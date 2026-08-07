@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,14 +23,24 @@ const (
 	externalConsumePath    = "/api/internal/wallet/consume"
 	externalRequestTimeout = 5 * time.Second
 	externalBalanceRetry   = 3
-	externalConsumeRetry   = 3
-	externalStaleMaxAge    = 60 * time.Second
+	// 4 attempts = 3 retries, using the full 0.5s/1s/2s backoff ladder.
+	externalConsumeRetry = 4
+	externalStaleMaxAge  = 60 * time.Second
 )
 
 var (
-	_                    GroupBalance = (*ExternalHTTP)(nil)
-	externalHTTPClient                = &http.Client{}
-	externalBalanceCache              = gcache.New(time.Second, 5*time.Second)
+	_ GroupBalance = (*ExternalHTTP)(nil)
+	// The default transport keeps only 2 idle conns per host — far too few
+	// for per-request balance checks at proxy QPS (TCP/TLS churn, port
+	// exhaustion). Bodies are fully drained before close so conns are reused.
+	externalHTTPClient = &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        64,
+			MaxIdleConnsPerHost: 32,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+	externalBalanceCache = gcache.New(time.Second, 5*time.Second)
 
 	// retry intervals are variables so tests can shrink them
 	externalBalanceRetryInterval = time.Second
@@ -73,9 +84,9 @@ type ExternalHTTP struct {
 
 // InitExternal enables the external HTTP wallet backend as the default
 // balance backend.
-func InitExternal(url, key string) error {
-	url = strings.TrimRight(url, "/")
-	if url == "" {
+func InitExternal(rawURL, key string) error {
+	rawURL = strings.TrimRight(rawURL, "/")
+	if rawURL == "" {
 		return errors.New("external balance url is empty")
 	}
 
@@ -83,9 +94,17 @@ func InitExternal(url, key string) error {
 		return errors.New("external balance key is empty")
 	}
 
-	Default = NewExternalHTTP(url, key)
+	// A scheme-less/garbage URL must fail at startup, not turn every relay
+	// request into a 500 at runtime.
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Host == "" {
+		return fmt.Errorf("external balance url is invalid: %q", rawURL)
+	}
 
-	log.Info("external HTTP balance backend enabled: " + url)
+	Default = NewExternalHTTP(rawURL, key)
+
+	log.Info("external HTTP balance backend enabled: " + rawURL)
 
 	return nil
 }
@@ -191,6 +210,17 @@ func (e *ExternalHTTP) getRemainBalance(ctx context.Context, group string) (floa
 		}
 
 		lastErr = err
+
+		if ctx.Err() != nil {
+			break
+		}
+	}
+
+	// Never stale-serve a canceled context: the async poller treats a
+	// pre-charge error as retryable, but a stale "success" during shutdown
+	// would let the charge proceed into an ambiguous state.
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("get group (%s) balance canceled: %w", group, ctx.Err())
 	}
 
 	if stale, ok := externalGetLastGood(group); ok && time.Since(stale.at) <= externalStaleMaxAge {
@@ -199,6 +229,13 @@ func (e *ExternalHTTP) getRemainBalance(ctx context.Context, group string) (floa
 			group,
 			stale.at.Format(time.RFC3339),
 			lastErr,
+		)
+		// Park the stale value in the 1s cache too, so an outage doesn't
+		// hammer the wallet with full retry ladders on every request.
+		externalBalanceCache.Set(
+			externalBalanceCacheKey(group),
+			stale.balance,
+			gcache.DefaultExpiration,
 		)
 
 		return stale.balance, nil
@@ -227,7 +264,10 @@ func (e *ExternalHTTP) fetchBalanceFromAPI(ctx context.Context, group string) (f
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf(
@@ -332,7 +372,10 @@ func (e *ExternalHTTP) postConsume(
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf(

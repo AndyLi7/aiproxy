@@ -409,6 +409,8 @@ func processGroupConsume(
 	postGroupConsumer balance.PostGroupConsumer,
 	meta *meta.Meta,
 ) float64 {
+	ctx = context.WithValue(ctx, balance.CtxRequestID, meta.RequestID)
+
 	consumedAmount, err := postGroupConsumer.PostGroupConsume(ctx, meta.Token.Name, amount)
 	if err != nil {
 		log.Error("error consuming token remain amount: " + err.Error())

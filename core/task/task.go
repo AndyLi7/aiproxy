@@ -764,6 +764,8 @@ func consumeAsyncUsageGroupBalance(
 		return false, fmt.Errorf("get group: %w", err)
 	}
 
+	ctx = context.WithValue(ctx, balance.CtxRequestID, info.RequestID)
+
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
 	if err != nil {
 		return false, fmt.Errorf("get group balance: %w", err)

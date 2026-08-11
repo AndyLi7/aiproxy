@@ -24,8 +24,6 @@ RUN mkdir -p /aiproxy
 
 WORKDIR /aiproxy
 
-VOLUME /aiproxy
-
 RUN apk add --no-cache ca-certificates tzdata ffmpeg curl && \
     rm -rf /var/cache/apk/*
 

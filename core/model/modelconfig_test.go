@@ -335,6 +335,103 @@ func TestGetModelConfigLoadsFastJSONFields(t *testing.T) {
 	}
 }
 
+func setupModelConfigCacheDeleteTest(t *testing.T, modelNames []string) {
+	t.Helper()
+
+	prevDB := model.DB
+	prevUsingSQLite := common.UsingSQLite
+	testDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "model-config-cache.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite db: %v", err)
+	}
+
+	model.DB = testDB
+	common.UsingSQLite = true
+	sqlDB, err := testDB.DB()
+	if err != nil {
+		t.Fatalf("failed to get sqlite handle: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sqlDB.Close()
+		model.DB = prevDB
+		common.UsingSQLite = prevUsingSQLite
+		if prevDB != nil {
+			_ = model.InitModelConfigAndChannelCache()
+		}
+	})
+
+	if err := testDB.AutoMigrate(&model.ModelConfig{}, &model.Channel{}); err != nil {
+		t.Fatalf("failed to migrate model cache fixtures: %v", err)
+	}
+	for _, name := range modelNames {
+		if err := testDB.Create(&model.ModelConfig{
+			Model: name,
+			Type:  mode.ChatCompletions,
+		}).Error; err != nil {
+			t.Fatalf("failed to create model config %q: %v", name, err)
+		}
+	}
+	if err := testDB.Create(&model.Channel{
+		Name:   "cache-delete-test",
+		Status: model.ChannelStatusEnabled,
+		Models: modelNames,
+		Sets:   []string{model.ChannelDefaultSet},
+	}).Error; err != nil {
+		t.Fatalf("failed to create channel fixture: %v", err)
+	}
+	if err := model.InitModelConfigAndChannelCache(); err != nil {
+		t.Fatalf("failed to initialize model cache: %v", err)
+	}
+}
+
+func enabledModelConfigCacheContains(modelName string) bool {
+	for _, config := range model.LoadModelCaches().EnabledModelConfigsBySet[model.ChannelDefaultSet] {
+		if config.Model == modelName {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDeleteModelConfigRefreshesEnabledModelCache(t *testing.T) {
+	const modelName = "cache-delete-single"
+	setupModelConfigCacheDeleteTest(t, []string{modelName})
+	if !enabledModelConfigCacheContains(modelName) {
+		t.Fatal("expected fixture in enabled model cache before deletion")
+	}
+
+	if err := model.DeleteModelConfig(modelName); err != nil {
+		t.Fatalf("failed to delete model config: %v", err)
+	}
+
+	if enabledModelConfigCacheContains(modelName) {
+		t.Fatal("expected single deletion to refresh the enabled model cache")
+	}
+}
+
+func TestDeleteMissingModelConfigIsIdempotent(t *testing.T) {
+	setupModelConfigCacheDeleteTest(t, nil)
+
+	if err := model.DeleteModelConfig("already-absent"); err != nil {
+		t.Fatalf("expected deleting a missing model config to succeed, got: %v", err)
+	}
+}
+
+func TestDeleteModelConfigsRefreshesEnabledModelCache(t *testing.T) {
+	modelNames := []string{"cache-delete-batch-a", "cache-delete-batch-b"}
+	setupModelConfigCacheDeleteTest(t, modelNames)
+
+	if err := model.DeleteModelConfigsByModels(modelNames); err != nil {
+		t.Fatalf("failed to batch delete model configs: %v", err)
+	}
+
+	for _, modelName := range modelNames {
+		if enabledModelConfigCacheContains(modelName) {
+			t.Fatalf("expected batch deletion to evict %q from enabled model cache", modelName)
+		}
+	}
+}
+
 func TestUpdateGroupModelConfigClearsMaxImageGenerationCount(t *testing.T) {
 	prevDB := model.DB
 	prevUsingSQLite := common.UsingSQLite

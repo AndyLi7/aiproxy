@@ -443,7 +443,12 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 		&model.Channel{ID: 11, BaseURL: "https://example.com"},
 		mode.Videos,
 		"test-video-model",
-		model.ModelConfig{},
+		model.ModelConfig{Config: map[model.ModelConfigKey]any{
+			model.ModelConfigKey("x_token_platform_pricing"): map[string]any{
+				"currency":        "USD",
+				"pricing_version": "21",
+			},
+		}},
 		meta.WithRequestID("request-async-1"),
 		meta.WithRequestUsage(model.Usage{
 			OutputTokens: 9,
@@ -469,6 +474,8 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 	require.Zero(t, captured.Usage.OutputTokens)
 	require.Zero(t, captured.Usage.TotalTokens)
 	require.Equal(t, "priority", captured.UsageContext.ServiceTier)
+	require.Equal(t, "USD", captured.PricingCurrency)
+	require.Equal(t, "21", captured.PricingVersion)
 }
 
 func TestBuildRequestDetailForLogSkipsRequestBodyForUpstreamOnlyStatuses(t *testing.T) {

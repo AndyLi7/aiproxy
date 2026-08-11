@@ -410,6 +410,9 @@ func processGroupConsume(
 	meta *meta.Meta,
 ) float64 {
 	ctx = context.WithValue(ctx, balance.CtxRequestID, meta.RequestID)
+	if currency, version, ok := meta.ModelConfig.RetailPricingMetadata(); ok {
+		ctx = balance.ContextWithPricing(ctx, currency, version)
+	}
 
 	consumedAmount, err := postGroupConsumer.PostGroupConsume(ctx, meta.Token.Name, amount)
 	if err != nil {

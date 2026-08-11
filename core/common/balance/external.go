@@ -61,6 +61,13 @@ type externalStaleBalance struct {
 
 type ctxKey struct{}
 
+type pricingContextKey struct{}
+
+type consumePricing struct {
+	currency       string
+	pricingVersion string
+}
+
 // CtxRequestID is the context key used to pass the request id to
 // PostGroupConsume so the wallet backend can deduplicate retried charges.
 var CtxRequestID ctxKey
@@ -73,6 +80,28 @@ func RequestIDFromContext(ctx context.Context) string {
 		return requestID
 	}
 	return ""
+}
+
+// ContextWithPricing attaches the immutable retail-pricing provenance that
+// the external wallet records alongside a debit.
+func ContextWithPricing(ctx context.Context, currency, pricingVersion string) context.Context {
+	return context.WithValue(ctx, pricingContextKey{}, consumePricing{
+		currency:       strings.TrimSpace(currency),
+		pricingVersion: strings.TrimSpace(pricingVersion),
+	})
+}
+
+func pricingFromContext(ctx context.Context) consumePricing {
+	pricing, _ := ctx.Value(pricingContextKey{}).(consumePricing)
+	return pricing
+}
+
+// PricingFromContext returns pricing provenance previously attached with
+// ContextWithPricing. Balance consumers can use it when bridging to an
+// external ledger.
+func PricingFromContext(ctx context.Context) (currency, pricingVersion string) {
+	pricing := pricingFromContext(ctx)
+	return pricing.currency, pricing.pricingVersion
 }
 
 // ExternalHTTP is a GroupBalance backend that talks to an external wallet
@@ -122,10 +151,12 @@ type externalBalanceResp struct {
 }
 
 type externalConsumeReq struct {
-	Group     string  `json:"group"`
-	TokenName string  `json:"tokenName"`
-	Amount    float64 `json:"amount"`
-	RequestID string  `json:"requestId,omitempty"`
+	Group          string  `json:"group"`
+	TokenName      string  `json:"tokenName"`
+	Amount         float64 `json:"amount"`
+	RequestID      string  `json:"requestId,omitempty"`
+	Currency       string  `json:"currency,omitempty"`
+	PricingVersion string  `json:"pricingVersion,omitempty"`
 }
 
 type externalConsumeResp struct {
@@ -313,6 +344,7 @@ func (c *ExternalPostGroupConsumer) PostGroupConsume(
 	}
 
 	requestID := RequestIDFromContext(ctx)
+	pricing := pricingFromContext(ctx)
 
 	var lastErr error
 	for i := range externalConsumeRetry {
@@ -320,7 +352,14 @@ func (c *ExternalPostGroupConsumer) PostGroupConsume(
 			time.Sleep(externalConsumeBackoff[i-1])
 		}
 
-		charged, err := c.backend.postConsume(ctx, c.group, tokenName, usage, requestID)
+		charged, err := c.backend.postConsume(
+			ctx,
+			c.group,
+			tokenName,
+			usage,
+			requestID,
+			pricing,
+		)
 		if err == nil {
 			externalBalanceCache.Delete(externalBalanceCacheKey(c.group))
 			return charged, nil
@@ -341,12 +380,15 @@ func (e *ExternalHTTP) postConsume(
 	group, tokenName string,
 	amount float64,
 	requestID string,
+	pricing consumePricing,
 ) (float64, error) {
 	reqBody, err := sonic.Marshal(externalConsumeReq{
-		Group:     group,
-		TokenName: tokenName,
-		Amount:    amount,
-		RequestID: requestID,
+		Group:          group,
+		TokenName:      tokenName,
+		Amount:         amount,
+		RequestID:      requestID,
+		Currency:       pricing.currency,
+		PricingVersion: pricing.pricingVersion,
 	})
 	if err != nil {
 		return 0, err

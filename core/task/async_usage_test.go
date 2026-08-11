@@ -48,6 +48,38 @@ type preChargeFailingAsyncUsageBalance struct {
 	err error
 }
 
+type pricingCaptureConsumer struct {
+	currency string
+	version  string
+}
+
+func (c *pricingCaptureConsumer) PostGroupConsume(
+	ctx context.Context,
+	_ string,
+	amount float64,
+) (float64, error) {
+	c.currency, c.version = balance.PricingFromContext(ctx)
+	return amount, nil
+}
+
+type pricingCaptureBalance struct {
+	consumer *pricingCaptureConsumer
+}
+
+func (b pricingCaptureBalance) GetGroupRemainBalance(
+	context.Context,
+	model.GroupCache,
+) (float64, balance.PostGroupConsumer, error) {
+	return 100, b.consumer, nil
+}
+
+func (pricingCaptureBalance) GetGroupQuota(
+	context.Context,
+	model.GroupCache,
+) (*balance.GroupQuota, error) {
+	return &balance.GroupQuota{Total: 100, Remain: 100}, nil
+}
+
 func (b preChargeFailingAsyncUsageBalance) GetGroupRemainBalance(
 	context.Context,
 	model.GroupCache,
@@ -60,6 +92,32 @@ func (b preChargeFailingAsyncUsageBalance) GetGroupQuota(
 	model.GroupCache,
 ) (*balance.GroupQuota, error) {
 	return nil, b.err
+}
+
+func TestConsumeAsyncUsagePassesPricingProvenance(t *testing.T) {
+	consumer := &pricingCaptureConsumer{}
+	oldBalance := balance.Default
+	balance.Default = pricingCaptureBalance{consumer: consumer}
+	t.Cleanup(func() { balance.Default = oldBalance })
+
+	const groupID = "group-pricing-provenance"
+	require.NoError(t, model.CacheSetGroup(&model.GroupCache{
+		ID:     groupID,
+		Status: model.GroupStatusEnabled,
+	}))
+	t.Cleanup(func() { require.NoError(t, model.CacheDeleteGroup(groupID)) })
+
+	charged, err := consumeAsyncUsageGroupBalance(t.Context(), &model.AsyncUsageInfo{
+		RequestID:       "pricing_request",
+		GroupID:         groupID,
+		TokenName:       "token-1",
+		PricingCurrency: "USD",
+		PricingVersion:  "21",
+	}, 0.108607)
+	require.NoError(t, err)
+	require.True(t, charged)
+	require.Equal(t, "USD", consumer.currency)
+	require.Equal(t, "21", consumer.version)
 }
 
 func TestCompleteAsyncUsageIgnoresMissingLog(t *testing.T) {

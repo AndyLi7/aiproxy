@@ -159,6 +159,7 @@ func TestExternalConsumeRequestID(t *testing.T) {
 	consumer := newExternalPostGroupConsumer(e, group)
 
 	ctx := context.WithValue(t.Context(), CtxRequestID, "req-abc123")
+	ctx = ContextWithPricing(ctx, "USD", "21")
 
 	charged, err := consumer.PostGroupConsume(ctx, "token-1", 1.25)
 	require.NoError(t, err)
@@ -169,6 +170,8 @@ func TestExternalConsumeRequestID(t *testing.T) {
 	require.Equal(t, "token-1", gotReq.TokenName)
 	require.InDelta(t, 1.25, gotReq.Amount, 0)
 	require.Equal(t, "req-abc123", gotReq.RequestID)
+	require.Equal(t, "USD", gotReq.Currency)
+	require.Equal(t, "21", gotReq.PricingVersion)
 }
 
 func TestExternalConsumeRetry(t *testing.T) {

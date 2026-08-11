@@ -39,6 +39,8 @@ type AsyncUsageInfo struct {
 	GroupID                     string           `gorm:"size:64;index"           json:"group_id"`
 	TokenID                     int              `gorm:"index"                   json:"token_id"`
 	TokenName                   string           `gorm:"size:128"                json:"token_name,omitempty"`
+	PricingCurrency             string           `gorm:"size:16"                 json:"pricing_currency,omitempty"`
+	PricingVersion              string           `gorm:"size:128"                json:"pricing_version,omitempty"`
 	Price                       Price            `gorm:"embedded"                json:"price"`
 	UpstreamID                  string           `gorm:"type:varchar(256);index" json:"upstream_id"`
 	Status                      AsyncUsageStatus `gorm:"index;default:1"         json:"status"`

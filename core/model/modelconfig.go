@@ -407,12 +407,24 @@ func SaveModelConfigs(configs []ModelConfig) (err error) {
 
 const ErrModelConfigNotFound = "model config"
 
-func DeleteModelConfig(model string) error {
+func DeleteModelConfig(model string) (err error) {
+	defer func() {
+		if err == nil {
+			_ = InitModelConfigAndChannelCache()
+		}
+	}()
+
 	result := DB.Where("model = ?", model).Delete(&ModelConfig{})
-	return HandleUpdateResult(result, ErrModelConfigNotFound)
+	return result.Error
 }
 
-func DeleteModelConfigsByModels(models []string) error {
+func DeleteModelConfigsByModels(models []string) (err error) {
+	defer func() {
+		if err == nil {
+			_ = InitModelConfigAndChannelCache()
+		}
+	}()
+
 	return DB.Transaction(func(tx *gorm.DB) error {
 		return tx.
 			Where("model IN (?)", models).

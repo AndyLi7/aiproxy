@@ -765,6 +765,7 @@ func consumeAsyncUsageGroupBalance(
 	}
 
 	ctx = context.WithValue(ctx, balance.CtxRequestID, info.RequestID)
+	ctx = balance.ContextWithPricing(ctx, info.PricingCurrency, info.PricingVersion)
 
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
 	if err != nil {

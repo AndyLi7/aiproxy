@@ -465,6 +465,8 @@ func saveAsyncUsageInfo(
 		return
 	}
 
+	pricingCurrency, pricingVersion, _ := meta.ModelConfig.RetailPricingMetadata()
+
 	if err := model.CreateAsyncUsageInfo(&model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
 		RequestAt:                   meta.RequestAt,
@@ -475,6 +477,8 @@ func saveAsyncUsageInfo(
 		GroupID:                     meta.Group.ID,
 		TokenID:                     meta.Token.ID,
 		TokenName:                   meta.Token.Name,
+		PricingCurrency:             pricingCurrency,
+		PricingVersion:              pricingVersion,
 		Price:                       price,
 		UpstreamID:                  result.UpstreamID,
 		UsageContext:                result.UsageContext.WithFallback(meta.RequestUsageContext),

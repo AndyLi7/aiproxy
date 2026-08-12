@@ -133,6 +133,8 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 		"",
 		nil,
 		"",
+		"",
+		"",
 		"resp_test_websearch",
 		model.AsyncUsageStatusNone,
 	)

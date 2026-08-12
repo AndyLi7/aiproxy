@@ -32,6 +32,7 @@ func recordConsume(
 
 	summaryClaudeLongContext := meta.ModelConfig.ShouldSummaryClaudeLongContext() &&
 		model.IsClaudeLongContextSummary(meta.OriginModel, usage)
+	currency, pricingVersion, _ := meta.ModelConfig.RetailPricingMetadata()
 
 	return model.BatchRecordLogs(
 		now,
@@ -58,6 +59,8 @@ func recordConsume(
 		amount,
 		meta.User,
 		metadata,
+		currency,
+		pricingVersion,
 		meta.PromptCacheKey,
 		upstreamID,
 		asyncUsageStatus,

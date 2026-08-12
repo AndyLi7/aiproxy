@@ -651,6 +651,8 @@ func completeAsyncUsage(
 		usageContext,
 		selectedPrice,
 		amount,
+		info.PricingCurrency,
+		info.PricingVersion,
 	); err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			notify.ErrorThrottle(

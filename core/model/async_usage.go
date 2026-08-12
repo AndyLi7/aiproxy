@@ -346,6 +346,8 @@ func UpdateLogUsageByRequestID(
 	usageContext UsageContext,
 	price Price,
 	amount Amount,
+	currency string,
+	pricingVersion string,
 ) error {
 	var logEntry Log
 	if err := LogDB.Where("request_id = ?", requestID).First(&logEntry).Error; err != nil {
@@ -356,6 +358,8 @@ func UpdateLogUsageByRequestID(
 	logEntry.UsageContext = usageContext
 	logEntry.Price = price
 	logEntry.Amount = amount
+	logEntry.Currency = currency
+	logEntry.PricingVersion = pricingVersion
 	logEntry.AsyncUsageStatus = AsyncUsageStatusCompleted
 
 	return LogDB.Save(&logEntry).Error

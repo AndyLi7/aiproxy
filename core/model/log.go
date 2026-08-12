@@ -65,6 +65,8 @@ type Log struct {
 	TTFBMilliseconds ZeroNullInt64    `                                                                      json:"ttfb_milliseconds,omitempty"`
 	CreatedAt        time.Time        `gorm:"autoCreateTime;index"                                           json:"created_at"`
 	TokenName        string           `gorm:"size:32"                                                        json:"token_name,omitempty"`
+	Currency         string           `gorm:"size:16"                                                        json:"currency,omitempty"`
+	PricingVersion   string           `gorm:"size:128"                                                       json:"pricing_version,omitempty"`
 	Endpoint         EmptyNullString  `gorm:"size:64"                                                        json:"endpoint,omitempty"`
 	Content          EmptyNullString  `gorm:"type:text"                                                      json:"content,omitempty"`
 	GroupID          string           `gorm:"size:64"                                                        json:"group,omitempty"`
@@ -372,6 +374,8 @@ func RecordConsumeLog(
 	amountDetail Amount,
 	user string,
 	metadata map[string]string,
+	currency string,
+	pricingVersion string,
 	promptCacheKey string,
 	upstreamID string,
 	asyncUsageStatus AsyncUsageStatus,
@@ -418,6 +422,8 @@ func RecordConsumeLog(
 		Amount:           amountDetail,
 		User:             EmptyNullString(user),
 		Metadata:         metadata,
+		Currency:         currency,
+		PricingVersion:   pricingVersion,
 		PromptCacheKey:   EmptyNullString(promptCacheKey),
 		UpstreamID:       EmptyNullString(upstreamID),
 		AsyncUsageStatus: asyncUsageStatus,

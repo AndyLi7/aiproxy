@@ -272,8 +272,21 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	}
 
 	// Get initial channel
+	channelStartedAt := time.Now()
 	initialChannel, err := getInitialChannel(c, requestModel, mode)
 	if err != nil || initialChannel == nil || initialChannel.channel == nil {
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  middleware.GetRequestID(c),
+			Stage:      "channel_selection",
+			DurationMS: float64(time.Since(channelStartedAt).Microseconds()) / 1000,
+			Outcome:    "error",
+			Status:     http.StatusServiceUnavailable,
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			Model:      requestModel,
+			ErrorType:  "channel_unavailable",
+		})
 		middleware.AbortLogWithMessageWithMode(mode, c,
 			http.StatusServiceUnavailable,
 			"the upstream load is saturated, please try again later",
@@ -281,6 +294,18 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 		return
 	}
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  middleware.GetRequestID(c),
+		Stage:      "channel_selection",
+		DurationMS: float64(time.Since(channelStartedAt).Microseconds()) / 1000,
+		Outcome:    "success",
+		Status:     http.StatusOK,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+		Model:      requestModel,
+		ChannelID:  initialChannel.channel.ID,
+	})
 
 	price := model.Price{}
 	if relayController.GetRequestPrice != nil {
@@ -338,8 +363,35 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		return
 	}
 
-	// First attempt
+	// First attempt. For async video submission this measures the upstream's
+	// initial acknowledgement, not the later video-generation duration.
+	upstreamStartedAt := time.Now()
 	result, retry := RelayHelper(c, meta, relayController.Handler)
+	upstreamOutcome := "success"
+	upstreamStatus := http.StatusOK
+	upstreamErrorType := ""
+	if c.Request.Context().Err() != nil {
+		upstreamOutcome = "cancelled"
+		upstreamStatus = 499
+		upstreamErrorType = "context_cancelled"
+	} else if result.Error != nil {
+		upstreamOutcome = "error"
+		upstreamStatus = result.Error.StatusCode()
+		upstreamErrorType = "upstream_error"
+	}
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  middleware.GetRequestID(c),
+		Stage:      "upstream_initial_response",
+		DurationMS: float64(time.Since(upstreamStartedAt).Microseconds()) / 1000,
+		Outcome:    upstreamOutcome,
+		Status:     upstreamStatus,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+		Model:      requestModel,
+		ChannelID:  initialChannel.channel.ID,
+		ErrorType:  upstreamErrorType,
+	})
 
 	retryTimes := int(config.GetRetryTimes())
 	if mc.RetryTimes > 0 {

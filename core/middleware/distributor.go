@@ -256,7 +256,27 @@ const (
 	GroupMinimumBalance   = 0.3
 )
 
-func checkGroupBalance(c *gin.Context, group model.GroupCache) bool {
+func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
+	startedAt := time.Now()
+	defer func() {
+		outcome := "success"
+		errorType := ""
+		if !ok {
+			outcome = "error"
+			errorType = "wallet_check_rejected"
+		}
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  GetRequestID(c),
+			Stage:      "wallet_balance_lookup",
+			DurationMS: float64(time.Since(startedAt).Microseconds()) / 1000,
+			Outcome:    outcome,
+			Status:     c.Writer.Status(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			ErrorType:  errorType,
+		})
+	}()
 	gbc, err := GetGroupBalanceConsumer(c, group)
 	if err != nil {
 		if errors.Is(err, balance.ErrNoRealNameUsedAmountLimit) {
@@ -454,6 +474,24 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	if !checkGroupBalance(c, group) {
 		return
 	}
+	routeStartedAt := time.Now()
+	routeStageLogged := false
+	defer func() {
+		if routeStageLogged {
+			return
+		}
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  GetRequestID(c),
+			Stage:      "model_resolution",
+			DurationMS: float64(time.Since(routeStartedAt).Microseconds()) / 1000,
+			Outcome:    "error",
+			Status:     c.Writer.Status(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			ErrorType:  "model_resolution_rejected",
+		})
+	}()
 
 	requestModel, err := getRequestModel(c, mode, group.ID, token.ID)
 	if err != nil {
@@ -591,6 +629,18 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 		return
 	}
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  GetRequestID(c),
+		Stage:      "model_resolution",
+		DurationMS: float64(time.Since(routeStartedAt).Microseconds()) / 1000,
+		Outcome:    "success",
+		Status:     http.StatusOK,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+		Model:      findModel,
+	})
+	routeStageLogged = true
 
 	clearRequestBodyNode(c)
 	c.Next()

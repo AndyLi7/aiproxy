@@ -409,6 +409,25 @@ func TestDeleteModelConfigRefreshesEnabledModelCache(t *testing.T) {
 	}
 }
 
+func TestUpdateChannelStatusRefreshesEnabledModelCache(t *testing.T) {
+	const modelName = "cache-channel-status"
+	setupModelConfigCacheDeleteTest(t, []string{modelName})
+	if !enabledModelConfigCacheContains(modelName) {
+		t.Fatal("expected fixture in enabled model cache before disabling channel")
+	}
+
+	var channel model.Channel
+	if err := model.DB.Where("name = ?", "cache-delete-test").First(&channel).Error; err != nil {
+		t.Fatalf("failed to load channel fixture: %v", err)
+	}
+	if err := model.UpdateChannelStatusByID(channel.ID, model.ChannelStatusDisabled); err != nil {
+		t.Fatalf("failed to disable channel: %v", err)
+	}
+	if enabledModelConfigCacheContains(modelName) {
+		t.Fatal("expected disabling a channel to refresh the enabled model cache")
+	}
+}
+
 func TestDeleteMissingModelConfigIsIdempotent(t *testing.T) {
 	setupModelConfigCacheDeleteTest(t, nil)
 

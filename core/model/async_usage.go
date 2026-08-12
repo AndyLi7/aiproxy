@@ -30,7 +30,7 @@ var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
 	ID                          int              `gorm:"primaryKey"              json:"id"`
-	RequestID                   string           `gorm:"type:char(16);index"     json:"request_id"`
+	RequestID                   string           `gorm:"type:varchar(128);index" json:"request_id"`
 	RequestAt                   time.Time        `                               json:"request_at"`
 	Mode                        int              `gorm:"index"                   json:"mode"`
 	Model                       string           `gorm:"size:128"                json:"model"`

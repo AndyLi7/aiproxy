@@ -13,7 +13,7 @@ type ConsumeError struct {
 	RequestAt  time.Time       `gorm:"index;index:idx_consume_error_group_reqat,priority:2"         json:"request_at"`
 	CreatedAt  time.Time       `                                                                    json:"created_at"`
 	GroupID    string          `gorm:"size:64;index;index:idx_consume_error_group_reqat,priority:1" json:"group_id"`
-	RequestID  string          `gorm:"type:char(16);index"                                          json:"request_id"`
+	RequestID  string          `gorm:"type:varchar(128);index"                                      json:"request_id"`
 	TokenName  EmptyNullString `gorm:"size:32;not null"                                             json:"token_name"`
 	Model      string          `gorm:"size:128"                                                     json:"model"`
 	Content    string          `gorm:"type:text"                                                    json:"content"`

@@ -2,12 +2,42 @@ package middleware
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/relay/mode"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
 )
+
+func IsPublicVideoRequest(path string, m mode.Mode) bool {
+	if path == "/v1/videos" || strings.HasPrefix(path, "/v1/videos/") {
+		return true
+	}
+
+	switch m {
+	case mode.VideoGenerationsJobs,
+		mode.VideoGenerationsGetJobs,
+		mode.VideoGenerationsContent,
+		mode.Videos,
+		mode.VideosGet,
+		mode.VideosContent,
+		mode.VideosDelete,
+		mode.VideosRemix,
+		mode.VideosEdits,
+		mode.VideosExtensions,
+		mode.GeminiVideo,
+		mode.GeminiVideoOperations,
+		mode.AliVideo,
+		mode.AliVideoTasks,
+		mode.DoubaoVideo,
+		mode.DoubaoVideoTasks,
+		mode.DoubaoVideoTasksDelete:
+		return true
+	default:
+		return false
+	}
+}
 
 func AbortLogWithMessageWithMode(
 	m mode.Mode,
@@ -27,6 +57,12 @@ func AbortWithMessageWithMode(
 	message string,
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
+	if IsPublicVideoRequest(c.Request.URL.Path, m) {
+		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
+		c.Abort()
+		return
+	}
+
 	c.JSON(statusCode,
 		relaymodel.WrapperErrorWithMessage(m, statusCode, message, opts...),
 	)
@@ -49,6 +85,12 @@ func AbortWithMessage(
 	message string,
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
+	if IsPublicVideoRequest(c.Request.URL.Path, GetMode(c)) {
+		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
+		c.Abort()
+		return
+	}
+
 	c.JSON(statusCode,
 		relaymodel.WrapperErrorWithMessage(GetMode(c), statusCode, message, opts...),
 	)

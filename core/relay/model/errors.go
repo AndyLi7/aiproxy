@@ -1,9 +1,49 @@
 package model
 
 import (
+	"net/http"
+
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/mode"
 )
+
+func PublicVideoError(statusCode int) adaptor.Error {
+	err := OpenAIError{
+		Message: "The request could not be completed.",
+		Type:    "api_error",
+		Code:    "internal_error",
+	}
+
+	switch statusCode {
+	case http.StatusBadRequest:
+		err.Message = "The request contains an invalid parameter."
+		err.Type = "invalid_request_error"
+		err.Code = "invalid_parameter"
+	case http.StatusUnauthorized:
+		err.Message = "The API key is missing or invalid."
+		err.Type = "authentication_error"
+		err.Code = "invalid_api_key"
+	case http.StatusForbidden:
+		err.Message = "The API key cannot access this resource."
+		err.Type = "permission_error"
+		err.Code = "permission_denied"
+	case http.StatusNotFound:
+		err.Message = "The requested resource was not found."
+		err.Type = "invalid_request_error"
+		err.Code = "not_found"
+	case http.StatusTooManyRequests:
+		err.Message = "Too many requests. Please retry later."
+		err.Type = "rate_limit_error"
+		err.Code = "rate_limit_exceeded"
+	default:
+		if statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError {
+			err.Type = "invalid_request_error"
+			err.Code = "request_rejected"
+		}
+	}
+
+	return NewOpenAIError(statusCode, err)
+}
 
 const (
 	ErrorTypeAIPROXY     = "aiproxy_error"

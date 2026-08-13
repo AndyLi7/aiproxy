@@ -3,6 +3,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	relaycontroller "github.com/labring/aiproxy/core/relay/controller"
@@ -21,6 +23,32 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestErrorWithRequestIDSanitizesPublicVideoError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	middleware.SetRequestID(c, "public-request-id")
+
+	ErrorWithRequestID(c, relaymodel.WrapperErrorWithMessage(
+		mode.Videos,
+		http.StatusInternalServerError,
+		"upstream model at http://10.0.0.8 failed: private-upstream-id",
+	))
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, "public-request-id", recorder.Header().Get(middleware.RequestIDHeader))
+	var body relaymodel.OpenAIErrorResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Equal(t, "The request could not be completed.", body.Error.Message)
+	require.Equal(t, "api_error", body.Error.Type)
+	require.Equal(t, "internal_error", body.Error.Code)
+	require.NotContains(t, recorder.Body.String(), "10.0.0.8")
+	require.NotContains(t, recorder.Body.String(), "private-upstream-id")
+	require.NotContains(t, recorder.Body.String(), "public-request-id")
+	require.NotContains(t, recorder.Body.String(), "aiproxy")
+}
 
 func TestRetryStateRemainingRelayDelay(t *testing.T) {
 	t.Parallel()

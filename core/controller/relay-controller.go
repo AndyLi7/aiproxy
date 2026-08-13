@@ -914,6 +914,12 @@ func RelayNotImplemented(c *gin.Context) {
 }
 
 func ErrorWithRequestID(c *gin.Context, relayErr adaptor.Error) {
+	if middleware.IsPublicVideoRequest(c.Request.URL.Path, middleware.GetMode(c)) {
+		common.GetLogger(c).Errorf("public video request failed: %v", relayErr)
+		c.JSON(relayErr.StatusCode(), relaymodel.PublicVideoError(relayErr.StatusCode()))
+		return
+	}
+
 	requestID := middleware.GetRequestID(c)
 	if requestID == "" {
 		c.JSON(relayErr.StatusCode(), relayErr)

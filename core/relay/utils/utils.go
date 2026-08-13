@@ -185,10 +185,11 @@ func DoRequestWithMeta(req *http.Request, m *meta.Meta) (*http.Response, error) 
 		return DoRequest(req, 0)
 	}
 
-	client, err := LoadHTTPClientWithTLSConfigE(
+	client, err := LoadHTTPClientWithOutboundPolicyE(
 		m.RequestTimeout,
 		m.Channel.ProxyURL,
 		m.Channel.SkipTLSVerify,
+		OutboundPolicyFromConfigs(m.ChannelConfigs),
 	)
 	if err != nil {
 		return nil, err

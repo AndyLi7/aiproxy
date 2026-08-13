@@ -1373,7 +1373,17 @@ func fetchDoubaoVideoContent(
 		skipTLSVerify = meta.Channel.SkipTLSVerify
 	}
 
-	client, err := relayutils.LoadHTTPClientWithTLSConfigE(0, proxyURL, skipTLSVerify)
+	policy := relayutils.OutboundPolicyAllowPrivate
+	if meta != nil {
+		policy = relayutils.OutboundPolicyFromConfigs(meta.ChannelConfigs)
+	}
+
+	client, err := relayutils.LoadHTTPClientWithOutboundPolicyE(
+		0,
+		proxyURL,
+		skipTLSVerify,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}

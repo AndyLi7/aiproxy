@@ -46,6 +46,7 @@ type Meta struct {
 	RequestServiceTier  string
 	PromptCacheKey      string
 	User                string
+	OperationalFields   model.OperationalFields
 
 	JobID        string
 	GenerationID string
@@ -156,6 +157,12 @@ func WithPromptCacheKey(promptCacheKey string) Option {
 func WithUser(user string) Option {
 	return func(meta *Meta) {
 		meta.User = user
+	}
+}
+
+func WithOperationalFields(fields model.OperationalFields) Option {
+	return func(meta *Meta) {
+		meta.OperationalFields = fields
 	}
 }
 

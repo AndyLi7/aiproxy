@@ -157,3 +157,7 @@ func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.D
 
 	return tx
 }
+
+func RecordOperationalLog(entry *Log) error {
+	return LogDB.Create(entry).Error
+}

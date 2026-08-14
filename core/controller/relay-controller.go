@@ -262,7 +262,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 				statusCode = requestParamErr.StatusCode
 			}
 
-			middleware.AbortLogWithMessageWithMode(mode, c,
+			middleware.AbortOperationallyWithMode(mode, c,
+				model.FailureStageValidation,
 				statusCode,
 				err.Error(),
 			)
@@ -287,7 +288,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 			Model:      requestModel,
 			ErrorType:  "channel_unavailable",
 		})
-		middleware.AbortLogWithMessageWithMode(mode, c,
+		middleware.AbortOperationallyWithMode(mode, c,
+			model.FailureStageRouting,
 			http.StatusServiceUnavailable,
 			"the upstream load is saturated, please try again later",
 		)
@@ -311,7 +313,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.GetRequestPrice != nil {
 		price, err = relayController.GetRequestPrice(c, mc)
 		if err != nil {
-			middleware.AbortLogWithMessageWithMode(mode, c,
+			middleware.AbortOperationallyWithMode(mode, c,
+				model.FailureStageValidation,
 				http.StatusInternalServerError,
 				"get request price failed: "+err.Error(),
 			)
@@ -325,7 +328,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.GetRequestUsage != nil {
 		requestUsage, err := relayController.GetRequestUsage(c, mc)
 		if err != nil {
-			middleware.AbortLogWithMessageWithMode(mode, c,
+			middleware.AbortOperationallyWithMode(mode, c,
+				model.FailureStageValidation,
 				http.StatusInternalServerError,
 				"get request usage failed: "+err.Error(),
 			)
@@ -354,7 +358,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		middleware.GroupMinimumBalance,
 	)
 	if !gbc.CheckBalance(requiredBalance) {
-		middleware.AbortLogWithMessageWithMode(mode, c,
+		middleware.AbortOperationallyWithMode(mode, c,
+			model.FailureStageBalance,
 			http.StatusForbidden,
 			fmt.Sprintf("group (%s) balance not enough", gbc.Group),
 			relaymodel.WithType(middleware.GroupBalanceNotEnough),
@@ -436,6 +441,17 @@ func recordResult(
 	downstreamResult bool,
 	metadata map[string]string,
 ) {
+	fields := middleware.OperationalFieldsFromContext(c)
+	if result.Error != nil {
+		fields = model.BuildOperationalFields(
+			fields.RequestSource,
+			model.FailureStageUpstream,
+			result.Error.Error(),
+		)
+	}
+	meta.OperationalFields = fields
+	middleware.MarkOperationalLogRecorded(c)
+
 	code := http.StatusOK
 
 	content := ""

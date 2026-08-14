@@ -368,6 +368,7 @@ func BatchRecordLogs(
 	promptCacheKey string,
 	upstreamID string,
 	asyncUsageStatus AsyncUsageStatus,
+	operationalFields OperationalFields,
 	summaryServiceTier string,
 	summaryClaudeLongContext bool,
 ) (err error) {
@@ -412,6 +413,7 @@ func BatchRecordLogs(
 				promptCacheKey,
 				upstreamID,
 				asyncUsageStatus,
+				operationalFields,
 			)
 		}
 	} else {

@@ -137,6 +137,7 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 		"",
 		"resp_test_websearch",
 		model.AsyncUsageStatusNone,
+		model.OperationalFields{},
 	)
 	if err != nil {
 		t.Fatalf("record consume log: %v", err)

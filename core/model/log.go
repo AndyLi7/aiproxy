@@ -382,6 +382,7 @@ func RecordConsumeLog(
 	promptCacheKey string,
 	upstreamID string,
 	asyncUsageStatus AsyncUsageStatus,
+	operationalFields OperationalFields,
 ) error {
 	if createAt.IsZero() {
 		createAt = time.Now()
@@ -430,6 +431,9 @@ func RecordConsumeLog(
 		PromptCacheKey:   EmptyNullString(promptCacheKey),
 		UpstreamID:       EmptyNullString(upstreamID),
 		AsyncUsageStatus: asyncUsageStatus,
+		RequestSource:    operationalFields.RequestSource,
+		FailureStage:     operationalFields.FailureStage,
+		SafeError:        operationalFields.SafeError,
 	}
 
 	return LogDB.Create(log).Error

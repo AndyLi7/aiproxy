@@ -6,9 +6,33 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
 )
+
+func AbortOperationallyWithMode(
+	m mode.Mode,
+	c *gin.Context,
+	stage model.FailureStage,
+	statusCode int,
+	message string,
+	opts ...relaymodel.WrapperErrorOptionFunc,
+) {
+	SetFailureStage(c, stage, message)
+	AbortLogWithMessageWithMode(m, c, statusCode, message, opts...)
+}
+
+func AbortOperationally(
+	c *gin.Context,
+	stage model.FailureStage,
+	statusCode int,
+	message string,
+	opts ...relaymodel.WrapperErrorOptionFunc,
+) {
+	SetFailureStage(c, stage, message)
+	AbortLogWithMessage(c, statusCode, message, opts...)
+}
 
 func IsPublicVideoRequest(path string, m mode.Mode) bool {
 	if path == "/v1/videos" || strings.HasPrefix(path, "/v1/videos/") {
@@ -46,6 +70,7 @@ func AbortLogWithMessageWithMode(
 	message string,
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
+	setDefaultFailureStage(c, message)
 	common.GetLogger(c).Error(message)
 	AbortWithMessageWithMode(m, c, statusCode, message, opts...)
 }
@@ -75,8 +100,21 @@ func AbortLogWithMessage(
 	message string,
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
+	setDefaultFailureStage(c, message)
 	common.GetLogger(c).Error(message)
 	AbortWithMessage(c, statusCode, message, opts...)
+}
+
+func setDefaultFailureStage(c *gin.Context, safeError string) {
+	if _, exists := c.Get(operationalFailureStageKey); exists {
+		return
+	}
+
+	stage := model.FailureStageValidation
+	if _, authenticated := c.Get(Token); !authenticated {
+		stage = model.FailureStageAuth
+	}
+	SetFailureStage(c, stage, safeError)
 }
 
 func AbortWithMessage(

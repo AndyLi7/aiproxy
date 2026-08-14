@@ -9,16 +9,16 @@ import (
 func SetRelayRouter(router *gin.Engine) {
 	// https://platform.openai.com/docs/api-reference/introduction
 	v1Router := router.Group("/v1")
-	v1Router.Use(middleware.IPBlock, middleware.TokenAuth)
+	v1Router.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
 
 	v1betaRouter := router.Group("/v1beta")
-	v1betaRouter.Use(middleware.IPBlock, middleware.TokenAuth)
+	v1betaRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
 
 	aliRouter := router.Group("/api/v1")
-	aliRouter.Use(middleware.IPBlock, middleware.TokenAuth)
+	aliRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
 
 	doubaoRouter := router.Group("/api/v3")
-	doubaoRouter.Use(middleware.IPBlock, middleware.TokenAuth)
+	doubaoRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
 
 	modelsRouter := v1Router.Group("/models")
 	{

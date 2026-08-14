@@ -184,7 +184,7 @@ func TokenAuth(c *gin.Context) {
 	SetLogGroupFields(log.Data, group)
 
 	if group.Status != model.GroupStatusEnabled && group.Status != model.GroupStatusInternal {
-		AbortLogWithMessage(c, http.StatusForbidden, "group is disabled")
+		AbortOperationally(c, model.FailureStageEntitlement, http.StatusForbidden, "group is disabled")
 		return
 	}
 

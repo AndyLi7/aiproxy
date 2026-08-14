@@ -280,8 +280,9 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 	gbc, err := GetGroupBalanceConsumer(c, group)
 	if err != nil {
 		if errors.Is(err, balance.ErrNoRealNameUsedAmountLimit) {
-			AbortLogWithMessage(
+			AbortOperationally(
 				c,
+				model.FailureStageBalance,
 				http.StatusForbidden,
 				err.Error(),
 			)
@@ -295,8 +296,9 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 			fmt.Sprintf("Get group `%s` balance error", group.ID),
 			err.Error(),
 		)
-		AbortWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageBalance,
 			http.StatusInternalServerError,
 			fmt.Sprintf("get group `%s` balance error", group.ID),
 		)
@@ -320,8 +322,9 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 	}
 
 	if !gbc.CheckBalance(GroupMinimumBalance) {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageBalance,
 			http.StatusForbidden,
 			fmt.Sprintf("group `%s` balance not enough", group.ID),
 			relaymodel.WithType(GroupBalanceNotEnough),
@@ -462,7 +465,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(Mode, mode)
 
 	if config.GetDisableServe() {
-		AbortLogWithMessage(c, http.StatusServiceUnavailable, "service is under maintenance")
+		AbortOperationally(c, model.FailureStageRouting, http.StatusServiceUnavailable, "service is under maintenance")
 		return
 	}
 
@@ -505,15 +508,16 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	}
 
 	if requestModel == "" {
-		AbortLogWithMessage(c, http.StatusBadRequest, "no model provided")
+		AbortOperationally(c, model.FailureStageValidation, http.StatusBadRequest, "no model provided")
 		return
 	}
 
 	findModel := token.FindModel(requestModel)
 
 	if findModel == "" {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageModel,
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist or you do not have access to it.",
@@ -528,8 +532,9 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	mc, ok := GetModelCaches(c).ModelConfig.GetModelConfig(findModel)
 	if !ok {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageModel,
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist or you do not have access to it.",
@@ -546,8 +551,9 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(ModelConfig, mc)
 
 	if !CheckRelayMode(mode, mc.Type) {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageModel,
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist on this endpoint.",
@@ -625,7 +631,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 			model.Price{},
 			true,
 		)
-		AbortLogWithMessage(c, http.StatusTooManyRequests, errMsg)
+		AbortOperationally(c, model.FailureStageRateLimit, http.StatusTooManyRequests, errMsg)
 
 		return
 	}
@@ -736,6 +742,7 @@ func NewMetaByContext(c *gin.Context,
 		meta.WithPromptCacheKey(promptCacheKey),
 		meta.WithUser(user),
 		meta.WithRequestServiceTier(requestServiceTier),
+		meta.WithOperationalFields(OperationalFieldsFromContext(c)),
 	)
 
 	return meta.NewMeta(

@@ -1685,7 +1685,7 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 
 	settled := coremodel.AsyncUsageInfo{
 		RequestID:       "request-123",
-		UpstreamID:      "video-123",
+		UpstreamID:      "task-public-123",
 		GroupID:         "group-1",
 		TokenID:         7,
 		Status:          coremodel.AsyncUsageStatusCompleted,
@@ -1712,7 +1712,7 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 		mode.VideosGet,
 		"doubao-seedance-2-0-260128",
 		coremodel.ModelConfig{},
-		meta.WithVideoID("video-123"),
+		meta.WithVideoID("task-public-123"),
 	)
 	m.Group.ID = "group-1"
 	m.Token.ID = 7

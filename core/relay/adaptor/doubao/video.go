@@ -1124,7 +1124,7 @@ func VideosStatusHandler(
 		settled, err := coremodel.FindCompletedAsyncUsageByUpstreamID(
 			meta.Group.ID,
 			meta.Token.ID,
-			response.ID,
+			meta.VideoID,
 		)
 		if err != nil {
 			common.GetLogger(c).Errorf("find settled video usage failed: %v", err)

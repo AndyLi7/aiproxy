@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	coremodel "github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 )
 
@@ -89,16 +90,20 @@ const (
 )
 
 type Video struct {
-	ID        string         `json:"id"`
-	Object    string         `json:"object"`
-	CreatedAt int64          `json:"created_at,omitempty"`
-	Status    VideoStatus    `json:"status,omitempty"`
-	Progress  int            `json:"progress,omitempty"`
-	Model     string         `json:"model,omitempty"`
-	Prompt    string         `json:"prompt,omitempty"`
-	Seconds   int            `json:"seconds,omitempty"`
-	Size      string         `json:"size,omitempty"`
-	Error     map[string]any `json:"error,omitempty"`
+	ID             string           `json:"id"`
+	Object         string           `json:"object"`
+	CreatedAt      int64            `json:"created_at,omitempty"`
+	Status         VideoStatus      `json:"status,omitempty"`
+	Progress       int              `json:"progress,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	Prompt         string           `json:"prompt,omitempty"`
+	Seconds        int              `json:"seconds,omitempty"`
+	Size           string           `json:"size,omitempty"`
+	Error          map[string]any   `json:"error,omitempty"`
+	Usage          *coremodel.Usage `json:"usage,omitempty"`
+	Cost           *float64         `json:"cost,omitempty"`
+	Currency       string           `json:"currency,omitempty"`
+	PricingVersion string           `json:"pricing_version,omitempty"`
 }
 
 type OpenAIVideoError struct {

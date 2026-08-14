@@ -73,6 +73,33 @@ func GetPendingAsyncUsages(limit int) ([]*AsyncUsageInfo, error) {
 	return GetPendingAsyncUsagesDue(limit, time.Now())
 }
 
+func FindCompletedAsyncUsageByUpstreamID(
+	groupID string,
+	tokenID int,
+	upstreamID string,
+) (*AsyncUsageInfo, error) {
+	if LogDB == nil || groupID == "" || tokenID == 0 || upstreamID == "" {
+		return nil, nil
+	}
+
+	var info AsyncUsageInfo
+	err := LogDB.
+		Where("group_id = ?", groupID).
+		Where("token_id = ?", tokenID).
+		Where("upstream_id = ?", upstreamID).
+		Where("status = ?", int(AsyncUsageStatusCompleted)).
+		Order("updated_at DESC, id DESC").
+		First(&info).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &info, nil
+}
+
 func GetPendingAsyncUsagesDue(
 	limit int,
 	now time.Time,

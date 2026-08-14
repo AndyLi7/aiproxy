@@ -1119,9 +1119,30 @@ func VideosStatusHandler(
 		}
 	}
 
+	video := buildDoubaoVideo(meta, response.ID, &response)
+	if video.Status == relaymodel.VideoStatusCompleted {
+		settled, err := coremodel.FindCompletedAsyncUsageByUpstreamID(
+			meta.Group.ID,
+			meta.Token.ID,
+			response.ID,
+		)
+		if err != nil {
+			common.GetLogger(c).Errorf("find settled video usage failed: %v", err)
+		} else if settled != nil {
+			usage := settled.Usage
+			video.Usage = &usage
+			if settled.PricingCurrency != "" && settled.PricingVersion != "" {
+				cost := settled.Amount.UsedAmount
+				video.Cost = &cost
+				video.Currency = settled.PricingCurrency
+				video.PricingVersion = settled.PricingVersion
+			}
+		}
+	}
+
 	return writeDoubaoVideoObject(
 		c,
-		buildDoubaoVideo(meta, response.ID, &response),
+		video,
 		adaptor.DoResponseResult{
 			UpstreamID: response.ID,
 			UsageContext: doubaoVideoUsageContext(

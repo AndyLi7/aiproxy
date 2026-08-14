@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,28 @@ import (
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 )
+
+func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, error) {
+	filter := model.OperationalLogFilter{Status: model.OperationalStatus(c.Query("status"))}
+	if !filter.Status.Valid() {
+		return model.OperationalLogFilter{}, fmt.Errorf("invalid operational status %q", filter.Status)
+	}
+
+	rawChannels := strings.TrimSpace(c.Query("channels"))
+	if rawChannels == "" {
+		return filter, nil
+	}
+
+	for _, rawChannelID := range strings.Split(rawChannels, ",") {
+		channelID, err := strconv.Atoi(strings.TrimSpace(rawChannelID))
+		if err != nil || channelID <= 0 {
+			return model.OperationalLogFilter{}, fmt.Errorf("invalid channel ID %q", rawChannelID)
+		}
+		filter.ChannelIDs = append(filter.ChannelIDs, channelID)
+	}
+
+	return filter, nil
+}
 
 func parseCommonParams(c *gin.Context) (params struct {
 	group         string
@@ -57,6 +81,8 @@ func parseCommonParams(c *gin.Context) (params struct {
 //	@Param			end_timestamp	query		int		false	"End timestamp (milliseconds)"
 //	@Param			model_name		query		string	false	"Model name"
 //	@Param			channel			query		int		false	"Channel ID"
+//	@Param			channels		query		string	false	"Comma-separated channel IDs"
+//	@Param			status			query		string	false	"Operational status: processing, success, failed, rejected"
 //	@Param			order			query		string	false	"Order"
 //	@Param			request_id		query		string	false	"Request ID"
 //	@Param			upstream_id		query		string	false	"Upstream ID"
@@ -71,6 +97,11 @@ func GetLogs(c *gin.Context) {
 	page, perPage := utils.ParsePageParams(c)
 	startTime, endTime := utils.ParseTimeRange(c, 0)
 	params := parseCommonParams(c)
+	operationalFilter, err := parseOperationalLogFilter(c)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := model.GetLogs(
 		startTime,
@@ -79,6 +110,7 @@ func GetLogs(c *gin.Context) {
 		params.requestID,
 		params.upstreamID,
 		params.channelID,
+		operationalFilter,
 		params.order,
 		model.CodeType(params.codeType),
 		params.code,
@@ -173,6 +205,8 @@ func GetGroupLogs(c *gin.Context) {
 //	@Param			end_timestamp	query		int		false	"End timestamp (milliseconds)"
 //	@Param			model_name		query		string	false	"Filter by model name"
 //	@Param			channel			query		int		false	"Filter by channel"
+//	@Param			channels		query		string	false	"Comma-separated channel IDs"
+//	@Param			status			query		string	false	"Operational status: processing, success, failed, rejected"
 //	@Param			group			query		string	true	"Group name"
 //	@Param			token_id		query		int		false	"Filter by token id"
 //	@Param			token_name		query		string	false	"Filter by token name"
@@ -190,6 +224,11 @@ func SearchLogs(c *gin.Context) {
 	page, perPage := utils.ParsePageParams(c)
 	startTime, endTime := utils.ParseTimeRange(c, 0)
 	params := parseCommonParams(c)
+	operationalFilter, err := parseOperationalLogFilter(c)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	keyword := c.Query("keyword")
 
@@ -204,6 +243,7 @@ func SearchLogs(c *gin.Context) {
 		startTime,
 		endTime,
 		params.channelID,
+		operationalFilter,
 		params.order,
 		model.CodeType(params.codeType),
 		params.code,

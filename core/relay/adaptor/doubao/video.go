@@ -1101,25 +1101,47 @@ func VideosStatusHandler(
 		)
 	}
 
-	if response.ID == "" {
-		response.ID = meta.VideoID
+	// The public handle is the id we returned at create time and keyed the store
+	// row by — it is the only id the client holds. Upstream may report a DIFFERENT
+	// id here: an aggregator channel mints its own create handle and then echoes
+	// the origin provider's task id in the status body. That id is internal — it
+	// is not a store key, so handing it to the client gives out a handle whose
+	// next poll resolves to nothing. Keep the public handle on every field the
+	// client or the store sees; the upstream id only goes to the log.
+	upstreamID := response.ID
+
+	publicID := meta.VideoID
+	if publicID == "" {
+		publicID = upstreamID
 	}
+
+	// Diagnostic only — the divergence is handled, and it repeats on every poll
+	// of every task, so it must not compete with real signal at warn level.
+	if upstreamID != "" && upstreamID != publicID && c.Request != nil {
+		common.GetLogger(c).Debugf(
+			"upstream reported video id %q for public id %q, keeping the public id",
+			upstreamID,
+			publicID,
+		)
+	}
+
+	response.ID = publicID
 
 	applyStoredDoubaoVideoMetadata(
 		meta,
 		store,
-		coremodel.VideoGenerationStoreID(response.ID),
+		coremodel.VideoGenerationStoreID(publicID),
 		&response,
 	)
 
 	expiresAt := doubaoVideoExpiresAt(response)
 	if response.Content.VideoURL != "" || response.Content.FileURL != "" {
-		if err := saveDoubaoVideoStore(meta, store, response.ID, expiresAt); err != nil {
+		if err := saveDoubaoVideoStore(meta, store, publicID, expiresAt); err != nil {
 			common.GetLogger(c).Errorf("save doubao video store failed: %v", err)
 		}
 	}
 
-	video := buildDoubaoVideo(meta, response.ID, &response)
+	video := buildDoubaoVideo(meta, publicID, &response)
 	if video.Status == relaymodel.VideoStatusCompleted {
 		settled, err := coremodel.FindCompletedAsyncUsageByUpstreamID(
 			meta.Group.ID,
@@ -1144,7 +1166,10 @@ func VideosStatusHandler(
 		c,
 		video,
 		adaptor.DoResponseResult{
-			UpstreamID: response.ID,
+			// The create path records the async usage row under the public
+			// handle; stay consistent so the log and the settlement lookup
+			// above agree on one id per task.
+			UpstreamID: publicID,
 			UsageContext: doubaoVideoUsageContext(
 				&response,
 			).WithFallback(doubaoVideoRequestUsageContext(meta)),
@@ -1613,12 +1638,23 @@ func doubaoVideoOutputAudioFromRequest(request doubaoVideoRequest) *bool {
 	return new(true)
 }
 
+// doubaoVideoExpiresAt decides how long a task stays RETRIEVABLE through this
+// gateway, which is a retention promise we make to the customer — not the same
+// thing as Ark's execution_expires_after (48h), which only says how long Ark
+// keeps executing it. Let the upstream value EXTEND retention, never shorten it:
+// the store row is the only key to a video the customer already paid for, and
+// the reaper deletes expired rows outright.
 func doubaoVideoExpiresAt(response relaymodel.DoubaoVideoTaskResponse) time.Time {
+	retention := time.Now().Add(doubaoVideoTTL)
+
 	if response.CreatedAt > 0 && response.ExecutionExpiresAfter > 0 {
-		return time.Unix(response.CreatedAt+response.ExecutionExpiresAfter, 0)
+		upstream := time.Unix(response.CreatedAt+response.ExecutionExpiresAfter, 0)
+		if upstream.After(retention) {
+			return upstream
+		}
 	}
 
-	return time.Now().Add(doubaoVideoTTL)
+	return retention
 }
 
 func doubaoVideoDimensions(resolution, ratio string) (int, int) {

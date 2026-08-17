@@ -498,6 +498,24 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	requestModel, err := getRequestModel(c, mode, group.ID, token.ID)
 	if err != nil {
+		// Stored-mode routes (videos, video jobs, responses, native task
+		// lookups) resolve the model by reading a store row keyed on the id in
+		// the path. A missing row means the caller asked about something that
+		// does not exist, or whose retention window lapsed — that is a 404 the
+		// caller can act on, not a 500. Everything else is a real backend
+		// failure and must stay a 500, so an outage is never quietly downgraded
+		// into "unknown id".
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			AbortOperationally(
+				c,
+				model.FailureStageModel,
+				http.StatusNotFound,
+				"The requested resource does not exist or is no longer available.",
+			)
+
+			return
+		}
+
 		AbortLogWithMessage(
 			c,
 			http.StatusInternalServerError,

@@ -231,6 +231,9 @@ func TestValidateVideosRequestRejectsFuzzySizeWhenCapabilitiesArePublished(t *te
 		err,
 		"unsupported video size `999x999`, allowed values: 854x480, 480x854, 480x480, 1280x720, 720x1280, 720x720",
 	)
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "unsupported_size", paramErr.Code)
 }
 
 func TestValidateVideosRequestAllowsExactCapabilitySize(t *testing.T) {
@@ -293,6 +296,9 @@ func TestValidateVideosRequestRejectsUnsupportedDiscreteDuration(t *testing.T) {
 		err,
 		"unsupported video duration `6`, allowed values: 5, 10, 12",
 	)
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "unsupported_duration", paramErr.Code)
 }
 
 func TestValidateVideosRequestRejectsUnsupportedAudio(t *testing.T) {

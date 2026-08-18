@@ -23,6 +23,19 @@ func AbortOperationallyWithMode(
 	AbortLogWithMessageWithMode(m, c, statusCode, message, opts...)
 }
 
+func AbortOperationallyWithCodeWithMode(
+	m mode.Mode,
+	c *gin.Context,
+	stage model.FailureStage,
+	errorCode string,
+	statusCode int,
+	message string,
+	opts ...relaymodel.WrapperErrorOptionFunc,
+) {
+	SetOperationalFailure(c, stage, errorCode, message)
+	AbortLogWithMessageWithMode(m, c, statusCode, message, opts...)
+}
+
 func AbortOperationally(
 	c *gin.Context,
 	stage model.FailureStage,

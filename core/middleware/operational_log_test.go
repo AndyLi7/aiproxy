@@ -65,6 +65,9 @@ func TestOperationalLogMiddlewareRecordsRejectedRequestOnce(t *testing.T) {
 	if entry.FailureStage != model.FailureStageBalance {
 		t.Fatalf("failure stage = %q, want balance", entry.FailureStage)
 	}
+	if entry.ErrorCode != "insufficient_balance" {
+		t.Fatalf("error code = %q, want insufficient_balance", entry.ErrorCode)
+	}
 	if strings.Contains(entry.SafeError, "top-secret") || strings.Contains(string(entry.Content), "private prompt") {
 		t.Fatalf("operational log leaked a credential or request body: %+v", entry)
 	}

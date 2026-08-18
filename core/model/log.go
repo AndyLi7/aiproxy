@@ -69,6 +69,7 @@ type Log struct {
 	PricingVersion   string           `gorm:"size:128"                                                       json:"pricing_version,omitempty"`
 	RequestSource    string           `gorm:"size:16;index"                                                  json:"request_source,omitempty"`
 	FailureStage     FailureStage     `gorm:"size:32;index"                                                  json:"failure_stage,omitempty"`
+	ErrorCode        string           `gorm:"size:64;index"                                                  json:"error_code,omitempty"`
 	SafeError        string           `gorm:"type:text"                                                      json:"safe_error,omitempty"`
 	Endpoint         EmptyNullString  `gorm:"size:64"                                                        json:"endpoint,omitempty"`
 	Content          EmptyNullString  `gorm:"type:text"                                                      json:"content,omitempty"`
@@ -433,6 +434,7 @@ func RecordConsumeLog(
 		AsyncUsageStatus: asyncUsageStatus,
 		RequestSource:    operationalFields.RequestSource,
 		FailureStage:     operationalFields.FailureStage,
+		ErrorCode:        operationalFields.ErrorCode,
 		SafeError:        operationalFields.SafeError,
 	}
 

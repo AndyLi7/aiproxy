@@ -14,6 +14,7 @@ const OperationalLogSourceHeader = "X-Token-Platform-Source"
 
 const (
 	operationalFailureStageKey = "operational_failure_stage"
+	operationalErrorCodeKey    = "operational_error_code"
 	operationalSafeErrorKey    = "operational_safe_error"
 	operationalLogRecordedKey  = "operational_log_recorded"
 )
@@ -21,7 +22,17 @@ const (
 var recordOperationalLog = model.RecordOperationalLog
 
 func SetFailureStage(c *gin.Context, stage model.FailureStage, safeError string) {
+	SetOperationalFailure(c, stage, "", safeError)
+}
+
+func SetOperationalFailure(
+	c *gin.Context,
+	stage model.FailureStage,
+	errorCode string,
+	safeError string,
+) {
 	c.Set(operationalFailureStageKey, stage)
+	c.Set(operationalErrorCodeKey, errorCode)
 	c.Set(operationalSafeErrorKey, safeError)
 }
 
@@ -40,6 +51,7 @@ func OperationalFieldsFromContext(c *gin.Context) model.OperationalFields {
 		c.GetHeader(OperationalLogSourceHeader),
 		failureStage,
 		c.GetString(operationalSafeErrorKey),
+		c.GetString(operationalErrorCodeKey),
 	)
 }
 
@@ -77,6 +89,7 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		User:          model.EmptyNullString(GetRequestUser(c)),
 		RequestSource: fields.RequestSource,
 		FailureStage:  fields.FailureStage,
+		ErrorCode:     fields.ErrorCode,
 		SafeError:     fields.SafeError,
 	}
 

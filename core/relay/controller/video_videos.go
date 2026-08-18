@@ -118,7 +118,7 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 	if supportedSizes, ok := exactVideoSizesFromCapabilities(mc.Config); ok {
 		if size := strings.ToLower(strings.TrimSpace(params.size)); size != "" &&
 			!slices.Contains(supportedSizes, size) {
-			return NewBadRequestParamError(fmt.Sprintf(
+			return NewCodedBadRequestParamError("unsupported_size", fmt.Sprintf(
 				"unsupported video size `%s`, allowed values: %s",
 				size,
 				strings.Join(supportedSizes, ", "),
@@ -138,7 +138,7 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 			for i, duration := range supportedDurations {
 				allowed[i] = strconv.Itoa(duration)
 			}
-			return NewBadRequestParamError(fmt.Sprintf(
+			return NewCodedBadRequestParamError("unsupported_duration", fmt.Sprintf(
 				"unsupported video duration `%d`, allowed values: %s",
 				params.seconds,
 				strings.Join(allowed, ", "),
@@ -282,13 +282,15 @@ func validateGenerateAudioCapability(
 	switch mode {
 	case "none":
 		if *requested {
-			return NewBadRequestParamError(
+			return NewCodedBadRequestParamError(
+				"unsupported_audio",
 				"generate_audio is not supported by this model; allowed value: false",
 			)
 		}
 	case "required":
 		if !*requested {
-			return NewBadRequestParamError(
+			return NewCodedBadRequestParamError(
+				"audio_required",
 				"generate_audio is required by this model; allowed value: true",
 			)
 		}

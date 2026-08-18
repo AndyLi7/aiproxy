@@ -20,12 +20,39 @@ func TestBuildOperationalFieldsSanitizesServerFields(t *testing.T) {
 	if fields.FailureStage != FailureStageBalance {
 		t.Fatalf("failure stage = %q, want %q", fields.FailureStage, FailureStageBalance)
 	}
+	if fields.ErrorCode != "insufficient_balance" {
+		t.Fatalf("error code = %q, want insufficient_balance", fields.ErrorCode)
+	}
 	if strings.Contains(strings.ToLower(fields.SafeError), "bearer") ||
 		strings.Contains(fields.SafeError, "sk-secret-value") {
 		t.Fatalf("safe error leaked authorization: %q", fields.SafeError)
 	}
 	if strings.ContainsAny(fields.SafeError, "\r\n") {
 		t.Fatalf("safe error contains a line break: %q", fields.SafeError)
+	}
+}
+
+func TestBuildOperationalFieldsPreservesSafeSpecificErrorCode(t *testing.T) {
+	t.Parallel()
+
+	fields := BuildOperationalFields(
+		RequestSourceAPI,
+		FailureStageValidation,
+		"unsupported size",
+		"unsupported_size",
+	)
+	if fields.ErrorCode != "unsupported_size" {
+		t.Fatalf("error code = %q, want unsupported_size", fields.ErrorCode)
+	}
+
+	invalid := BuildOperationalFields(
+		RequestSourceAPI,
+		FailureStageValidation,
+		"invalid",
+		"../../unsafe",
+	)
+	if invalid.ErrorCode != "invalid_request" {
+		t.Fatalf("invalid error code = %q, want invalid_request", invalid.ErrorCode)
 	}
 }
 

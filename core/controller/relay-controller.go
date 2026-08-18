@@ -258,12 +258,15 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 			statusCode := http.StatusInternalServerError
 
 			var requestParamErr *controller.RequestParamError
+			errorCode := ""
 			if errors.As(err, &requestParamErr) {
 				statusCode = requestParamErr.StatusCode
+				errorCode = requestParamErr.Code
 			}
 
-			middleware.AbortOperationallyWithMode(mode, c,
+			middleware.AbortOperationallyWithCodeWithMode(mode, c,
 				model.FailureStageValidation,
+				errorCode,
 				statusCode,
 				err.Error(),
 			)
@@ -447,6 +450,7 @@ func recordResult(
 			fields.RequestSource,
 			model.FailureStageUpstream,
 			result.Error.Error(),
+			"upstream_error",
 		)
 	}
 	meta.OperationalFields = fields

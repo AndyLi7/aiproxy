@@ -53,6 +53,43 @@ type pricingCaptureConsumer struct {
 	version  string
 }
 
+type finalizedLogConsumer struct {
+	t         *testing.T
+	db        *gorm.DB
+	requestID string
+	sawUsage  bool
+}
+
+func (c *finalizedLogConsumer) PostGroupConsume(
+	_ context.Context,
+	_ string,
+	amount float64,
+) (float64, error) {
+	var got model.Log
+	require.NoError(c.t, c.db.Where("request_id = ?", c.requestID).First(&got).Error)
+	c.sawUsage = int64(got.Usage.TotalTokens) > 0 && got.Amount.UsedAmount == amount
+
+	return amount, nil
+}
+
+type finalizedLogBalance struct {
+	consumer *finalizedLogConsumer
+}
+
+func (b finalizedLogBalance) GetGroupRemainBalance(
+	context.Context,
+	model.GroupCache,
+) (float64, balance.PostGroupConsumer, error) {
+	return 100, b.consumer, nil
+}
+
+func (finalizedLogBalance) GetGroupQuota(
+	context.Context,
+	model.GroupCache,
+) (*balance.GroupQuota, error) {
+	return &balance.GroupQuota{Total: 100, Remain: 100}, nil
+}
+
 func (c *pricingCaptureConsumer) PostGroupConsume(
 	ctx context.Context,
 	_ string,
@@ -148,6 +185,54 @@ func TestCompleteAsyncUsageIgnoresMissingLog(t *testing.T) {
 	require.NoError(t, completeAsyncUsage(context.Background(), info, usage, model.UsageContext{}))
 	require.Equal(t, model.AsyncUsageStatusCompleted, info.Status)
 	require.Equal(t, usage.InputTokens, info.Usage.InputTokens)
+}
+
+func TestCompleteAsyncUsagePersistsFinalUsageBeforeBalanceCallback(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.AsyncUsageInfo{}))
+
+	oldLogDB := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = oldLogDB })
+
+	const (
+		requestID = "usage_before_balance_callback"
+		groupID   = "group-usage-before-balance-callback"
+	)
+	require.NoError(t, db.Create(&model.Log{
+		RequestID:        model.EmptyNullString(requestID),
+		AsyncUsageStatus: model.AsyncUsageStatusPending,
+	}).Error)
+	require.NoError(t, model.CacheSetGroup(&model.GroupCache{
+		ID:     groupID,
+		Status: model.GroupStatusEnabled,
+	}))
+	t.Cleanup(func() { require.NoError(t, model.CacheDeleteGroup(groupID)) })
+
+	consumer := &finalizedLogConsumer{t: t, db: db, requestID: requestID}
+	oldBalance := balance.Default
+	balance.Default = finalizedLogBalance{consumer: consumer}
+	t.Cleanup(func() { balance.Default = oldBalance })
+
+	info := &model.AsyncUsageInfo{
+		RequestID:       requestID,
+		RequestAt:       time.Now(),
+		Status:          model.AsyncUsageStatusPending,
+		Model:           "video-model",
+		GroupID:         groupID,
+		TokenID:         1,
+		TokenName:       "playground",
+		Price:           model.Price{OutputPrice: 0.5, OutputPriceUnit: 1},
+		ProcessingToken: "claim-token",
+	}
+	require.NoError(t, model.CreateAsyncUsageInfo(info))
+
+	require.NoError(t, completeAsyncUsage(context.Background(), info, model.Usage{
+		OutputTokens: 4,
+		TotalTokens:  4,
+	}, model.UsageContext{}))
+	require.True(t, consumer.sawUsage, "wallet callback must observe finalized usage and amount")
 }
 
 func TestCompleteAsyncUsageReturnsLogUpdateError(t *testing.T) {

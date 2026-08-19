@@ -16,6 +16,8 @@ type videosRequestUsageParams struct {
 	seconds         int
 	secondsProvided bool
 	size            string
+	resolution      string
+	aspectRatio     string
 	generateAudio   *bool
 }
 
@@ -63,7 +65,9 @@ func GetVideosRequestUsage(c *gin.Context, mc model.ModelConfig) (RequestUsage, 
 		// response or async usage fetcher.
 		Usage: model.Usage{},
 		Context: model.UsageContext{
-			Resolution: params.size,
+			Resolution:       params.size,
+			NativeResolution: params.resolution,
+			OutputAudio:      params.generateAudio,
 		},
 	}, nil
 }
@@ -93,10 +97,12 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 			return videosRequestUsageParams{}, err
 		}
 		size := strings.TrimSpace(c.PostForm("size"))
-		if c.Request.URL.Path == "/v1/videos" && size == "" {
+		resolution := strings.TrimSpace(c.PostForm("resolution"))
+		aspectRatio := strings.TrimSpace(c.PostForm("aspect_ratio"))
+		if c.Request.URL.Path == "/v1/videos" && size == "" && resolution == "" && aspectRatio == "" {
 			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
 				videoMissingParameterCode,
-				"size is required and must use <width>x<height> format",
+				"provide either size or resolution with aspect_ratio",
 				"size", nil, nil, "<width>x<height> string",
 			)
 		}
@@ -105,6 +111,8 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 			seconds:         seconds,
 			secondsProvided: secondsProvided,
 			size:            size,
+			resolution:      resolution,
+			aspectRatio:     aspectRatio,
 			generateAudio:   generateAudio,
 		}, nil
 	}
@@ -160,14 +168,23 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 		return videosRequestUsageParams{}, err
 	}
 
-	size, err := optionalStringValueFromNode(&node, "size", "resolution")
+	size, err := optionalStringValueFromNode(&node, "size")
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
-	if c.Request.URL.Path == "/v1/videos" && strings.TrimSpace(size) == "" {
+	resolution, err := optionalEnumStringValueFromNode(&node, "resolution", "resolution string")
+	if err != nil {
+		return videosRequestUsageParams{}, err
+	}
+	aspectRatio, err := optionalEnumStringValueFromNode(&node, "aspect_ratio", "aspect ratio string")
+	if err != nil {
+		return videosRequestUsageParams{}, err
+	}
+	if c.Request.URL.Path == "/v1/videos" && strings.TrimSpace(size) == "" &&
+		strings.TrimSpace(resolution) == "" && strings.TrimSpace(aspectRatio) == "" {
 		return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
 			videoMissingParameterCode,
-			"size is required and must use <width>x<height> format",
+			"provide either size or resolution with aspect_ratio",
 			"size", nil, nil, "<width>x<height> string",
 		)
 	}
@@ -176,11 +193,21 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 		seconds:         seconds,
 		secondsProvided: secondsProvided,
 		size:            size,
+		resolution:      resolution,
+		aspectRatio:     aspectRatio,
 		generateAudio:   generateAudio,
 	}, nil
 }
 
 func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.ModelConfig) error {
+	if err := validateVideoDimensionSelection(params, mc); err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(params.resolution) != "" {
+		return validateVideosRequestDurationAndAudio(params, mc)
+	}
+
 	fuzzy := !mc.DisableResolutionFuzzyMatch
 	supportedSizes, hasExactSizes := exactVideoSizesFromCapabilities(mc.Config)
 	size := strings.ToLower(strings.TrimSpace(params.size))
@@ -223,6 +250,89 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 		return err
 	}
 
+	return validateVideosRequestDurationAndAudio(params, mc)
+}
+
+func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.ModelConfig) error {
+	size := strings.TrimSpace(params.size)
+	resolution := strings.ToLower(strings.TrimSpace(params.resolution))
+	aspectRatio := strings.TrimSpace(params.aspectRatio)
+
+	if size != "" && (resolution != "" || aspectRatio != "") {
+		return NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			"size cannot be combined with resolution or aspect_ratio",
+			"size", size, nil, "either size or resolution with aspect_ratio",
+		)
+	}
+	if resolution == "" && aspectRatio != "" {
+		return NewDetailedBadRequestParamError(
+			videoMissingParameterCode,
+			"resolution is required when aspect_ratio is provided",
+			"resolution", nil, nil, "resolution string",
+		)
+	}
+	if resolution != "" && aspectRatio == "" {
+		return NewDetailedBadRequestParamError(
+			videoMissingParameterCode,
+			"aspect_ratio is required when resolution is provided",
+			"aspect_ratio", nil, nil, "aspect ratio string",
+		)
+	}
+	if resolution == "" {
+		return nil
+	}
+
+	allowedResolutions, resolutionsOK := model.GetModelConfigStringSlice(
+		mc.Config,
+		model.ModelConfigKey("resolutions"),
+	)
+	if !resolutionsOK || len(allowedResolutions) == 0 {
+		allowedResolutions = mc.AllowedResolutions
+	}
+	allowedResolutions = normalizedVideoCapabilityValues(allowedResolutions, true)
+	if len(allowedResolutions) != 0 && !slices.Contains(allowedResolutions, resolution) {
+		return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
+			"unsupported video resolution `%s`, allowed values: %s",
+			resolution,
+			strings.Join(allowedResolutions, ", "),
+		), "resolution", resolution, allowedResolutions, "one of the allowed resolution values")
+	}
+
+	allowedAspectRatios, ratiosOK := model.GetModelConfigStringSlice(
+		mc.Config,
+		model.ModelConfigKey("aspectRatios"),
+	)
+	allowedAspectRatios = normalizedVideoCapabilityValues(allowedAspectRatios, false)
+	if ratiosOK && len(allowedAspectRatios) != 0 && !slices.Contains(allowedAspectRatios, aspectRatio) {
+		return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
+			"unsupported video aspect_ratio `%s`, allowed values: %s",
+			aspectRatio,
+			strings.Join(allowedAspectRatios, ", "),
+		), "aspect_ratio", aspectRatio, allowedAspectRatios, "one of the allowed aspect ratio values")
+	}
+
+	return nil
+}
+
+func normalizedVideoCapabilityValues(values []string, lower bool) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if lower {
+			value = strings.ToLower(value)
+		}
+		if value != "" && !slices.Contains(result, value) {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func validateVideosRequestDurationAndAudio(
+	params videosRequestUsageParams,
+	mc model.ModelConfig,
+) error {
 	if supportedDurations, ok := exactVideoDurationsFromCapabilities(mc.Config); ok {
 		if params.secondsProvided && !slices.Contains(supportedDurations, params.seconds) {
 			allowed := make([]string, len(supportedDurations))
@@ -347,6 +457,29 @@ func optionalStringValueFromNode(node *ast.Node, names ...string) (string, error
 		}
 	}
 	return "", nil
+}
+
+func optionalEnumStringValueFromNode(node *ast.Node, name, expected string) (string, error) {
+	valueNode := node.Get(name)
+	if valueNode == nil || !valueNode.Exists() {
+		return "", nil
+	}
+	if valueNode.TypeSafe() != ast.V_STRING {
+		return "", NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a string", name),
+			name, videoNodeValue(valueNode), nil, expected,
+		)
+	}
+	value, err := valueNode.String()
+	if err != nil {
+		return "", NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a string", name),
+			name, nil, nil, expected,
+		)
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func videoNodeValue(node *ast.Node) any {

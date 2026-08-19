@@ -304,6 +304,173 @@ func TestValidateVideosRequestAllowsExactCapabilitySize(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateVideosRequestAllowsSemanticDimensions(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"resolution":"720p",
+			"aspect_ratio":"16:9",
+			"seconds":5
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"480p", "720p"},
+			"aspectRatios": []any{"16:9", "9:16"},
+			"durations":    []any{float64(5), float64(10)},
+		},
+	})
+	require.NoError(t, err)
+}
+
+func TestGetVideosRequestUsagePreservesSemanticBillingContext(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"resolution":"720p",
+			"aspect_ratio":"16:9",
+			"seconds":5,
+			"generate_audio":true
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	usage, err := GetVideosRequestUsage(ctx, model.ModelConfig{})
+	require.NoError(t, err)
+	require.Equal(t, "720p", usage.Context.NativeResolution)
+	require.Empty(t, usage.Context.Resolution)
+	require.NotNil(t, usage.Context.OutputAudio)
+	require.True(t, *usage.Context.OutputAudio)
+}
+
+func TestValidateVideosRequestRejectsUnsupportedSemanticDimensions(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name        string
+		resolution  string
+		aspectRatio string
+		wantParam   string
+		wantValue   string
+		wantAllowed []string
+	}{
+		{
+			name:        "resolution",
+			resolution:  "1080p",
+			aspectRatio: "16:9",
+			wantParam:   "resolution",
+			wantValue:   "1080p",
+			wantAllowed: []string{"480p", "720p"},
+		},
+		{
+			name:        "aspect ratio",
+			resolution:  "720p",
+			aspectRatio: "1:1",
+			wantParam:   "aspect_ratio",
+			wantValue:   "1:1",
+			wantAllowed: []string{"16:9", "9:16"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			body := `{"model":"video-model","prompt":"A city street","resolution":"` +
+				test.resolution + `","aspect_ratio":"` + test.aspectRatio + `","seconds":5}`
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			err := ValidateVideosRequest(ctx, model.ModelConfig{
+				Config: map[model.ModelConfigKey]any{
+					"resolutions":  []any{"480p", "720p"},
+					"aspectRatios": []any{"16:9", "9:16"},
+				},
+			})
+			var paramErr *RequestParamError
+			require.ErrorAs(t, err, &paramErr)
+			require.Equal(t, "unsupported_by_model", paramErr.Code)
+			require.Equal(t, test.wantParam, paramErr.Param)
+			require.Equal(t, test.wantValue, paramErr.Value)
+			require.Equal(t, test.wantAllowed, paramErr.AllowedValues)
+		})
+	}
+}
+
+func TestValidateVideosRequestRejectsAmbiguousDimensionSelection(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name      string
+		body      string
+		wantCode  string
+		wantParam string
+	}{
+		{
+			name: "size with semantic dimensions",
+			body: `{"model":"video-model","prompt":"A city street","size":"1280x720",` +
+				`"resolution":"720p","aspect_ratio":"16:9","seconds":5}`,
+			wantCode:  "invalid_parameter",
+			wantParam: "size",
+		},
+		{
+			name:      "resolution without aspect ratio",
+			body:      `{"model":"video-model","prompt":"A city street","resolution":"720p","seconds":5}`,
+			wantCode:  "missing_parameter",
+			wantParam: "aspect_ratio",
+		},
+		{
+			name:      "aspect ratio without resolution",
+			body:      `{"model":"video-model","prompt":"A city street","aspect_ratio":"16:9","seconds":5}`,
+			wantCode:  "missing_parameter",
+			wantParam: "resolution",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(test.body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			err := ValidateVideosRequest(ctx, model.ModelConfig{})
+			var paramErr *RequestParamError
+			require.ErrorAs(t, err, &paramErr)
+			require.Equal(t, test.wantCode, paramErr.Code)
+			require.Equal(t, test.wantParam, paramErr.Param)
+		})
+	}
+}
+
 func TestValidateVideosRequestRejectsUnsupportedDiscreteDuration(t *testing.T) {
 	t.Parallel()
 

@@ -1174,6 +1174,53 @@ func TestAdaptorConvertRequestVideosIgnoresJobOnlyDuration(t *testing.T) {
 	}
 }
 
+func TestAdaptorConvertRequestVideosMapsSemanticDimensions(t *testing.T) {
+	adaptor := &Adaptor{}
+	m := meta.NewMeta(
+		nil,
+		mode.Videos,
+		"doubao-seedance-2-0-260128",
+		coremodel.ModelConfig{},
+	)
+
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		strings.NewReader(`{
+			"model": "alias-video",
+			"prompt": "Animate a calm ocean",
+			"resolution": "720p",
+			"aspect_ratio": "9:16",
+			"seconds": 5
+		}`),
+	)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	result, err := adaptor.ConvertRequest(m, nil, req)
+	if err != nil {
+		t.Fatalf("ConvertRequest returned error: %v", err)
+	}
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("failed to read converted body: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to unmarshal converted body %s: %v", string(body), err)
+	}
+	if payload["resolution"] != "720p" {
+		t.Fatalf("expected resolution 720p, got %#v", payload["resolution"])
+	}
+	if payload["ratio"] != "9:16" {
+		t.Fatalf("expected ratio 9:16, got %#v", payload["ratio"])
+	}
+}
+
 func TestAdaptorConvertRequestVideoGenerationIgnoresVideosSeconds(t *testing.T) {
 	adaptor := &Adaptor{}
 	m := meta.NewMeta(
@@ -1652,6 +1699,8 @@ func TestAdaptorDoResponseVideoStatusRestoresOpenAIFieldsFromStore(t *testing.T)
 		video.Prompt != "A stored prompt" ||
 		video.Seconds != 6 ||
 		video.Size != "720x1280" ||
+		video.Resolution != "720p" ||
+		video.AspectRatio != "9:16" ||
 		video.Progress != 100 {
 		t.Fatalf("expected OpenAI video response with stored metadata, got %#v", video)
 	}

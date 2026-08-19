@@ -99,6 +99,9 @@ type Video struct {
 	Prompt         string           `json:"prompt,omitempty"`
 	Seconds        int              `json:"seconds,omitempty"`
 	Size           string           `json:"size,omitempty"`
+	Resolution     string           `json:"resolution,omitempty"`
+	AspectRatio    string           `json:"aspect_ratio,omitempty"`
+	GenerateAudio  *bool            `json:"generate_audio,omitempty"`
 	Error          map[string]any   `json:"error,omitempty"`
 	Usage          *coremodel.Usage `json:"usage,omitempty"`
 	Cost           *float64         `json:"cost,omitempty"`

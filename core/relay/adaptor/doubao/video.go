@@ -78,6 +78,7 @@ type doubaoOpenAIVideoRequest struct {
 	SafetyIdentifier      string                     `json:"safety_identifier,omitempty"`
 	Resolution            string                     `json:"resolution,omitempty"`
 	Ratio                 string                     `json:"ratio,omitempty"`
+	AspectRatio           string                     `json:"aspect_ratio,omitempty"`
 	Size                  string                     `json:"size,omitempty"`
 	Seconds               doubaoFlexibleInt          `json:"seconds,omitempty"`
 	Seed                  any                        `json:"seed,omitempty"`
@@ -519,6 +520,7 @@ func parseDoubaoJSONOpenAIVideoCommonRequest(
 			doubaoVideoResolutionFromSize(size),
 		),
 		Ratio: firstNonEmptyString(
+			raw.AspectRatio,
 			raw.Ratio,
 			ratioFromSize(size),
 		),
@@ -597,6 +599,7 @@ func parseDoubaoMultipartOpenAIVideoCommonRequest(
 			doubaoVideoResolutionFromSize(size),
 		),
 		Ratio: firstNonEmptyString(
+			req.PostFormValue("aspect_ratio"),
 			req.PostFormValue("ratio"),
 			ratioFromSize(size),
 		),
@@ -1336,14 +1339,17 @@ func buildDoubaoVideo(
 	metadata := doubaoVideoMetadataFromMeta(meta)
 	resolution, ratio := doubaoVideoResolutionAndRatio(response, metadata)
 	video := relaymodel.Video{
-		ID:        id,
-		Object:    relaymodel.VideoObject,
-		CreatedAt: firstPositiveInt64(response.CreatedAt, now),
-		Status:    doubaoVideoStatus(response.Status),
-		Model:     meta.OriginModel,
-		Prompt:    metadata.Prompt,
-		Seconds:   firstPositiveInt(response.Duration, metadata.Duration),
-		Size:      doubaoVideoSize(resolution, ratio),
+		ID:            id,
+		Object:        relaymodel.VideoObject,
+		CreatedAt:     firstPositiveInt64(response.CreatedAt, now),
+		Status:        doubaoVideoStatus(response.Status),
+		Model:         meta.OriginModel,
+		Prompt:        metadata.Prompt,
+		Seconds:       firstPositiveInt(response.Duration, metadata.Duration),
+		Size:          doubaoVideoSize(resolution, ratio),
+		Resolution:    resolution,
+		AspectRatio:   ratio,
+		GenerateAudio: response.GenerateAudio,
 	}
 
 	switch video.Status {

@@ -20,6 +20,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/json-iterator/go v1.1.12
+	github.com/klauspost/compress v1.18.5
 	github.com/labring/aiproxy/mcp-servers v0.0.0-20260513041420-a70a89df6ddf
 	github.com/labring/aiproxy/openapi-mcp v0.0.0-20260513041420-a70a89df6ddf
 	github.com/larksuite/oapi-sdk-go/v3 v3.7.5
@@ -123,7 +124,6 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
-	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect

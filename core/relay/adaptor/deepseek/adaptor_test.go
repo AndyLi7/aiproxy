@@ -147,22 +147,6 @@ func TestDeepseekGetRequestURLOpenAIModes(t *testing.T) {
 	}
 }
 
-func TestDeepseekSupportModeResponses(t *testing.T) {
-	a := &Adaptor{}
-
-	assert.True(t, a.SupportMode(&meta.Meta{
-		Mode:        mode.Responses,
-		ActualModel: "deepseek-v4-flash",
-	}))
-	assert.False(t, a.SupportMode(&meta.Meta{
-		Mode:        mode.Responses,
-		ActualModel: "deepseek-chat",
-	}))
-	assert.False(t, a.SupportMode(&meta.Meta{
-		Mode: mode.ResponsesGet,
-	}))
-}
-
 func TestDeepseekMetadataIncludesOpenAIConfigSchema(t *testing.T) {
 	metadata := (&Adaptor{}).Metadata()
 	properties, ok := metadata.ConfigSchema["properties"].(map[string]any)

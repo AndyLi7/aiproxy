@@ -42,6 +42,19 @@ func TestNeedRecordConsumeSkipsSuccessfulStoredVideoReads(t *testing.T) {
 	}
 }
 
+func TestNeedRecordConsumeSkipsSuccessfulAlphaSearch(t *testing.T) {
+	if consume.NeedRecordConsumeForTest(http.StatusOK, &meta.Meta{Mode: mode.AlphaSearch}) {
+		t.Fatal("successful alpha search must not record consumption")
+	}
+
+	if !consume.NeedRecordConsumeForTest(
+		http.StatusBadGateway,
+		&meta.Meta{Mode: mode.AlphaSearch},
+	) {
+		t.Fatal("failed alpha search must record consumption")
+	}
+}
+
 func TestNeedRecordConsumeSkipsSuccessfulDoubaoNativeDeleteNoContent(t *testing.T) {
 	if consume.NeedRecordConsumeForTest(
 		http.StatusNoContent,

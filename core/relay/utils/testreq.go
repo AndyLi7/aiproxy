@@ -23,6 +23,7 @@ func NewErrUnsupportedModelType(modelType string) *UnsupportedModelTypeError {
 	return &UnsupportedModelTypeError{ModelType: modelType}
 }
 
+//nolint:gocyclo // Each supported relay mode has one explicit test-request builder branch.
 func BuildRequest(modelConfig model.ModelConfig) (io.Reader, mode.Mode, error) {
 	switch modelConfig.Type {
 	case mode.ChatCompletions:
@@ -53,6 +54,13 @@ func BuildRequest(modelConfig model.ModelConfig) (io.Reader, mode.Mode, error) {
 		}
 
 		return body, mode.Moderations, nil
+	case mode.Responses:
+		body, err := BuildResponsesRequest(modelConfig.Model)
+		if err != nil {
+			return nil, mode.Unknown, err
+		}
+
+		return body, mode.Responses, nil
 	case mode.ImagesGenerations, mode.GeminiImage:
 		body, err := BuildImagesGenerationsRequest(modelConfig)
 		if err != nil {
@@ -176,6 +184,20 @@ func BuildModerationsRequest(model string) (io.Reader, error) {
 	}
 
 	jsonBytes, err := sonic.Marshal(moderationsRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.NewReader(jsonBytes), nil
+}
+
+func BuildResponsesRequest(model string) (io.Reader, error) {
+	responsesRequest := &relaymodel.CreateResponseRequest{
+		Model: model,
+		Input: "hi",
+	}
+
+	jsonBytes, err := sonic.Marshal(responsesRequest)
 	if err != nil {
 		return nil, err
 	}

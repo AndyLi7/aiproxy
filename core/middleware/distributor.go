@@ -396,6 +396,10 @@ func CheckRelayMode(requestMode, modelMode mode.Mode) bool {
 			mode.GeminiImage,
 			mode.Responses,
 		)
+	case mode.ResponsesCompact:
+		return containsMode(mode.ChatCompletions, mode.Responses, mode.ResponsesCompact)
+	case mode.AlphaSearch:
+		return containsMode(mode.ChatCompletions, mode.Responses, mode.AlphaSearch)
 	case mode.ResponsesGet, mode.ResponsesDelete, mode.ResponsesCancel, mode.ResponsesInputItems:
 		return containsMode(
 			mode.ChatCompletions,
@@ -932,7 +936,7 @@ func getRequestModel(c *gin.Context, m mode.Mode, group string, tokenID int) (st
 		return getStoredVideoRequestModel(c, group, tokenID)
 	case isStoredResponseMode(m):
 		return getStoredResponseRequestModel(c, group, tokenID)
-	case m == mode.Responses:
+	case m == mode.Responses || m == mode.ResponsesCompact:
 		node, err := getRequestBodyNode(c)
 		if err != nil {
 			return "", fmt.Errorf("get request model failed: %w", err)
@@ -1353,7 +1357,7 @@ func GetPreviousResponseIDFromJSON(body []byte) (string, error) {
 
 func getPromptCacheKey(c *gin.Context, m mode.Mode) (string, error) {
 	switch m {
-	case mode.Responses, mode.ChatCompletions:
+	case mode.Responses, mode.ResponsesCompact, mode.ChatCompletions:
 	default:
 		return "", nil
 	}
@@ -1377,7 +1381,12 @@ func GetPromptCacheKeyFromJSON(body []byte) (string, error) {
 
 func getRequestServiceTier(c *gin.Context, m mode.Mode) (string, error) {
 	switch m {
-	case mode.ChatCompletions, mode.Completions, mode.Responses, mode.Anthropic, mode.Gemini:
+	case mode.ChatCompletions,
+		mode.Completions,
+		mode.Responses,
+		mode.ResponsesCompact,
+		mode.Anthropic,
+		mode.Gemini:
 	default:
 		return "", nil
 	}
@@ -1394,7 +1403,11 @@ func getRequestServiceTierFromNode(node *ast.Node, m mode.Mode) (string, error) 
 	switch m {
 	case mode.Gemini:
 		return getStringFieldFromNode(node, "serviceTier", "get request serviceTier failed")
-	case mode.ChatCompletions, mode.Completions, mode.Responses, mode.Anthropic:
+	case mode.ChatCompletions,
+		mode.Completions,
+		mode.Responses,
+		mode.ResponsesCompact,
+		mode.Anthropic:
 		return getStringFieldFromNode(node, "service_tier", "get request service_tier failed")
 	default:
 		return "", nil

@@ -40,27 +40,11 @@ func (a *Adaptor) DefaultBaseURL() string {
 func (a *Adaptor) SupportMode(mt *meta.Meta) bool {
 	m := adaptor.ModeFromMeta(mt)
 
-	if m == mode.Responses {
-		return supportsResponsesModel(mt)
-	}
-
 	return m == mode.ChatCompletions ||
 		m == mode.Completions ||
 		m == mode.Anthropic ||
-		m == mode.Gemini
-}
-
-func supportsResponsesModel(mt *meta.Meta) bool {
-	if mt == nil {
-		return false
-	}
-
-	modelName := strings.ToLower(mt.ActualModel)
-	if modelName == "" {
-		modelName = strings.ToLower(mt.OriginModel)
-	}
-
-	return modelName == "deepseek-v4-flash"
+		m == mode.Gemini ||
+		m == mode.Responses
 }
 
 func (a *Adaptor) SetupRequestHeader(

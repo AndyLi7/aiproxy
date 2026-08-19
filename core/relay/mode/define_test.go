@@ -47,6 +47,8 @@ func TestPersistedModeIDsStayStable(t *testing.T) {
 		mode.DoubaoVideo:             36,
 		mode.DoubaoVideoTasks:        37,
 		mode.DoubaoVideoTasksDelete:  38,
+		mode.ResponsesCompact:        39,
+		mode.AlphaSearch:             40,
 	}
 
 	for relayMode, want := range tests {

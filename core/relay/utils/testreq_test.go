@@ -123,6 +123,23 @@ func TestBuildRequestVideos(t *testing.T) {
 	require.NotContains(t, string(data), "seconds")
 }
 
+func TestBuildRequestResponses(t *testing.T) {
+	body, relayMode, err := utils.BuildRequest(model.ModelConfig{
+		Model: "gpt-5.6-sol",
+		Type:  mode.Responses,
+	})
+	require.NoError(t, err)
+	require.Equal(t, mode.Responses, relayMode)
+
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+
+	var request relaymodel.CreateResponseRequest
+	require.NoError(t, sonic.Unmarshal(data, &request))
+	require.Equal(t, "gpt-5.6-sol", request.Model)
+	require.Equal(t, "hi", request.Input)
+}
+
 func TestBuildImagesGenerationsRequestUsesImagePrompt(t *testing.T) {
 	body, relayMode, err := utils.BuildRequest(model.ModelConfig{
 		Model: "gemini-3.1-flash-image-preview",

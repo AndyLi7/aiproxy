@@ -41,7 +41,8 @@ func (a *Adaptor) SupportMode(mt *meta.Meta) bool {
 	return m == mode.ChatCompletions ||
 		m == mode.Completions ||
 		m == mode.Anthropic ||
-		m == mode.Gemini
+		m == mode.Gemini ||
+		m == mode.Responses
 }
 
 func (a *Adaptor) GetRequestURL(
@@ -54,6 +55,16 @@ func (a *Adaptor) GetRequestURL(
 	switch meta.Mode {
 	case mode.Anthropic:
 		u, err := url.JoinPath(originalBaseURL, "/api/anthropic/v1/messages")
+		if err != nil {
+			return adaptor.RequestURL{}, err
+		}
+
+		return adaptor.RequestURL{
+			Method: http.MethodPost,
+			URL:    u,
+		}, nil
+	case mode.Responses:
+		u, err := url.JoinPath(originalBaseURL, "/api/v1/responses")
 		if err != nil {
 			return adaptor.RequestURL{}, err
 		}
@@ -87,7 +98,7 @@ func (a *Adaptor) GetRequestURL(
 
 func (a *Adaptor) ConvertRequest(
 	meta *meta.Meta,
-	_ adaptor.Store,
+	store adaptor.Store,
 	req *http.Request,
 ) (adaptor.ConvertResult, error) {
 	switch meta.Mode {
@@ -106,6 +117,8 @@ func (a *Adaptor) ConvertRequest(
 		return openai.ConvertCompletionsRequest(meta, req)
 	case mode.Gemini:
 		return openai.ConvertGeminiRequest(meta, req)
+	case mode.Responses:
+		return openai.ConvertRequest(meta, store, req)
 	default:
 		return adaptor.ConvertResult{}, fmt.Errorf("unsupported mode: %s", meta.Mode)
 	}
@@ -134,6 +147,8 @@ func (a *Adaptor) DoResponse(
 		return openai.GeminiHandler(meta, c, resp)
 	case mode.ChatCompletions, mode.Completions:
 		return a.Adaptor.DoResponse(meta, store, c, resp)
+	case mode.Responses:
+		return openai.DoResponse(meta, store, c, resp)
 	default:
 		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIErrorWithMessage(
 			fmt.Sprintf("unsupported mode: %s", meta.Mode),
@@ -145,7 +160,7 @@ func (a *Adaptor) DoResponse(
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "Zhipu Coding endpoint\nChat and completions are routed to `/api/coding/paas/v4`\nAnthropic-compatible requests are routed to `/api/anthropic/v1/messages`\nGemini-compatible requests are converted to chat completions",
+		Readme: "Zhipu Coding endpoint\nResponses API requests are routed to `/api/v1/responses`\nChat and completions are routed to `/api/coding/paas/v4`\nAnthropic-compatible requests are routed to `/api/anthropic/v1/messages`\nGemini-compatible requests are converted to chat completions",
 		Models: zhipu.ModelList,
 	}
 }

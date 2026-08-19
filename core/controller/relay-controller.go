@@ -213,7 +213,7 @@ func relayController(m mode.Mode) RelayController {
 		c.ValidateRequest = controller.ValidateDoubaoVideoRequest
 		c.GetRequestPrice = controller.GetDoubaoVideoRequestPrice
 		c.GetRequestUsage = controller.GetDoubaoVideoRequestUsage
-	case mode.Responses:
+	case mode.Responses, mode.ResponsesCompact:
 		c.GetRequestUsage = controller.GetResponsesRequestUsage
 	}
 

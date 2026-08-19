@@ -59,10 +59,12 @@ func (a *Adaptor) SupportMode(mt *meta.Meta) bool {
 		m == mode.Anthropic ||
 		m == mode.Gemini ||
 		m == mode.Responses ||
+		m == mode.ResponsesCompact ||
 		m == mode.ResponsesGet ||
 		m == mode.ResponsesDelete ||
 		m == mode.ResponsesCancel ||
-		m == mode.ResponsesInputItems
+		m == mode.ResponsesInputItems ||
+		m == mode.AlphaSearch
 }
 
 //nolint:gocyclo
@@ -74,8 +76,28 @@ func (a *Adaptor) GetRequestURL(
 	u := meta.Channel.BaseURL
 
 	switch meta.Mode {
+	case mode.AlphaSearch:
+		url, err := url.JoinPath(u, "/alpha/search")
+		if err != nil {
+			return adaptor.RequestURL{}, err
+		}
+
+		return adaptor.RequestURL{
+			Method: http.MethodPost,
+			URL:    url,
+		}, nil
 	case mode.Responses:
 		url, err := url.JoinPath(u, "/responses")
+		if err != nil {
+			return adaptor.RequestURL{}, err
+		}
+
+		return adaptor.RequestURL{
+			Method: http.MethodPost,
+			URL:    url,
+		}, nil
+	case mode.ResponsesCompact:
+		url, err := url.JoinPath(u, "/responses/compact")
 		if err != nil {
 			return adaptor.RequestURL{}, err
 		}
@@ -345,11 +367,40 @@ func (a *Adaptor) GetRequestURL(
 func (a *Adaptor) SetupRequestHeader(
 	meta *meta.Meta,
 	_ adaptor.Store,
-	_ *gin.Context,
+	c *gin.Context,
 	req *http.Request,
 ) error {
+	if c != nil && c.Request != nil {
+		for _, headerName := range openAIRequestHeaderWhitelist {
+			if value := c.Request.Header.Values(headerName); len(value) > 0 {
+				req.Header[http.CanonicalHeaderKey(headerName)] = append([]string(nil), value...)
+			}
+		}
+	}
+
+	if meta.Mode == mode.ResponsesCompact {
+		req.Header.Set("Accept", "application/json")
+	}
+
 	req.Header.Set("Authorization", "Bearer "+meta.Channel.Key)
+
 	return nil
+}
+
+var openAIRequestHeaderWhitelist = []string{
+	"Accept",
+	"Accept-Language",
+	"OpenAI-Beta",
+	"User-Agent",
+	"Originator",
+	"conversation_id",
+	"session_id",
+	"x-codex-beta-features",
+	"x-codex-installation-id",
+	"x-codex-turn-state",
+	"x-codex-turn-metadata",
+	"x-codex-window-id",
+	"x-openai-internal-codex-responses-lite",
 }
 
 func (a *Adaptor) ConvertRequest(
@@ -370,8 +421,12 @@ func ConvertRequest(
 	}
 
 	switch meta.Mode {
+	case mode.AlphaSearch:
+		return ConvertAlphaSearchRequest(meta, req)
 	case mode.Responses:
 		return ConvertResponseRequest(meta, req, patchOpenAIResponsesReasoningEffort(meta))
+	case mode.ResponsesCompact:
+		return ConvertResponseCompactRequest(meta, req)
 	case mode.ResponsesGet, mode.ResponsesDelete, mode.ResponsesCancel, mode.ResponsesInputItems:
 		// These endpoints don't need request conversion
 		return adaptor.ConvertResult{}, nil
@@ -458,6 +513,8 @@ func doResponse(
 	options DoResponseOptions,
 ) (result adaptor.DoResponseResult, err adaptor.Error) {
 	switch meta.Mode {
+	case mode.AlphaSearch:
+		result, err = AlphaSearchHandler(meta, c, resp)
 	case mode.Responses:
 		if utils.IsStreamResponse(resp) {
 			result, err = responseStreamHandler(
@@ -470,6 +527,8 @@ func doResponse(
 		} else {
 			result, err = ResponseHandler(meta, store, c, resp)
 		}
+	case mode.ResponsesCompact:
+		result, err = CompactResponseHandler(meta, c, resp)
 	case mode.ResponsesGet:
 		result, err = GetResponseHandler(meta, c, resp)
 	case mode.ResponsesDelete:

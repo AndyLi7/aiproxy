@@ -170,6 +170,77 @@ func TestDoResponseRecordsPromptAndGenericMappingsForResponses(t *testing.T) {
 	assert.True(t, store.saved[0].ExpiresAt.Before(end.Add(24*time.Hour+time.Second)))
 }
 
+func TestDoResponseRecordsPromptAndGenericMappingsForResponsesCompact(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/responses/compact",
+		nil,
+	)
+
+	store := &recordingStore{}
+	requestMeta := &meta.Meta{
+		Mode:           mode.ResponsesCompact,
+		OriginModel:    "gpt-5",
+		PromptCacheKey: "cache-key",
+		ModelConfig: model.ModelConfig{
+			Model: "gpt-5",
+			Plugin: map[string]map[string]any{
+				PluginName: {"enable": true, "enable_generic_follow": true},
+			},
+		},
+		Group:   model.GroupCache{ID: "group-1"},
+		Token:   model.TokenCache{ID: 7},
+		Channel: meta.ChannelMeta{ID: 9},
+	}
+
+	_, relayErr := (&Plugin{}).DoResponse(
+		requestMeta,
+		store,
+		c,
+		&http.Response{StatusCode: http.StatusOK},
+		doResponseFunc{
+			fn: func(_ *meta.Meta, _ adaptor.Store, c *gin.Context, _ *http.Response) (adaptor.DoResponseResult, adaptor.Error) {
+				c.Status(http.StatusOK)
+				_, _ = c.Writer.Write([]byte(`{"id":"resp_123","prompt_cache_retention":"24h"}`))
+
+				return adaptor.DoResponseResult{
+					Usage: model.Usage{CachedTokens: 6},
+				}, nil
+			},
+		},
+	)
+
+	require.Nil(t, relayErr)
+	require.Len(t, store.savedIfNotExist, 2)
+	require.Len(t, store.saved, 2)
+	assert.Equal(
+		t,
+		model.PromptCacheStoreID("gpt-5", "cache-key", model.CacheKeyTypeStable),
+		store.savedIfNotExist[0].ID,
+	)
+	assert.Equal(
+		t,
+		model.CacheFollowStoreID("gpt-5", model.CacheKeyTypeStable),
+		store.savedIfNotExist[1].ID,
+	)
+	assert.Equal(
+		t,
+		model.PromptCacheStoreID("gpt-5", "cache-key", model.CacheKeyTypeRecent),
+		store.saved[0].ID,
+	)
+	assert.Equal(
+		t,
+		model.CacheFollowStoreID("gpt-5", model.CacheKeyTypeRecent),
+		store.saved[1].ID,
+	)
+}
+
 func TestDoResponseSkipsGenericCacheFollowWhenPromptCacheKeyAbsentByDefault(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)

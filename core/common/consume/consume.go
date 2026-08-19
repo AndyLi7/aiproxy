@@ -202,7 +202,8 @@ func checkNeedRecordConsume(code int, meta *meta.Meta) bool {
 		mode.ResponsesGet,
 		mode.ResponsesDelete,
 		mode.ResponsesCancel,
-		mode.ResponsesInputItems:
+		mode.ResponsesInputItems,
+		mode.AlphaSearch:
 		return code != http.StatusOK
 	case mode.DoubaoVideoTasksDelete:
 		return code != http.StatusOK && code != http.StatusNoContent

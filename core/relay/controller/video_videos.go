@@ -92,11 +92,19 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 		if err != nil {
 			return videosRequestUsageParams{}, err
 		}
+		size := strings.TrimSpace(c.PostForm("size"))
+		if c.Request.URL.Path == "/v1/videos" && size == "" {
+			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+				videoMissingParameterCode,
+				"size is required and must use <width>x<height> format",
+				"size", nil, nil, "<width>x<height> string",
+			)
+		}
 
 		return videosRequestUsageParams{
 			seconds:         seconds,
 			secondsProvided: secondsProvided,
-			size:            c.PostForm("size"),
+			size:            size,
 			generateAudio:   generateAudio,
 		}, nil
 	}
@@ -156,6 +164,13 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
+	if c.Request.URL.Path == "/v1/videos" && strings.TrimSpace(size) == "" {
+		return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+			videoMissingParameterCode,
+			"size is required and must use <width>x<height> format",
+			"size", nil, nil, "<width>x<height> string",
+		)
+	}
 
 	return videosRequestUsageParams{
 		seconds:         seconds,
@@ -167,10 +182,31 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 
 func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.ModelConfig) error {
 	fuzzy := !mc.DisableResolutionFuzzyMatch
-	if err := validateOpenAIVideoSizeFormat(params.size, mc.AllowedResolutions, fuzzy); err != nil {
-		return err
+	supportedSizes, hasExactSizes := exactVideoSizesFromCapabilities(mc.Config)
+	size := strings.ToLower(strings.TrimSpace(params.size))
+	if size != "" && !dimensionResolutionValue(size) {
+		allowedValues := supportedSizes
+		if !hasExactSizes {
+			options := openAIVideoSupportedResolutionOptions(mc.AllowedResolutions, fuzzy)
+			if options != "<width>x<height>" {
+				allowedValues = strings.Split(options, ", ")
+			}
+		}
+		message := fmt.Sprintf("invalid video size `%s`: expected <width>x<height>", size)
+		if len(allowedValues) != 0 {
+			message = fmt.Sprintf(
+				"invalid video size `%s`, allowed values: %s",
+				size,
+				strings.Join(allowedValues, ", "),
+			)
+		}
+		return NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			message,
+			"size", size, allowedValues, "<width>x<height> string",
+		)
 	}
-	if supportedSizes, ok := exactVideoSizesFromCapabilities(mc.Config); ok {
+	if hasExactSizes {
 		if size := strings.ToLower(strings.TrimSpace(params.size)); size != "" &&
 			!slices.Contains(supportedSizes, size) {
 			return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
@@ -266,7 +302,15 @@ func strictOptionalPositiveIntValueFromNode(node *ast.Node, name string) (int, b
 			name, videoNodeValue(valueNode), nil, "positive integer",
 		)
 	}
-	value, err := valueNode.Int64()
+	raw, err := valueNode.Raw()
+	if err != nil {
+		return 0, true, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a positive integer", name),
+			name, videoNodeValue(valueNode), nil, "positive integer",
+		)
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 0)
 	if err != nil || value <= 0 {
 		return 0, true, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,

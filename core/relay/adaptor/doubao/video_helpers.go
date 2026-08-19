@@ -119,6 +119,10 @@ func ratioFromSize(size string) string {
 	switch size {
 	case "720p", "1080p", "480p", "":
 		return ""
+	case "854x480", "1280x720", "1920x1080", "3840x2160":
+		return "16:9"
+	case "480x854", "720x1280", "1080x1920", "2160x3840":
+		return "9:16"
 	}
 
 	width, height, ok := strings.Cut(size, "x")

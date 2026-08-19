@@ -36,6 +36,31 @@ func AbortOperationallyWithCodeWithMode(
 	AbortLogWithMessageWithMode(m, c, statusCode, message, opts...)
 }
 
+func AbortPublicVideoRequestError(
+	c *gin.Context,
+	stage model.FailureStage,
+	statusCode int,
+	code string,
+	message string,
+	param string,
+	value any,
+	allowedValues []string,
+	expected string,
+) {
+	SetOperationalFailure(c, stage, code, message)
+	common.GetLogger(c).Warn(message)
+	c.JSON(statusCode, relaymodel.PublicVideoRequestError(
+		statusCode,
+		code,
+		message,
+		param,
+		value,
+		allowedValues,
+		expected,
+	))
+	c.Abort()
+}
+
 func AbortOperationally(
 	c *gin.Context,
 	stage model.FailureStage,

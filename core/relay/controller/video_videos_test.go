@@ -233,7 +233,10 @@ func TestValidateVideosRequestRejectsFuzzySizeWhenCapabilitiesArePublished(t *te
 	)
 	var paramErr *RequestParamError
 	require.ErrorAs(t, err, &paramErr)
-	require.Equal(t, "unsupported_size", paramErr.Code)
+	require.Equal(t, "unsupported_by_model", paramErr.Code)
+	require.Equal(t, "size", paramErr.Param)
+	require.Equal(t, "999x999", paramErr.Value)
+	require.Equal(t, []string{"854x480", "480x854", "480x480", "1280x720", "720x1280", "720x720"}, paramErr.AllowedValues)
 }
 
 func TestValidateVideosRequestAllowsExactCapabilitySize(t *testing.T) {
@@ -298,7 +301,69 @@ func TestValidateVideosRequestRejectsUnsupportedDiscreteDuration(t *testing.T) {
 	)
 	var paramErr *RequestParamError
 	require.ErrorAs(t, err, &paramErr)
-	require.Equal(t, "unsupported_duration", paramErr.Code)
+	require.Equal(t, "unsupported_by_model", paramErr.Code)
+	require.Equal(t, "seconds", paramErr.Param)
+	require.Equal(t, "6", paramErr.Value)
+	require.Equal(t, []string{"5", "10", "12"}, paramErr.AllowedValues)
+}
+
+func TestValidateVideosRequestRejectsExplicitNullSeconds(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{"model":"video-model","prompt":"A city street","seconds":null}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "invalid_parameter", paramErr.Code)
+	require.Equal(t, "seconds", paramErr.Param)
+	require.Equal(t, "positive integer", paramErr.Expected)
+}
+
+func TestValidateVideosRequestRejectsNonObjectBody(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(`[]`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "body", paramErr.Param)
+	require.Equal(t, "array", paramErr.Value)
+	require.Equal(t, "JSON object", paramErr.Expected)
+}
+
+func TestValidateVideosRequestRequiresPrompt(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"video-model"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "missing_parameter", paramErr.Code)
+	require.Equal(t, "prompt", paramErr.Param)
 }
 
 func TestValidateVideosRequestRejectsUnsupportedAudio(t *testing.T) {

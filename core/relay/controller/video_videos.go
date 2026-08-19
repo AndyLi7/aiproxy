@@ -19,6 +19,12 @@ type videosRequestUsageParams struct {
 	generateAudio   *bool
 }
 
+const (
+	videoInvalidParameterCode   = "invalid_parameter"
+	videoMissingParameterCode   = "missing_parameter"
+	videoUnsupportedByModelCode = "unsupported_by_model"
+)
+
 func ValidateVideosRequest(c *gin.Context, mc model.ModelConfig) error {
 	params, err := getVideosRequestUsageParams(c)
 	if err != nil {
@@ -68,6 +74,14 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 			return videosRequestUsageParams{}, NewBadRequestParamError(err.Error())
 		}
 
+		if c.Request.URL.Path == "/v1/videos" && strings.TrimSpace(c.PostForm("prompt")) == "" {
+			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+				videoMissingParameterCode,
+				"prompt is required and must be a non-empty string",
+				"prompt", nil, nil, "non-empty string",
+			)
+		}
+
 		secondsValue, secondsProvided := c.GetPostForm("seconds")
 		seconds, err := parseOptionalPositiveInt(secondsValue, "seconds")
 		if err != nil {
@@ -89,15 +103,56 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 
 	node, err := common.UnmarshalRequest2NodeReusable(c.Request)
 	if err != nil {
-		return videosRequestUsageParams{}, NewBadRequestParamError(err.Error())
+		return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			"request body must contain valid JSON",
+			"body", nil, nil, "valid JSON object",
+		)
+	}
+	if node.TypeSafe() != ast.V_OBJECT {
+		return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			"request body must be a JSON object",
+			"body", videoJSONTypeName(node.TypeSafe()), nil, "JSON object",
+		)
+	}
+	if c.Request.URL.Path == "/v1/videos" {
+		promptNode := node.Get("prompt")
+		if promptNode == nil || !promptNode.Exists() || promptNode.TypeSafe() == ast.V_NULL {
+			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+				videoMissingParameterCode,
+				"prompt is required and must be a non-empty string",
+				"prompt", nil, nil, "non-empty string",
+			)
+		}
+		if promptNode.TypeSafe() != ast.V_STRING {
+			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+				videoInvalidParameterCode,
+				"prompt must be a non-empty string",
+				"prompt", videoNodeValue(promptNode), nil, "non-empty string",
+			)
+		}
+		prompt, promptErr := promptNode.String()
+		if promptErr != nil || strings.TrimSpace(prompt) == "" {
+			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
+				videoMissingParameterCode,
+				"prompt is required and must be a non-empty string",
+				"prompt", prompt, nil, "non-empty string",
+			)
+		}
 	}
 
-	seconds, secondsProvided, err := intValueFromNode(&node, "seconds")
+	seconds, secondsProvided, err := strictOptionalPositiveIntValueFromNode(&node, "seconds")
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
 
-	generateAudio, err := optionalBoolValueFromNode(&node, "generate_audio")
+	generateAudio, err := strictOptionalBoolValueFromNode(&node, "generate_audio")
+	if err != nil {
+		return videosRequestUsageParams{}, err
+	}
+
+	size, err := optionalStringValueFromNode(&node, "size", "resolution")
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
@@ -105,7 +160,7 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 	return videosRequestUsageParams{
 		seconds:         seconds,
 		secondsProvided: secondsProvided,
-		size:            firstNonEmptyStringValueFromNode(&node, "size", "resolution"),
+		size:            size,
 		generateAudio:   generateAudio,
 	}, nil
 }
@@ -118,11 +173,11 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 	if supportedSizes, ok := exactVideoSizesFromCapabilities(mc.Config); ok {
 		if size := strings.ToLower(strings.TrimSpace(params.size)); size != "" &&
 			!slices.Contains(supportedSizes, size) {
-			return NewCodedBadRequestParamError("unsupported_size", fmt.Sprintf(
+			return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
 				"unsupported video size `%s`, allowed values: %s",
 				size,
 				strings.Join(supportedSizes, ", "),
-			))
+			), "size", size, supportedSizes, "one of the allowed size values")
 		}
 	} else if err := validateSupportedVideoResolution(
 		params.size,
@@ -138,11 +193,11 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 			for i, duration := range supportedDurations {
 				allowed[i] = strconv.Itoa(duration)
 			}
-			return NewCodedBadRequestParamError("unsupported_duration", fmt.Sprintf(
+			return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
 				"unsupported video duration `%d`, allowed values: %s",
 				params.seconds,
 				strings.Join(allowed, ", "),
-			))
+			), "seconds", strconv.Itoa(params.seconds), allowed, "one of the allowed integer durations")
 		}
 	} else if err := validateVideoGenerationSeconds(
 		params.seconds,
@@ -166,19 +221,117 @@ func parseOptionalBool(c *gin.Context, name string) (*bool, error) {
 	return &parsed, nil
 }
 
-func optionalBoolValueFromNode(node *ast.Node, name string) (*bool, error) {
+func strictOptionalBoolValueFromNode(node *ast.Node, name string) (*bool, error) {
 	valueNode := node.Get(name)
-	if valueNode == nil || !valueNode.Exists() || valueNode.TypeSafe() == ast.V_NULL {
+	if valueNode == nil || !valueNode.Exists() {
 		return nil, nil
 	}
+	if valueNode.TypeSafe() == ast.V_NULL {
+		return nil, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a boolean", name),
+			name, nil, []string{"true", "false"}, "boolean",
+		)
+	}
 	if valueNode.TypeSafe() != ast.V_TRUE && valueNode.TypeSafe() != ast.V_FALSE {
-		return nil, NewBadRequestParamError(fmt.Sprintf("invalid %s: must be a boolean", name))
+		return nil, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a boolean", name),
+			name, videoNodeValue(valueNode), []string{"true", "false"}, "boolean",
+		)
 	}
 	value, err := valueNode.Bool()
 	if err != nil {
 		return nil, NewBadRequestParamError(fmt.Sprintf("invalid %s: must be a boolean", name))
 	}
 	return &value, nil
+}
+
+func strictOptionalPositiveIntValueFromNode(node *ast.Node, name string) (int, bool, error) {
+	valueNode := node.Get(name)
+	if valueNode == nil || !valueNode.Exists() {
+		return 0, false, nil
+	}
+	if valueNode.TypeSafe() == ast.V_NULL {
+		return 0, true, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a positive integer", name),
+			name, nil, nil, "positive integer",
+		)
+	}
+	if valueNode.TypeSafe() != ast.V_NUMBER {
+		return 0, true, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a positive integer", name),
+			name, videoNodeValue(valueNode), nil, "positive integer",
+		)
+	}
+	value, err := valueNode.Int64()
+	if err != nil || value <= 0 {
+		return 0, true, NewDetailedBadRequestParamError(
+			videoInvalidParameterCode,
+			fmt.Sprintf("%s must be a positive integer", name),
+			name, videoNodeValue(valueNode), nil, "positive integer",
+		)
+	}
+	return int(value), true, nil
+}
+
+func optionalStringValueFromNode(node *ast.Node, names ...string) (string, error) {
+	for _, name := range names {
+		valueNode := node.Get(name)
+		if valueNode == nil || !valueNode.Exists() {
+			continue
+		}
+		if valueNode.TypeSafe() != ast.V_STRING {
+			return "", NewDetailedBadRequestParamError(
+				videoInvalidParameterCode,
+				fmt.Sprintf("%s must be a string in <width>x<height> format", name),
+				name, videoNodeValue(valueNode), nil, "<width>x<height> string",
+			)
+		}
+		value, err := valueNode.String()
+		if err != nil {
+			return "", NewDetailedBadRequestParamError(
+				videoInvalidParameterCode,
+				fmt.Sprintf("%s must be a string in <width>x<height> format", name),
+				name, nil, nil, "<width>x<height> string",
+			)
+		}
+		if strings.TrimSpace(value) != "" {
+			return value, nil
+		}
+	}
+	return "", nil
+}
+
+func videoNodeValue(node *ast.Node) any {
+	if node == nil || !node.Exists() || node.TypeSafe() == ast.V_NULL {
+		return nil
+	}
+	if raw, err := node.Raw(); err == nil {
+		return raw
+	}
+	return videoJSONTypeName(node.TypeSafe())
+}
+
+func videoJSONTypeName(valueType int) string {
+	switch valueType {
+	case ast.V_OBJECT:
+		return "object"
+	case ast.V_ARRAY:
+		return "array"
+	case ast.V_STRING:
+		return "string"
+	case ast.V_NUMBER:
+		return "number"
+	case ast.V_TRUE, ast.V_FALSE:
+		return "boolean"
+	case ast.V_NULL:
+		return "null"
+	default:
+		return "unknown"
+	}
 }
 
 var videoPixelsByResolution = map[string]string{
@@ -282,16 +435,18 @@ func validateGenerateAudioCapability(
 	switch mode {
 	case "none":
 		if *requested {
-			return NewCodedBadRequestParamError(
-				"unsupported_audio",
+			return NewDetailedBadRequestParamError(
+				videoUnsupportedByModelCode,
 				"generate_audio is not supported by this model; allowed value: false",
+				"generate_audio", true, []string{"false"}, "false",
 			)
 		}
 	case "required":
 		if !*requested {
-			return NewCodedBadRequestParamError(
-				"audio_required",
+			return NewDetailedBadRequestParamError(
+				videoUnsupportedByModelCode,
 				"generate_audio is required by this model; allowed value: true",
+				"generate_audio", false, []string{"true"}, "true",
 			)
 		}
 	}

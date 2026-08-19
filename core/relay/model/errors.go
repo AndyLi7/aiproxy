@@ -31,6 +31,10 @@ func PublicVideoError(statusCode int) adaptor.Error {
 		err.Message = "The requested resource was not found."
 		err.Type = "invalid_request_error"
 		err.Code = "not_found"
+	case http.StatusMethodNotAllowed:
+		err.Message = "Method not allowed for this endpoint."
+		err.Type = "invalid_request_error"
+		err.Code = "method_not_allowed"
 	case http.StatusTooManyRequests:
 		err.Message = "Too many requests. Please retry later."
 		err.Type = "rate_limit_error"
@@ -43,6 +47,30 @@ func PublicVideoError(statusCode int) adaptor.Error {
 	}
 
 	return NewOpenAIError(statusCode, err)
+}
+
+func PublicVideoRequestError(
+	statusCode int,
+	code string,
+	message string,
+	param string,
+	value any,
+	allowedValues []string,
+	expected string,
+) adaptor.Error {
+	var allowedValuesPointer *[]string
+	if len(allowedValues) != 0 {
+		allowedValuesPointer = &allowedValues
+	}
+	return NewOpenAIError(statusCode, OpenAIError{
+		Code:          code,
+		Message:       message,
+		Type:          "invalid_request_error",
+		Param:         param,
+		Value:         value,
+		AllowedValues: allowedValuesPointer,
+		Expected:      expected,
+	})
 }
 
 const (

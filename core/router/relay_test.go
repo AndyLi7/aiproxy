@@ -24,4 +24,5 @@ func TestSetRelayRouterRegistersGeminiModelScopedOperationRoutes(t *testing.T) {
 	require.True(t, registered["GET /v1/models/:model/operations/*operation_id"])
 	require.True(t, registered["GET /v1beta/models/:model/operations/*operation_id"])
 	require.True(t, registered["GET /v1beta/files/*model"])
+	require.True(t, registered["GET /v1/videos"])
 }

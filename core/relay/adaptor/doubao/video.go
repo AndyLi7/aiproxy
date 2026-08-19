@@ -30,6 +30,19 @@ const (
 	doubaoVideoTTL          = 7 * 24 * time.Hour
 )
 
+var doubaoVideoContentRetryDelays = []time.Duration{
+	200 * time.Millisecond,
+	500 * time.Millisecond,
+	time.Second,
+	2 * time.Second,
+}
+
+type doubaoVideoContentFetchFunc func(
+	context.Context,
+	*meta.Meta,
+	string,
+) (*http.Response, error)
+
 type doubaoVideoRequest struct {
 	Model                 string               `json:"model,omitempty"`
 	Content               []doubaoVideoContent `json:"content,omitempty"`
@@ -1221,19 +1234,33 @@ func fetchDoubaoVideoContentHandler(
 		)
 	}
 
-	videoResp, err := fetchDoubaoVideoContent(c.Request.Context(), meta, videoURL)
+	videoResp, err := fetchDoubaoVideoContentWithRetry(
+		c.Request.Context(),
+		meta,
+		videoURL,
+		fetchDoubaoVideoContent,
+		doubaoVideoContentRetryDelays,
+	)
 	if err != nil {
+		c.Header("Retry-After", "2")
+
 		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIVideoError(
 			err,
-			http.StatusInternalServerError,
+			http.StatusServiceUnavailable,
 		)
 	}
 	defer videoResp.Body.Close()
 
 	if videoResp.StatusCode != http.StatusOK {
+		status := http.StatusBadGateway
+		if isRetryableDoubaoVideoContentStatus(videoResp.StatusCode) {
+			c.Header("Retry-After", "2")
+			status = http.StatusServiceUnavailable
+		}
+
 		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIVideoErrorWithMessage(
 			fmt.Sprintf("unexpected video status code: %d", videoResp.StatusCode),
-			http.StatusInternalServerError,
+			status,
 		)
 	}
 
@@ -1435,6 +1462,72 @@ func fetchDoubaoVideoContent(
 	}
 
 	return client.Do(req)
+}
+
+func fetchDoubaoVideoContentWithRetry(
+	ctx context.Context,
+	meta *meta.Meta,
+	videoURL string,
+	fetch doubaoVideoContentFetchFunc,
+	delays []time.Duration,
+) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 0; ; attempt++ {
+		response, err := fetch(ctx, meta, videoURL)
+		if err == nil && response != nil &&
+			!isRetryableDoubaoVideoContentStatus(response.StatusCode) {
+			return response, nil
+		}
+		if err == nil && response != nil && attempt >= len(delays) {
+			return response, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else if response != nil {
+			drainAndCloseDoubaoVideoContentResponse(response)
+		}
+
+		if attempt >= len(delays) {
+			return nil, lastErr
+		}
+
+		timer := time.NewTimer(delays[attempt])
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isRetryableDoubaoVideoContentStatus(status int) bool {
+	switch status {
+	case http.StatusNotFound,
+		http.StatusConflict,
+		http.StatusTooEarly,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func drainAndCloseDoubaoVideoContentResponse(response *http.Response) {
+	if response == nil || response.Body == nil {
+		return
+	}
+
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	_ = response.Body.Close()
 }
 
 func saveDoubaoVideoJobStore(
@@ -1672,7 +1765,7 @@ func doubaoVideoDimensions(resolution, ratio string) (int, int) {
 
 	switch strings.TrimSpace(ratio) {
 	case "9:16":
-		return height, height * 16 / 9
+		return height, (height*16 + 8) / 9
 	case "1:1":
 		return height, height
 	case "4:3":
@@ -1682,7 +1775,7 @@ func doubaoVideoDimensions(resolution, ratio string) (int, int) {
 	case "21:9":
 		return height * 21 / 9, height
 	default:
-		return height * 16 / 9, height
+		return (height*16 + 8) / 9, height
 	}
 }
 

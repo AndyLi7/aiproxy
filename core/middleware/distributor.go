@@ -498,6 +498,21 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	requestModel, err := getRequestModel(c, mode, group.ID, token.ID)
 	if err != nil {
+		var validationErr *publicVideoRequestValidationError
+		if errors.As(err, &validationErr) {
+			AbortPublicVideoRequestError(
+				c,
+				model.FailureStageValidation,
+				http.StatusBadRequest,
+				validationErr.code,
+				validationErr.message,
+				validationErr.param,
+				validationErr.value,
+				validationErr.allowedValues,
+				validationErr.expected,
+			)
+			return
+		}
 		// Stored-mode routes (videos, video jobs, responses, native task
 		// lookups) resolve the model by reading a store row keyed on the id in
 		// the path. A missing row means the caller asked about something that
@@ -526,6 +541,20 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	}
 
 	if requestModel == "" {
+		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
+			AbortPublicVideoRequestError(
+				c,
+				model.FailureStageValidation,
+				http.StatusBadRequest,
+				"missing_parameter",
+				"model is required and must be a non-empty string",
+				"model",
+				nil,
+				nil,
+				"non-empty string",
+			)
+			return
+		}
 		AbortOperationally(c, model.FailureStageValidation, http.StatusBadRequest, "no model provided")
 		return
 	}
@@ -791,6 +820,17 @@ func getRequestBodyNode(c *gin.Context) (*ast.Node, error) {
 
 	return &node, nil
 }
+
+type publicVideoRequestValidationError struct {
+	code          string
+	message       string
+	param         string
+	value         any
+	allowedValues []string
+	expected      string
+}
+
+func (e *publicVideoRequestValidationError) Error() string { return e.message }
 
 func clearRequestBodyNode(c *gin.Context) {
 	if c == nil {
@@ -1117,12 +1157,44 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 
 	node, err := getRequestBodyNode(c)
 	if err != nil {
-		return "", fmt.Errorf("get request model failed: %w", err)
+		return "", &publicVideoRequestValidationError{
+			code:     "invalid_parameter",
+			message:  "request body must contain valid JSON",
+			param:    "body",
+			expected: "valid JSON object",
+		}
+	}
+	if node.TypeSafe() != ast.V_OBJECT {
+		return "", &publicVideoRequestValidationError{
+			code:     "invalid_parameter",
+			message:  "request body must be a JSON object",
+			param:    "body",
+			value:    requestJSONTypeName(node.TypeSafe()),
+			expected: "JSON object",
+		}
 	}
 
-	requestModel, err := getStringFieldFromNode(node, "model", "get request model failed")
-	if err != nil {
-		return requestModel, err
+	modelNode := node.Get("model")
+	requestModel := ""
+	if modelNode != nil && modelNode.Exists() && modelNode.TypeSafe() != ast.V_NULL {
+		if modelNode.TypeSafe() != ast.V_STRING {
+			return "", &publicVideoRequestValidationError{
+				code:     "invalid_parameter",
+				message:  "model must be a non-empty string",
+				param:    "model",
+				value:    requestJSONTypeName(modelNode.TypeSafe()),
+				expected: "non-empty string",
+			}
+		}
+		requestModel, err = modelNode.String()
+		if err != nil {
+			return "", &publicVideoRequestValidationError{
+				code:     "invalid_parameter",
+				message:  "model must be a non-empty string",
+				param:    "model",
+				expected: "non-empty string",
+			}
+		}
 	}
 
 	referenceModel, err := getVideoCreateRequestModelFromReference(
@@ -1138,6 +1210,25 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 	}
 
 	return referenceModel, nil
+}
+
+func requestJSONTypeName(valueType int) string {
+	switch valueType {
+	case ast.V_OBJECT:
+		return "object"
+	case ast.V_ARRAY:
+		return "array"
+	case ast.V_STRING:
+		return "string"
+	case ast.V_NUMBER:
+		return "number"
+	case ast.V_TRUE, ast.V_FALSE:
+		return "boolean"
+	case ast.V_NULL:
+		return "null"
+	default:
+		return "unknown"
+	}
 }
 
 func getVideoCreateRequestModelFromReference(

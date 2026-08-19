@@ -22,6 +22,7 @@ func TestPublicVideoErrorUsesSafeStableEnvelope(t *testing.T) {
 		{http.StatusUnauthorized, "authentication_error", "invalid_api_key", "The API key is missing or invalid."},
 		{http.StatusForbidden, "permission_error", "permission_denied", "The API key cannot access this resource."},
 		{http.StatusNotFound, "invalid_request_error", "not_found", "The requested resource was not found."},
+		{http.StatusMethodNotAllowed, "invalid_request_error", "method_not_allowed", "Method not allowed for this endpoint."},
 		{http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", "Too many requests. Please retry later."},
 		{http.StatusUnprocessableEntity, "invalid_request_error", "request_rejected", "The request could not be completed."},
 		{http.StatusInternalServerError, "api_error", "internal_error", "The request could not be completed."},

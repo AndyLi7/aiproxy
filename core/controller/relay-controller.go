@@ -262,6 +262,20 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 			if errors.As(err, &requestParamErr) {
 				statusCode = requestParamErr.StatusCode
 				errorCode = requestParamErr.Code
+				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
+					middleware.AbortPublicVideoRequestError(
+						c,
+						model.FailureStageValidation,
+						statusCode,
+						errorCode,
+						requestParamErr.Message,
+						requestParamErr.Param,
+						requestParamErr.Value,
+						requestParamErr.AllowedValues,
+						requestParamErr.Expected,
+					)
+					return
+				}
 			}
 
 			middleware.AbortOperationallyWithCodeWithMode(mode, c,

@@ -40,3 +40,31 @@ func TestAbortWithMessageSanitizesVideoAuthenticationBeforeModeSelection(t *test
 	require.Equal(t, "invalid_api_key", body.Error.Code)
 	require.NotContains(t, recorder.Body.String(), "private-key")
 }
+
+func TestAbortPublicVideoRequestErrorIncludesActionableFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	AbortPublicVideoRequestError(
+		c,
+		"validation",
+		http.StatusBadRequest,
+		"unsupported_by_model",
+		"seconds 3 is not supported by this model",
+		"seconds",
+		"3",
+		[]string{"4", "5"},
+		"one of the allowed integer durations",
+	)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	var body relaymodel.OpenAIErrorResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Equal(t, "unsupported_by_model", body.Error.Code)
+	require.Equal(t, "seconds", body.Error.Param)
+	require.Equal(t, "3", body.Error.Value)
+	require.Equal(t, []string{"4", "5"}, *body.Error.AllowedValues)
+	require.Equal(t, "one of the allowed integer durations", body.Error.Expected)
+}

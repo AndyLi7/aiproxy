@@ -159,6 +159,7 @@ func SetRelayRouter(router *gin.Engine) {
 			"/videos",
 			controller.Videos()...,
 		)
+		relayRouter.GET("/videos", controller.PublicVideoMethodNotAllowed)
 		relayRouter.POST(
 			"/videos/edits",
 			controller.EditVideo()...,

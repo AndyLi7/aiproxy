@@ -372,7 +372,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 				DisableResolutionFuzzyMatch: mc.DisableResolutionFuzzyMatch,
 			},
 		),
-		middleware.GroupMinimumBalance,
+		middleware.GetGroupMinimumBalance(),
 	)
 	if !gbc.CheckBalance(requiredBalance) {
 		middleware.AbortOperationallyWithMode(mode, c,

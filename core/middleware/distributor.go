@@ -16,6 +16,7 @@ import (
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
+	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/common/reqlimit"
 	"github.com/labring/aiproxy/core/model"
@@ -252,9 +253,18 @@ func GetGroupBalanceConsumer(
 }
 
 const (
-	GroupBalanceNotEnough = "group_balance_not_enough"
-	GroupMinimumBalance   = 0.3
+	GroupBalanceNotEnough      = "group_balance_not_enough"
+	DefaultGroupMinimumBalance = 0.01
 )
+
+func GetGroupMinimumBalance() float64 {
+	value := env.Float64("GROUP_MINIMUM_BALANCE", DefaultGroupMinimumBalance)
+	if value < 0 {
+		return 0
+	}
+
+	return value
+}
 
 func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 	startedAt := time.Now()
@@ -321,7 +331,7 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 		)
 	}
 
-	if !gbc.CheckBalance(GroupMinimumBalance) {
+	if !gbc.CheckBalance(GetGroupMinimumBalance()) {
 		AbortOperationally(
 			c,
 			model.FailureStageBalance,

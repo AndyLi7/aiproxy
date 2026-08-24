@@ -462,6 +462,45 @@ func TestGetPriorityWeightHandlesNilErrorRatesMap(t *testing.T) {
 	assert.InDelta(t, 1000.0, getPriorityWeight(channel, getChannelErrorRate(nil, 123)), 0.0001)
 }
 
+func TestPickChannelUsesHighestPriorityTier(t *testing.T) {
+	t.Parallel()
+
+	primary := &model.Channel{
+		ID:       1,
+		Status:   model.ChannelStatusEnabled,
+		Priority: 100,
+	}
+	backup := &model.Channel{
+		ID:       2,
+		Status:   model.ChannelStatusEnabled,
+		Priority: 1,
+	}
+
+	channel, err := pickChannelWithRandom(
+		[]*model.Channel{primary, backup},
+		map[int64]float64{},
+		func() float64 { return 0.999 },
+	)
+	require.NoError(t, err)
+	assert.Equal(t, primary.ID, channel.ID)
+}
+
+func TestPickChannelSharesTrafficInsideHighestPriorityTier(t *testing.T) {
+	t.Parallel()
+
+	primaryA := &model.Channel{ID: 1, Priority: 100}
+	primaryB := &model.Channel{ID: 2, Priority: 100}
+	backup := &model.Channel{ID: 3, Priority: 1}
+
+	channel, err := pickChannelWithRandom(
+		[]*model.Channel{primaryA, primaryB, backup},
+		map[int64]float64{},
+		func() float64 { return 0.999 },
+	)
+	require.NoError(t, err)
+	assert.Equal(t, primaryB.ID, channel.ID)
+}
+
 func TestGetChannelWithFallbackHandlesNilInputs(t *testing.T) {
 	t.Parallel()
 

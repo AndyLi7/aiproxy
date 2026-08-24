@@ -201,7 +201,17 @@ func (a *Adaptor) fetchVideoTask(
 		skipTLSVerify = channel.SkipTLSVerify
 	}
 
-	client, err := relayutils.LoadHTTPClientWithTLSConfigE(0, proxyURL, skipTLSVerify)
+	policy := relayutils.OutboundPolicyAllowPrivate
+	if channel != nil {
+		policy = relayutils.OutboundPolicyFromConfigs(channel.Configs)
+	}
+
+	client, err := relayutils.LoadHTTPClientWithOutboundPolicyE(
+		0,
+		proxyURL,
+		skipTLSVerify,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -245,13 +245,15 @@ func setupOpenAIAsyncUsageRequestHeader(channel *model.Channel, req *http.Reques
 
 func calculateVideoUsage(job *relaymodel.VideoGenerationJob) (model.Usage, model.UsageContext) {
 	totalSeconds := job.NSeconds * job.NVariants
+	usage := model.Usage{
+		OutputTokens: model.ZeroNullInt64(totalSeconds),
+		TotalTokens:  model.ZeroNullInt64(totalSeconds),
+	}
+	usageContext := model.UsageContext{
+		Resolution: videoGenerationJobPriceResolution(job),
+	}
 
-	return model.Usage{
-			OutputTokens: model.ZeroNullInt64(totalSeconds),
-			TotalTokens:  model.ZeroNullInt64(totalSeconds),
-		}, model.UsageContext{
-			Resolution: videoGenerationJobPriceResolution(job),
-		}
+	return usage, usageContext
 }
 
 func calculateOfficialVideoUsage(video *relaymodel.Video) (model.Usage, model.UsageContext) {

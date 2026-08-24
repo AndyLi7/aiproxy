@@ -27,7 +27,8 @@ func (a *Adaptor) GetBalance(_ *model.Channel) (float64, error) {
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "Lingyi Wanwu API\nOpenAI-compatible endpoint\nSupports Gemini-compatible request conversion",
-		Models: ModelList,
+		Readme:       "Lingyi Wanwu API\nOpenAI-compatible endpoint\nSupports Gemini-compatible request conversion",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }

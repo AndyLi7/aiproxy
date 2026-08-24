@@ -16,6 +16,7 @@ import (
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
+	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/common/reqlimit"
 	"github.com/labring/aiproxy/core/model"
@@ -252,16 +253,46 @@ func GetGroupBalanceConsumer(
 }
 
 const (
-	GroupBalanceNotEnough = "group_balance_not_enough"
-	GroupMinimumBalance   = 0.3
+	GroupBalanceNotEnough      = "group_balance_not_enough"
+	DefaultGroupMinimumBalance = 0.01
 )
 
-func checkGroupBalance(c *gin.Context, group model.GroupCache) bool {
+func GetGroupMinimumBalance() float64 {
+	value := env.Float64("GROUP_MINIMUM_BALANCE", DefaultGroupMinimumBalance)
+	if value < 0 {
+		return 0
+	}
+
+	return value
+}
+
+func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
+	startedAt := time.Now()
+	defer func() {
+		outcome := "success"
+		errorType := ""
+		if !ok {
+			outcome = "error"
+			errorType = "wallet_check_rejected"
+		}
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  GetRequestID(c),
+			Stage:      "wallet_balance_lookup",
+			DurationMS: float64(time.Since(startedAt).Microseconds()) / 1000,
+			Outcome:    outcome,
+			Status:     c.Writer.Status(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			ErrorType:  errorType,
+		})
+	}()
 	gbc, err := GetGroupBalanceConsumer(c, group)
 	if err != nil {
 		if errors.Is(err, balance.ErrNoRealNameUsedAmountLimit) {
-			AbortLogWithMessage(
+			AbortOperationally(
 				c,
+				model.FailureStageBalance,
 				http.StatusForbidden,
 				err.Error(),
 			)
@@ -275,8 +306,9 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) bool {
 			fmt.Sprintf("Get group `%s` balance error", group.ID),
 			err.Error(),
 		)
-		AbortWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageBalance,
 			http.StatusInternalServerError,
 			fmt.Sprintf("get group `%s` balance error", group.ID),
 		)
@@ -299,9 +331,10 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) bool {
 		)
 	}
 
-	if !gbc.CheckBalance(GroupMinimumBalance) {
-		AbortLogWithMessage(
+	if !gbc.CheckBalance(GetGroupMinimumBalance()) {
+		AbortOperationally(
 			c,
+			model.FailureStageBalance,
 			http.StatusForbidden,
 			fmt.Sprintf("group `%s` balance not enough", group.ID),
 			relaymodel.WithType(GroupBalanceNotEnough),
@@ -373,6 +406,10 @@ func CheckRelayMode(requestMode, modelMode mode.Mode) bool {
 			mode.GeminiImage,
 			mode.Responses,
 		)
+	case mode.ResponsesCompact:
+		return containsMode(mode.ChatCompletions, mode.Responses, mode.ResponsesCompact)
+	case mode.AlphaSearch:
+		return containsMode(mode.ChatCompletions, mode.Responses, mode.AlphaSearch)
 	case mode.ResponsesGet, mode.ResponsesDelete, mode.ResponsesCancel, mode.ResponsesInputItems:
 		return containsMode(
 			mode.ChatCompletions,
@@ -442,7 +479,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(Mode, mode)
 
 	if config.GetDisableServe() {
-		AbortLogWithMessage(c, http.StatusServiceUnavailable, "service is under maintenance")
+		AbortOperationally(c, model.FailureStageRouting, http.StatusServiceUnavailable, "service is under maintenance")
 		return
 	}
 
@@ -454,9 +491,60 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	if !checkGroupBalance(c, group) {
 		return
 	}
+	routeStartedAt := time.Now()
+	routeStageLogged := false
+	defer func() {
+		if routeStageLogged {
+			return
+		}
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  GetRequestID(c),
+			Stage:      "model_resolution",
+			DurationMS: float64(time.Since(routeStartedAt).Microseconds()) / 1000,
+			Outcome:    "error",
+			Status:     c.Writer.Status(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			ErrorType:  "model_resolution_rejected",
+		})
+	}()
 
 	requestModel, err := getRequestModel(c, mode, group.ID, token.ID)
 	if err != nil {
+		var validationErr *publicVideoRequestValidationError
+		if errors.As(err, &validationErr) {
+			AbortPublicVideoRequestError(
+				c,
+				model.FailureStageValidation,
+				http.StatusBadRequest,
+				validationErr.code,
+				validationErr.message,
+				validationErr.param,
+				validationErr.value,
+				validationErr.allowedValues,
+				validationErr.expected,
+			)
+			return
+		}
+		// Stored-mode routes (videos, video jobs, responses, native task
+		// lookups) resolve the model by reading a store row keyed on the id in
+		// the path. A missing row means the caller asked about something that
+		// does not exist, or whose retention window lapsed — that is a 404 the
+		// caller can act on, not a 500. Everything else is a real backend
+		// failure and must stay a 500, so an outage is never quietly downgraded
+		// into "unknown id".
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			AbortOperationally(
+				c,
+				model.FailureStageModel,
+				http.StatusNotFound,
+				"The requested resource does not exist or is no longer available.",
+			)
+
+			return
+		}
+
 		AbortLogWithMessage(
 			c,
 			http.StatusInternalServerError,
@@ -467,15 +555,30 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	}
 
 	if requestModel == "" {
-		AbortLogWithMessage(c, http.StatusBadRequest, "no model provided")
+		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
+			AbortPublicVideoRequestError(
+				c,
+				model.FailureStageValidation,
+				http.StatusBadRequest,
+				"missing_parameter",
+				"model is required and must be a non-empty string",
+				"model",
+				nil,
+				nil,
+				"non-empty string",
+			)
+			return
+		}
+		AbortOperationally(c, model.FailureStageValidation, http.StatusBadRequest, "no model provided")
 		return
 	}
 
 	findModel := token.FindModel(requestModel)
 
 	if findModel == "" {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageModel,
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist or you do not have access to it.",
@@ -490,8 +593,9 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	mc, ok := GetModelCaches(c).ModelConfig.GetModelConfig(findModel)
 	if !ok {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageModel,
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist or you do not have access to it.",
@@ -508,8 +612,9 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(ModelConfig, mc)
 
 	if !CheckRelayMode(mode, mc.Type) {
-		AbortLogWithMessage(
+		AbortOperationally(
 			c,
+			model.FailureStageModel,
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist on this endpoint.",
@@ -587,10 +692,22 @@ func distribute(c *gin.Context, mode mode.Mode) {
 			model.Price{},
 			true,
 		)
-		AbortLogWithMessage(c, http.StatusTooManyRequests, errMsg)
+		AbortOperationally(c, model.FailureStageRateLimit, http.StatusTooManyRequests, errMsg)
 
 		return
 	}
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  GetRequestID(c),
+		Stage:      "model_resolution",
+		DurationMS: float64(time.Since(routeStartedAt).Microseconds()) / 1000,
+		Outcome:    "success",
+		Status:     http.StatusOK,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+		Model:      findModel,
+	})
+	routeStageLogged = true
 
 	clearRequestBodyNode(c)
 	c.Next()
@@ -686,6 +803,7 @@ func NewMetaByContext(c *gin.Context,
 		meta.WithPromptCacheKey(promptCacheKey),
 		meta.WithUser(user),
 		meta.WithRequestServiceTier(requestServiceTier),
+		meta.WithOperationalFields(OperationalFieldsFromContext(c)),
 	)
 
 	return meta.NewMeta(
@@ -716,6 +834,17 @@ func getRequestBodyNode(c *gin.Context) (*ast.Node, error) {
 
 	return &node, nil
 }
+
+type publicVideoRequestValidationError struct {
+	code          string
+	message       string
+	param         string
+	value         any
+	allowedValues []string
+	expected      string
+}
+
+func (e *publicVideoRequestValidationError) Error() string { return e.message }
 
 func clearRequestBodyNode(c *gin.Context) {
 	if c == nil {
@@ -817,7 +946,7 @@ func getRequestModel(c *gin.Context, m mode.Mode, group string, tokenID int) (st
 		return getStoredVideoRequestModel(c, group, tokenID)
 	case isStoredResponseMode(m):
 		return getStoredResponseRequestModel(c, group, tokenID)
-	case m == mode.Responses:
+	case m == mode.Responses || m == mode.ResponsesCompact:
 		node, err := getRequestBodyNode(c)
 		if err != nil {
 			return "", fmt.Errorf("get request model failed: %w", err)
@@ -1042,12 +1171,44 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 
 	node, err := getRequestBodyNode(c)
 	if err != nil {
-		return "", fmt.Errorf("get request model failed: %w", err)
+		return "", &publicVideoRequestValidationError{
+			code:     "invalid_parameter",
+			message:  "request body must contain valid JSON",
+			param:    "body",
+			expected: "valid JSON object",
+		}
+	}
+	if node.TypeSafe() != ast.V_OBJECT {
+		return "", &publicVideoRequestValidationError{
+			code:     "invalid_parameter",
+			message:  "request body must be a JSON object",
+			param:    "body",
+			value:    requestJSONTypeName(node.TypeSafe()),
+			expected: "JSON object",
+		}
 	}
 
-	requestModel, err := getStringFieldFromNode(node, "model", "get request model failed")
-	if err != nil {
-		return requestModel, err
+	modelNode := node.Get("model")
+	requestModel := ""
+	if modelNode != nil && modelNode.Exists() && modelNode.TypeSafe() != ast.V_NULL {
+		if modelNode.TypeSafe() != ast.V_STRING {
+			return "", &publicVideoRequestValidationError{
+				code:     "invalid_parameter",
+				message:  "model must be a non-empty string",
+				param:    "model",
+				value:    requestJSONTypeName(modelNode.TypeSafe()),
+				expected: "non-empty string",
+			}
+		}
+		requestModel, err = modelNode.String()
+		if err != nil {
+			return "", &publicVideoRequestValidationError{
+				code:     "invalid_parameter",
+				message:  "model must be a non-empty string",
+				param:    "model",
+				expected: "non-empty string",
+			}
+		}
 	}
 
 	referenceModel, err := getVideoCreateRequestModelFromReference(
@@ -1063,6 +1224,25 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 	}
 
 	return referenceModel, nil
+}
+
+func requestJSONTypeName(valueType int) string {
+	switch valueType {
+	case ast.V_OBJECT:
+		return "object"
+	case ast.V_ARRAY:
+		return "array"
+	case ast.V_STRING:
+		return "string"
+	case ast.V_NUMBER:
+		return "number"
+	case ast.V_TRUE, ast.V_FALSE:
+		return "boolean"
+	case ast.V_NULL:
+		return "null"
+	default:
+		return "unknown"
+	}
 }
 
 func getVideoCreateRequestModelFromReference(
@@ -1187,7 +1367,7 @@ func GetPreviousResponseIDFromJSON(body []byte) (string, error) {
 
 func getPromptCacheKey(c *gin.Context, m mode.Mode) (string, error) {
 	switch m {
-	case mode.Responses, mode.ChatCompletions:
+	case mode.Responses, mode.ResponsesCompact, mode.ChatCompletions:
 	default:
 		return "", nil
 	}
@@ -1211,7 +1391,12 @@ func GetPromptCacheKeyFromJSON(body []byte) (string, error) {
 
 func getRequestServiceTier(c *gin.Context, m mode.Mode) (string, error) {
 	switch m {
-	case mode.ChatCompletions, mode.Completions, mode.Responses, mode.Anthropic, mode.Gemini:
+	case mode.ChatCompletions,
+		mode.Completions,
+		mode.Responses,
+		mode.ResponsesCompact,
+		mode.Anthropic,
+		mode.Gemini:
 	default:
 		return "", nil
 	}
@@ -1228,7 +1413,11 @@ func getRequestServiceTierFromNode(node *ast.Node, m mode.Mode) (string, error) 
 	switch m {
 	case mode.Gemini:
 		return getStringFieldFromNode(node, "serviceTier", "get request serviceTier failed")
-	case mode.ChatCompletions, mode.Completions, mode.Responses, mode.Anthropic:
+	case mode.ChatCompletions,
+		mode.Completions,
+		mode.Responses,
+		mode.ResponsesCompact,
+		mode.Anthropic:
 		return getStringFieldFromNode(node, "service_tier", "get request service_tier failed")
 	default:
 		return "", nil

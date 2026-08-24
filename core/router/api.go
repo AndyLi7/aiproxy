@@ -187,6 +187,11 @@ func SetAPIRouter(router *gin.Engine) {
 			logRoute.GET("/:group/detail/:log_id", controller.GetGroupLogDetail)
 		}
 
+		videoTasksRoute := apiRouter.Group("/video_tasks")
+		{
+			videoTasksRoute.GET("/:group", controller.GetGroupVideoTasks)
+		}
+
 		modelConfigsRoute := apiRouter.Group("/model_configs")
 		{
 			modelConfigsRoute.GET("/", controller.GetModelConfigs)

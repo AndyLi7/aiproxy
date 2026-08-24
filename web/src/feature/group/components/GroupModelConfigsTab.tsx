@@ -48,6 +48,7 @@ import { PriceFormFields } from '@/components/price/PriceFormFields'
 import { PriceDisplay } from '@/components/price/PriceDisplay'
 import { Combobox } from '@/components/ui/combobox'
 import { toast } from 'sonner'
+import { priceSchema } from '@/validation/model'
 
 interface GroupModelConfigsTabProps {
     groupId: string
@@ -312,6 +313,14 @@ export function GroupModelConfigsTab({ groupId }: GroupModelConfigsTabProps) {
     const handleSave = () => {
         const model = isCreating ? formModel.trim() : editingConfig?.model
         if (!model) return
+
+        if (formOverridePrice) {
+            const result = priceSchema.safeParse(formPrice)
+            if (!result.success) {
+                toast.error(result.error.issues[0]?.message || t('error.validationDescription'))
+                return
+            }
+        }
 
         const maxImageGenerationCountConfig = (() => {
             if (supportImageGenerationCountLimit) {

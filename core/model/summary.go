@@ -105,31 +105,39 @@ var allSummaryFields = func() []string {
 	for _, prefix := range serviceTierPrefixes {
 		countFields = append(
 			countFields,
-			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...,
+		)
 		usageFields = append(
 			usageFields,
-			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...,
+		)
 		amountFields = append(
 			amountFields,
-			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...,
+		)
 		timeFields = append(
 			timeFields,
-			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...,
+		)
 	}
 
 	for _, prefix := range extraSummaryPrefixes {
 		countFields = append(
 			countFields,
-			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...,
+		)
 		usageFields = append(
 			usageFields,
-			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...,
+		)
 		amountFields = append(
 			amountFields,
-			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...,
+		)
 		timeFields = append(
 			timeFields,
-			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...,
+		)
 	}
 
 	return concatSummaryFields(
@@ -150,31 +158,39 @@ var summaryFieldGroups = func() map[string][]string {
 	for _, prefix := range serviceTierPrefixes {
 		countFields = append(
 			countFields,
-			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...,
+		)
 		usageFields = append(
 			usageFields,
-			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...,
+		)
 		amountFields = append(
 			amountFields,
-			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...,
+		)
 		timeFields = append(
 			timeFields,
-			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...,
+		)
 	}
 
 	for _, prefix := range extraSummaryPrefixes {
 		countFields = append(
 			countFields,
-			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseCountSummaryFields)...,
+		)
 		usageFields = append(
 			usageFields,
-			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseUsageSummaryFields)...,
+		)
 		amountFields = append(
 			amountFields,
-			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseAmountSummaryFields)...,
+		)
 		timeFields = append(
 			timeFields,
-			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...)
+			buildPrefixedSummaryFields(prefix, baseTimeSummaryFields)...,
+		)
 	}
 
 	return map[string][]string{

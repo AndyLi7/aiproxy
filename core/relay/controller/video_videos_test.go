@@ -23,6 +23,7 @@ func TestGetVideosRequestUsageMultipart(t *testing.T) {
 	writer := multipart.NewWriter(&body)
 	require.NoError(t, writer.WriteField("model", "sora-2"))
 	require.NoError(t, writer.WriteField("prompt", "Animate the reference"))
+	require.NoError(t, writer.WriteField("size", "1280x720"))
 	require.NoError(t, writer.WriteField("seconds", "6"))
 	require.NoError(t, writer.Close())
 
@@ -51,6 +52,7 @@ func TestValidateVideosRequestRejectsTooLongSeconds(t *testing.T) {
 	body := `{
 		"model":"video-model",
 		"prompt":"A city street",
+		"size":"1280x720",
 		"seconds":6
 	}`
 	req := httptest.NewRequestWithContext(
@@ -137,7 +139,7 @@ func TestValidateVideosRequestRejectsInvalidSizeFormat(t *testing.T) {
 		AllowedResolutions: []string{"720p"},
 	})
 	require.Error(t, err)
-	require.Equal(t, "invalid video size `720p`, supported resolutions: 1280x720", err.Error())
+	require.Equal(t, "invalid video size `720p`, allowed values: 1280x720", err.Error())
 }
 
 func TestGetVideosRequestUsageRejectsNonOpenAIDimensionDelimiter(t *testing.T) {
@@ -166,7 +168,7 @@ func TestGetVideosRequestUsageRejectsNonOpenAIDimensionDelimiter(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(
 		t,
-		"invalid video size `1280*720`, supported resolutions: <width>x<height>",
+		"invalid video size `1280*720`: expected <width>x<height>",
 		err.Error(),
 	)
 }
@@ -199,6 +201,490 @@ func TestValidateVideosRequestAllowsAdvertised4KSize(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateVideosRequestRejectsFuzzySizeWhenCapabilitiesArePublished(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"size":"999x999",
+			"seconds":5
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		AllowedResolutions: []string{"480p", "720p"},
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"480p", "720p"},
+			"aspectRatios": []any{"16:9", "9:16", "1:1"},
+			"durations":    []any{float64(5), float64(10)},
+		},
+	})
+	require.EqualError(
+		t,
+		err,
+		"unsupported video size `999x999`, allowed values: 854x480, 480x854, 480x480, 1280x720, 720x1280, 720x720",
+	)
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "unsupported_by_model", paramErr.Code)
+	require.Equal(t, "size", paramErr.Param)
+	require.Equal(t, "999x999", paramErr.Value)
+	require.Equal(t, []string{"854x480", "480x854", "480x480", "1280x720", "720x1280", "720x720"}, paramErr.AllowedValues)
+}
+
+func TestValidateVideosRequestRejectsMalformedSizeWithActionableDetails(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"size":"1280*720",
+			"seconds":5
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"720p"},
+			"aspectRatios": []any{"16:9", "9:16"},
+		},
+	})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "invalid_parameter", paramErr.Code)
+	require.Equal(t, "size", paramErr.Param)
+	require.Equal(t, "1280*720", paramErr.Value)
+	require.Equal(t, []string{"1280x720", "720x1280"}, paramErr.AllowedValues)
+	require.Equal(t, "<width>x<height> string", paramErr.Expected)
+}
+
+func TestValidateVideosRequestAllowsExactCapabilitySize(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"size":"720x720",
+			"seconds":10
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"720p"},
+			"aspectRatios": []any{"1:1"},
+			"durations":    []any{float64(5), float64(10)},
+		},
+	})
+	require.NoError(t, err)
+}
+
+func TestValidateVideosRequestAllowsSemanticDimensions(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"resolution":"720p",
+			"aspect_ratio":"16:9",
+			"seconds":5
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"480p", "720p"},
+			"aspectRatios": []any{"16:9", "9:16"},
+			"durations":    []any{float64(5), float64(10)},
+		},
+	})
+	require.NoError(t, err)
+}
+
+func TestGetVideosRequestUsagePreservesSemanticBillingContext(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"resolution":"720p",
+			"aspect_ratio":"16:9",
+			"seconds":5,
+			"generate_audio":true
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	usage, err := GetVideosRequestUsage(ctx, model.ModelConfig{})
+	require.NoError(t, err)
+	require.Equal(t, "720p", usage.Context.NativeResolution)
+	require.Empty(t, usage.Context.Resolution)
+	require.NotNil(t, usage.Context.OutputAudio)
+	require.True(t, *usage.Context.OutputAudio)
+}
+
+func TestValidateVideosRequestRejectsUnsupportedSemanticDimensions(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name        string
+		resolution  string
+		aspectRatio string
+		wantParam   string
+		wantValue   string
+		wantAllowed []string
+	}{
+		{
+			name:        "resolution",
+			resolution:  "1080p",
+			aspectRatio: "16:9",
+			wantParam:   "resolution",
+			wantValue:   "1080p",
+			wantAllowed: []string{"480p", "720p"},
+		},
+		{
+			name:        "aspect ratio",
+			resolution:  "720p",
+			aspectRatio: "1:1",
+			wantParam:   "aspect_ratio",
+			wantValue:   "1:1",
+			wantAllowed: []string{"16:9", "9:16"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			body := `{"model":"video-model","prompt":"A city street","resolution":"` +
+				test.resolution + `","aspect_ratio":"` + test.aspectRatio + `","seconds":5}`
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			err := ValidateVideosRequest(ctx, model.ModelConfig{
+				Config: map[model.ModelConfigKey]any{
+					"resolutions":  []any{"480p", "720p"},
+					"aspectRatios": []any{"16:9", "9:16"},
+				},
+			})
+			var paramErr *RequestParamError
+			require.ErrorAs(t, err, &paramErr)
+			require.Equal(t, "unsupported_by_model", paramErr.Code)
+			require.Equal(t, test.wantParam, paramErr.Param)
+			require.Equal(t, test.wantValue, paramErr.Value)
+			require.Equal(t, test.wantAllowed, paramErr.AllowedValues)
+		})
+	}
+}
+
+func TestValidateVideosRequestRejectsAmbiguousDimensionSelection(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name      string
+		body      string
+		wantCode  string
+		wantParam string
+	}{
+		{
+			name: "size with semantic dimensions",
+			body: `{"model":"video-model","prompt":"A city street","size":"1280x720",` +
+				`"resolution":"720p","aspect_ratio":"16:9","seconds":5}`,
+			wantCode:  "invalid_parameter",
+			wantParam: "size",
+		},
+		{
+			name:      "resolution without aspect ratio",
+			body:      `{"model":"video-model","prompt":"A city street","resolution":"720p","seconds":5}`,
+			wantCode:  "missing_parameter",
+			wantParam: "aspect_ratio",
+		},
+		{
+			name:      "aspect ratio without resolution",
+			body:      `{"model":"video-model","prompt":"A city street","aspect_ratio":"16:9","seconds":5}`,
+			wantCode:  "missing_parameter",
+			wantParam: "resolution",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(test.body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			err := ValidateVideosRequest(ctx, model.ModelConfig{})
+			var paramErr *RequestParamError
+			require.ErrorAs(t, err, &paramErr)
+			require.Equal(t, test.wantCode, paramErr.Code)
+			require.Equal(t, test.wantParam, paramErr.Param)
+		})
+	}
+}
+
+func TestValidateVideosRequestRejectsUnsupportedDiscreteDuration(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"size":"1280x720",
+			"seconds":6
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"720p"},
+			"aspectRatios": []any{"16:9"},
+			"durations":    []any{float64(5), float64(10), float64(12)},
+		},
+	})
+	require.EqualError(
+		t,
+		err,
+		"unsupported video duration `6`, allowed values: 5, 10, 12",
+	)
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "unsupported_by_model", paramErr.Code)
+	require.Equal(t, "seconds", paramErr.Param)
+	require.Equal(t, "6", paramErr.Value)
+	require.Equal(t, []string{"5", "10", "12"}, paramErr.AllowedValues)
+}
+
+func TestValidateVideosRequestRejectsExplicitNullSeconds(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{"model":"video-model","prompt":"A city street","seconds":null}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "invalid_parameter", paramErr.Code)
+	require.Equal(t, "seconds", paramErr.Param)
+	require.Equal(t, "positive integer", paramErr.Expected)
+}
+
+func TestValidateVideosRequestRejectsFractionalSeconds(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"size":"1280x720",
+			"seconds":2.5
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "invalid_parameter", paramErr.Code)
+	require.Equal(t, "seconds", paramErr.Param)
+	require.Equal(t, "positive integer", paramErr.Expected)
+}
+
+func TestValidateVideosRequestRequiresSize(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"seconds":5
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "missing_parameter", paramErr.Code)
+	require.Equal(t, "size", paramErr.Param)
+	require.Equal(t, "<width>x<height> string", paramErr.Expected)
+}
+
+func TestValidateVideosRequestMultipartRequiresSize(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "video-model"))
+	require.NoError(t, writer.WriteField("prompt", "A city street"))
+	require.NoError(t, writer.WriteField("seconds", "5"))
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/videos", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "missing_parameter", paramErr.Code)
+	require.Equal(t, "size", paramErr.Param)
+	require.Equal(t, "<width>x<height> string", paramErr.Expected)
+}
+
+func TestValidateVideosRequestRejectsNonObjectBody(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(`[]`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "body", paramErr.Param)
+	require.Equal(t, "array", paramErr.Value)
+	require.Equal(t, "JSON object", paramErr.Expected)
+}
+
+func TestValidateVideosRequestRequiresPrompt(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"video-model"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "missing_parameter", paramErr.Code)
+	require.Equal(t, "prompt", paramErr.Param)
+}
+
+func TestValidateVideosRequestRejectsUnsupportedAudio(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{
+			"model":"video-model",
+			"prompt":"A city street",
+			"size":"1280x720",
+			"seconds":5,
+			"generate_audio":true
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"720p"},
+			"aspectRatios": []any{"16:9"},
+			"durations":    []any{float64(5)},
+			"audio": map[string]any{
+				"mode":           "none",
+				"defaultEnabled": false,
+			},
+		},
+	})
+	require.EqualError(
+		t,
+		err,
+		"generate_audio is not supported by this model; allowed value: false",
+	)
+}
+
 func TestGetVideosRequestUsageIgnoresJobOnlyFields(t *testing.T) {
 	t.Parallel()
 
@@ -208,6 +694,7 @@ func TestGetVideosRequestUsageIgnoresJobOnlyFields(t *testing.T) {
 		"model":"video-model",
 		"prompt":"A city street",
 		"seconds":4,
+		"size":"1280x720",
 		"n_seconds":60,
 		"n_variants":10,
 		"width":1920,
@@ -230,7 +717,7 @@ func TestGetVideosRequestUsageIgnoresJobOnlyFields(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Zero(t, usage.Usage.OutputTokens)
-	require.Empty(t, usage.Context.Resolution)
+	require.Equal(t, "1280x720", usage.Context.Resolution)
 }
 
 func TestGetVideosRequestUsageUsesOfficialVideoFields(t *testing.T) {

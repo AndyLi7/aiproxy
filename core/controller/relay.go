@@ -1,14 +1,19 @@
 package controller
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/relay/mode"
-	// relay model used by swagger
-	_ "github.com/labring/aiproxy/core/relay/model"
+	relaymodel "github.com/labring/aiproxy/core/relay/model"
 )
+
+func PublicVideoMethodNotAllowed(c *gin.Context) {
+	c.Header("Allow", http.MethodPost)
+	c.JSON(http.StatusMethodNotAllowed, relaymodel.PublicVideoError(http.StatusMethodNotAllowed))
+}
 
 // Completions godoc
 //
@@ -635,6 +640,20 @@ func CreateResponse() []gin.HandlerFunc {
 	return []gin.HandlerFunc{
 		middleware.NewDistribute(mode.Responses),
 		NewRelay(mode.Responses),
+	}
+}
+
+func CompactResponse() []gin.HandlerFunc {
+	return []gin.HandlerFunc{
+		middleware.NewDistribute(mode.ResponsesCompact),
+		NewRelay(mode.ResponsesCompact),
+	}
+}
+
+func AlphaSearch() []gin.HandlerFunc {
+	return []gin.HandlerFunc{
+		middleware.NewDistribute(mode.AlphaSearch),
+		NewRelay(mode.AlphaSearch),
 	}
 }
 

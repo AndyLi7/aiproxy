@@ -283,7 +283,7 @@ func saveCacheFollowMappings(
 
 func supportsPromptCacheStore(m mode.Mode) bool {
 	switch m {
-	case mode.Responses, mode.ChatCompletions:
+	case mode.Responses, mode.ResponsesCompact, mode.ChatCompletions:
 		return true
 	default:
 		return false
@@ -292,7 +292,11 @@ func supportsPromptCacheStore(m mode.Mode) bool {
 
 func supportsCacheFollowStore(m mode.Mode) bool {
 	switch m {
-	case mode.Responses, mode.ChatCompletions, mode.Gemini, mode.Anthropic:
+	case mode.Responses,
+		mode.ResponsesCompact,
+		mode.ChatCompletions,
+		mode.Gemini,
+		mode.Anthropic:
 		return true
 	default:
 		return false

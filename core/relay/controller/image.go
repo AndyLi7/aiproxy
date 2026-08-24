@@ -16,8 +16,13 @@ import (
 const imageRequestParamN = "n"
 
 type RequestParamError struct {
-	StatusCode int
-	Message    string
+	StatusCode    int
+	Code          string
+	Message       string
+	Param         string
+	Value         any
+	AllowedValues []string
+	Expected      string
 }
 
 func (e *RequestParamError) Error() string {
@@ -27,7 +32,35 @@ func (e *RequestParamError) Error() string {
 func NewBadRequestParamError(message string) error {
 	return &RequestParamError{
 		StatusCode: http.StatusBadRequest,
+		Code:       "invalid_parameter",
 		Message:    message,
+	}
+}
+
+func NewCodedBadRequestParamError(code, message string) error {
+	return &RequestParamError{
+		StatusCode: http.StatusBadRequest,
+		Code:       code,
+		Message:    message,
+	}
+}
+
+func NewDetailedBadRequestParamError(
+	code string,
+	message string,
+	param string,
+	value any,
+	allowedValues []string,
+	expected string,
+) error {
+	return &RequestParamError{
+		StatusCode:    http.StatusBadRequest,
+		Code:          code,
+		Message:       message,
+		Param:         param,
+		Value:         value,
+		AllowedValues: allowedValues,
+		Expected:      expected,
 	}
 }
 

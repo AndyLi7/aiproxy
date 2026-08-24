@@ -247,8 +247,9 @@ func (a *Adaptor) SupportMode(mt *meta.Meta) bool {
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "Doubao / Volcano Engine endpoint\nSupports bot-style models, native Responses API, Gemini-compatible request conversion, and network search metering fields",
-		Models: ModelList,
+		Readme:       "Doubao / Volcano Engine endpoint\nSupports bot-style models, native Responses API, Gemini-compatible request conversion, and network search metering fields",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }
 
@@ -376,6 +377,12 @@ func (a *Adaptor) DoResponse(
 			return openai.GeminiStreamHandler(meta, c, resp)
 		}
 		return openai.GeminiHandler(meta, c, resp)
+	case mode.Responses,
+		mode.ResponsesGet,
+		mode.ResponsesDelete,
+		mode.ResponsesCancel,
+		mode.ResponsesInputItems:
+		return a.Adaptor.DoResponse(meta, store, c, resp)
 	default:
 		return openai.DoResponse(meta, store, c, resp)
 	}

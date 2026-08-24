@@ -395,7 +395,20 @@ func (a *Adaptor) DoResponse(
 		mode.ResponsesDelete,
 		mode.ResponsesCancel,
 		mode.ResponsesInputItems:
-		return openai.DoResponse(meta, store, c, resp)
+		if meta.Mode != mode.Responses || !utils.IsStreamResponse(resp) {
+			return openai.DoResponse(meta, store, c, resp)
+		}
+
+		options, err := openai.LoadDoResponseOptions(meta)
+		if err != nil {
+			return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+				err,
+				"load_channel_config_failed",
+				http.StatusInternalServerError,
+			)
+		}
+
+		return openai.DoResponse(meta, store, c, resp, options)
 	default:
 		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIErrorWithMessage(
 			fmt.Sprintf("unsupported mode: %s", meta.Mode),
@@ -407,7 +420,8 @@ func (a *Adaptor) DoResponse(
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "OpenAI compatibility\nNative Responses API support\nNetwork search metering support\nImage generation/edit support: https://help.aliyun.com/zh/model-studio/qwen-image-api and https://help.aliyun.com/zh/model-studio/qwen-image-edit-api\nVideo generation support: DashScope /api/v1/services/aigc/video-generation/video-synthesis\nRerank support: https://help.aliyun.com/zh/model-studio/text-rerank-api\nSTT support: https://help.aliyun.com/zh/model-studio/sambert-speech-synthesis/\nAnthropic support: /api/v2/apps/claude-code-proxy\nGemini support",
-		Models: ModelList,
+		Readme:       "OpenAI compatibility\nNative Responses API support\nNetwork search metering support\nImage generation/edit support: https://help.aliyun.com/zh/model-studio/qwen-image-api and https://help.aliyun.com/zh/model-studio/qwen-image-edit-api\nVideo generation support: DashScope /api/v1/services/aigc/video-generation/video-synthesis\nRerank support: https://help.aliyun.com/zh/model-studio/text-rerank-api\nSTT support: https://help.aliyun.com/zh/model-studio/sambert-speech-synthesis/\nAnthropic support: /api/v2/apps/claude-code-proxy\nGemini support",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }

@@ -23,7 +23,8 @@ func (a *Adaptor) DefaultBaseURL() string {
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "Mistral API\nOpenAI-compatible endpoint\nSupports Gemini-compatible request conversion",
-		Models: ModelList,
+		Readme:       "Mistral API\nOpenAI-compatible endpoint\nSupports Gemini-compatible request conversion",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }

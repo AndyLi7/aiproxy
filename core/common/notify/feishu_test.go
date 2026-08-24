@@ -18,7 +18,8 @@ func TestPostToFeiShuv2(t *testing.T) {
 		notify.FeishuColorRed,
 		"Error",
 		"Error Message",
-		os.Getenv("FEISHU_WEBHOOK"))
+		os.Getenv("FEISHU_WEBHOOK"),
+	)
 	if err != nil {
 		t.Error(err)
 	}

@@ -102,6 +102,14 @@ func TestGetRequestURL(t *testing.T) {
 	}
 }
 
+func TestMetadataIncludesOpenAIConfigSchema(t *testing.T) {
+	metadata := (&azure.Adaptor{}).Metadata()
+	properties, ok := metadata.ConfigSchema["properties"].(map[string]any)
+	require.True(t, ok)
+	_, ok = properties["responses_first_event_timeout"]
+	assert.True(t, ok)
+}
+
 func TestGetRequestURL_ResponsesOnlyModels(t *testing.T) {
 	adaptor := &azure.Adaptor{}
 

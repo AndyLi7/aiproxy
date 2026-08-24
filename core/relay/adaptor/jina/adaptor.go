@@ -55,7 +55,8 @@ func (a *Adaptor) DoResponse(
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "https://jina.ai\nSupports embeddings and rerank\nAlso supports Gemini-compatible request conversion through the OpenAI-compatible layer",
-		Models: ModelList,
+		Readme:       "https://jina.ai\nSupports embeddings and rerank\nAlso supports Gemini-compatible request conversion through the OpenAI-compatible layer",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }

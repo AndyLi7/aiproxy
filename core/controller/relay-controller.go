@@ -20,7 +20,6 @@ import (
 	"github.com/labring/aiproxy/core/common/conv"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
-	"github.com/labring/aiproxy/core/monitor"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/adaptors"
 	"github.com/labring/aiproxy/core/relay/controller"
@@ -214,7 +213,7 @@ func relayController(m mode.Mode) RelayController {
 		c.ValidateRequest = controller.ValidateDoubaoVideoRequest
 		c.GetRequestPrice = controller.GetDoubaoVideoRequestPrice
 		c.GetRequestUsage = controller.GetDoubaoVideoRequestUsage
-	case mode.Responses:
+	case mode.Responses, mode.ResponsesCompact:
 		c.GetRequestUsage = controller.GetResponsesRequestUsage
 	}
 
@@ -257,13 +256,29 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.ValidateRequest != nil {
 		if err := relayController.ValidateRequest(c, mc); err != nil {
 			statusCode := http.StatusInternalServerError
-
-			var requestParamErr *controller.RequestParamError
-			if errors.As(err, &requestParamErr) {
+			errorCode := ""
+			if requestParamErr, ok := errors.AsType[*controller.RequestParamError](err); ok {
 				statusCode = requestParamErr.StatusCode
+				errorCode = requestParamErr.Code
+				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
+					middleware.AbortPublicVideoRequestError(
+						c,
+						model.FailureStageValidation,
+						statusCode,
+						errorCode,
+						requestParamErr.Message,
+						requestParamErr.Param,
+						requestParamErr.Value,
+						requestParamErr.AllowedValues,
+						requestParamErr.Expected,
+					)
+					return
+				}
 			}
 
-			middleware.AbortLogWithMessageWithMode(mode, c,
+			middleware.AbortOperationallyWithCodeWithMode(mode, c,
+				model.FailureStageValidation,
+				errorCode,
 				statusCode,
 				err.Error(),
 			)
@@ -273,21 +288,48 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	}
 
 	// Get initial channel
+	channelStartedAt := time.Now()
 	initialChannel, err := getInitialChannel(c, requestModel, mode)
 	if err != nil || initialChannel == nil || initialChannel.channel == nil {
-		middleware.AbortLogWithMessageWithMode(mode, c,
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  middleware.GetRequestID(c),
+			Stage:      "channel_selection",
+			DurationMS: float64(time.Since(channelStartedAt).Microseconds()) / 1000,
+			Outcome:    "error",
+			Status:     http.StatusServiceUnavailable,
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			Model:      requestModel,
+			ErrorType:  "channel_unavailable",
+		})
+		middleware.AbortOperationallyWithMode(mode, c,
+			model.FailureStageRouting,
 			http.StatusServiceUnavailable,
 			"the upstream load is saturated, please try again later",
 		)
 
 		return
 	}
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  middleware.GetRequestID(c),
+		Stage:      "channel_selection",
+		DurationMS: float64(time.Since(channelStartedAt).Microseconds()) / 1000,
+		Outcome:    "success",
+		Status:     http.StatusOK,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+		Model:      requestModel,
+		ChannelID:  initialChannel.channel.ID,
+	})
 
 	price := model.Price{}
 	if relayController.GetRequestPrice != nil {
 		price, err = relayController.GetRequestPrice(c, mc)
 		if err != nil {
-			middleware.AbortLogWithMessageWithMode(mode, c,
+			middleware.AbortOperationallyWithMode(mode, c,
+				model.FailureStageValidation,
 				http.StatusInternalServerError,
 				"get request price failed: "+err.Error(),
 			)
@@ -301,7 +343,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.GetRequestUsage != nil {
 		requestUsage, err := relayController.GetRequestUsage(c, mc)
 		if err != nil {
-			middleware.AbortLogWithMessageWithMode(mode, c,
+			middleware.AbortOperationallyWithMode(mode, c,
+				model.FailureStageValidation,
 				http.StatusInternalServerError,
 				"get request usage failed: "+err.Error(),
 			)
@@ -325,12 +368,14 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 			price,
 			model.PriceSelectionOptions{
 				DisableResolutionFuzzyMatch: mc.DisableResolutionFuzzyMatch,
+				RequestAt:                   meta.RequestAt,
 			},
 		),
-		middleware.GroupMinimumBalance,
+		middleware.GetGroupMinimumBalance(),
 	)
 	if !gbc.CheckBalance(requiredBalance) {
-		middleware.AbortLogWithMessageWithMode(mode, c,
+		middleware.AbortOperationallyWithMode(mode, c,
+			model.FailureStageBalance,
 			http.StatusForbidden,
 			fmt.Sprintf("group (%s) balance not enough", gbc.Group),
 			relaymodel.WithType(middleware.GroupBalanceNotEnough),
@@ -339,8 +384,35 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		return
 	}
 
-	// First attempt
+	// First attempt. For async video submission this measures the upstream's
+	// initial acknowledgement, not the later video-generation duration.
+	upstreamStartedAt := time.Now()
 	result, retry := RelayHelper(c, meta, relayController.Handler)
+	upstreamOutcome := "success"
+	upstreamStatus := http.StatusOK
+	upstreamErrorType := ""
+	if c.Request.Context().Err() != nil {
+		upstreamOutcome = "cancelled"
+		upstreamStatus = 499
+		upstreamErrorType = "context_cancelled"
+	} else if result.Error != nil {
+		upstreamOutcome = "error"
+		upstreamStatus = result.Error.StatusCode()
+		upstreamErrorType = "upstream_error"
+	}
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  middleware.GetRequestID(c),
+		Stage:      "upstream_initial_response",
+		DurationMS: float64(time.Since(upstreamStartedAt).Microseconds()) / 1000,
+		Outcome:    upstreamOutcome,
+		Status:     upstreamStatus,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+		Model:      requestModel,
+		ChannelID:  initialChannel.channel.ID,
+		ErrorType:  upstreamErrorType,
+	})
 
 	retryTimes := int(config.GetRetryTimes())
 	if mc.RetryTimes > 0 {
@@ -385,6 +457,18 @@ func recordResult(
 	downstreamResult bool,
 	metadata map[string]string,
 ) {
+	fields := middleware.OperationalFieldsFromContext(c)
+	if result.Error != nil {
+		fields = model.BuildOperationalFields(
+			fields.RequestSource,
+			model.FailureStageUpstream,
+			result.Error.Error(),
+			"upstream_error",
+		)
+	}
+	meta.OperationalFields = fields
+	middleware.MarkOperationalLogRecorded(c)
+
 	code := http.StatusOK
 
 	content := ""
@@ -421,6 +505,7 @@ func recordResult(
 		price,
 		model.PriceSelectionOptions{
 			DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+			RequestAt:                   meta.RequestAt,
 		},
 	)
 	if amount > 0 {
@@ -466,6 +551,8 @@ func saveAsyncUsageInfo(
 		return
 	}
 
+	pricingCurrency, pricingVersion, _ := meta.ModelConfig.RetailPricingMetadata()
+
 	if err := model.CreateAsyncUsageInfo(&model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
 		RequestAt:                   meta.RequestAt,
@@ -476,6 +563,8 @@ func saveAsyncUsageInfo(
 		GroupID:                     meta.Group.ID,
 		TokenID:                     meta.Token.ID,
 		TokenName:                   meta.Token.Name,
+		PricingCurrency:             pricingCurrency,
+		PricingVersion:              pricingVersion,
 		Price:                       price,
 		UpstreamID:                  result.UpstreamID,
 		UsageContext:                result.UsageContext.WithFallback(meta.RequestUsageContext),
@@ -546,12 +635,11 @@ func buildBodyDetailOption(meta *meta.Meta) controller.BodyDetailOption {
 }
 
 type retryState struct {
-	retryTimes                           int
-	lastMinErrorRateHasPermissionChannel *model.Channel
-	preferChannelIDs                     []int
-	ignoreChannelIDs                     map[int64]struct{}
-	exhausted                            bool
-	failedChannelIDs                     map[int64]struct{} // Track all failed channels in this request
+	retryTimes        int
+	designatedChannel *model.Channel
+	preferChannelIDs  []int
+	ignoreChannelIDs  map[int64]struct{}
+	failedChannelIDs  map[int64]struct{} // Track failed channels in the current retry round
 
 	meta                *meta.Meta
 	price               model.Price
@@ -622,7 +710,7 @@ func initRetryState(
 	}
 
 	if channel.designatedChannel {
-		state.exhausted = true
+		state.designatedChannel = channel.channel
 	}
 
 	if !monitorplugin.ChannelHasPermission(result.Error) {
@@ -631,8 +719,6 @@ func initRetryState(
 		}
 
 		state.ignoreChannelIDs[int64(channel.channel.ID)] = struct{}{}
-	} else {
-		state.lastMinErrorRateHasPermissionChannel = channel.channel
 	}
 
 	return state
@@ -693,7 +779,7 @@ func (s *retryState) remainingRelayDelay(
 func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayController RelayHandler) {
 	log := common.GetLogger(c)
 
-	// do not use for i := range state.retryTimes, because the retryTimes is constant
+	// retryTimes can grow when permission failures add more eligible-channel attempts
 	i := 0
 
 	for {
@@ -819,49 +905,17 @@ func handleRetryResult(
 
 	hasPermission := monitorplugin.ChannelHasPermission(state.result.Error)
 
-	if state.exhausted {
-		if !hasPermission {
-			return true
+	if state.designatedChannel != nil {
+		return !hasPermission
+	}
+
+	if !hasPermission {
+		if state.ignoreChannelIDs == nil {
+			state.ignoreChannelIDs = make(map[int64]struct{})
 		}
-	} else {
-		if !hasPermission {
-			if state.ignoreChannelIDs == nil {
-				state.ignoreChannelIDs = make(map[int64]struct{})
-			}
 
-			state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
-			state.retryTimes++
-		} else {
-			if state.lastMinErrorRateHasPermissionChannel == nil {
-				state.lastMinErrorRateHasPermissionChannel = newChannel
-				return false
-			}
-
-			currentErrorRate, err := monitor.GetChannelModelErrorRate(
-				ctx.Request.Context(),
-				state.meta.OriginModel,
-				int64(state.lastMinErrorRateHasPermissionChannel.ID),
-			)
-			if err != nil {
-				return false
-			}
-
-			newErrorRate, err := monitor.GetChannelModelErrorRate(
-				ctx.Request.Context(),
-				state.meta.OriginModel,
-				int64(newChannel.ID),
-			)
-			if err != nil {
-				return false
-			}
-
-			state.lastMinErrorRateHasPermissionChannel = pickMinErrorRateHasPermissionChannel(
-				state.lastMinErrorRateHasPermissionChannel,
-				currentErrorRate,
-				newChannel,
-				newErrorRate,
-			)
-		}
+		state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
+		state.retryTimes++
 	}
 
 	return false
@@ -894,6 +948,12 @@ func RelayNotImplemented(c *gin.Context) {
 }
 
 func ErrorWithRequestID(c *gin.Context, relayErr adaptor.Error) {
+	if middleware.IsPublicVideoRequest(c.Request.URL.Path, middleware.GetMode(c)) {
+		common.GetLogger(c).Errorf("public video request failed: %v", relayErr)
+		c.JSON(relayErr.StatusCode(), relaymodel.PublicVideoError(relayErr.StatusCode()))
+		return
+	}
+
 	requestID := middleware.GetRequestID(c)
 	if requestID == "" {
 		c.JSON(relayErr.StatusCode(), relayErr)

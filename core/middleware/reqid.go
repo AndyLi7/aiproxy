@@ -1,12 +1,15 @@
 package middleware
 
 import (
+	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 )
+
+var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 
 func GenRequestID(t time.Time) string {
 	return strconv.FormatInt(t.UnixMicro(), 10)
@@ -29,6 +32,9 @@ func GetRequestID(c *gin.Context) string {
 
 func RequestIDMiddleware(c *gin.Context) {
 	now := GetRequestAt(c)
-	id := GenRequestID(now)
+	id := c.GetHeader(RequestIDHeader)
+	if !safeRequestID.MatchString(id) {
+		id = GenRequestID(now)
+	}
 	SetRequestID(c, id)
 }

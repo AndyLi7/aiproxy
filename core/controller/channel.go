@@ -36,6 +36,33 @@ type ChannelResponse struct {
 	AccessedAt time.Time `json:"accessed_at,omitempty"`
 }
 
+// ChannelCreateResponse returns only the stable identity fields needed by
+// callers after an insert. Channel credentials never belong in this payload.
+type ChannelCreateResponse struct {
+	ID     int               `json:"id"`
+	Name   string            `json:"name"`
+	Type   model.ChannelType `json:"type"`
+	Status int               `json:"status"`
+}
+
+func buildChannelCreateResponse(channel *model.Channel) ChannelCreateResponse {
+	return ChannelCreateResponse{
+		ID:     channel.ID,
+		Name:   channel.Name,
+		Type:   channel.Type,
+		Status: channel.Status,
+	}
+}
+
+func buildChannelCreateResponses(channels []*model.Channel) []ChannelCreateResponse {
+	responses := make([]ChannelCreateResponse, len(channels))
+	for i, channel := range channels {
+		responses[i] = buildChannelCreateResponse(channel)
+	}
+
+	return responses
+}
+
 func (c *ChannelResponse) MarshalJSON() ([]byte, error) {
 	type Alias model.Channel
 
@@ -152,7 +179,7 @@ func GetAllChannels(c *gin.Context) {
 //	@Produce		json
 //	@Security		ApiKeyAuth
 //	@Param			channels	body		[]AddChannelRequest	true	"Channel information"
-//	@Success		200			{object}	middleware.APIResponse
+//	@Success		200			{object}	middleware.APIResponse{data=[]ChannelCreateResponse}
 //	@Router			/api/channels/ [post]
 func AddChannels(c *gin.Context) {
 	channels := make([]*AddChannelRequest, 0)
@@ -180,7 +207,7 @@ func AddChannels(c *gin.Context) {
 		return
 	}
 
-	middleware.SuccessResponse(c, nil)
+	middleware.SuccessResponse(c, buildChannelCreateResponses(_channels))
 }
 
 // SearchChannels godoc
@@ -340,7 +367,7 @@ func (r *AddChannelRequest) ToChannel() (*model.Channel, error) {
 //	@Produce		json
 //	@Security		ApiKeyAuth
 //	@Param			channel	body		AddChannelRequest	true	"Channel information"
-//	@Success		200		{object}	middleware.APIResponse
+//	@Success		200		{object}	middleware.APIResponse{data=ChannelCreateResponse}
 //	@Router			/api/channel/ [post]
 func AddChannel(c *gin.Context) {
 	channel := AddChannelRequest{}
@@ -363,7 +390,7 @@ func AddChannel(c *gin.Context) {
 		return
 	}
 
-	middleware.SuccessResponse(c, nil)
+	middleware.SuccessResponse(c, buildChannelCreateResponse(ch))
 }
 
 // DeleteChannel godoc

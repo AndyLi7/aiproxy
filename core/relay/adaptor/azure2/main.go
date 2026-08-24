@@ -43,7 +43,8 @@ func (a *Adaptor) Metadata() adaptor.Metadata {
 			"Azure AI Foundry / Azure OpenAI compatible endpoint\nModel names can contain '.' character\nAPI version is optional, default is '%s'\nSupports Gemini-compatible request conversion",
 			azure.DefaultAPIVersion,
 		),
-		KeyHelp: "key or key|api-version",
-		Models:  openai.ModelList,
+		KeyHelp:      "key or key|api-version",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       openai.ModelList,
 	}
 }

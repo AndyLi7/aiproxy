@@ -2,20 +2,53 @@
 package controller
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/adaptor"
 	relaycontroller "github.com/labring/aiproxy/core/relay/controller"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
+	relaymodel "github.com/labring/aiproxy/core/relay/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestErrorWithRequestIDSanitizesPublicVideoError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	middleware.SetRequestID(c, "public-request-id")
+
+	ErrorWithRequestID(c, relaymodel.WrapperErrorWithMessage(
+		mode.Videos,
+		http.StatusInternalServerError,
+		"upstream model at http://10.0.0.8 failed: private-upstream-id",
+	))
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, "public-request-id", recorder.Header().Get(middleware.RequestIDHeader))
+	var body relaymodel.OpenAIErrorResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Equal(t, "The request could not be completed.", body.Error.Message)
+	require.Equal(t, "api_error", body.Error.Type)
+	require.Equal(t, "internal_error", body.Error.Code)
+	require.NotContains(t, recorder.Body.String(), "10.0.0.8")
+	require.NotContains(t, recorder.Body.String(), "private-upstream-id")
+	require.NotContains(t, recorder.Body.String(), "public-request-id")
+	require.NotContains(t, recorder.Body.String(), "aiproxy")
+}
 
 func TestRetryStateRemainingRelayDelay(t *testing.T) {
 	t.Parallel()
@@ -107,10 +140,265 @@ func TestCalculateRelayBackoffDelay(t *testing.T) {
 	t.Parallel()
 
 	assert.Zero(t, calculateRelayBackoffDelay(0, 500*time.Millisecond))
+	assert.Equal(t, time.Second, calculateRelayBackoffDelay(1, -time.Second))
 	assert.Equal(t, 1500*time.Millisecond, calculateRelayBackoffDelay(1, 500*time.Millisecond))
+	assert.Equal(t, 2*time.Second, calculateRelayBackoffDelay(1, 2*time.Second))
 	assert.Equal(t, 2500*time.Millisecond, calculateRelayBackoffDelay(2, 500*time.Millisecond))
 	assert.Equal(t, 5*time.Second, calculateRelayBackoffDelay(20, time.Second))
 	assert.Equal(t, 2*time.Second, calculateRelayBackoffDelay(1, time.Second))
+}
+
+func TestHandleRelayResultDecidesRetryLifecycle(t *testing.T) {
+	t.Parallel()
+
+	newContext := func(ctx context.Context) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
+
+		return c
+	}
+	err := relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{
+		Message: "upstream unavailable",
+	})
+
+	tests := []struct {
+		name       string
+		bizErr     adaptor.Error
+		retry      bool
+		retryTimes int
+		wantDone   bool
+	}{
+		{
+			name:     "successful request is done",
+			wantDone: true,
+		},
+		{
+			name:       "retryable error with budget continues",
+			bizErr:     err,
+			retry:      true,
+			retryTimes: 2,
+			wantDone:   false,
+		},
+		{
+			name:       "retry disabled finishes",
+			bizErr:     err,
+			retryTimes: 2,
+			wantDone:   true,
+		},
+		{
+			name:     "zero retry budget finishes",
+			bizErr:   err,
+			retry:    true,
+			wantDone: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.wantDone, handleRelayResult(
+				newContext(context.Background()),
+				tt.bizErr,
+				tt.retry,
+				tt.retryTimes,
+			))
+		})
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.True(t, handleRelayResult(newContext(canceled), err, true, 2))
+}
+
+func TestInitRetryStateRecordsInitialFailure(t *testing.T) {
+	t.Parallel()
+
+	ch1 := &model.Channel{ID: 1, Status: model.ChannelStatusEnabled}
+	ch2 := &model.Channel{ID: 2, Status: model.ChannelStatusEnabled}
+	endAt := time.Unix(500, 0)
+	initial := &initialChannel{
+		channel:          ch1,
+		migratedChannels: []*model.Channel{ch1, ch2},
+		preferChannelIDs: []int{2},
+		ignoreChannelIDs: map[int64]struct{}{9: {}},
+	}
+	requestMeta := meta.NewMeta(ch1, mode.Responses, "gpt-5", model.ModelConfig{})
+	result := &relaycontroller.HandleResult{
+		Error: relaymodel.NewOpenAIError(http.StatusTooManyRequests, relaymodel.OpenAIError{
+			Message: "rate limited",
+		}),
+	}
+
+	state := initRetryState(3, initial, requestMeta, result, model.Price{}, endAt)
+
+	assert.Equal(t, 3, state.retryTimes)
+	assert.Equal(t, []int{2}, state.preferChannelIDs)
+	assert.Equal(t, initial.ignoreChannelIDs, state.ignoreChannelIDs)
+	assert.Equal(t, []*model.Channel{ch1, ch2}, state.migratedChannels)
+	assert.Contains(t, state.failedChannelIDs, int64(ch1.ID))
+	assert.Equal(t, 1, state.channelRetryInfo[ch1.ID].failures)
+	assert.Equal(t, endAt, state.channelRetryInfo[ch1.ID].lastEndAt)
+	assert.Nil(t, state.designatedChannel)
+}
+
+func TestInitRetryStateMarksInitialPermissionFailureAsIgnored(t *testing.T) {
+	t.Parallel()
+
+	channel := &model.Channel{ID: 7, Status: model.ChannelStatusEnabled}
+	requestMeta := meta.NewMeta(channel, mode.Responses, "gpt-5", model.ModelConfig{})
+	result := &relaycontroller.HandleResult{
+		Error: relaymodel.NewOpenAIError(http.StatusUnauthorized, relaymodel.OpenAIError{
+			Message: "invalid key",
+		}),
+	}
+
+	state := initRetryState(
+		2,
+		&initialChannel{channel: channel},
+		requestMeta,
+		result,
+		model.Price{},
+		time.Unix(600, 0),
+	)
+
+	assert.Contains(t, state.failedChannelIDs, int64(channel.ID))
+	assert.Contains(t, state.ignoreChannelIDs, int64(channel.ID))
+	assert.Empty(t, state.channelRetryInfo)
+}
+
+func TestInitRetryStateTracksDesignatedChannel(t *testing.T) {
+	t.Parallel()
+
+	channel := &model.Channel{ID: 8, Status: model.ChannelStatusEnabled}
+	requestMeta := meta.NewMeta(channel, mode.Responses, "gpt-5", model.ModelConfig{})
+	result := &relaycontroller.HandleResult{
+		Error: relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{
+			Message: "upstream error",
+		}),
+	}
+
+	state := initRetryState(
+		1,
+		&initialChannel{channel: channel, designatedChannel: true},
+		requestMeta,
+		result,
+		model.Price{},
+		time.Unix(700, 0),
+	)
+
+	assert.Same(t, channel, state.designatedChannel)
+}
+
+func TestHandleRetryResultUpdatesAutomaticRetryState(t *testing.T) {
+	t.Parallel()
+
+	newContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
+
+		return c
+	}
+	newState := func(err adaptor.Error) *retryState {
+		return &retryState{
+			retryTimes: 2,
+			result:     &relaycontroller.HandleResult{Error: err},
+		}
+	}
+	permissionError := relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{
+		Message: "upstream unavailable",
+	})
+	noPermissionError := relaymodel.NewOpenAIError(http.StatusUnauthorized, relaymodel.OpenAIError{
+		Message: "invalid key",
+	})
+	channel := &model.Channel{ID: 11, Status: model.ChannelStatusEnabled}
+
+	t.Run("permissioned failure keeps retrying without hard filtering", func(t *testing.T) {
+		t.Parallel()
+
+		state := newState(permissionError)
+
+		done := handleRetryResult(newContext(), true, channel, state)
+
+		assert.False(t, done)
+		assert.Equal(t, 2, state.retryTimes)
+		assert.Empty(t, state.ignoreChannelIDs)
+	})
+
+	t.Run("permission failure is hard filtered and extends retry budget", func(t *testing.T) {
+		t.Parallel()
+
+		state := newState(noPermissionError)
+
+		done := handleRetryResult(newContext(), true, channel, state)
+
+		assert.False(t, done)
+		assert.Equal(t, 3, state.retryTimes)
+		assert.Contains(t, state.ignoreChannelIDs, int64(channel.ID))
+	})
+
+	t.Run("retry disabled finishes immediately", func(t *testing.T) {
+		t.Parallel()
+
+		state := newState(permissionError)
+
+		done := handleRetryResult(newContext(), false, channel, state)
+
+		assert.True(t, done)
+	})
+
+	t.Run("nil result error finishes immediately", func(t *testing.T) {
+		t.Parallel()
+
+		state := newState(nil)
+
+		done := handleRetryResult(newContext(), true, channel, state)
+
+		assert.True(t, done)
+	})
+}
+
+func TestHandleRetryResultKeepsDesignatedChannelSemantics(t *testing.T) {
+	t.Parallel()
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
+	channel := &model.Channel{ID: 12, Status: model.ChannelStatusEnabled}
+
+	permissionedState := &retryState{
+		designatedChannel: channel,
+		result: &relaycontroller.HandleResult{
+			Error: relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{}),
+		},
+	}
+	assert.False(t, handleRetryResult(c, true, channel, permissionedState))
+
+	noPermissionState := &retryState{
+		designatedChannel: channel,
+		result: &relaycontroller.HandleResult{
+			Error: relaymodel.NewOpenAIError(http.StatusForbidden, relaymodel.OpenAIError{}),
+		},
+	}
+	assert.True(t, handleRetryResult(c, true, channel, noPermissionState))
+	assert.Empty(t, noPermissionState.ignoreChannelIDs)
+}
+
+func TestHandleRetryResultStopsOnCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
+
+	cancel()
+
+	state := &retryState{
+		result: &relaycontroller.HandleResult{
+			Error: relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{}),
+		},
+	}
+
+	assert.True(t, handleRetryResult(c, true, &model.Channel{ID: 13}, state))
 }
 
 func TestRelayControllerVideoModesValidateRequests(t *testing.T) {
@@ -183,7 +471,12 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 		&model.Channel{ID: 11, BaseURL: "https://example.com"},
 		mode.Videos,
 		"test-video-model",
-		model.ModelConfig{},
+		model.ModelConfig{Config: map[model.ModelConfigKey]any{
+			model.ModelConfigKey("x_token_platform_pricing"): map[string]any{
+				"currency":        "USD",
+				"pricing_version": "21",
+			},
+		}},
 		meta.WithRequestID("request-async-1"),
 		meta.WithRequestUsage(model.Usage{
 			OutputTokens: 9,
@@ -209,6 +502,8 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 	require.Zero(t, captured.Usage.OutputTokens)
 	require.Zero(t, captured.Usage.TotalTokens)
 	require.Equal(t, "priority", captured.UsageContext.ServiceTier)
+	require.Equal(t, "USD", captured.PricingCurrency)
+	require.Equal(t, "21", captured.PricingVersion)
 }
 
 func TestBuildRequestDetailForLogSkipsRequestBodyForUpstreamOnlyStatuses(t *testing.T) {

@@ -180,48 +180,56 @@ func handleSTTNonStream(
 	if strings.Contains(resp.Header.Get("Content-Type"), "json") {
 		node, err := common.GetJSONNodeNoCopy(responseBody)
 		if err != nil {
+			responseErr := relaymodel.WrapperOpenAIError(
+				err,
+				"get_node_from_body_err",
+				http.StatusInternalServerError,
+			)
+
 			return adaptor.DoResponseResult{
-					Usage: usage.ToModelUsage(),
-				}, relaymodel.WrapperOpenAIError(
-					err,
-					"get_node_from_body_err",
-					http.StatusInternalServerError,
-				)
+				Usage: usage.ToModelUsage(),
+			}, responseErr
 		}
 
 		usageNode := node.Get("usage")
 		if usageNode != nil && usageNode.Exists() {
 			usageStr, err := usageNode.Raw()
 			if err != nil {
+				responseErr := relaymodel.WrapperOpenAIError(
+					err,
+					"unmarshal_response_err",
+					http.StatusInternalServerError,
+				)
+
 				return adaptor.DoResponseResult{
-						Usage: usage.ToModelUsage(),
-					}, relaymodel.WrapperOpenAIError(
-						err,
-						"unmarshal_response_err",
-						http.StatusInternalServerError,
-					)
+					Usage: usage.ToModelUsage(),
+				}, responseErr
 			}
 
 			err = sonic.UnmarshalString(usageStr, usage)
 			if err != nil {
+				responseErr := relaymodel.WrapperOpenAIError(
+					err,
+					"unmarshal_response_err",
+					http.StatusInternalServerError,
+				)
+
 				return adaptor.DoResponseResult{
-						Usage: usage.ToModelUsage(),
-					}, relaymodel.WrapperOpenAIError(
-						err,
-						"unmarshal_response_err",
-						http.StatusInternalServerError,
-					)
+					Usage: usage.ToModelUsage(),
+				}, responseErr
 			}
 		} else {
 			responseBody, err = injectUsageIntoJSON(&node, usage)
 			if err != nil {
+				responseErr := relaymodel.WrapperOpenAIError(
+					err,
+					"inject_usage_failed",
+					http.StatusInternalServerError,
+				)
+
 				return adaptor.DoResponseResult{
-						Usage: usage.ToModelUsage(),
-					}, relaymodel.WrapperOpenAIError(
-						err,
-						"inject_usage_failed",
-						http.StatusInternalServerError,
-					)
+					Usage: usage.ToModelUsage(),
+				}, responseErr
 			}
 		}
 

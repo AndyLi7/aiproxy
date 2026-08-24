@@ -2,6 +2,7 @@ package consume_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -295,6 +296,36 @@ func TestCalculateAmount(t *testing.T) {
 			t.Errorf("CalculateAmount()\n%s\n\tgot: %v\n\twant: %v\n\t", tt.name, got, tt.want)
 		}
 	}
+}
+
+func TestCalculateAmountWithDailyConditionalPerRequestPrice(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	price := model.Price{
+		PerRequestPrice: 1,
+		ConditionalPrices: []model.ConditionalPrice{
+			{
+				Condition: model.PriceCondition{
+					DailyStartTime: "09:00",
+					DailyEndTime:   "12:00",
+					Timezone:       "Asia/Shanghai",
+				},
+				Price: model.Price{PerRequestPrice: 2},
+			},
+		},
+	}
+
+	amount := consume.CalculateAmountWithOptions(
+		http.StatusOK,
+		model.Usage{},
+		model.UsageContext{},
+		price,
+		model.PriceSelectionOptions{
+			RequestAt: time.Date(2026, time.July, 20, 10, 0, 0, 0, location),
+		},
+	)
+	require.Equal(t, 2.0, amount)
 }
 
 func TestCalculateAmountWithConditionalPricing(t *testing.T) {
@@ -681,4 +712,63 @@ func TestConsumePendingAsyncUsageDoesNotRecordPriceUsageOrAmount(t *testing.T) {
 	require.Zero(t, logEntry.Amount.UsedAmount)
 	require.Zero(t, logEntry.Price.OutputPrice)
 	require.Empty(t, logEntry.Price.ConditionalPrices)
+}
+
+func TestConsumePersistsRetailPricingProvenanceInLog(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+
+	oldLogDB := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() {
+		model.LogDB = oldLogDB
+	})
+
+	requestMeta := &meta.Meta{
+		RequestID:   "retail_pricing_log",
+		RequestAt:   time.Now(),
+		Group:       model.GroupCache{ID: "group"},
+		Token:       model.TokenCache{ID: 1, Name: "token"},
+		Channel:     meta.ChannelMeta{ID: 2},
+		OriginModel: "video-model",
+		Mode:        mode.VideoGenerationsJobs,
+		ModelConfig: model.ModelConfig{Config: map[model.ModelConfigKey]any{
+			model.ModelConfigKey("x_token_platform_pricing"): map[string]any{
+				"currency":        "USD",
+				"pricing_version": "22",
+			},
+		}},
+	}
+
+	consume.Consume(
+		context.Background(),
+		time.Now(),
+		nil,
+		time.Now(),
+		http.StatusOK,
+		requestMeta,
+		model.Usage{},
+		model.UsageContext{},
+		model.Price{},
+		"",
+		"127.0.0.1",
+		0,
+		nil,
+		true,
+		nil,
+		"upstream-id",
+		model.AsyncUsageStatusPending,
+	)
+
+	var logEntry model.Log
+	require.NoError(t, db.Where("request_id = ?", requestMeta.RequestID).First(&logEntry).Error)
+
+	encoded, err := json.Marshal(&logEntry)
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &payload))
+	require.Equal(t, "USD", payload["currency"])
+	require.Equal(t, "22", payload["pricing_version"])
 }

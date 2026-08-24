@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
@@ -73,6 +74,24 @@ func AdminAuth(c *gin.Context) {
 }
 
 func TokenAuth(c *gin.Context) {
+	startedAt := time.Now()
+	stageLogged := false
+	defer func() {
+		if stageLogged {
+			return
+		}
+		common.LogLatencyEvent(c, common.LatencyEvent{
+			Event:      "aiproxy_stage_finished",
+			RequestID:  GetRequestID(c),
+			Stage:      "token_group_auth",
+			DurationMS: float64(time.Since(startedAt).Microseconds()) / 1000,
+			Outcome:    "error",
+			Status:     c.Writer.Status(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			ErrorType:  "authentication_rejected",
+		})
+	}()
 	log := common.GetLogger(c)
 
 	key := c.Request.Header.Get("Authorization")
@@ -165,7 +184,7 @@ func TokenAuth(c *gin.Context) {
 	SetLogGroupFields(log.Data, group)
 
 	if group.Status != model.GroupStatusEnabled && group.Status != model.GroupStatusInternal {
-		AbortLogWithMessage(c, http.StatusForbidden, "group is disabled")
+		AbortOperationally(c, model.FailureStageEntitlement, http.StatusForbidden, "group is disabled")
 		return
 	}
 
@@ -175,6 +194,17 @@ func TokenAuth(c *gin.Context) {
 	c.Set(Group, group)
 	c.Set(Token, token)
 	c.Set(ModelCaches, modelCaches)
+	common.LogLatencyEvent(c, common.LatencyEvent{
+		Event:      "aiproxy_stage_finished",
+		RequestID:  GetRequestID(c),
+		Stage:      "token_group_auth",
+		DurationMS: float64(time.Since(startedAt).Microseconds()) / 1000,
+		Outcome:    "success",
+		Status:     http.StatusOK,
+		Method:     c.Request.Method,
+		Path:       c.Request.URL.Path,
+	})
+	stageLogged = true
 
 	c.Next()
 }

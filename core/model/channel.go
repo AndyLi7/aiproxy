@@ -545,7 +545,13 @@ func DeleteChannelsByIDs(ids []int) (err error) {
 	})
 }
 
-func UpdateChannelStatusByID(id, status int) error {
+func UpdateChannelStatusByID(id, status int) (err error) {
+	defer func() {
+		if err == nil {
+			_ = InitModelConfigAndChannelCache()
+		}
+	}()
+
 	result := DB.Model(&Channel{}).
 		Where("id = ?", id).
 		Update("status", status)

@@ -162,7 +162,7 @@ func TestBuildLogExportCSVExcludesTimezoneModeAndRetryAtByDefault(t *testing.T) 
 
 	csvText := string(content)
 
-	headerLine := strings.SplitN(strings.TrimPrefix(csvText, "\xEF\xBB\xBF"), "\n", 2)[0]
+	headerLine, _, _ := strings.Cut(strings.TrimPrefix(csvText, "\xEF\xBB\xBF"), "\n")
 	if strings.Contains(","+headerLine+",", ",timezone,") ||
 		strings.Contains(","+headerLine+",", ",mode,") ||
 		strings.Contains(","+headerLine+",", ",retry_at,") {

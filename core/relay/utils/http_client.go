@@ -71,12 +71,18 @@ func normalizeProxyURL(proxyURL string) string {
 	return strings.TrimSpace(proxyURL)
 }
 
-func httpClientCacheKey(timeout time.Duration, proxyURL string, skipTLSVerify bool) string {
+func httpClientCacheKeyWithPolicy(
+	timeout time.Duration,
+	proxyURL string,
+	skipTLSVerify bool,
+	policy OutboundPolicy,
+) string {
 	return fmt.Sprintf(
-		"%d|%s|%t",
+		"%d|%s|%t|%s",
 		normalizeTimeout(timeout),
 		normalizeProxyURL(proxyURL),
 		skipTLSVerify,
+		policy,
 	)
 }
 
@@ -84,6 +90,7 @@ func createTransport(
 	timeout time.Duration,
 	proxyURL string,
 	skipTLSVerify bool,
+	policy OutboundPolicy,
 ) (*http.Transport, error) {
 	transport := defaultTransportTemplate()
 
@@ -95,6 +102,22 @@ func createTransport(
 	}
 
 	proxyURL = normalizeProxyURL(proxyURL)
+	switch policy {
+	case OutboundPolicyAllowPrivate:
+	case OutboundPolicyPublicOnly:
+		if proxyURL != "" {
+			return nil, errors.New("public-only outbound policy does not support proxies")
+		}
+
+		transport.Proxy = nil
+		transport.DialContext = publicOnlyDialContext(
+			net.DefaultResolver.LookupNetIP,
+			defaultDialer.DialContext,
+		)
+	default:
+		return nil, fmt.Errorf("unsupported outbound policy: %q", policy)
+	}
+
 	if proxyURL == "" {
 		return transport, nil
 	}
@@ -185,7 +208,21 @@ func LoadHTTPClientWithTLSConfigE(
 	proxyURL string,
 	skipTLSVerify bool,
 ) (*http.Client, error) {
-	key := httpClientCacheKey(timeout, proxyURL, skipTLSVerify)
+	return LoadHTTPClientWithOutboundPolicyE(
+		timeout,
+		proxyURL,
+		skipTLSVerify,
+		OutboundPolicyAllowPrivate,
+	)
+}
+
+func LoadHTTPClientWithOutboundPolicyE(
+	timeout time.Duration,
+	proxyURL string,
+	skipTLSVerify bool,
+	policy OutboundPolicy,
+) (*http.Client, error) {
+	key := httpClientCacheKeyWithPolicy(timeout, proxyURL, skipTLSVerify, policy)
 	if value, ok := httpClientCache.Get(key); ok {
 		cached, ok := value.(*cachedHTTPClient)
 		if !ok {
@@ -195,13 +232,17 @@ func LoadHTTPClientWithTLSConfigE(
 		return cached.client, nil
 	}
 
-	transport, err := createTransport(timeout, proxyURL, skipTLSVerify)
+	transport, err := createTransport(timeout, proxyURL, skipTLSVerify, policy)
 	if err != nil {
 		return nil, err
 	}
 
 	client := &http.Client{
 		Transport: transport,
+	}
+	if policy == OutboundPolicyPublicOnly {
+		client.Transport = publicOnlyRoundTripper{transport: transport}
+		client.CheckRedirect = publicOnlyRedirectPolicy
 	}
 
 	httpClientCache.SetDefault(key, &cachedHTTPClient{

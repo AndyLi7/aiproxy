@@ -21,8 +21,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var responseStreamInitialBufferTimeout = 2 * time.Second
-
 // ConvertResponseRequest converts a response creation request
 func ConvertResponseRequest(
 	meta *meta.Meta,
@@ -65,6 +63,165 @@ func ConvertResponseRequest(
 			"Content-Length": {strconv.Itoa(len(jsonData))},
 		},
 		Body: bytes.NewReader(jsonData),
+	}, nil
+}
+
+// ConvertResponseCompactRequest preserves compact input items, including opaque
+// encrypted compaction items, while applying the channel's model mapping.
+func ConvertResponseCompactRequest(
+	meta *meta.Meta,
+	req *http.Request,
+) (adaptor.ConvertResult, error) {
+	node, err := common.UnmarshalRequest2NodeReusable(req)
+	if err != nil {
+		return adaptor.ConvertResult{}, err
+	}
+
+	if _, err = node.Set("model", ast.NewString(meta.ActualModel)); err != nil {
+		return adaptor.ConvertResult{}, err
+	}
+
+	jsonData, err := node.MarshalJSON()
+	if err != nil {
+		return adaptor.ConvertResult{}, err
+	}
+
+	return adaptor.ConvertResult{
+		Header: http.Header{
+			"Content-Type":   {"application/json"},
+			"Content-Length": {strconv.Itoa(len(jsonData))},
+		},
+		Body: bytes.NewReader(jsonData),
+	}, nil
+}
+
+// ConvertAlphaSearchRequest preserves the private Alpha Search protocol while
+// applying the configured upstream model mapping.
+func ConvertAlphaSearchRequest(
+	meta *meta.Meta,
+	req *http.Request,
+) (adaptor.ConvertResult, error) {
+	node, err := common.UnmarshalRequest2NodeReusable(req)
+	if err != nil {
+		return adaptor.ConvertResult{}, err
+	}
+
+	if _, err = node.Set("model", ast.NewString(meta.ActualModel)); err != nil {
+		return adaptor.ConvertResult{}, err
+	}
+
+	jsonData, err := node.MarshalJSON()
+	if err != nil {
+		return adaptor.ConvertResult{}, err
+	}
+
+	return adaptor.ConvertResult{
+		Header: http.Header{
+			"Content-Type":   {"application/json"},
+			"Content-Length": {strconv.Itoa(len(jsonData))},
+		},
+		Body: bytes.NewReader(jsonData),
+	}, nil
+}
+
+// AlphaSearchHandler transparently forwards the private Alpha Search response.
+// The result schema evolves independently from the public OpenAI API.
+func AlphaSearchHandler(
+	meta *meta.Meta,
+	c *gin.Context,
+	resp *http.Response,
+) (adaptor.DoResponseResult, adaptor.Error) {
+	if !adaptor.IsSuccessfulResponseStatus(mode.AlphaSearch, resp.StatusCode) {
+		return adaptor.DoResponseResult{}, ErrorHanlder(resp)
+	}
+
+	responseBody, err := common.GetResponseBody(resp)
+	if err != nil {
+		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+			err,
+			"read_response_body_failed",
+			http.StatusInternalServerError,
+		)
+	}
+
+	if meta.OriginModel != "" && meta.OriginModel != meta.ActualModel {
+		node, err := common.GetJSONNodeNoCopy(responseBody)
+		if err != nil {
+			return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+				err,
+				"unmarshal_response_body_failed",
+				http.StatusInternalServerError,
+			)
+		}
+
+		responseBody, err = rewriteTopLevelModelNode(responseBody, &node, meta.OriginModel)
+		if err != nil {
+			return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+				err,
+				"set_model_failed",
+				http.StatusInternalServerError,
+			)
+		}
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
+	_, _ = c.Writer.Write(responseBody)
+
+	return adaptor.DoResponseResult{}, nil
+}
+
+// CompactResponseHandler forwards the standalone compact response as raw JSON.
+// The output contains opaque encrypted items and must remain canonical.
+func CompactResponseHandler(
+	meta *meta.Meta,
+	c *gin.Context,
+	resp *http.Response,
+) (adaptor.DoResponseResult, adaptor.Error) {
+	if !adaptor.IsSuccessfulResponseStatus(mode.ResponsesCompact, resp.StatusCode) {
+		return adaptor.DoResponseResult{}, ErrorHanlder(resp)
+	}
+
+	defer resp.Body.Close()
+
+	responseBody, err := common.GetResponseBody(resp)
+	if err != nil {
+		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+			err,
+			"read_response_body_failed",
+			http.StatusInternalServerError,
+		)
+	}
+
+	var response struct {
+		ID    string                   `json:"id"`
+		Usage relaymodel.ResponseUsage `json:"usage"`
+	}
+	if err := sonic.Unmarshal(responseBody, &response); err != nil {
+		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+			err,
+			"unmarshal_response_body_failed",
+			http.StatusInternalServerError,
+		)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
+	_, _ = c.Writer.Write(responseBody)
+
+	return adaptor.DoResponseResult{
+		Usage:      response.Usage.ToModelUsage(),
+		UpstreamID: response.ID,
 	}, nil
 }
 
@@ -193,6 +350,22 @@ func ResponseStreamHandler(
 	c *gin.Context,
 	resp *http.Response,
 ) (adaptor.DoResponseResult, adaptor.Error) {
+	return responseStreamHandler(
+		meta,
+		store,
+		c,
+		resp,
+		defaultConfig().responsesFirstEventTimeout(),
+	)
+}
+
+func responseStreamHandler(
+	meta *meta.Meta,
+	store adaptor.Store,
+	c *gin.Context,
+	resp *http.Response,
+	firstEventTimeout time.Duration,
+) (adaptor.DoResponseResult, adaptor.Error) {
 	if !adaptor.IsSuccessfulResponseStatus(mode.Responses, resp.StatusCode) {
 		return adaptor.DoResponseResult{}, ErrorHanlder(resp)
 	}
@@ -305,7 +478,7 @@ readLoop:
 			pendingEvents = append(pendingEvents, append([]byte(nil), data...))
 
 			if bufferTimer == nil {
-				bufferTimer = time.NewTimer(responseStreamInitialBufferTimeout)
+				bufferTimer = time.NewTimer(firstEventTimeout)
 			}
 
 			continue

@@ -46,14 +46,16 @@ func OpenaiHandler(meta *meta.Meta, c *gin.Context) (adaptor.DoResponseResult, a
 
 	jsonBody, err := sonic.Marshal(openaiResp)
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIErrorWithMessage(
+			err.Error(),
+			nil,
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage:      openaiResp.Usage.ToModelUsage(),
-				UpstreamID: openaiResp.ID,
-			}, relaymodel.WrapperOpenAIErrorWithMessage(
-				err.Error(),
-				nil,
-				http.StatusInternalServerError,
-			)
+			Usage:      openaiResp.Usage.ToModelUsage(),
+			UpstreamID: openaiResp.ID,
+		}, responseErr
 	}
 
 	c.Writer.Header().Set("Content-Type", "application/json")

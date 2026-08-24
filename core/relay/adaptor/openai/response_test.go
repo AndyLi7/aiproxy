@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
+	"github.com/labring/aiproxy/core/relay/mode"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,8 +25,6 @@ type responseTestStore struct {
 	saved           []adaptor.StoreCache
 	savedIfNotExist []adaptor.StoreCache
 }
-
-var responseStreamInitialBufferTimeoutTestMu sync.Mutex
 
 func (s *responseTestStore) GetStore(string, int, string) (adaptor.StoreCache, error) {
 	return adaptor.StoreCache{}, nil
@@ -353,16 +351,7 @@ func TestResponseStreamHandlerAcceptsObjectFunctionCallArguments(t *testing.T) {
 }
 
 func TestResponseStreamHandlerStartsBufferTimeoutFromFirstDelayedEvent(t *testing.T) {
-	responseStreamInitialBufferTimeoutTestMu.Lock()
-	defer responseStreamInitialBufferTimeoutTestMu.Unlock()
-
 	gin.SetMode(gin.TestMode)
-
-	oldTimeout := responseStreamInitialBufferTimeout
-	responseStreamInitialBufferTimeout = time.Millisecond
-	t.Cleanup(func() {
-		responseStreamInitialBufferTimeout = oldTimeout
-	})
 
 	reader, writer := io.Pipe()
 	defer writer.Close()
@@ -399,11 +388,70 @@ func TestResponseStreamHandlerStartsBufferTimeoutFromFirstDelayedEvent(t *testin
 		Header:     make(http.Header),
 	}
 
-	result, err := ResponseStreamHandler(&meta.Meta{}, &responseTestStore{}, c, resp)
+	result, err := responseStreamHandler(
+		&meta.Meta{},
+		&responseTestStore{},
+		c,
+		resp,
+		time.Millisecond,
+	)
 	require.Nil(t, err)
 	assert.Equal(t, "resp_timeout", result.UpstreamID)
 	assert.Contains(t, recorder.Body.String(), "response.in_progress")
 	assert.Contains(t, recorder.Body.String(), "response.completed")
+}
+
+func TestAdaptorDoResponseUsesResponsesFirstEventTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reader, writer := io.Pipe()
+	defer writer.Close()
+
+	go func() {
+		_, _ = writer.Write([]byte(strings.Join([]string{
+			"event: response.created",
+			"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_configured_timeout\",\"object\":\"response\",\"created_at\":1,\"status\":\"in_progress\",\"model\":\"gpt-5.4\",\"output\":[],\"parallel_tool_calls\":true,\"store\":false}}",
+			"",
+		}, "\n")))
+
+		time.Sleep(20 * time.Millisecond)
+
+		_, _ = writer.Write([]byte(strings.Join([]string{
+			"event: error",
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"stream failed\"}}",
+			"",
+		}, "\n")))
+		_ = writer.Close()
+	}()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/responses",
+		nil,
+	)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       reader,
+		Header: http.Header{
+			"Content-Type": {"text/event-stream"},
+		},
+	}
+	m := &meta.Meta{
+		Mode: mode.Responses,
+		ChannelConfigs: model.ChannelConfigs{
+			"responses_first_event_timeout": 0,
+		},
+	}
+
+	result, err := (&Adaptor{}).DoResponse(m, &responseTestStore{}, c, resp)
+	require.Nil(t, err)
+	assert.Equal(t, "resp_configured_timeout", result.UpstreamID)
+	assert.Contains(t, recorder.Body.String(), "response.created")
+	assert.Contains(t, recorder.Body.String(), "stream failed")
 }
 
 func TestResponseHandlerWebSearchCountFromToolUsage(t *testing.T) {
@@ -586,6 +634,201 @@ func TestConvertResponseRequestMapsSystemInputRoleToDeveloper(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "user", second["role"])
 	assert.Equal(t, "mapped-gpt-5.5", body["model"])
+}
+
+func TestConvertResponseRequestKeepsDeveloperInputRole(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/responses",
+		strings.NewReader(`{
+			"model":"gpt-5.5",
+			"input":[
+				{"type":"message","role":"developer","content":[{"type":"input_text","text":"Be concise"}]}
+			]
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	result, err := ConvertResponseRequest(&meta.Meta{ActualModel: "mapped-gpt-5.5"}, req)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(result.Body).Decode(&body))
+	input, ok := body["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	first, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "developer", first["role"])
+}
+
+func TestConvertResponseCompactRequestPreservesOpaqueItems(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/responses/compact",
+		strings.NewReader(
+			`{"model":"gpt-5.6-sol","input":[{"type":"compaction","encrypted_content":"opaque"}],"future_field":{"keep":true}}`,
+		),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	result, err := ConvertResponseCompactRequest(&meta.Meta{ActualModel: "mapped-gpt-5.6"}, req)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(result.Body).Decode(&body))
+	assert.Equal(t, "mapped-gpt-5.6", body["model"])
+	input, ok := body["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	item, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "opaque", item["encrypted_content"])
+
+	futureField, ok := body["future_field"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, futureField["keep"])
+}
+
+func TestConvertAlphaSearchRequestPreservesProtocolFields(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/alpha/search",
+		strings.NewReader(`{
+			"id":"search-session",
+			"model":"gpt-5.6-sol",
+			"commands":{"search_query":[{"q":"OpenAI news","recency":7}]},
+			"settings":{"external_web_access":"live"},
+			"future_field":{"keep":true}
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	result, err := ConvertAlphaSearchRequest(&meta.Meta{ActualModel: "mapped-gpt-5.6"}, req)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(result.Body).Decode(&body))
+	assert.Equal(t, "search-session", body["id"])
+	assert.Equal(t, "mapped-gpt-5.6", body["model"])
+	commands, ok := body["commands"].(map[string]any)
+	require.True(t, ok)
+	searchQueries, ok := commands["search_query"].([]any)
+	require.True(t, ok)
+	require.Len(t, searchQueries, 1)
+	searchQuery, ok := searchQueries[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "OpenAI news", searchQuery["q"])
+
+	settings, ok := body["settings"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "live", settings["external_web_access"])
+
+	futureField, ok := body["future_field"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, futureField["keep"])
+}
+
+func TestAlphaSearchHandlerPreservesOpaqueResponse(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	respBody := `{"model":"mapped-gpt-5.6","encrypted_output":"ciphertext","output":"Search result","results":[{"type":"text_result","ref_id":"turn0search0","future_field":{"preserved":true}}]}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json; charset=utf-8"}},
+		Body:       io.NopCloser(strings.NewReader(respBody)),
+	}
+
+	result, err := AlphaSearchHandler(&meta.Meta{
+		OriginModel: "gpt-5.6",
+		ActualModel: "mapped-gpt-5.6",
+	}, c, resp)
+	require.NoError(t, err)
+	assert.Empty(t, result.Usage)
+	assert.Contains(t, recorder.Body.String(), `"model":"gpt-5.6"`)
+	assert.NotContains(t, recorder.Body.String(), "mapped-gpt-5.6")
+	assert.Contains(t, recorder.Body.String(), `"future_field":{"preserved":true}`)
+	assert.Equal(t, "application/json; charset=utf-8", recorder.Header().Get("Content-Type"))
+}
+
+func TestAlphaSearchHandlerPreservesResponseWithoutModel(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	respBody := `{"encrypted_output":"ciphertext","output":"Search result","results":[]}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(respBody)),
+	}
+
+	_, err := AlphaSearchHandler(&meta.Meta{
+		OriginModel: "gpt-5.6",
+		ActualModel: "mapped-gpt-5.6",
+	}, c, resp)
+	require.NoError(t, err)
+	assert.Equal(t, respBody, recorder.Body.String())
+}
+
+func TestCompactResponseHandlerPreservesOpaqueJSONAndUsage(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	respBody := `{"id":"resp_compact","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque"}],"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(respBody)),
+	}
+
+	result, err := CompactResponseHandler(&meta.Meta{}, c, resp)
+	require.NoError(t, err)
+	assert.Equal(t, respBody, recorder.Body.String())
+	assert.Equal(t, int64(7), int64(result.Usage.InputTokens))
+	assert.Equal(t, int64(3), int64(result.Usage.OutputTokens))
+	assert.Equal(t, "resp_compact", result.UpstreamID)
+}
+
+func TestAdaptorSetupRequestHeaderForwardsCodexHeaders(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+	c.Request.Header.Set("Session_id", "session-1")
+	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
+	c.Request.Header.Set("X-Unrelated-Header", "drop-me")
+
+	upstreamReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"https://example.com/v1/responses",
+		nil,
+	)
+	m := &meta.Meta{Mode: mode.Responses, Channel: meta.ChannelMeta{Key: "test-key"}}
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(m, nil, c, upstreamReq))
+	assert.Equal(t, "remote_compaction_v2", upstreamReq.Header.Get("X-Codex-Beta-Features"))
+	assert.Equal(t, "session-1", upstreamReq.Header.Get("Session_id"))
+	assert.Equal(t, "turn-state", upstreamReq.Header.Get("X-Codex-Turn-State"))
+	assert.Empty(t, upstreamReq.Header.Get("X-Unrelated-Header"))
+	assert.Equal(t, "Bearer test-key", upstreamReq.Header.Get("Authorization"))
 }
 
 func TestGetResponseHandlerRewritesModelToOriginModel(t *testing.T) {

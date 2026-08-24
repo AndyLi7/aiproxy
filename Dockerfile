@@ -4,11 +4,9 @@ WORKDIR /aiproxy/web
 
 COPY ./web/ ./
 
-RUN npm install -g pnpm
+RUN corepack pnpm install --frozen-lockfile && corepack pnpm run build
 
-RUN pnpm install && pnpm run build
-
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /aiproxy/core
 
@@ -25,8 +23,6 @@ FROM alpine:latest
 RUN mkdir -p /aiproxy
 
 WORKDIR /aiproxy
-
-VOLUME /aiproxy
 
 RUN apk add --no-cache ca-certificates tzdata ffmpeg curl && \
     rm -rf /var/cache/apk/*

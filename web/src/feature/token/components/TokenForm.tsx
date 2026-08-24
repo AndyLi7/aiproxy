@@ -42,14 +42,15 @@ export function TokenForm({ onSuccess }: TokenFormProps) {
             period_type: null,
         },
     })
+    const periodType = form.watch('period_type')
 
     // 提交表单
     const onSubmit = (data: TokenCreateForm) => {
         createToken({
             name: data.name,
             quota: data.quota,
-            period_quota: data.period_quota,
-            period_type: data.period_quota && data.period_quota > 0 ? (data.period_type || 'monthly') : undefined,
+            period_quota: data.period_type ? data.period_quota : undefined,
+            period_type: data.period_type || undefined,
         }, {
             onSuccess: () => {
                 onSuccess?.()
@@ -108,6 +109,39 @@ export function TokenForm({ onSuccess }: TokenFormProps) {
 
                 <FormField
                     control={form.control}
+                    name="period_type"
+                    render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>{t("token.quota.periodType")}</FormLabel>
+                            <Select
+                                onValueChange={(value) => {
+                                    const nextPeriodType = value === 'none' ? null : value
+                                    field.onChange(nextPeriodType)
+                                    if (!nextPeriodType) {
+                                        form.setValue('period_quota', undefined, { shouldDirty: true })
+                                    }
+                                }}
+                                value={field.value || 'none'}
+                            >
+                                <FormControl>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={t("token.quota.selectPeriodType")} />
+                                    </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                    <SelectItem value="none">{t("token.quota.none")}</SelectItem>
+                                    <SelectItem value="daily">{t("token.quota.daily")}</SelectItem>
+                                    <SelectItem value="weekly">{t("token.quota.weekly")}</SelectItem>
+                                    <SelectItem value="monthly">{t("token.quota.monthly")}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
+
+                <FormField
+                    control={form.control}
                     name="period_quota"
                     render={({ field }) => (
                         <FormItem>
@@ -124,43 +158,12 @@ export function TokenForm({ onSuccess }: TokenFormProps) {
                                         const value = e.target.value
                                         field.onChange(value === '' ? undefined : parseFloat(value))
                                     }}
+                                    disabled={!periodType}
                                 />
                             </FormControl>
                             <FormDescription>
-                                {t("token.quota.periodHelp")}
+                                {periodType ? t("token.quota.periodHelp") : t("token.quota.periodQuotaDisabledHelp")}
                             </FormDescription>
-                            <FormMessage />
-                        </FormItem>
-                    )}
-                />
-
-                <FormField
-                    control={form.control}
-                    name="period_type"
-                    render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>{t("token.quota.periodType")}</FormLabel>
-                            <Select
-                                onValueChange={field.onChange}
-                                value={field.value || 'monthly'}
-                                disabled={!form.watch('period_quota')}
-                            >
-                                <FormControl>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder={t("token.quota.selectPeriodType")} />
-                                    </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                    <SelectItem value="daily">{t("token.quota.daily")}</SelectItem>
-                                    <SelectItem value="weekly">{t("token.quota.weekly")}</SelectItem>
-                                    <SelectItem value="monthly">{t("token.quota.monthly")}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                            {!form.watch('period_quota') && (
-                                <FormDescription>
-                                    {t("token.quota.periodTypeDisabledHelp")}
-                                </FormDescription>
-                            )}
                             <FormMessage />
                         </FormItem>
                     )}

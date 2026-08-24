@@ -231,7 +231,11 @@ func (m *ChannelMonitor) DoResponse(
 	resp *http.Response,
 	do adaptor.DoResponse,
 ) (adaptor.DoResponseResult, adaptor.Error) {
+	responseAt := time.Now()
 	result, relayErr := do.DoResponse(meta, store, c, resp)
+
+	responseCost := common.TruncateDuration(time.Since(responseAt))
+	common.GetLogger(c).Data["resp_cost"] = responseCost.String()
 
 	if result.Usage.TotalTokens > 0 {
 		count, overLimitCount, secondCount := reqlimit.PushChannelModelTokensRequest(

@@ -58,6 +58,7 @@ export function TokenQuotaDialog({ open, onOpenChange, token }: TokenQuotaDialog
             period_type: null,
         },
     })
+    const periodType = form.watch('period_type')
 
     // 当token数据变化时，重置表单
     useEffect(() => {
@@ -65,7 +66,7 @@ export function TokenQuotaDialog({ open, onOpenChange, token }: TokenQuotaDialog
             form.reset({
                 quota: token.quota > 0 ? token.quota : undefined,
                 period_quota: token.period_quota > 0 ? token.period_quota : undefined,
-                period_type: token.period_type || null,
+                period_type: token.period_type || (token.period_quota > 0 ? 'monthly' : null),
             })
         }
     }, [token, open, form])
@@ -74,15 +75,15 @@ export function TokenQuotaDialog({ open, onOpenChange, token }: TokenQuotaDialog
         if (!token) return
 
         const quota = data.quota ?? 0
-        const periodQuota = data.period_quota ?? 0
-        const periodType = periodQuota > 0 ? (data.period_type || 'monthly') : ''
+        const periodQuota = data.period_type ? (data.period_quota ?? 0) : 0
+        const submittedPeriodType = data.period_type || ''
 
         updateToken({
             id: token.id,
             data: {
                 quota,
                 period_quota: periodQuota,
-                period_type: periodType,
+                period_type: submittedPeriodType,
             },
         }, {
             onSuccess: () => {
@@ -140,6 +141,40 @@ export function TokenQuotaDialog({ open, onOpenChange, token }: TokenQuotaDialog
 
                             <FormField
                                 control={form.control}
+                                name="period_type"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>{t("token.quota.periodType")}</FormLabel>
+                                        <Select
+                                            onValueChange={(value) => {
+                                                const nextPeriodType = value === 'none' ? null : value
+                                                field.onChange(nextPeriodType)
+                                                if (!nextPeriodType) {
+                                                    form.setValue('period_quota', undefined, { shouldDirty: true })
+                                                }
+                                            }}
+                                            value={field.value || 'none'}
+                                            disabled={isLoading}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder={t("token.quota.selectPeriodType")} />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="none">{t("token.quota.none")}</SelectItem>
+                                                <SelectItem value="daily">{t("token.quota.daily")}</SelectItem>
+                                                <SelectItem value="weekly">{t("token.quota.weekly")}</SelectItem>
+                                                <SelectItem value="monthly">{t("token.quota.monthly")}</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
                                 name="period_quota"
                                 render={({ field }) => (
                                     <FormItem>
@@ -156,43 +191,12 @@ export function TokenQuotaDialog({ open, onOpenChange, token }: TokenQuotaDialog
                                                     const value = e.target.value
                                                     field.onChange(value === '' ? undefined : parseFloat(value))
                                                 }}
+                                                disabled={isLoading || !periodType}
                                             />
                                         </FormControl>
                                         <p className="text-xs text-muted-foreground">
-                                            {t("token.quota.periodHelp")}
+                                            {periodType ? t("token.quota.periodHelp") : t("token.quota.periodQuotaDisabledHelp")}
                                         </p>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="period_type"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>{t("token.quota.periodType")}</FormLabel>
-                                        <Select
-                                            onValueChange={field.onChange}
-                                            value={field.value || 'monthly'}
-                                            disabled={!form.watch('period_quota')}
-                                        >
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder={t("token.quota.selectPeriodType")} />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="daily">{t("token.quota.daily")}</SelectItem>
-                                                <SelectItem value="weekly">{t("token.quota.weekly")}</SelectItem>
-                                                <SelectItem value="monthly">{t("token.quota.monthly")}</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        {!form.watch('period_quota') && (
-                                            <p className="text-xs text-muted-foreground">
-                                                {t("token.quota.periodTypeDisabledHelp")}
-                                            </p>
-                                        )}
                                         <FormMessage />
                                     </FormItem>
                                 )}

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/middleware"
@@ -168,7 +169,7 @@ func TestGetRetryChannelPrefersPreferredChannels(t *testing.T) {
 	})
 
 	t.Run(
-		"returns exhausted when failed channels consume all retry candidates",
+		"starts a new round when failed channels consume all retry candidates",
 		func(t *testing.T) {
 			t.Parallel()
 
@@ -185,59 +186,14 @@ func TestGetRetryChannelPrefersPreferredChannels(t *testing.T) {
 			)
 
 			channel, err := getRetryChannel(context.Background(), state)
-			require.ErrorIs(t, err, ErrChannelsExhausted)
-			assert.Nil(t, channel)
+			require.NoError(t, err)
+			assert.NotNil(t, channel)
+			assert.Empty(t, state.failedChannelIDs)
 		},
 	)
 }
 
-func TestPickMinErrorRateHasPermissionChannel(t *testing.T) {
-	t.Parallel()
-
-	current := &model.Channel{ID: 1}
-	candidate := &model.Channel{ID: 2}
-
-	t.Run("returns candidate when current is nil", func(t *testing.T) {
-		t.Parallel()
-
-		picked := pickMinErrorRateHasPermissionChannel(
-			nil,
-			0,
-			candidate,
-			0.2,
-		)
-		require.NotNil(t, picked)
-		assert.Equal(t, 2, picked.ID)
-	})
-
-	t.Run("keeps current when candidate error rate is higher", func(t *testing.T) {
-		t.Parallel()
-
-		picked := pickMinErrorRateHasPermissionChannel(
-			current,
-			0.1,
-			candidate,
-			0.3,
-		)
-		require.NotNil(t, picked)
-		assert.Equal(t, 1, picked.ID)
-	})
-
-	t.Run("switches to candidate when candidate error rate is lower", func(t *testing.T) {
-		t.Parallel()
-
-		picked := pickMinErrorRateHasPermissionChannel(
-			current,
-			0.4,
-			candidate,
-			0.2,
-		)
-		require.NotNil(t, picked)
-		assert.Equal(t, 2, picked.ID)
-	})
-}
-
-func TestGetRetryChannelFallsBackToLowestErrorRateHasPermissionChannel(t *testing.T) {
+func TestGetRetryChannelStartsNewRoundAfterCandidatesAreExhausted(t *testing.T) {
 	t.Parallel()
 
 	ch1 := &model.Channel{
@@ -254,23 +210,220 @@ func TestGetRetryChannelFallsBackToLowestErrorRateHasPermissionChannel(t *testin
 	}
 
 	state := &retryState{
-		meta: meta.NewMeta(
-			ch1,
-			mode.Responses,
-			"gpt-5",
-			model.ModelConfig{},
-		),
-		migratedChannels:                     []*model.Channel{ch1, ch2},
-		failedChannelIDs:                     map[int64]struct{}{},
-		ignoreChannelIDs:                     map[int64]struct{}{1: {}, 2: {}},
-		lastMinErrorRateHasPermissionChannel: ch2,
+		meta:             meta.NewMeta(ch1, mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels: []*model.Channel{ch1, ch2},
+		failedChannelIDs: map[int64]struct{}{1: {}, 2: {}},
+		ignoreChannelIDs: nil,
+		preferChannelIDs: []int{1},
 	}
 
 	channel, err := getRetryChannel(context.Background(), state)
 	require.NoError(t, err)
 	require.NotNil(t, channel)
-	assert.Equal(t, 2, channel.ID)
-	assert.True(t, state.exhausted)
+	assert.Contains(t, []int{1, 2}, channel.ID)
+	assert.Empty(t, state.failedChannelIDs)
+	assert.Empty(t, state.preferChannelIDs)
+
+	state.failedChannelIDs[int64(channel.ID)] = struct{}{}
+	nextChannel, err := getRetryChannel(context.Background(), state)
+	require.NoError(t, err)
+	require.NotNil(t, nextChannel)
+	assert.NotEqual(t, channel.ID, nextChannel.ID)
+}
+
+func TestGetRetryChannelKeepsPermissionFailuresIgnoredAcrossRounds(t *testing.T) {
+	t.Parallel()
+
+	ch1 := &model.Channel{ID: 1, Type: model.ChannelTypeOpenAI, Status: model.ChannelStatusEnabled}
+	ch2 := &model.Channel{ID: 2, Type: model.ChannelTypeOpenAI, Status: model.ChannelStatusEnabled}
+	state := &retryState{
+		meta:             meta.NewMeta(ch1, mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels: []*model.Channel{ch1, ch2},
+		failedChannelIDs: map[int64]struct{}{1: {}},
+		ignoreChannelIDs: map[int64]struct{}{2: {}},
+	}
+
+	channel, err := getRetryChannel(context.Background(), state)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 1, channel.ID)
+	assert.Empty(t, state.failedChannelIDs)
+}
+
+func TestGetRetryChannelKeepsDesignatedChannelPinned(t *testing.T) {
+	t.Parallel()
+
+	ch1 := &model.Channel{ID: 1, Type: model.ChannelTypeOpenAI, Status: model.ChannelStatusEnabled}
+	ch2 := &model.Channel{ID: 2, Type: model.ChannelTypeOpenAI, Status: model.ChannelStatusEnabled}
+	state := &retryState{
+		designatedChannel: ch1,
+		meta:              meta.NewMeta(ch1, mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels:  []*model.Channel{ch2},
+		failedChannelIDs:  map[int64]struct{}{1: {}, 2: {}},
+	}
+
+	channel, err := getRetryChannel(context.Background(), state)
+	require.NoError(t, err)
+	assert.Equal(t, ch1.ID, channel.ID)
+
+	state.ignoreChannelIDs = map[int64]struct{}{1: {}}
+	channel, err = getRetryChannel(context.Background(), state)
+	require.ErrorIs(t, err, ErrChannelsExhausted)
+	assert.Nil(t, channel)
+}
+
+func TestFilterChannelsAppliesRetryEligibilityRules(t *testing.T) {
+	t.Parallel()
+
+	enabled := &model.Channel{
+		ID:     1,
+		Status: model.ChannelStatusEnabled,
+	}
+	disabled := &model.Channel{
+		ID:     2,
+		Status: model.ChannelStatusDisabled,
+	}
+	highError := &model.Channel{
+		ID:     3,
+		Status: model.ChannelStatusEnabled,
+	}
+	exactThreshold := &model.Channel{
+		ID:     6,
+		Status: model.ChannelStatusEnabled,
+	}
+	ignored := &model.Channel{
+		ID:     4,
+		Status: model.ChannelStatusEnabled,
+	}
+	multiIgnored := &model.Channel{
+		ID:     5,
+		Status: model.ChannelStatusEnabled,
+	}
+
+	filtered := filterChannels(
+		[]*model.Channel{nil, enabled, disabled, highError, ignored, multiIgnored, exactThreshold},
+		map[int64]float64{3: maxRetryErrorRate + 0.01, 6: maxRetryErrorRate},
+		maxRetryErrorRate,
+		map[int64]struct{}{4: {}},
+		map[int64]struct{}{5: {}},
+	)
+
+	gotIDs := make([]int, len(filtered))
+	for i, channel := range filtered {
+		gotIDs[i] = channel.ID
+	}
+
+	assert.Equal(t, []int{enabled.ID, exactThreshold.ID}, gotIDs)
+}
+
+func TestGetRetryChannelVisitsEveryEligibleChannelBeforeNextRound(t *testing.T) {
+	t.Parallel()
+
+	channels := []*model.Channel{
+		{ID: 1, Status: model.ChannelStatusEnabled},
+		{ID: 2, Status: model.ChannelStatusEnabled},
+		{ID: 3, Status: model.ChannelStatusEnabled},
+	}
+	state := &retryState{
+		meta:             meta.NewMeta(channels[0], mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels: channels,
+		failedChannelIDs: map[int64]struct{}{1: {}, 2: {}, 3: {}},
+	}
+	seen := make(map[int]struct{}, len(channels))
+
+	for len(seen) < len(channels) {
+		channel, err := getRetryChannel(context.Background(), state)
+		require.NoError(t, err)
+		require.NotNil(t, channel)
+		_, alreadySeen := seen[channel.ID]
+		assert.False(t, alreadySeen, "channel %d was selected twice in one round", channel.ID)
+		seen[channel.ID] = struct{}{}
+		state.failedChannelIDs[int64(channel.ID)] = struct{}{}
+	}
+
+	channel, err := getRetryChannel(context.Background(), state)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Empty(t, state.failedChannelIDs)
+}
+
+func TestFilterChannelsDisablesErrorRateFilterAtZero(t *testing.T) {
+	t.Parallel()
+
+	channels := []*model.Channel{
+		{ID: 1, Status: model.ChannelStatusEnabled},
+		{ID: 2, Status: model.ChannelStatusDisabled},
+	}
+
+	filtered := filterChannels(
+		channels,
+		map[int64]float64{1: 1},
+		0,
+	)
+
+	require.Len(t, filtered, 1)
+	assert.Equal(t, 1, filtered[0].ID)
+}
+
+func TestGetRetryChannelReturnsExhaustedWhenNoRoundCanBeReset(t *testing.T) {
+	t.Parallel()
+
+	channel := &model.Channel{
+		ID:     1,
+		Status: model.ChannelStatusDisabled,
+	}
+	state := &retryState{
+		meta:             meta.NewMeta(channel, mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels: []*model.Channel{channel},
+		failedChannelIDs: map[int64]struct{}{},
+	}
+
+	got, err := getRetryChannel(context.Background(), state)
+	require.ErrorIs(t, err, ErrChannelsExhausted)
+	assert.Nil(t, got)
+	assert.Empty(t, state.failedChannelIDs)
+}
+
+func TestGetRetryChannelReturnsExhaustedWhenRoundResetHasNoEligibleChannel(t *testing.T) {
+	t.Parallel()
+
+	channel := &model.Channel{
+		ID:     1,
+		Status: model.ChannelStatusEnabled,
+	}
+	state := &retryState{
+		meta:             meta.NewMeta(channel, mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels: []*model.Channel{channel},
+		failedChannelIDs: map[int64]struct{}{1: {}},
+		ignoreChannelIDs: map[int64]struct{}{1: {}},
+	}
+
+	got, err := getRetryChannel(context.Background(), state)
+	require.ErrorIs(t, err, ErrChannelsExhausted)
+	assert.Nil(t, got)
+	assert.Empty(t, state.failedChannelIDs)
+}
+
+func TestGetRetryChannelRoundResetPreservesBackoffState(t *testing.T) {
+	t.Parallel()
+
+	ch1 := &model.Channel{ID: 1, Status: model.ChannelStatusEnabled}
+	ch2 := &model.Channel{ID: 2, Status: model.ChannelStatusEnabled}
+	base := time.Unix(100, 0)
+	state := &retryState{
+		meta:             meta.NewMeta(ch1, mode.Responses, "gpt-5", model.ModelConfig{}),
+		migratedChannels: []*model.Channel{ch1, ch2},
+		failedChannelIDs: map[int64]struct{}{1: {}, 2: {}},
+		channelRetryInfo: map[int]channelRetryInfo{
+			1: {failures: 2, lastEndAt: base},
+		},
+	}
+
+	channel, err := getRetryChannel(context.Background(), state)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Empty(t, state.failedChannelIDs)
+	assert.Equal(t, channelRetryInfo{failures: 2, lastEndAt: base}, state.channelRetryInfo[1])
 }
 
 func TestGetPriorityWeight(t *testing.T) {

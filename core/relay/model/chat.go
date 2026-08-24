@@ -197,10 +197,13 @@ func (e OpenAIErrorResponse) ErrorCode() any {
 }
 
 type OpenAIError struct {
-	Code    any    `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
-	Type    string `json:"type,omitempty"`
-	Param   string `json:"param,omitempty"`
+	Code          any       `json:"code,omitempty"`
+	Message       string    `json:"message,omitempty"`
+	Type          string    `json:"type,omitempty"`
+	Param         string    `json:"param,omitempty"`
+	Value         any       `json:"value,omitempty"`
+	AllowedValues *[]string `json:"allowed_values,omitempty"`
+	Expected      string    `json:"expected,omitempty"`
 }
 
 func NewOpenAIError(statusCode int, err OpenAIError) adaptor.Error {

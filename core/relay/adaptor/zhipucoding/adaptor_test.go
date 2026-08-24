@@ -2,11 +2,15 @@
 package zhipucoding
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	coremodel "github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -20,6 +24,7 @@ func TestAdaptorSupportMode(t *testing.T) {
 		mode.Completions,
 		mode.Anthropic,
 		mode.Gemini,
+		mode.Responses,
 	}
 	for _, m := range supportedModes {
 		if !adaptor.SupportMode(&meta.Meta{Mode: m}) {
@@ -28,7 +33,11 @@ func TestAdaptorSupportMode(t *testing.T) {
 	}
 
 	unsupportedModes := []mode.Mode{
-		mode.Responses,
+		mode.ResponsesGet,
+		mode.ResponsesDelete,
+		mode.ResponsesCancel,
+		mode.ResponsesInputItems,
+		mode.ResponsesCompact,
 		mode.Embeddings,
 		mode.AudioSpeech,
 		mode.Rerank,
@@ -71,6 +80,11 @@ func TestAdaptorGetRequestURL(t *testing.T) {
 			mode: mode.Completions,
 			want: "https://open.bigmodel.cn/api/coding/paas/v4/completions",
 		},
+		{
+			name: "responses uses coding responses endpoint",
+			mode: mode.Responses,
+			want: "https://open.bigmodel.cn/api/v1/responses",
+		},
 	}
 
 	for _, tt := range tests {
@@ -105,17 +119,156 @@ func TestAdaptorGetRequestURL(t *testing.T) {
 	}
 }
 
-func TestAdaptorGetRequestURLUnsupportedResponses(t *testing.T) {
+func TestAdaptorGetRequestURLUnsupportedResponsesSubAPI(t *testing.T) {
 	adaptor := &Adaptor{}
 	m := meta.NewMeta(
 		&coremodel.Channel{BaseURL: "https://open.bigmodel.cn"},
-		mode.Responses,
+		mode.ResponsesGet,
 		"glm-5.1",
 		coremodel.ModelConfig{},
 	)
 
 	if _, err := adaptor.GetRequestURL(m, nil, nil); err == nil {
-		t.Fatal("expected Responses mode to be unsupported")
+		t.Fatal("expected ResponsesGet mode to be unsupported")
+	}
+}
+
+func TestAdaptorConvertRequestResponses(t *testing.T) {
+	adaptor := &Adaptor{}
+	m := meta.NewMeta(nil, mode.Responses, "glm-5.3", coremodel.ModelConfig{})
+
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/responses",
+		strings.NewReader(`{
+			"model":"model-alias",
+			"input":[{"role":"system","content":"be concise"}],
+			"stream":true
+		}`),
+	)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	result, err := adaptor.ConvertRequest(m, nil, req)
+	if err != nil {
+		t.Fatalf("ConvertRequest returned error: %v", err)
+	}
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("failed to read converted body: %v", err)
+	}
+
+	var payload struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+		Input  []struct {
+			Role string `json:"role"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to unmarshal converted body: %v", err)
+	}
+
+	if payload.Model != "glm-5.3" {
+		t.Fatalf("expected mapped model glm-5.3, got %s", payload.Model)
+	}
+
+	if !payload.Stream {
+		t.Fatal("expected stream to remain enabled")
+	}
+
+	if len(payload.Input) != 1 || payload.Input[0].Role != "developer" {
+		t.Fatalf("expected system input role to normalize to developer, got %#v", payload.Input)
+	}
+}
+
+func TestAdaptorDoResponseResponses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	adaptor := &Adaptor{}
+	m := meta.NewMeta(nil, mode.Responses, "glm-5.3", coremodel.ModelConfig{})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": {"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"resp_123",
+			"object":"response",
+			"status":"completed",
+			"model":"glm-5.3",
+			"output":[],
+			"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}
+		}`)),
+	}
+
+	result, relayErr := adaptor.DoResponse(m, nil, ctx, resp)
+	if relayErr != nil {
+		t.Fatalf("DoResponse returned error: %v", relayErr)
+	}
+
+	if result.UpstreamID != "resp_123" {
+		t.Fatalf("expected upstream response ID resp_123, got %s", result.UpstreamID)
+	}
+
+	if result.Usage.TotalTokens != 5 {
+		t.Fatalf("expected total token usage 5, got %d", result.Usage.TotalTokens)
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
+func TestAdaptorDoResponseResponsesStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	adaptor := &Adaptor{}
+	m := meta.NewMeta(nil, mode.Responses, "glm-5.3", coremodel.ModelConfig{})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/responses",
+		nil,
+	)
+	body := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_stream","object":"response","status":"in_progress","model":"glm-5.3","output":[],"store":false}}`,
+		"",
+		"event: response.completed",
+		`data: {"type":"response.completed","response":{"id":"resp_stream","object":"response","status":"completed","model":"glm-5.3","output":[],"store":false,"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`,
+		"",
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": {"text/event-stream"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+
+	result, relayErr := adaptor.DoResponse(m, nil, ctx, resp)
+	if relayErr != nil {
+		t.Fatalf("DoResponse returned error: %v", relayErr)
+	}
+
+	if result.UpstreamID != "resp_stream" {
+		t.Fatalf("expected upstream response ID resp_stream, got %s", result.UpstreamID)
+	}
+
+	if result.Usage.TotalTokens != 5 {
+		t.Fatalf("expected total token usage 5, got %d", result.Usage.TotalTokens)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"type":"response.completed"`) {
+		t.Fatalf("expected completed event, got %q", recorder.Body.String())
 	}
 }
 

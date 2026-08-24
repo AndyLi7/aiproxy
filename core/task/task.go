@@ -603,6 +603,7 @@ func completeAsyncUsage(
 		price,
 		model.PriceSelectionOptions{
 			DisableResolutionFuzzyMatch: info.DisableResolutionFuzzyMatch,
+			RequestAt:                   info.RequestAt,
 		},
 	)
 	selectedPrice := price.SelectConditionalPriceWithOptions(
@@ -610,9 +611,35 @@ func completeAsyncUsage(
 		usageContext,
 		model.PriceSelectionOptions{
 			DisableResolutionFuzzyMatch: info.DisableResolutionFuzzyMatch,
+			RequestAt:                   info.RequestAt,
 		},
 	)
 	selectedPrice.ConditionalPrices = nil
+
+	// Persist the finalized usage before notifying an external balance provider.
+	// The provider callback may immediately calculate its own settlement from this
+	// log, so charging first exposes an incomplete usage snapshot and leaves that
+	// settlement pending even though the customer debit succeeds.
+	if err := model.UpdateLogUsageByRequestID(
+		info.RequestID,
+		usage,
+		usageContext,
+		selectedPrice,
+		amount,
+		info.PricingCurrency,
+		info.PricingVersion,
+	); err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			notify.ErrorThrottle(
+				"asyncUsageUpdateLog",
+				time.Minute*5,
+				"update async usage log failed",
+				err.Error(),
+			)
+
+			return fmt.Errorf("update async usage log: %w", err)
+		}
+	}
 
 	if amount.UsedAmount > 0 && !info.BalanceConsumed {
 		charged, err := consumeAsyncUsageGroupBalance(ctx, info, amount.UsedAmount)
@@ -642,25 +669,6 @@ func completeAsyncUsage(
 			if err := model.MarkAsyncUsageBalanceConsumed(info); err != nil {
 				return fmt.Errorf("update async usage balance consumed: %w", err)
 			}
-		}
-	}
-
-	if err := model.UpdateLogUsageByRequestID(
-		info.RequestID,
-		usage,
-		usageContext,
-		selectedPrice,
-		amount,
-	); err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			notify.ErrorThrottle(
-				"asyncUsageUpdateLog",
-				time.Minute*5,
-				"update async usage log failed",
-				err.Error(),
-			)
-
-			return fmt.Errorf("update async usage log: %w", err)
 		}
 	}
 
@@ -763,6 +771,9 @@ func consumeAsyncUsageGroupBalance(
 	if err != nil {
 		return false, fmt.Errorf("get group: %w", err)
 	}
+
+	ctx = context.WithValue(ctx, balance.CtxRequestID, info.RequestID)
+	ctx = balance.ContextWithPricing(ctx, info.PricingCurrency, info.PricingVersion)
 
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
 	if err != nil {

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Plus, Trash2 } from 'lucide-react'
 import type { ModelPrice, ConditionalPrice, PriceCondition } from '@/types/model'
+import { TimezoneInput } from '@/components/common/TimezoneInput'
+import { DEFAULT_TIMEZONE } from '@/utils/timezone'
 import {
     Select,
     SelectContent,
@@ -72,6 +74,30 @@ function textToList(value: string): string[] | undefined {
     return values.length > 0 ? values : undefined
 }
 
+function timestampToDateTimeLocal(value?: number): string {
+    if (!value) return ''
+
+    const date = new Date(value * 1000)
+    const pad = (part: number) => String(part).padStart(2, '0')
+    return [
+        date.getFullYear(),
+        '-',
+        pad(date.getMonth() + 1),
+        '-',
+        pad(date.getDate()),
+        'T',
+        pad(date.getHours()),
+        ':',
+        pad(date.getMinutes()),
+    ].join('')
+}
+
+function dateTimeLocalToTimestamp(value: string): number | undefined {
+    if (!value) return undefined
+
+    return Math.floor(new Date(value).getTime() / 1000)
+}
+
 function ConditionFields({ condition, onChange }: {
     condition: PriceCondition
     onChange: (c: PriceCondition) => void
@@ -86,6 +112,15 @@ function ConditionFields({ condition, onChange }: {
     const parseBoolSelectValue = (value: string) => {
         if (value === anyBool) return undefined
         return value === 'true'
+    }
+    const updateDailyTime = (field: 'daily_start_time' | 'daily_end_time', value: string) => {
+        const otherField = field === 'daily_start_time' ? 'daily_end_time' : 'daily_start_time'
+        const hasDailyRange = Boolean(value || condition[otherField])
+        onChange({
+            ...condition,
+            [field]: value || undefined,
+            timezone: hasDailyRange ? (condition.timezone || DEFAULT_TIMEZONE) : undefined,
+        })
     }
 
     return (
@@ -212,22 +247,57 @@ function ConditionFields({ condition, onChange }: {
             <div className="space-y-1">
                 <Label className="text-xs">{t('group.price.startTime')}</Label>
                 <Input
-                    type="number"
-                    min={0}
-                    value={condition.start_time || ''}
+                    type="datetime-local"
+                    value={timestampToDateTimeLocal(condition.start_time)}
                     className="h-8 text-sm"
-                    onChange={(e) => onChange({ ...condition, start_time: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => onChange({
+                        ...condition,
+                        start_time: dateTimeLocalToTimestamp(e.target.value),
+                    })}
                 />
             </div>
             <div className="space-y-1">
                 <Label className="text-xs">{t('group.price.endTime')}</Label>
                 <Input
-                    type="number"
-                    min={0}
-                    value={condition.end_time || ''}
+                    type="datetime-local"
+                    value={timestampToDateTimeLocal(condition.end_time)}
                     className="h-8 text-sm"
-                    onChange={(e) => onChange({ ...condition, end_time: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => onChange({
+                        ...condition,
+                        end_time: dateTimeLocalToTimestamp(e.target.value),
+                    })}
                 />
+            </div>
+            <div className="space-y-1">
+                <Label className="text-xs">{t('group.price.dailyStartTime')}</Label>
+                <Input
+                    type="time"
+                    value={condition.daily_start_time || ''}
+                    className="h-8 text-sm"
+                    onChange={(e) => updateDailyTime('daily_start_time', e.target.value)}
+                />
+            </div>
+            <div className="space-y-1">
+                <Label className="text-xs">{t('group.price.dailyEndTime')}</Label>
+                <Input
+                    type="time"
+                    value={condition.daily_end_time || ''}
+                    className="h-8 text-sm"
+                    onChange={(e) => updateDailyTime('daily_end_time', e.target.value)}
+                />
+            </div>
+            <div className="space-y-1 col-span-2">
+                <Label className="text-xs">{t('group.price.timezone')}</Label>
+                <TimezoneInput
+                    value={condition.timezone || ''}
+                    onChange={(timezone) => onChange({
+                        ...condition,
+                        timezone: timezone || undefined,
+                    })}
+                    disabled={!condition.daily_start_time && !condition.daily_end_time}
+                    className="h-8 w-full text-sm"
+                />
+                <p className="text-xs text-muted-foreground">{t('group.price.dailyTimeHint')}</p>
             </div>
         </div>
     )

@@ -65,11 +65,17 @@ type Log struct {
 	TTFBMilliseconds ZeroNullInt64    `                                                                      json:"ttfb_milliseconds,omitempty"`
 	CreatedAt        time.Time        `gorm:"autoCreateTime;index"                                           json:"created_at"`
 	TokenName        string           `gorm:"size:32"                                                        json:"token_name,omitempty"`
+	Currency         string           `gorm:"size:16"                                                        json:"currency,omitempty"`
+	PricingVersion   string           `gorm:"size:128"                                                       json:"pricing_version,omitempty"`
+	RequestSource    string           `gorm:"size:16;index"                                                  json:"request_source,omitempty"`
+	FailureStage     FailureStage     `gorm:"size:32;index"                                                  json:"failure_stage,omitempty"`
+	ErrorCode        string           `gorm:"size:64;index"                                                  json:"error_code,omitempty"`
+	SafeError        string           `gorm:"type:text"                                                      json:"safe_error,omitempty"`
 	Endpoint         EmptyNullString  `gorm:"size:64"                                                        json:"endpoint,omitempty"`
 	Content          EmptyNullString  `gorm:"type:text"                                                      json:"content,omitempty"`
 	GroupID          string           `gorm:"size:64"                                                        json:"group,omitempty"`
 	Model            string           `gorm:"size:128"                                                       json:"model"`
-	RequestID        EmptyNullString  `gorm:"type:char(16);index:,where:request_id is not null"              json:"request_id"`
+	RequestID        EmptyNullString  `gorm:"type:varchar(128);index:,where:request_id is not null"          json:"request_id"`
 	UpstreamID       EmptyNullString  `gorm:"type:varchar(256)"                                              json:"upstream_id,omitempty"`
 	AsyncUsageStatus AsyncUsageStatus `                                                                      json:"async_usage_status,omitempty"`
 	ID               int              `gorm:"primaryKey"                                                     json:"id"`
@@ -372,9 +378,12 @@ func RecordConsumeLog(
 	amountDetail Amount,
 	user string,
 	metadata map[string]string,
+	currency string,
+	pricingVersion string,
 	promptCacheKey string,
 	upstreamID string,
 	asyncUsageStatus AsyncUsageStatus,
+	operationalFields OperationalFields,
 ) error {
 	if createAt.IsZero() {
 		createAt = time.Now()
@@ -418,9 +427,15 @@ func RecordConsumeLog(
 		Amount:           amountDetail,
 		User:             EmptyNullString(user),
 		Metadata:         metadata,
+		Currency:         currency,
+		PricingVersion:   pricingVersion,
 		PromptCacheKey:   EmptyNullString(promptCacheKey),
 		UpstreamID:       EmptyNullString(upstreamID),
 		AsyncUsageStatus: asyncUsageStatus,
+		RequestSource:    operationalFields.RequestSource,
+		FailureStage:     operationalFields.FailureStage,
+		ErrorCode:        operationalFields.ErrorCode,
+		SafeError:        operationalFields.SafeError,
 	}
 
 	return LogDB.Create(log).Error
@@ -475,6 +490,7 @@ func buildGetLogsQuery(
 	code int,
 	ip string,
 	user string,
+	operationalFilter OperationalLogFilter,
 ) *gorm.DB {
 	tx := LogDB.Model(&Log{})
 
@@ -534,7 +550,7 @@ func buildGetLogsQuery(
 		tx = tx.Where("user = ?", user)
 	}
 
-	return tx
+	return applyOperationalLogFilter(tx, operationalFilter)
 }
 
 func getLogs(
@@ -553,6 +569,7 @@ func getLogs(
 	withBody bool,
 	ip string,
 	user string,
+	operationalFilter OperationalLogFilter,
 	page int,
 	perPage int,
 ) (int64, []*Log, error) {
@@ -578,6 +595,7 @@ func getLogs(
 			code,
 			ip,
 			user,
+			operationalFilter,
 		).Count(&total).Error
 	})
 
@@ -596,6 +614,7 @@ func getLogs(
 			code,
 			ip,
 			user,
+			operationalFilter,
 		)
 		if withBody {
 			query = query.Preload("RequestDetail")
@@ -628,6 +647,7 @@ func GetLogs(
 	requestID string,
 	upstreamID string,
 	channelID int,
+	operationalFilter OperationalLogFilter,
 	order string,
 	codeType CodeType,
 	code int,
@@ -671,6 +691,7 @@ func GetLogs(
 			withBody,
 			ip,
 			user,
+			operationalFilter,
 			page,
 			perPage,
 		)
@@ -741,6 +762,7 @@ func GetGroupLogs(
 			withBody,
 			ip,
 			user,
+			OperationalLogFilter{},
 			page,
 			perPage,
 		)
@@ -810,6 +832,7 @@ func exportLogs(
 		code,
 		ip,
 		user,
+		OperationalLogFilter{},
 	)
 
 	if withBody {
@@ -858,6 +881,7 @@ func exportLogsRange(
 		code,
 		ip,
 		user,
+		OperationalLogFilter{},
 	)
 
 	if !startTimestamp.IsZero() {
@@ -1047,6 +1071,7 @@ func buildSearchLogsQuery(
 	code int,
 	ip string,
 	user string,
+	operationalFilter OperationalLogFilter,
 ) *gorm.DB {
 	tx := LogDB.Model(&Log{})
 
@@ -1163,7 +1188,7 @@ func buildSearchLogsQuery(
 		}
 	}
 
-	return tx
+	return applyOperationalLogFilter(tx, operationalFilter)
 }
 
 func searchLogs(
@@ -1183,6 +1208,7 @@ func searchLogs(
 	withBody bool,
 	ip string,
 	user string,
+	operationalFilter OperationalLogFilter,
 	page int,
 	perPage int,
 ) (int64, []*Log, error) {
@@ -1209,6 +1235,7 @@ func searchLogs(
 			code,
 			ip,
 			user,
+			operationalFilter,
 		).Count(&total).Error
 	})
 
@@ -1228,6 +1255,7 @@ func searchLogs(
 			code,
 			ip,
 			user,
+			operationalFilter,
 		)
 
 		if withBody {
@@ -1265,6 +1293,7 @@ func SearchLogs(
 	startTimestamp time.Time,
 	endTimestamp time.Time,
 	channelID int,
+	operationalFilter OperationalLogFilter,
 	order string,
 	codeType CodeType,
 	code int,
@@ -1303,6 +1332,7 @@ func SearchLogs(
 			withBody,
 			ip,
 			user,
+			operationalFilter,
 			page,
 			perPage,
 		)
@@ -1389,6 +1419,7 @@ func SearchGroupLogs(
 			withBody,
 			ip,
 			user,
+			OperationalLogFilter{},
 			page,
 			perPage,
 		)

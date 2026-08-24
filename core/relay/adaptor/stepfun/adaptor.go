@@ -44,7 +44,8 @@ func (a *Adaptor) GetBalance(_ *model.Channel) (float64, error) {
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "StepFun API\nOpenAI-compatible endpoint\nTTS requests use a default voice when not provided\nSupports Gemini-compatible request conversion",
-		Models: ModelList,
+		Readme:       "StepFun API\nOpenAI-compatible endpoint\nTTS requests use a default voice when not provided\nSupports Gemini-compatible request conversion",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }

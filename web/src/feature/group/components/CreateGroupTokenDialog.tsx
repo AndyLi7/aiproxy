@@ -43,15 +43,15 @@ export function CreateGroupTokenDialog({
     const [name, setName] = useState('')
     const [quota, setQuota] = useState<number | undefined>(undefined)
     const [periodQuota, setPeriodQuota] = useState<number | undefined>(undefined)
-    const [periodType, setPeriodType] = useState<string>('monthly')
+    const [periodType, setPeriodType] = useState<string | null>(null)
 
     const mutation = useMutation({
-        mutationFn: (data: { group: string; name: string; quota?: number; periodQuota?: number; periodType: string }) => {
+        mutationFn: (data: { group: string; name: string; quota?: number; periodQuota?: number; periodType: string | null }) => {
             return tokenApi.createGroupToken(data.group, {
                 name: data.name,
                 quota: data.quota,
-                period_quota: data.periodQuota,
-                period_type: data.periodQuota && data.periodQuota > 0 ? data.periodType : undefined,
+                period_quota: data.periodType ? data.periodQuota : undefined,
+                period_type: data.periodType || undefined,
             })
         },
         onSuccess: (data) => {
@@ -79,7 +79,7 @@ export function CreateGroupTokenDialog({
         setName('')
         setQuota(undefined)
         setPeriodQuota(undefined)
-        setPeriodType('monthly')
+        setPeriodType(null)
     }
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -138,6 +138,30 @@ export function CreateGroupTokenDialog({
                             <p className="text-xs text-muted-foreground">{t('token.quota.totalHelp')}</p>
                         </div>
 
+                        {/* Period Type */}
+                        <div className="space-y-2">
+                            <Label>{t('token.quota.periodType')}</Label>
+                            <Select
+                                value={periodType || 'none'}
+                                onValueChange={(value) => {
+                                    const nextPeriodType = value === 'none' ? null : value
+                                    setPeriodType(nextPeriodType)
+                                    if (!nextPeriodType) setPeriodQuota(undefined)
+                                }}
+                                disabled={mutation.isPending}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder={t('token.quota.selectPeriodType')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">{t('token.quota.none')}</SelectItem>
+                                    <SelectItem value="daily">{t('token.quota.daily')}</SelectItem>
+                                    <SelectItem value="weekly">{t('token.quota.weekly')}</SelectItem>
+                                    <SelectItem value="monthly">{t('token.quota.monthly')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
                         {/* Period Quota */}
                         <div className="space-y-2">
                             <Label htmlFor="token-period-quota">{t('token.quota.period')}</Label>
@@ -149,31 +173,11 @@ export function CreateGroupTokenDialog({
                                 placeholder={t('token.quota.periodPlaceholder')}
                                 value={periodQuota ?? ''}
                                 onChange={(e) => setPeriodQuota(e.target.value === '' ? undefined : parseFloat(e.target.value))}
-                                disabled={mutation.isPending}
+                                disabled={mutation.isPending || !periodType}
                             />
-                            <p className="text-xs text-muted-foreground">{t('token.quota.periodHelp')}</p>
-                        </div>
-
-                        {/* Period Type */}
-                        <div className="space-y-2">
-                            <Label>{t('token.quota.periodType')}</Label>
-                            <Select
-                                value={periodType}
-                                onValueChange={setPeriodType}
-                                disabled={mutation.isPending || !periodQuota}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder={t('token.quota.selectPeriodType')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="daily">{t('token.quota.daily')}</SelectItem>
-                                    <SelectItem value="weekly">{t('token.quota.weekly')}</SelectItem>
-                                    <SelectItem value="monthly">{t('token.quota.monthly')}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                            {!periodQuota && (
-                                <p className="text-xs text-muted-foreground">{t('token.quota.periodTypeDisabledHelp')}</p>
-                            )}
+                            <p className="text-xs text-muted-foreground">
+                                {periodType ? t('token.quota.periodHelp') : t('token.quota.periodQuotaDisabledHelp')}
+                            </p>
                         </div>
                     </div>
                     <DialogFooter>

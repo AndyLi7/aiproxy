@@ -16,6 +16,18 @@ func configSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"responses_first_event_timeout": map[string]any{
+				"type":        "integer",
+				"title":       "Responses first event timeout",
+				"description": "Maximum seconds to buffer initial Responses API lifecycle events while waiting for the first output or error event. Increase this value to allow late upstream errors to trigger channel retries.",
+				"default":     2,
+				"minimum":     0,
+			},
+			"map_reasoning_to_reasoning_content": map[string]any{
+				"type":        "boolean",
+				"title":       "Map reasoning To reasoning_content",
+				"description": "Rewrite upstream chat completion `reasoning` fields to `reasoning_content` in both streaming and non-streaming responses.",
+			},
 			"appid": map[string]any{
 				"type":        "string",
 				"title":       "AppID Header",

@@ -43,7 +43,8 @@ func (a *Adaptor) SupportMode(mt *meta.Meta) bool {
 	return m == mode.ChatCompletions ||
 		m == mode.Completions ||
 		m == mode.Anthropic ||
-		m == mode.Gemini
+		m == mode.Gemini ||
+		m == mode.Responses
 }
 
 func (a *Adaptor) SetupRequestHeader(
@@ -145,8 +146,9 @@ func (a *Adaptor) DoResponse(
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "DeepSeek API\nOpenAI-compatible chat and completions endpoints\nSupports native Anthropic-compatible endpoint and Gemini-compatible request conversion",
-		Models: ModelList,
+		Readme:       "DeepSeek API\nOpenAI-compatible chat and completions endpoints\nSupports native Responses API for deepseek-v4-flash\nSupports native Anthropic-compatible endpoint and Gemini-compatible request conversion",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       ModelList,
 	}
 }
 

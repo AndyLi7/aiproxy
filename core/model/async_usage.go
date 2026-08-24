@@ -30,7 +30,7 @@ var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
 	ID                          int              `gorm:"primaryKey"              json:"id"`
-	RequestID                   string           `gorm:"type:char(16);index"     json:"request_id"`
+	RequestID                   string           `gorm:"type:varchar(128);index" json:"request_id"`
 	RequestAt                   time.Time        `                               json:"request_at"`
 	Mode                        int              `gorm:"index"                   json:"mode"`
 	Model                       string           `gorm:"size:128"                json:"model"`
@@ -39,6 +39,8 @@ type AsyncUsageInfo struct {
 	GroupID                     string           `gorm:"size:64;index"           json:"group_id"`
 	TokenID                     int              `gorm:"index"                   json:"token_id"`
 	TokenName                   string           `gorm:"size:128"                json:"token_name,omitempty"`
+	PricingCurrency             string           `gorm:"size:16"                 json:"pricing_currency,omitempty"`
+	PricingVersion              string           `gorm:"size:128"                json:"pricing_version,omitempty"`
 	Price                       Price            `gorm:"embedded"                json:"price"`
 	UpstreamID                  string           `gorm:"type:varchar(256);index" json:"upstream_id"`
 	Status                      AsyncUsageStatus `gorm:"index;default:1"         json:"status"`
@@ -69,6 +71,33 @@ func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
 
 func GetPendingAsyncUsages(limit int) ([]*AsyncUsageInfo, error) {
 	return GetPendingAsyncUsagesDue(limit, time.Now())
+}
+
+func FindCompletedAsyncUsageByUpstreamID(
+	groupID string,
+	tokenID int,
+	upstreamID string,
+) (*AsyncUsageInfo, error) {
+	if LogDB == nil || groupID == "" || tokenID == 0 || upstreamID == "" {
+		return nil, nil
+	}
+
+	var info AsyncUsageInfo
+	err := LogDB.
+		Where("group_id = ?", groupID).
+		Where("token_id = ?", tokenID).
+		Where("upstream_id = ?", upstreamID).
+		Where("status = ?", int(AsyncUsageStatusCompleted)).
+		Order("updated_at DESC, id DESC").
+		First(&info).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &info, nil
 }
 
 func GetPendingAsyncUsagesDue(
@@ -344,6 +373,8 @@ func UpdateLogUsageByRequestID(
 	usageContext UsageContext,
 	price Price,
 	amount Amount,
+	currency string,
+	pricingVersion string,
 ) error {
 	var logEntry Log
 	if err := LogDB.Where("request_id = ?", requestID).First(&logEntry).Error; err != nil {
@@ -354,6 +385,8 @@ func UpdateLogUsageByRequestID(
 	logEntry.UsageContext = usageContext
 	logEntry.Price = price
 	logEntry.Amount = amount
+	logEntry.Currency = currency
+	logEntry.PricingVersion = pricingVersion
 	logEntry.AsyncUsageStatus = AsyncUsageStatusCompleted
 
 	return LogDB.Save(&logEntry).Error

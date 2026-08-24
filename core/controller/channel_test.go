@@ -2,15 +2,114 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/model"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAddChannelReturnsSanitizedCreatedChannelID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	previousDB := model.DB
+	previousLogDB := model.LogDB
+	previousUsingSQLite := common.UsingSQLite
+	previousDisableModelConfig := config.DisableModelConfig
+	testDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "channel.db"))
+	require.NoError(t, err)
+	model.DB = testDB
+	model.LogDB = nil
+	common.UsingSQLite = true
+	config.DisableModelConfig = true
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LogDB = previousLogDB
+		common.UsingSQLite = previousUsingSQLite
+		config.DisableModelConfig = previousDisableModelConfig
+	})
+	require.NoError(t, testDB.AutoMigrate(&model.Channel{}, &model.ModelConfig{}))
+
+	body := []byte(`{"name":"created-channel","key":"test-key","base_url":"https://example.invalid","proxy_url":"https://proxy.invalid","type":1,"status":1}`)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	AddChannel(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool           `json:"success"`
+		Data    map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Contains(t, response.Data, "id")
+	require.Positive(t, response.Data["id"])
+	require.Equal(t, "created-channel", response.Data["name"])
+	require.NotContains(t, response.Data, "key")
+	require.NotContains(t, response.Data, "base_url")
+	require.NotContains(t, response.Data, "proxy_url")
+}
+
+func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	previousDB := model.DB
+	previousLogDB := model.LogDB
+	previousUsingSQLite := common.UsingSQLite
+	previousDisableModelConfig := config.DisableModelConfig
+	testDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "channels.db"))
+	require.NoError(t, err)
+	model.DB = testDB
+	model.LogDB = nil
+	common.UsingSQLite = true
+	config.DisableModelConfig = true
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LogDB = previousLogDB
+		common.UsingSQLite = previousUsingSQLite
+		config.DisableModelConfig = previousDisableModelConfig
+	})
+	require.NoError(t, testDB.AutoMigrate(&model.Channel{}, &model.ModelConfig{}))
+
+	body := []byte(`[
+		{"name":"created-a","key":"secret-a","type":1,"status":1},
+		{"name":"created-b","key":"secret-b","type":1,"status":1}
+	]`)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channels/", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	AddChannels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool             `json:"success"`
+		Data    []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Len(t, response.Data, 2)
+	for _, channel := range response.Data {
+		require.Contains(t, channel, "id")
+		require.Positive(t, channel["id"])
+		require.NotContains(t, channel, "key")
+	}
+}
 
 func TestAddChannelRequestToChannelPreservesNewlinesInKey(t *testing.T) {
 	const key = "first-key\nsecond-key"

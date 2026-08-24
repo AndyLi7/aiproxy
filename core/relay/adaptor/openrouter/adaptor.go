@@ -46,13 +46,14 @@ func (a *Adaptor) DoResponse(
 
 		return openai.Handler(meta, c, resp, openai.ReasoningToReasoningContentPreHandler)
 	default:
-		return openai.DoResponse(meta, store, c, resp)
+		return a.Adaptor.DoResponse(meta, store, c, resp)
 	}
 }
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme: "OpenRouter OpenAI-compatible endpoint\nThe upstream `reasoning` field is normalized to `reasoning_content`\nAlso supports Gemini-compatible request conversion",
-		Models: openai.ModelList,
+		Readme:       "OpenRouter OpenAI-compatible endpoint\nThe upstream `reasoning` field is normalized to `reasoning_content`\nAlso supports Gemini-compatible request conversion",
+		ConfigSchema: openai.ConfigSchema(),
+		Models:       openai.ModelList,
 	}
 }

@@ -108,6 +108,14 @@ export function PriceDisplay({ price }: PriceDisplayProps) {
             )
         }
 
+        if (condition.daily_start_time || condition.daily_end_time) {
+            parts.push(
+                `${t('group.price.dailyTimeRange')}: ` +
+                `${condition.daily_start_time || '-'} - ${condition.daily_end_time || '-'} ` +
+                `(${condition.timezone || '-'})`
+            )
+        }
+
         return parts
     }
 

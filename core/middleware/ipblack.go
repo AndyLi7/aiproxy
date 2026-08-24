@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common/ipblack"
+	"github.com/labring/aiproxy/core/model"
 )
 
 func IPBlock(c *gin.Context) {
@@ -12,7 +13,7 @@ func IPBlock(c *gin.Context) {
 
 	isBlock := ipblack.GetIPIsBlockAnyWay(c.Request.Context(), ip)
 	if isBlock {
-		AbortLogWithMessage(c, http.StatusForbidden, "please try again later")
+		AbortOperationally(c, model.FailureStageRateLimit, http.StatusForbidden, "please try again later")
 		c.Abort()
 		return
 	}

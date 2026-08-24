@@ -594,16 +594,14 @@ export function ChannelForm({
                             >
                                 <span>{model}</span>
                                 {(() => {
-                                    const pair = getChannelModelMetric(runtimeMetrics, channelId, model)
-                                    const modelMetric = runtimeMetrics?.models?.[model]
-                                    if (!pair && !modelMetric) return null
-                                    const metric = pair || modelMetric
+                                    const metric = getChannelModelMetric(runtimeMetrics, channelId, model)
+                                    if (!metric) return null
                                     return (
                                         <span className="ml-2 inline-flex items-center gap-1 text-[10px]">
-                                            <span>RPM {metric?.rpm || 0}</span>
-                                            <span>TPM {metric?.tpm || 0}</span>
-                                            <span>ERR {formatPercent(metric?.error_rate)}</span>
-                                            {pair?.banned && (
+                                            <span>RPM {metric.rpm}</span>
+                                            <span>TPM {metric.tpm}</span>
+                                            <span>ERR {formatPercent(metric.error_rate)}</span>
+                                            {metric.banned && (
                                                 <span className="rounded bg-destructive/10 px-1 py-0.5 text-destructive">
                                                     {t('channel.temporarilyExcluded')}
                                                 </span>
@@ -854,9 +852,7 @@ export function ChannelForm({
                                                                         </div>
                                                                     )
                                                                 }
-                                                                const pair = getChannelModelMetric(runtimeMetrics, channelId, item)
-                                                                const modelMetric = runtimeMetrics?.models?.[item]
-                                                                const metric = pair || modelMetric
+                                                                const metric = getChannelModelMetric(runtimeMetrics, channelId, item)
                                                                 return (
                                                                     <div className="flex flex-wrap items-center gap-2">
                                                                         <span>{item}</span>
@@ -865,7 +861,7 @@ export function ChannelForm({
                                                                                 RPM {metric.rpm} · TPM {metric.tpm} · ERR {formatPercent(metric.error_rate)}
                                                                             </span>
                                                                         )}
-                                                                        {pair?.banned && (
+                                                                        {metric?.banned && (
                                                                             <span className="text-[10px] font-medium text-destructive">
                                                                                 {t('channel.highErrorRateExcluded')}
                                                                             </span>
@@ -874,9 +870,7 @@ export function ChannelForm({
                                                                 )
                                                             }}
                                                             handleSelectedItemDisplay={(item) => {
-                                                                const pair = getChannelModelMetric(runtimeMetrics, channelId, item)
-                                                                const modelMetric = runtimeMetrics?.models?.[item]
-                                                                const metric = pair || modelMetric
+                                                                const metric = getChannelModelMetric(runtimeMetrics, channelId, item)
                                                                 return (
                                                                     <div className="flex flex-wrap items-center gap-2">
                                                                         <span>{item}</span>
@@ -885,7 +879,7 @@ export function ChannelForm({
                                                                                 RPM {metric.rpm} · TPM {metric.tpm} · ERR {formatPercent(metric.error_rate)}
                                                                             </span>
                                                                         )}
-                                                                        {pair?.banned && (
+                                                                        {metric?.banned && (
                                                                             <span className="text-[10px] font-medium text-destructive">
                                                                                 {t('channel.highErrorRateExcluded')}
                                                                             </span>

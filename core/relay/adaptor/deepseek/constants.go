@@ -7,6 +7,22 @@ import (
 
 var ModelList = []model.ModelConfig{
 	{
+		Model: "deepseek-v4-flash",
+		Type:  mode.ChatCompletions,
+		Owner: model.ModelOwnerDeepSeek,
+		Price: model.Price{
+			InputPrice:  0.00014,
+			CachedPrice: 0.0000028,
+			OutputPrice: 0.00028,
+		},
+		Config: model.NewModelConfig(
+			model.WithModelConfigMaxContextTokens(1000000),
+			model.WithModelConfigMaxOutputTokens(384000),
+			model.WithModelConfigToolChoice(true),
+		),
+	},
+
+	{
 		Model: "deepseek-chat",
 		Type:  mode.ChatCompletions,
 		Owner: model.ModelOwnerDeepSeek,

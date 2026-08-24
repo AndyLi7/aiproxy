@@ -59,10 +59,12 @@ func (a *Adaptor) SupportMode(mt *meta.Meta) bool {
 		m == mode.Anthropic ||
 		m == mode.Gemini ||
 		m == mode.Responses ||
+		m == mode.ResponsesCompact ||
 		m == mode.ResponsesGet ||
 		m == mode.ResponsesDelete ||
 		m == mode.ResponsesCancel ||
-		m == mode.ResponsesInputItems
+		m == mode.ResponsesInputItems ||
+		m == mode.AlphaSearch
 }
 
 //nolint:gocyclo
@@ -74,8 +76,28 @@ func (a *Adaptor) GetRequestURL(
 	u := meta.Channel.BaseURL
 
 	switch meta.Mode {
+	case mode.AlphaSearch:
+		url, err := url.JoinPath(u, "/alpha/search")
+		if err != nil {
+			return adaptor.RequestURL{}, err
+		}
+
+		return adaptor.RequestURL{
+			Method: http.MethodPost,
+			URL:    url,
+		}, nil
 	case mode.Responses:
 		url, err := url.JoinPath(u, "/responses")
+		if err != nil {
+			return adaptor.RequestURL{}, err
+		}
+
+		return adaptor.RequestURL{
+			Method: http.MethodPost,
+			URL:    url,
+		}, nil
+	case mode.ResponsesCompact:
+		url, err := url.JoinPath(u, "/responses/compact")
 		if err != nil {
 			return adaptor.RequestURL{}, err
 		}
@@ -345,11 +367,40 @@ func (a *Adaptor) GetRequestURL(
 func (a *Adaptor) SetupRequestHeader(
 	meta *meta.Meta,
 	_ adaptor.Store,
-	_ *gin.Context,
+	c *gin.Context,
 	req *http.Request,
 ) error {
+	if c != nil && c.Request != nil {
+		for _, headerName := range openAIRequestHeaderWhitelist {
+			if value := c.Request.Header.Values(headerName); len(value) > 0 {
+				req.Header[http.CanonicalHeaderKey(headerName)] = append([]string(nil), value...)
+			}
+		}
+	}
+
+	if meta.Mode == mode.ResponsesCompact {
+		req.Header.Set("Accept", "application/json")
+	}
+
 	req.Header.Set("Authorization", "Bearer "+meta.Channel.Key)
+
 	return nil
+}
+
+var openAIRequestHeaderWhitelist = []string{
+	"Accept",
+	"Accept-Language",
+	"OpenAI-Beta",
+	"User-Agent",
+	"Originator",
+	"conversation_id",
+	"session_id",
+	"x-codex-beta-features",
+	"x-codex-installation-id",
+	"x-codex-turn-state",
+	"x-codex-turn-metadata",
+	"x-codex-window-id",
+	"x-openai-internal-codex-responses-lite",
 }
 
 func (a *Adaptor) ConvertRequest(
@@ -370,8 +421,12 @@ func ConvertRequest(
 	}
 
 	switch meta.Mode {
+	case mode.AlphaSearch:
+		return ConvertAlphaSearchRequest(meta, req)
 	case mode.Responses:
 		return ConvertResponseRequest(meta, req, patchOpenAIResponsesReasoningEffort(meta))
+	case mode.ResponsesCompact:
+		return ConvertResponseCompactRequest(meta, req)
 	case mode.ResponsesGet, mode.ResponsesDelete, mode.ResponsesCancel, mode.ResponsesInputItems:
 		// These endpoints don't need request conversion
 		return adaptor.ConvertResult{}, nil
@@ -434,20 +489,46 @@ func ConvertRequest(
 	}
 }
 
-//nolint:gocyclo
 func DoResponse(
 	meta *meta.Meta,
 	store adaptor.Store,
 	c *gin.Context,
 	resp *http.Response,
+	options ...DoResponseOptions,
+) (result adaptor.DoResponseResult, err adaptor.Error) {
+	responseOptions := defaultConfig().doResponseOptions()
+	if len(options) > 0 {
+		responseOptions = options[0]
+	}
+
+	return doResponse(meta, store, c, resp, responseOptions)
+}
+
+//nolint:gocyclo
+func doResponse(
+	meta *meta.Meta,
+	store adaptor.Store,
+	c *gin.Context,
+	resp *http.Response,
+	options DoResponseOptions,
 ) (result adaptor.DoResponseResult, err adaptor.Error) {
 	switch meta.Mode {
+	case mode.AlphaSearch:
+		result, err = AlphaSearchHandler(meta, c, resp)
 	case mode.Responses:
 		if utils.IsStreamResponse(resp) {
-			result, err = ResponseStreamHandler(meta, store, c, resp)
+			result, err = responseStreamHandler(
+				meta,
+				store,
+				c,
+				resp,
+				options.ResponsesFirstEventTimeout,
+			)
 		} else {
 			result, err = ResponseHandler(meta, store, c, resp)
 		}
+	case mode.ResponsesCompact:
+		result, err = CompactResponseHandler(meta, c, resp)
 	case mode.ResponsesGet:
 		result, err = GetResponseHandler(meta, c, resp)
 	case mode.ResponsesDelete:
@@ -588,13 +669,29 @@ func (a *Adaptor) DoResponse(
 	c *gin.Context,
 	resp *http.Response,
 ) (result adaptor.DoResponseResult, err adaptor.Error) {
-	return DoResponse(meta, store, c, resp)
+	options := defaultConfig().doResponseOptions()
+	if meta.Mode == mode.Responses && utils.IsStreamResponse(resp) {
+		var configErr error
+
+		cfg, configErr := a.loadConfig(meta)
+		if configErr != nil {
+			return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
+				configErr,
+				"load_channel_config_failed",
+				http.StatusInternalServerError,
+			)
+		}
+
+		options = cfg.doResponseOptions()
+	}
+
+	return DoResponse(meta, store, c, resp, options)
 }
 
 func (a *Adaptor) Metadata() adaptor.Metadata {
 	return adaptor.Metadata{
-		Readme:       "OpenAI native API\nSupports chat, completions, embeddings, moderations, image, audio, rerank, PDF parsing, video generation, and Responses API\nAlso supports Anthropic-compatible and Gemini-compatible request conversion on top of the OpenAI endpoint\nChannel config `map_reasoning_to_reasoning_content` rewrites upstream `reasoning` fields to `reasoning_content` in chat completion responses",
-		ConfigSchema: configSchema(),
+		Readme:       "OpenAI native API\nSupports chat, completions, embeddings, moderations, image, audio, rerank, PDF parsing, video generation, and Responses API\nAlso supports Anthropic-compatible and Gemini-compatible request conversion on top of the OpenAI endpoint\nChannel config `responses_first_event_timeout` sets the maximum seconds to wait for the first effective Responses stream event\nChannel config `map_reasoning_to_reasoning_content` rewrites upstream `reasoning` fields to `reasoning_content` in chat completion responses",
+		ConfigSchema: ConfigSchema(),
 		Models:       ModelList,
 	}
 }

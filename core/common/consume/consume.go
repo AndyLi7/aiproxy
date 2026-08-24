@@ -202,7 +202,8 @@ func checkNeedRecordConsume(code int, meta *meta.Meta) bool {
 		mode.ResponsesGet,
 		mode.ResponsesDelete,
 		mode.ResponsesCancel,
-		mode.ResponsesInputItems:
+		mode.ResponsesInputItems,
+		mode.AlphaSearch:
 		return code != http.StatusOK
 	case mode.DoubaoVideoTasksDelete:
 		return code != http.StatusOK && code != http.StatusNoContent
@@ -249,6 +250,8 @@ func CalculateAmountDetailWithOptions(
 	modelPrice model.Price,
 	options model.PriceSelectionOptions,
 ) model.Amount {
+	modelPrice = modelPrice.SelectConditionalPriceWithOptions(usage, usageContext, options)
+
 	if modelPrice.PerRequestPrice != 0 {
 		if code != http.StatusOK {
 			return model.Amount{}
@@ -258,8 +261,6 @@ func CalculateAmountDetailWithOptions(
 			UsedAmount: float64(modelPrice.PerRequestPrice),
 		}
 	}
-
-	modelPrice = modelPrice.SelectConditionalPriceWithOptions(usage, usageContext, options)
 
 	inputTokens := usage.InputTokens
 	if modelPrice.ImageInputPrice > 0 {
@@ -400,6 +401,7 @@ func priceSelectionOptions(meta *meta.Meta) model.PriceSelectionOptions {
 
 	return model.PriceSelectionOptions{
 		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+		RequestAt:                   meta.RequestAt,
 	}
 }
 
@@ -409,6 +411,11 @@ func processGroupConsume(
 	postGroupConsumer balance.PostGroupConsumer,
 	meta *meta.Meta,
 ) float64 {
+	ctx = context.WithValue(ctx, balance.CtxRequestID, meta.RequestID)
+	if currency, version, ok := meta.ModelConfig.RetailPricingMetadata(); ok {
+		ctx = balance.ContextWithPricing(ctx, currency, version)
+	}
+
 	consumedAmount, err := postGroupConsumer.PostGroupConsume(ctx, meta.Token.Name, amount)
 	if err != nil {
 		log.Error("error consuming token remain amount: " + err.Error())

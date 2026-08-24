@@ -19,6 +19,9 @@ export interface PriceCondition {
     output_token_max?: number
     start_time?: number
     end_time?: number
+    daily_start_time?: string
+    daily_end_time?: string
+    timezone?: string
     resolution?: string[]
     quality?: string[]
     service_tier?: '' | 'auto' | 'default' | 'flex' | 'scale' | 'priority'

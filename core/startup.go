@@ -63,6 +63,21 @@ func initializePprof(pprofPort int) {
 }
 
 func initializeBalance() error {
+	externalURL := os.Getenv("EXTERNAL_BALANCE_URL")
+	externalKey := os.Getenv("EXTERNAL_BALANCE_KEY")
+
+	if externalURL != "" || externalKey != "" {
+		if externalURL == "" || externalKey == "" {
+			return errors.New(
+				"EXTERNAL_BALANCE_URL and EXTERNAL_BALANCE_KEY must both be set to enable the external balance backend",
+			)
+		}
+
+		log.Info("EXTERNAL_BALANCE_URL is set, balance will use the external HTTP backend")
+
+		return balance.InitExternal(externalURL, externalKey)
+	}
+
 	sealosJwtKey := os.Getenv("SEALOS_JWT_KEY")
 	if sealosJwtKey == "" {
 		log.Info("SEALOS_JWT_KEY is not set, balance will not be enabled")

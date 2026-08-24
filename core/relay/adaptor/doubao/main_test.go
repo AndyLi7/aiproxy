@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1173,6 +1174,53 @@ func TestAdaptorConvertRequestVideosIgnoresJobOnlyDuration(t *testing.T) {
 	}
 }
 
+func TestAdaptorConvertRequestVideosMapsSemanticDimensions(t *testing.T) {
+	adaptor := &Adaptor{}
+	m := meta.NewMeta(
+		nil,
+		mode.Videos,
+		"doubao-seedance-2-0-260128",
+		coremodel.ModelConfig{},
+	)
+
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		strings.NewReader(`{
+			"model": "alias-video",
+			"prompt": "Animate a calm ocean",
+			"resolution": "720p",
+			"aspect_ratio": "9:16",
+			"seconds": 5
+		}`),
+	)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	result, err := adaptor.ConvertRequest(m, nil, req)
+	if err != nil {
+		t.Fatalf("ConvertRequest returned error: %v", err)
+	}
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("failed to read converted body: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to unmarshal converted body %s: %v", string(body), err)
+	}
+	if payload["resolution"] != "720p" {
+		t.Fatalf("expected resolution 720p, got %#v", payload["resolution"])
+	}
+	if payload["ratio"] != "9:16" {
+		t.Fatalf("expected ratio 9:16, got %#v", payload["ratio"])
+	}
+}
+
 func TestAdaptorConvertRequestVideoGenerationIgnoresVideosSeconds(t *testing.T) {
 	adaptor := &Adaptor{}
 	m := meta.NewMeta(
@@ -1651,6 +1699,8 @@ func TestAdaptorDoResponseVideoStatusRestoresOpenAIFieldsFromStore(t *testing.T)
 		video.Prompt != "A stored prompt" ||
 		video.Seconds != 6 ||
 		video.Size != "720x1280" ||
+		video.Resolution != "720p" ||
+		video.AspectRatio != "9:16" ||
 		video.Progress != 100 {
 		t.Fatalf("expected OpenAI video response with stored metadata, got %#v", video)
 	}
@@ -1659,6 +1709,124 @@ func TestAdaptorDoResponseVideoStatusRestoresOpenAIFieldsFromStore(t *testing.T)
 		result.UsageContext.Resolution != "720x1280" ||
 		result.UsageContext.NativeResolution != "720p" {
 		t.Fatalf("unexpected status result: %#v", result)
+	}
+}
+
+func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	previousLogDB := coremodel.LogDB
+	db, err := coremodel.OpenSQLite(filepath.Join(t.TempDir(), "video-status-billing.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	if err := db.AutoMigrate(&coremodel.AsyncUsageInfo{}); err != nil {
+		t.Fatalf("migrate async usage: %v", err)
+	}
+	coremodel.LogDB = db
+	t.Cleanup(func() {
+		coremodel.LogDB = previousLogDB
+		sqlDB, dbErr := db.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	settled := coremodel.AsyncUsageInfo{
+		RequestID:       "request-123",
+		UpstreamID:      "task-public-123",
+		GroupID:         "group-1",
+		TokenID:         7,
+		Status:          coremodel.AsyncUsageStatusCompleted,
+		PricingCurrency: "USD",
+		PricingVersion:  "retail-v1",
+		Usage: coremodel.Usage{
+			OutputTokens: coremodel.ZeroNullInt64(19845),
+			TotalTokens:  coremodel.ZeroNullInt64(19845),
+		},
+		Amount: coremodel.Amount{UsedAmount: 0.043981},
+	}
+	if err := db.Create(&settled).Error; err != nil {
+		t.Fatalf("create settled async usage: %v", err)
+	}
+
+	store := &doubaoTestStore{saved: []adaptor.StoreCache{{
+		ID:       coremodel.VideoGenerationStoreID("video-123"),
+		Metadata: `{"prompt":"A stored prompt","resolution":"480p","ratio":"16:9","duration":5}`,
+	}}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	m := meta.NewMeta(
+		&coremodel.Channel{ID: 9},
+		mode.VideosGet,
+		"doubao-seedance-2-0-260128",
+		coremodel.ModelConfig{},
+		meta.WithVideoID("task-public-123"),
+	)
+	m.Group.ID = "group-1"
+	m.Token.ID = 7
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"video-123",
+			"status":"succeeded",
+			"content":{"video_url":"https://example.com/video.mp4"}
+		}`)),
+	}
+	if _, adaptorErr := (&Adaptor{}).DoResponse(m, store, ctx, resp); adaptorErr != nil {
+		t.Fatalf("DoResponse returned error: %v", adaptorErr)
+	}
+
+	var video struct {
+		Cost           *float64         `json:"cost"`
+		Usage          *coremodel.Usage `json:"usage"`
+		Currency       string           `json:"currency"`
+		PricingVersion string           `json:"pricing_version"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &video); err != nil {
+		t.Fatalf("unmarshal video response %s: %v", recorder.Body.String(), err)
+	}
+	if video.Cost == nil || *video.Cost != 0.043981 {
+		t.Fatalf("expected settled retail cost, got %#v", video.Cost)
+	}
+	if video.Usage == nil || video.Usage.TotalTokens != 19845 {
+		t.Fatalf("expected settled usage, got %#v", video.Usage)
+	}
+	if video.Currency != "USD" || video.PricingVersion != "retail-v1" {
+		t.Fatalf("expected explicit retail pricing metadata, got %#v", video)
+	}
+
+	foreignRecorder := httptest.NewRecorder()
+	foreignCtx, _ := gin.CreateTestContext(foreignRecorder)
+	m.Token.ID = 8
+	foreignResp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"video-123",
+			"status":"succeeded",
+			"content":{"video_url":"https://example.com/video.mp4"}
+		}`)),
+	}
+	if _, adaptorErr := (&Adaptor{}).DoResponse(m, store, foreignCtx, foreignResp); adaptorErr != nil {
+		t.Fatalf("foreign DoResponse returned error: %v", adaptorErr)
+	}
+
+	var foreignVideo struct {
+		Cost  *float64         `json:"cost"`
+		Usage *coremodel.Usage `json:"usage"`
+	}
+	if err := json.Unmarshal(foreignRecorder.Body.Bytes(), &foreignVideo); err != nil {
+		t.Fatalf(
+			"unmarshal foreign video response %s: %v",
+			foreignRecorder.Body.String(),
+			err,
+		)
+	}
+	if foreignVideo.Cost != nil || foreignVideo.Usage != nil {
+		t.Fatalf("must not expose another token's settlement, got %#v", foreignVideo)
 	}
 }
 

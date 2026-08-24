@@ -363,9 +363,12 @@ func BatchRecordLogs(
 	amount Amount,
 	user string,
 	metadata map[string]string,
+	currency string,
+	pricingVersion string,
 	promptCacheKey string,
 	upstreamID string,
 	asyncUsageStatus AsyncUsageStatus,
+	operationalFields OperationalFields,
 	summaryServiceTier string,
 	summaryClaudeLongContext bool,
 ) (err error) {
@@ -405,9 +408,12 @@ func BatchRecordLogs(
 				amount,
 				user,
 				metadata,
+				currency,
+				pricingVersion,
 				promptCacheKey,
 				upstreamID,
 				asyncUsageStatus,
+				operationalFields,
 			)
 		}
 	} else {

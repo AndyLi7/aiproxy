@@ -30,6 +30,19 @@ const (
 	doubaoVideoTTL          = 7 * 24 * time.Hour
 )
 
+var doubaoVideoContentRetryDelays = []time.Duration{
+	200 * time.Millisecond,
+	500 * time.Millisecond,
+	time.Second,
+	2 * time.Second,
+}
+
+type doubaoVideoContentFetchFunc func(
+	context.Context,
+	*meta.Meta,
+	string,
+) (*http.Response, error)
+
 type doubaoVideoRequest struct {
 	Model                 string               `json:"model,omitempty"`
 	Content               []doubaoVideoContent `json:"content,omitempty"`
@@ -65,6 +78,7 @@ type doubaoOpenAIVideoRequest struct {
 	SafetyIdentifier      string                     `json:"safety_identifier,omitempty"`
 	Resolution            string                     `json:"resolution,omitempty"`
 	Ratio                 string                     `json:"ratio,omitempty"`
+	AspectRatio           string                     `json:"aspect_ratio,omitempty"`
 	Size                  string                     `json:"size,omitempty"`
 	Seconds               doubaoFlexibleInt          `json:"seconds,omitempty"`
 	Seed                  any                        `json:"seed,omitempty"`
@@ -506,6 +520,7 @@ func parseDoubaoJSONOpenAIVideoCommonRequest(
 			doubaoVideoResolutionFromSize(size),
 		),
 		Ratio: firstNonEmptyString(
+			raw.AspectRatio,
 			raw.Ratio,
 			ratioFromSize(size),
 		),
@@ -584,6 +599,7 @@ func parseDoubaoMultipartOpenAIVideoCommonRequest(
 			doubaoVideoResolutionFromSize(size),
 		),
 		Ratio: firstNonEmptyString(
+			req.PostFormValue("aspect_ratio"),
 			req.PostFormValue("ratio"),
 			ratioFromSize(size),
 		),
@@ -1101,29 +1117,75 @@ func VideosStatusHandler(
 		)
 	}
 
-	if response.ID == "" {
-		response.ID = meta.VideoID
+	// The public handle is the id we returned at create time and keyed the store
+	// row by — it is the only id the client holds. Upstream may report a DIFFERENT
+	// id here: an aggregator channel mints its own create handle and then echoes
+	// the origin provider's task id in the status body. That id is internal — it
+	// is not a store key, so handing it to the client gives out a handle whose
+	// next poll resolves to nothing. Keep the public handle on every field the
+	// client or the store sees; the upstream id only goes to the log.
+	upstreamID := response.ID
+
+	publicID := meta.VideoID
+	if publicID == "" {
+		publicID = upstreamID
 	}
+
+	// Diagnostic only — the divergence is handled, and it repeats on every poll
+	// of every task, so it must not compete with real signal at warn level.
+	if upstreamID != "" && upstreamID != publicID && c.Request != nil {
+		common.GetLogger(c).Debugf(
+			"upstream reported video id %q for public id %q, keeping the public id",
+			upstreamID,
+			publicID,
+		)
+	}
+
+	response.ID = publicID
 
 	applyStoredDoubaoVideoMetadata(
 		meta,
 		store,
-		coremodel.VideoGenerationStoreID(response.ID),
+		coremodel.VideoGenerationStoreID(publicID),
 		&response,
 	)
 
 	expiresAt := doubaoVideoExpiresAt(response)
 	if response.Content.VideoURL != "" || response.Content.FileURL != "" {
-		if err := saveDoubaoVideoStore(meta, store, response.ID, expiresAt); err != nil {
+		if err := saveDoubaoVideoStore(meta, store, publicID, expiresAt); err != nil {
 			common.GetLogger(c).Errorf("save doubao video store failed: %v", err)
+		}
+	}
+
+	video := buildDoubaoVideo(meta, publicID, &response)
+	if video.Status == relaymodel.VideoStatusCompleted {
+		settled, err := coremodel.FindCompletedAsyncUsageByUpstreamID(
+			meta.Group.ID,
+			meta.Token.ID,
+			meta.VideoID,
+		)
+		if err != nil {
+			common.GetLogger(c).Errorf("find settled video usage failed: %v", err)
+		} else if settled != nil {
+			usage := settled.Usage
+			video.Usage = &usage
+			if settled.PricingCurrency != "" && settled.PricingVersion != "" {
+				cost := settled.Amount.UsedAmount
+				video.Cost = &cost
+				video.Currency = settled.PricingCurrency
+				video.PricingVersion = settled.PricingVersion
+			}
 		}
 	}
 
 	return writeDoubaoVideoObject(
 		c,
-		buildDoubaoVideo(meta, response.ID, &response),
+		video,
 		adaptor.DoResponseResult{
-			UpstreamID: response.ID,
+			// The create path records the async usage row under the public
+			// handle; stay consistent so the log and the settlement lookup
+			// above agree on one id per task.
+			UpstreamID: publicID,
 			UsageContext: doubaoVideoUsageContext(
 				&response,
 			).WithFallback(doubaoVideoRequestUsageContext(meta)),
@@ -1175,19 +1237,33 @@ func fetchDoubaoVideoContentHandler(
 		)
 	}
 
-	videoResp, err := fetchDoubaoVideoContent(c.Request.Context(), meta, videoURL)
+	videoResp, err := fetchDoubaoVideoContentWithRetry(
+		c.Request.Context(),
+		meta,
+		videoURL,
+		fetchDoubaoVideoContent,
+		doubaoVideoContentRetryDelays,
+	)
 	if err != nil {
+		c.Header("Retry-After", "2")
+
 		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIVideoError(
 			err,
-			http.StatusInternalServerError,
+			http.StatusServiceUnavailable,
 		)
 	}
 	defer videoResp.Body.Close()
 
 	if videoResp.StatusCode != http.StatusOK {
+		status := http.StatusBadGateway
+		if isRetryableDoubaoVideoContentStatus(videoResp.StatusCode) {
+			c.Header("Retry-After", "2")
+			status = http.StatusServiceUnavailable
+		}
+
 		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIVideoErrorWithMessage(
 			fmt.Sprintf("unexpected video status code: %d", videoResp.StatusCode),
-			http.StatusInternalServerError,
+			status,
 		)
 	}
 
@@ -1263,14 +1339,17 @@ func buildDoubaoVideo(
 	metadata := doubaoVideoMetadataFromMeta(meta)
 	resolution, ratio := doubaoVideoResolutionAndRatio(response, metadata)
 	video := relaymodel.Video{
-		ID:        id,
-		Object:    relaymodel.VideoObject,
-		CreatedAt: firstPositiveInt64(response.CreatedAt, now),
-		Status:    doubaoVideoStatus(response.Status),
-		Model:     meta.OriginModel,
-		Prompt:    metadata.Prompt,
-		Seconds:   firstPositiveInt(response.Duration, metadata.Duration),
-		Size:      doubaoVideoSize(resolution, ratio),
+		ID:            id,
+		Object:        relaymodel.VideoObject,
+		CreatedAt:     firstPositiveInt64(response.CreatedAt, now),
+		Status:        doubaoVideoStatus(response.Status),
+		Model:         meta.OriginModel,
+		Prompt:        metadata.Prompt,
+		Seconds:       firstPositiveInt(response.Duration, metadata.Duration),
+		Size:          doubaoVideoSize(resolution, ratio),
+		Resolution:    resolution,
+		AspectRatio:   ratio,
+		GenerateAudio: response.GenerateAudio,
 	}
 
 	switch video.Status {
@@ -1373,12 +1452,88 @@ func fetchDoubaoVideoContent(
 		skipTLSVerify = meta.Channel.SkipTLSVerify
 	}
 
-	client, err := relayutils.LoadHTTPClientWithTLSConfigE(0, proxyURL, skipTLSVerify)
+	policy := relayutils.OutboundPolicyAllowPrivate
+	if meta != nil {
+		policy = relayutils.OutboundPolicyFromConfigs(meta.ChannelConfigs)
+	}
+
+	client, err := relayutils.LoadHTTPClientWithOutboundPolicyE(
+		0,
+		proxyURL,
+		skipTLSVerify,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	return client.Do(req)
+}
+
+func fetchDoubaoVideoContentWithRetry(
+	ctx context.Context,
+	meta *meta.Meta,
+	videoURL string,
+	fetch doubaoVideoContentFetchFunc,
+	delays []time.Duration,
+) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 0; ; attempt++ {
+		response, err := fetch(ctx, meta, videoURL)
+		if err == nil && response != nil &&
+			!isRetryableDoubaoVideoContentStatus(response.StatusCode) {
+			return response, nil
+		}
+		if err == nil && response != nil && attempt >= len(delays) {
+			return response, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else if response != nil {
+			drainAndCloseDoubaoVideoContentResponse(response)
+		}
+
+		if attempt >= len(delays) {
+			return nil, lastErr
+		}
+
+		timer := time.NewTimer(delays[attempt])
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isRetryableDoubaoVideoContentStatus(status int) bool {
+	switch status {
+	case http.StatusNotFound,
+		http.StatusConflict,
+		http.StatusTooEarly,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func drainAndCloseDoubaoVideoContentResponse(response *http.Response) {
+	if response == nil || response.Body == nil {
+		return
+	}
+
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	_ = response.Body.Close()
 }
 
 func saveDoubaoVideoJobStore(
@@ -1582,12 +1737,23 @@ func doubaoVideoOutputAudioFromRequest(request doubaoVideoRequest) *bool {
 	return new(true)
 }
 
+// doubaoVideoExpiresAt decides how long a task stays RETRIEVABLE through this
+// gateway, which is a retention promise we make to the customer — not the same
+// thing as Ark's execution_expires_after (48h), which only says how long Ark
+// keeps executing it. Let the upstream value EXTEND retention, never shorten it:
+// the store row is the only key to a video the customer already paid for, and
+// the reaper deletes expired rows outright.
 func doubaoVideoExpiresAt(response relaymodel.DoubaoVideoTaskResponse) time.Time {
+	retention := time.Now().Add(doubaoVideoTTL)
+
 	if response.CreatedAt > 0 && response.ExecutionExpiresAfter > 0 {
-		return time.Unix(response.CreatedAt+response.ExecutionExpiresAfter, 0)
+		upstream := time.Unix(response.CreatedAt+response.ExecutionExpiresAfter, 0)
+		if upstream.After(retention) {
+			return upstream
+		}
 	}
 
-	return time.Now().Add(doubaoVideoTTL)
+	return retention
 }
 
 func doubaoVideoDimensions(resolution, ratio string) (int, int) {
@@ -1605,7 +1771,7 @@ func doubaoVideoDimensions(resolution, ratio string) (int, int) {
 
 	switch strings.TrimSpace(ratio) {
 	case "9:16":
-		return height, height * 16 / 9
+		return height, (height*16 + 8) / 9
 	case "1:1":
 		return height, height
 	case "4:3":
@@ -1615,7 +1781,7 @@ func doubaoVideoDimensions(resolution, ratio string) (int, int) {
 	case "21:9":
 		return height * 21 / 9, height
 	default:
-		return height * 16 / 9, height
+		return (height*16 + 8) / 9, height
 	}
 }
 

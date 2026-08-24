@@ -21,6 +21,11 @@ func SetAPIRouter(router *gin.Engine) {
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)
 	{
+		videoTasksRoute := apiRouter.Group("/video_tasks")
+		{
+			videoTasksRoute.GET("/:group", controller.GetGroupVideoTasks)
+		}
+
 		modelsRoute := apiRouter.Group("/models")
 		{
 			modelsRoute.GET("/builtin", controller.BuiltinModels)

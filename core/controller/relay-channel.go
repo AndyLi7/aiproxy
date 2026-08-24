@@ -259,36 +259,58 @@ func pickChannel(
 	channels []*model.Channel,
 	errorRates map[int64]float64,
 ) (*model.Channel, error) {
+	return pickChannelWithRandom(channels, errorRates, rand.Float64)
+}
+
+func pickChannelWithRandom(
+	channels []*model.Channel,
+	errorRates map[int64]float64,
+	random func() float64,
+) (*model.Channel, error) {
 	if len(channels) == 0 {
 		return nil, ErrChannelsExhausted
 	}
 
-	if len(channels) == 1 {
-		return channels[0], nil
+	highestPriority := channels[0].GetPriority()
+	for _, channel := range channels[1:] {
+		if priority := channel.GetPriority(); priority > highestPriority {
+			highestPriority = priority
+		}
+	}
+
+	candidates := make([]*model.Channel, 0, len(channels))
+	for _, channel := range channels {
+		if channel.GetPriority() == highestPriority {
+			candidates = append(candidates, channel)
+		}
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0], nil
 	}
 
 	var totalWeight float64
 
-	cachedWeights := make([]float64, len(channels))
-	for i, ch := range channels {
+	cachedWeights := make([]float64, len(candidates))
+	for i, ch := range candidates {
 		weight := getPriorityWeight(ch, getChannelErrorRate(errorRates, int64(ch.ID)))
 		totalWeight += weight
 		cachedWeights[i] = weight
 	}
 
 	if totalWeight == 0 {
-		return channels[rand.IntN(len(channels))], nil
+		return candidates[int(random()*float64(len(candidates)))], nil
 	}
 
-	r := rand.Float64() * totalWeight
-	for i, ch := range channels {
+	r := random() * totalWeight
+	for i, ch := range candidates {
 		r -= cachedWeights[i]
 		if r < 0 {
 			return ch, nil
 		}
 	}
 
-	return channels[rand.IntN(len(channels))], nil
+	return candidates[len(candidates)-1], nil
 }
 
 func getChannelWithFallback(

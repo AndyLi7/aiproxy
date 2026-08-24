@@ -57,7 +57,7 @@ func (c *BuiltinModelConfig) MarshalJSON() ([]byte, error) {
 }
 
 func SortBuiltinModelConfigsFunc(i, j BuiltinModelConfig) int {
-	return model.SortModelConfigsFunc((model.ModelConfig)(i), (model.ModelConfig)(j))
+	return model.SortModelConfigsFunc(model.ModelConfig(i), model.ModelConfig(j))
 }
 
 var (
@@ -106,7 +106,7 @@ func init() {
 					Root:       _model.Model,
 					Parent:     nil,
 				}
-				builtinModels = append(builtinModels, (BuiltinModelConfig)(_model))
+				builtinModels = append(builtinModels, BuiltinModelConfig(_model))
 			} else if v.OwnedBy != string(_model.Owner) {
 				log.Fatalf(
 					"model %s owner mismatch, expect %s, actual %s",
@@ -116,7 +116,7 @@ func init() {
 				)
 			}
 
-			builtinChannelType2Models[i][idx] = (BuiltinModelConfig)(_model)
+			builtinChannelType2Models[i][idx] = BuiltinModelConfig(_model)
 		}
 	}
 

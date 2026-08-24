@@ -298,6 +298,36 @@ func TestCalculateAmount(t *testing.T) {
 	}
 }
 
+func TestCalculateAmountWithDailyConditionalPerRequestPrice(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	price := model.Price{
+		PerRequestPrice: 1,
+		ConditionalPrices: []model.ConditionalPrice{
+			{
+				Condition: model.PriceCondition{
+					DailyStartTime: "09:00",
+					DailyEndTime:   "12:00",
+					Timezone:       "Asia/Shanghai",
+				},
+				Price: model.Price{PerRequestPrice: 2},
+			},
+		},
+	}
+
+	amount := consume.CalculateAmountWithOptions(
+		http.StatusOK,
+		model.Usage{},
+		model.UsageContext{},
+		price,
+		model.PriceSelectionOptions{
+			RequestAt: time.Date(2026, time.July, 20, 10, 0, 0, 0, location),
+		},
+	)
+	require.Equal(t, 2.0, amount)
+}
+
 func TestCalculateAmountWithConditionalPricing(t *testing.T) {
 	tests := []struct {
 		name        string

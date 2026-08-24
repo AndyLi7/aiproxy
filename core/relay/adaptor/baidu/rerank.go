@@ -54,13 +54,15 @@ func RerankHandler(
 
 	err = sonic.Unmarshal(respBody, &respMap)
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIError(
+			err,
+			"unmarshal_response_body_failed",
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage: reRankResp.Usage.ToModelUsage(),
-			}, relaymodel.WrapperOpenAIError(
-				err,
-				"unmarshal_response_body_failed",
-				http.StatusInternalServerError,
-			)
+			Usage: reRankResp.Usage.ToModelUsage(),
+		}, responseErr
 	}
 
 	delete(respMap, "model")
@@ -76,13 +78,15 @@ func RerankHandler(
 
 	jsonData, err := sonic.Marshal(respMap)
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIError(
+			err,
+			"marshal_response_body_failed",
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage: reRankResp.Usage.ToModelUsage(),
-			}, relaymodel.WrapperOpenAIError(
-				err,
-				"marshal_response_body_failed",
-				http.StatusInternalServerError,
-			)
+			Usage: reRankResp.Usage.ToModelUsage(),
+		}, responseErr
 	}
 
 	c.Writer.Header().Set("Content-Type", "application/json")

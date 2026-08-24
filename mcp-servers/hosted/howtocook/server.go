@@ -600,7 +600,7 @@ func (s *Server) selectVariedMeals(
 
 			// Try next category
 			attempts++
-			selectedCategory = categories[(rand.Intn(len(categories)))]
+			selectedCategory = categories[rand.Intn(len(categories))]
 		}
 	}
 
@@ -682,7 +682,8 @@ func (s *Server) selectMeatDishes(meatDishes []Recipe, count int) []Recipe {
 			originalIndex := meatTypeIndices[selectedIndex]
 			availableDishes = append(
 				availableDishes[:originalIndex],
-				availableDishes[originalIndex+1:]...)
+				availableDishes[originalIndex+1:]...,
+			)
 
 			// Adjust indices for remaining items
 			for j := range meatTypeIndices {

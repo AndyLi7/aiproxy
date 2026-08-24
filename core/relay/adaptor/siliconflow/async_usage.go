@@ -45,12 +45,14 @@ func (a *Adaptor) FetchAsyncUsage(
 	switch siliconFlowVideoStatusToOpenAI(response.Status) {
 	case relaymodel.VideoStatusCompleted:
 		outputTokens := siliconFlowVideoOutputTokens(response)
+		usage := model.Usage{
+			OutputTokens: model.ZeroNullInt64(outputTokens),
+			TotalTokens:  model.ZeroNullInt64(outputTokens),
+		}
+		usageContext := siliconFlowVideoAsyncUsageContextFromStore(request.Store, info).
+			WithFallback(info.UsageContext)
 
-		return model.Usage{
-				OutputTokens: model.ZeroNullInt64(outputTokens),
-				TotalTokens:  model.ZeroNullInt64(outputTokens),
-			}, siliconFlowVideoAsyncUsageContextFromStore(request.Store, info).
-				WithFallback(info.UsageContext), true, nil
+		return usage, usageContext, true, nil
 	case relaymodel.VideoStatusQueued, relaymodel.VideoStatusInProgress:
 		return model.Usage{}, model.UsageContext{}, false, nil
 	default:

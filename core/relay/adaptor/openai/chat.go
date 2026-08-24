@@ -841,14 +841,16 @@ func Handler(
 
 		_, err = node.Set("usage", ast.NewAny(usage))
 		if err != nil {
+			responseErr := relaymodel.WrapperOpenAIError(
+				err,
+				"set_usage_failed",
+				http.StatusInternalServerError,
+			)
+
 			return adaptor.DoResponseResult{
-					Usage:      usage.ToModelUsage(),
-					UpstreamID: upstreamID,
-				}, relaymodel.WrapperOpenAIError(
-					err,
-					"set_usage_failed",
-					http.StatusInternalServerError,
-				)
+				Usage:      usage.ToModelUsage(),
+				UpstreamID: upstreamID,
+			}, responseErr
 		}
 	} else if usage.TotalTokens != 0 && usage.PromptTokens == 0 { // some channels don't return prompt tokens & completion tokens
 		usage.PromptTokens = int64(meta.RequestUsage.InputTokens)
@@ -856,39 +858,45 @@ func Handler(
 
 		_, err = node.Set("usage", ast.NewAny(usage))
 		if err != nil {
+			responseErr := relaymodel.WrapperOpenAIError(
+				err,
+				"set_usage_failed",
+				http.StatusInternalServerError,
+			)
+
 			return adaptor.DoResponseResult{
-					Usage:      usage.ToModelUsage(),
-					UpstreamID: upstreamID,
-				}, relaymodel.WrapperOpenAIError(
-					err,
-					"set_usage_failed",
-					http.StatusInternalServerError,
-				)
+				Usage:      usage.ToModelUsage(),
+				UpstreamID: upstreamID,
+			}, responseErr
 		}
 	}
 
 	_, err = node.Set("model", ast.NewString(meta.OriginModel))
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIError(
+			err,
+			"set_model_failed",
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage:      usage.ToModelUsage(),
-				UpstreamID: upstreamID,
-			}, relaymodel.WrapperOpenAIError(
-				err,
-				"set_model_failed",
-				http.StatusInternalServerError,
-			)
+			Usage:      usage.ToModelUsage(),
+			UpstreamID: upstreamID,
+		}, responseErr
 	}
 
 	newData, err := sonic.Marshal(&node)
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIError(
+			err,
+			"marshal_response_body_failed",
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage:      usage.ToModelUsage(),
-				UpstreamID: upstreamID,
-			}, relaymodel.WrapperOpenAIError(
-				err,
-				"marshal_response_body_failed",
-				http.StatusInternalServerError,
-			)
+			Usage:      usage.ToModelUsage(),
+			UpstreamID: upstreamID,
+		}, responseErr
 	}
 
 	c.Writer.Header().Set("Content-Type", "application/json")

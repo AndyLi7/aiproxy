@@ -451,6 +451,61 @@ func TestCompleteAsyncUsagePreservesStoredPriceCondition(t *testing.T) {
 	require.Equal(t, 2.0, got.Amount.UsedAmount)
 }
 
+func TestCompleteAsyncUsageUsesOriginalRequestTimeForDailyPrice(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.AsyncUsageInfo{}))
+
+	oldLogDB := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() {
+		model.LogDB = oldLogDB
+	})
+
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	requestID := "async_daily_time"
+	require.NoError(t, db.Create(&model.Log{
+		RequestID:        model.EmptyNullString(requestID),
+		AsyncUsageStatus: model.AsyncUsageStatusPending,
+	}).Error)
+
+	info := &model.AsyncUsageInfo{
+		RequestID: requestID,
+		RequestAt: time.Date(2026, time.July, 20, 10, 0, 0, 0, location),
+		Status:    model.AsyncUsageStatusPending,
+		Model:     "video-model",
+		Price: model.Price{
+			OutputPrice:     0.1,
+			OutputPriceUnit: 1,
+			ConditionalPrices: []model.ConditionalPrice{
+				{
+					Condition: model.PriceCondition{
+						DailyStartTime: "09:00",
+						DailyEndTime:   "12:00",
+						Timezone:       "Asia/Shanghai",
+					},
+					Price: model.Price{OutputPrice: 0.4, OutputPriceUnit: 1},
+				},
+			},
+		},
+		ProcessingToken: "claim-token",
+	}
+	require.NoError(t, model.CreateAsyncUsageInfo(info))
+
+	require.NoError(t, completeAsyncUsage(context.Background(), info, model.Usage{
+		OutputTokens: 5,
+		TotalTokens:  5,
+	}, model.UsageContext{}))
+	require.Equal(t, 2.0, info.Amount.UsedAmount)
+
+	var got model.Log
+	require.NoError(t, db.Where("request_id = ?", requestID).First(&got).Error)
+	require.Equal(t, model.ZeroNullFloat64(0.4), got.Price.OutputPrice)
+	require.Equal(t, 2.0, got.Amount.UsedAmount)
+}
+
 func TestCompleteAsyncUsageChargesStoredPerRequestPrice(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

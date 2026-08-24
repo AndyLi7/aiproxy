@@ -830,13 +830,15 @@ func ImageHandler(
 
 	jsonResponse, err := sonic.Marshal(fullTextResponse)
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIError(
+			err,
+			"marshal_response_body_failed",
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage: fullTextResponse.Usage.ToModelUsage(),
-			}, relaymodel.WrapperOpenAIError(
-				err,
-				"marshal_response_body_failed",
-				http.StatusInternalServerError,
-			)
+			Usage: fullTextResponse.Usage.ToModelUsage(),
+		}, responseErr
 	}
 
 	c.Writer.Header().Set("Content-Type", "application/json")
@@ -882,13 +884,15 @@ func MultimodalImageHandler(
 
 	jsonResponse, err := sonic.Marshal(imageResponse)
 	if err != nil {
+		responseErr := relaymodel.WrapperOpenAIError(
+			err,
+			"marshal_response_body_failed",
+			http.StatusInternalServerError,
+		)
+
 		return adaptor.DoResponseResult{
-				Usage: imageResponse.Usage.ToModelUsage(),
-			}, relaymodel.WrapperOpenAIError(
-				err,
-				"marshal_response_body_failed",
-				http.StatusInternalServerError,
-			)
+			Usage: imageResponse.Usage.ToModelUsage(),
+		}, responseErr
 	}
 
 	c.Writer.Header().Set("Content-Type", "application/json")

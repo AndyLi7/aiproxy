@@ -603,6 +603,7 @@ func completeAsyncUsage(
 		price,
 		model.PriceSelectionOptions{
 			DisableResolutionFuzzyMatch: info.DisableResolutionFuzzyMatch,
+			RequestAt:                   info.RequestAt,
 		},
 	)
 	selectedPrice := price.SelectConditionalPriceWithOptions(
@@ -610,6 +611,7 @@ func completeAsyncUsage(
 		usageContext,
 		model.PriceSelectionOptions{
 			DisableResolutionFuzzyMatch: info.DisableResolutionFuzzyMatch,
+			RequestAt:                   info.RequestAt,
 		},
 	)
 	selectedPrice.ConditionalPrices = nil

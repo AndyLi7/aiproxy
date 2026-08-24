@@ -256,10 +256,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.ValidateRequest != nil {
 		if err := relayController.ValidateRequest(c, mc); err != nil {
 			statusCode := http.StatusInternalServerError
-
-			var requestParamErr *controller.RequestParamError
 			errorCode := ""
-			if errors.As(err, &requestParamErr) {
+			if requestParamErr, ok := errors.AsType[*controller.RequestParamError](err); ok {
 				statusCode = requestParamErr.StatusCode
 				errorCode = requestParamErr.Code
 				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
@@ -370,6 +368,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 			price,
 			model.PriceSelectionOptions{
 				DisableResolutionFuzzyMatch: mc.DisableResolutionFuzzyMatch,
+				RequestAt:                   meta.RequestAt,
 			},
 		),
 		middleware.GetGroupMinimumBalance(),
@@ -506,6 +505,7 @@ func recordResult(
 		price,
 		model.PriceSelectionOptions{
 			DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+			RequestAt:                   meta.RequestAt,
 		},
 	)
 	if amount > 0 {

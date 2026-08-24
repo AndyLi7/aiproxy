@@ -250,6 +250,8 @@ func CalculateAmountDetailWithOptions(
 	modelPrice model.Price,
 	options model.PriceSelectionOptions,
 ) model.Amount {
+	modelPrice = modelPrice.SelectConditionalPriceWithOptions(usage, usageContext, options)
+
 	if modelPrice.PerRequestPrice != 0 {
 		if code != http.StatusOK {
 			return model.Amount{}
@@ -259,8 +261,6 @@ func CalculateAmountDetailWithOptions(
 			UsedAmount: float64(modelPrice.PerRequestPrice),
 		}
 	}
-
-	modelPrice = modelPrice.SelectConditionalPriceWithOptions(usage, usageContext, options)
 
 	inputTokens := usage.InputTokens
 	if modelPrice.ImageInputPrice > 0 {
@@ -401,6 +401,7 @@ func priceSelectionOptions(meta *meta.Meta) model.PriceSelectionOptions {
 
 	return model.PriceSelectionOptions{
 		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+		RequestAt:                   meta.RequestAt,
 	}
 }
 

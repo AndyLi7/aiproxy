@@ -40,8 +40,7 @@ func IsDBConnectionError(err error) bool {
 	}
 
 	// Check for pgx/pgconn connection errors
-	var pgConnectErr *pgconn.ConnectError
-	if errors.As(err, &pgConnectErr) {
+	if _, ok := errors.AsType[*pgconn.ConnectError](err); ok {
 		return true
 	}
 
@@ -58,20 +57,17 @@ func IsDBConnectionError(err error) bool {
 	}
 
 	// Check for network operation errors
-	var netOpErr *net.OpError
-	if errors.As(err, &netOpErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true
 	}
 
 	// Check for DNS errors
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
 		return true
 	}
 
 	// Check for syscall errors (connection refused, reset, etc.)
-	var syscallErr syscall.Errno
-	if errors.As(err, &syscallErr) {
+	if syscallErr, ok := errors.AsType[syscall.Errno](err); ok {
 		switch syscallErr {
 		case syscall.ECONNREFUSED, // connection refused
 			syscall.ECONNRESET,   // connection reset by peer
@@ -86,8 +82,7 @@ func IsDBConnectionError(err error) bool {
 	}
 
 	// Check for net.AddrError
-	var addrErr *net.AddrError
-	if errors.As(err, &addrErr) {
+	if _, ok := errors.AsType[*net.AddrError](err); ok {
 		return true
 	}
 

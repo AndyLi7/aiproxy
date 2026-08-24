@@ -878,12 +878,16 @@ func (c *Converter) addSchemaValidations(schema *openapi3.Schema, property map[s
 		property["uniqueItems"] = schema.UniqueItems
 	}
 
-	if schema.ExclusiveMin {
-		property["exclusiveMinimum"] = schema.ExclusiveMin
+	if schema.ExclusiveMin.Bool != nil {
+		property["exclusiveMinimum"] = *schema.ExclusiveMin.Bool
+	} else if schema.ExclusiveMin.Value != nil {
+		property["exclusiveMinimum"] = *schema.ExclusiveMin.Value
 	}
 
-	if schema.ExclusiveMax {
-		property["exclusiveMaximum"] = schema.ExclusiveMax
+	if schema.ExclusiveMax.Bool != nil {
+		property["exclusiveMaximum"] = *schema.ExclusiveMax.Bool
+	} else if schema.ExclusiveMax.Value != nil {
+		property["exclusiveMaximum"] = *schema.ExclusiveMax.Value
 	}
 
 	// Number validations

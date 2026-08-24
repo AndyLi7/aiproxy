@@ -13848,6 +13848,14 @@ const docTemplate = `{
         "model.PriceCondition": {
             "type": "object",
             "properties": {
+                "daily_end_time": {
+                    "description": "HH:mm, exclusive; earlier than start crosses midnight",
+                    "type": "string"
+                },
+                "daily_start_time": {
+                    "description": "HH:mm, inclusive",
+                    "type": "string"
+                },
                 "end_time": {
                     "description": "Unix timestamp, 0 means no end limit",
                     "type": "integer"
@@ -13882,6 +13890,10 @@ const docTemplate = `{
                 "start_time": {
                     "description": "Unix timestamp, 0 means no start limit",
                     "type": "integer"
+                },
+                "timezone": {
+                    "description": "IANA timezone for the daily time range",
+                    "type": "string"
                 }
             }
         },

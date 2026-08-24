@@ -65,7 +65,7 @@ func SendMessage(
 	}
 
 	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.ReceiveIdTypeOpenId).
+		ReceiveIdType(larkim.CreateMessageV1ReceiveIDTypeOpenId).
 		Body(larkim.NewCreateMessageReqBodyBuilder().
 			ReceiveId(openID).
 			MsgType(larkim.MsgTypeText).

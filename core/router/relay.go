@@ -198,7 +198,8 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.CancelResponse()...)
 		relayRouter.GET(
 			"/responses/:response_id/input_items",
-			controller.GetResponseInputItems()...)
+			controller.GetResponseInputItems()...,
+		)
 
 		relayRouter.POST("/images/variations", controller.RelayNotImplemented)
 		relayRouter.GET("/files", controller.RelayNotImplemented)

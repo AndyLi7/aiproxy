@@ -616,7 +616,8 @@ func getWebSearchChannel(
 		mode.ChatCompletions,
 		nil,
 		errorRates,
-		ignoreChannelIDs)
+		ignoreChannelIDs,
+	)
 	if err != nil {
 		return nil, err
 	}

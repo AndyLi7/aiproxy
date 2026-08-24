@@ -147,6 +147,7 @@ export const MultiSelectCombobox = function <T>({
                                 <div className="flex items-center gap-2">
                                     {handleSelectedItemDisplay(selectedItemForRender)}
                                     <button
+                                        type="button"
                                         className="h-4 w-4 rounded flex items-center justify-center cursor-pointer text-muted-foreground hover:text-foreground"
                                         onClick={(e) => {
                                             e.stopPropagation()

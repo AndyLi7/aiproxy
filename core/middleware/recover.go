@@ -23,8 +23,7 @@ func GinRecoveryHandler(c *gin.Context) {
 			// condition that warrants a panic stack trace.
 			var brokenPipe bool
 			if ne, ok := err.(*net.OpError); ok {
-				var se *os.SyscallError
-				if errors.As(ne, &se) {
+				if se, ok := errors.AsType[*os.SyscallError](ne); ok {
 					seStr := strings.ToLower(se.Error())
 					if strings.Contains(seStr, "broken pipe") ||
 						strings.Contains(seStr, "connection reset by peer") {

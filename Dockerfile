@@ -8,6 +8,9 @@ RUN corepack pnpm install --frozen-lockfile && corepack pnpm run build
 
 FROM golang:1.27-alpine AS builder
 
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /aiproxy/core
 
 COPY ./ /aiproxy

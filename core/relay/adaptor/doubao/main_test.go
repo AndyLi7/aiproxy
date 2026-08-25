@@ -1939,7 +1939,7 @@ func TestAdaptorFetchAsyncUsageUsesDoubaoCompletionTokens(t *testing.T) {
 			"resolution": "720p",
 			"ratio": "16:9",
 			"service_tier": "default",
-			"generate_audio": false,
+			"generate_audio": true,
 			"usage": {
 				"completion_tokens": 411300,
 				"total_tokens": 411300,
@@ -1954,7 +1954,7 @@ func TestAdaptorFetchAsyncUsageUsesDoubaoCompletionTokens(t *testing.T) {
 		saved: []adaptor.StoreCache{
 			{
 				ID:       coremodel.VideoJobStoreID("task-123"),
-				Metadata: `{"prompt":"Stored prompt","resolution":"720p","ratio":"9:16","duration":6,"input_video":true,"output_audio":true}`,
+				Metadata: `{"prompt":"Stored prompt","resolution":"720p","ratio":"9:16","duration":6,"input_video":true,"output_audio":false}`,
 			},
 		},
 	}

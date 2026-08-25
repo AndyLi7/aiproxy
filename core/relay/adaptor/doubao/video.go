@@ -423,6 +423,7 @@ func convertDoubaoVideoRequest(
 	}
 
 	request.Model = meta.ActualModel
+	request.GenerateAudio = effectiveDoubaoVideoOutputAudio(meta, request.GenerateAudio)
 	setDoubaoVideoMetadata(meta, doubaoVideoMetadataFromRequest(request))
 
 	data, err := sonic.Marshal(&request)
@@ -1338,6 +1339,10 @@ func buildDoubaoVideo(
 	now := time.Now().Unix()
 	metadata := doubaoVideoMetadataFromMeta(meta)
 	resolution, ratio := doubaoVideoResolutionAndRatio(response, metadata)
+	generateAudio := metadata.OutputAudio
+	if generateAudio == nil {
+		generateAudio = response.GenerateAudio
+	}
 	video := relaymodel.Video{
 		ID:            id,
 		Object:        relaymodel.VideoObject,
@@ -1349,7 +1354,7 @@ func buildDoubaoVideo(
 		Size:          doubaoVideoSize(resolution, ratio),
 		Resolution:    resolution,
 		AspectRatio:   ratio,
-		GenerateAudio: response.GenerateAudio,
+		GenerateAudio: generateAudio,
 	}
 
 	switch video.Status {
@@ -1628,7 +1633,7 @@ func applyStoredDoubaoVideoMetadata(
 		response.ServiceTier = metadata.ServiceTier
 	}
 
-	if response.GenerateAudio == nil {
+	if metadata.OutputAudio != nil {
 		response.GenerateAudio = metadata.OutputAudio
 	}
 }
@@ -1734,6 +1739,34 @@ func doubaoVideoOutputAudioFromRequest(request doubaoVideoRequest) *bool {
 	}
 
 	// Ark Seedance 2.0 and 1.5 default generate_audio to true.
+	return new(true)
+}
+
+func effectiveDoubaoVideoOutputAudio(meta *meta.Meta, requested *bool) *bool {
+	if requested != nil {
+		return requested
+	}
+	if meta == nil {
+		return new(true)
+	}
+
+	audio, ok := meta.ModelConfig.Config[coremodel.ModelConfigKey("audio")].(map[string]any)
+	if !ok {
+		return new(true)
+	}
+
+	audioMode, _ := audio["mode"].(string)
+	if audioMode == "none" {
+		return new(false)
+	}
+	if audioMode == "optional" {
+		defaultEnabled, ok := audio["defaultEnabled"].(bool)
+		if !ok {
+			return new(false)
+		}
+		return new(defaultEnabled)
+	}
+
 	return new(true)
 }
 

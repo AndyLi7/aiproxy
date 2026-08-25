@@ -38,6 +38,7 @@ func TestGetGeminiVideoRequestUsageJSON(t *testing.T) {
 	require.Zero(t, usage.Usage.OutputTokens)
 	require.Zero(t, usage.Usage.TotalTokens)
 	require.Equal(t, "720p", usage.Context.Resolution)
+	require.Equal(t, 6, usage.Context.Seconds)
 }
 
 func TestGetGeminiVideoRequestUsageReadsTopLevelNativeParameters(t *testing.T) {
@@ -463,6 +464,7 @@ func TestGetGeminiVideoRequestUsageDefaultsWhenParametersMissing(t *testing.T) {
 	require.Zero(t, usage.Usage.OutputTokens)
 	require.Zero(t, usage.Usage.TotalTokens)
 	require.Equal(t, "720p", usage.Context.Resolution)
+	require.Equal(t, defaultGeminiVideoDurationSeconds, usage.Context.Seconds)
 }
 
 func TestGetGeminiVideoRequestUsageIgnoresVertexSampleCount(t *testing.T) {

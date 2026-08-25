@@ -91,6 +91,7 @@ func aliVideoRequestUsage(params aliVideoRequestUsageParams) RequestUsage {
 		Context: model.UsageContext{
 			Resolution:       params.resolution,
 			NativeResolution: params.resolution,
+			Seconds:          params.seconds,
 		},
 	}
 }

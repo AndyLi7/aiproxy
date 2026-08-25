@@ -24,6 +24,7 @@ var videoCreationModes = []int{
 type GroupVideoTaskParams struct {
 	Size          string `json:"size,omitempty"`
 	Resolution    string `json:"resolution,omitempty"`
+	Seconds       int    `json:"seconds,omitempty"`
 	GenerateAudio *bool  `json:"generate_audio,omitempty"`
 }
 
@@ -157,6 +158,7 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 		Params: GroupVideoTaskParams{
 			Size:          info.UsageContext.Resolution,
 			Resolution:    info.UsageContext.NativeResolution,
+			Seconds:       info.UsageContext.Seconds,
 			GenerateAudio: info.UsageContext.OutputAudio,
 		},
 		Currency:  info.PricingCurrency,

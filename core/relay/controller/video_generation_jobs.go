@@ -50,6 +50,7 @@ func GetVideoGenerationJobRequestUsage(c *gin.Context, mc model.ModelConfig) (Re
 		Usage: model.Usage{},
 		Context: model.UsageContext{
 			Resolution: videoRequestPriceResolution(request),
+			Seconds:    request.NSeconds,
 		},
 	}, nil
 }

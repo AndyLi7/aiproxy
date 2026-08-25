@@ -80,6 +80,7 @@ func TestGetAliVideoRequestUsageUsesAliResolution(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Zero(t, usage.Usage.OutputTokens)
+	require.Equal(t, 5, usage.Context.Seconds)
 	require.Equal(t, "720P", usage.Context.Resolution)
 	require.Equal(t, "720P", usage.Context.NativeResolution)
 }

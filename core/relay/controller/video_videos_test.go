@@ -359,6 +359,7 @@ func TestGetVideosRequestUsagePreservesSemanticBillingContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "720p", usage.Context.NativeResolution)
 	require.Empty(t, usage.Context.Resolution)
+	require.Equal(t, 5, usage.Context.Seconds)
 	require.NotNil(t, usage.Context.OutputAudio)
 	require.True(t, *usage.Context.OutputAudio)
 }

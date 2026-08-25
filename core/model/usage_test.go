@@ -981,6 +981,37 @@ func TestUsageContextWithFallbackPreservesNativeResolution(t *testing.T) {
 	}
 }
 
+func TestUsageContextWithFallbackPreservesRequestedSeconds(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   model.UsageContext
+		fallback model.UsageContext
+		want     int
+	}{
+		{
+			name:     "request seconds fill an empty result context",
+			result:   model.UsageContext{},
+			fallback: model.UsageContext{Seconds: 5},
+			want:     5,
+		},
+		{
+			name:     "result seconds remain authoritative",
+			result:   model.UsageContext{Seconds: 8},
+			fallback: model.UsageContext{Seconds: 5},
+			want:     8,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.result.WithFallback(tt.fallback)
+			if got.Seconds != tt.want {
+				t.Fatalf("expected seconds %d, got %d", tt.want, got.Seconds)
+			}
+		})
+	}
+}
+
 func TestUsageContextWithFallbackPreservesMediaFlags(t *testing.T) {
 	resultContext := model.UsageContext{OutputAudio: new(false)}
 	requestContext := model.UsageContext{

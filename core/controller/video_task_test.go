@@ -13,20 +13,12 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestGetGroupVideoTasksReturnsOnlySafeProjection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	previousDB := model.DB
-	previousLogDB := model.LogDB
-	database, err := model.OpenSQLite(filepath.Join(t.TempDir(), "video-task-handler.db"))
-	require.NoError(t, err)
-	model.DB = database
-	model.LogDB = database
-	t.Cleanup(func() {
-		model.DB = previousDB
-		model.LogDB = previousLogDB
-	})
+	database := openVideoTaskControllerTestDatabase(t, "video-task-handler.db")
 	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.AsyncUsageInfo{}))
 	require.NoError(t, database.Create(&model.Channel{
 		ID:   9,
@@ -46,6 +38,7 @@ func TestGetGroupVideoTasksReturnsOnlySafeProjection(t *testing.T) {
 		PricingCurrency: "USD",
 		UpstreamID:      "video-public-safe",
 		Status:          model.AsyncUsageStatusCompleted,
+		UsageContext:    model.UsageContext{Seconds: 5},
 		Amount:          model.Amount{UsedAmount: 0.25},
 		Error:           "Bearer raw-upstream-secret",
 		ProcessingToken: "lease-secret",
@@ -74,6 +67,7 @@ func TestGetGroupVideoTasksReturnsOnlySafeProjection(t *testing.T) {
 	require.EqualValues(t, 1, envelope.Data.Total)
 	require.Len(t, envelope.Data.Items, 1)
 	require.Equal(t, "req-safe", envelope.Data.Items[0].RequestID)
+	require.Equal(t, 5, envelope.Data.Items[0].Params.Seconds)
 
 	body := recorder.Body.String()
 	for _, forbidden := range []string{
@@ -125,16 +119,7 @@ func TestGetGroupVideoTasksRejectsExcessivePageWithSafeError(t *testing.T) {
 
 func TestGetGroupVideoTaskByRequestIDReturnsOnlySafeProjection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	previousDB := model.DB
-	previousLogDB := model.LogDB
-	database, err := model.OpenSQLite(filepath.Join(t.TempDir(), "video-task-by-request-handler.db"))
-	require.NoError(t, err)
-	model.DB = database
-	model.LogDB = database
-	t.Cleanup(func() {
-		model.DB = previousDB
-		model.LogDB = previousLogDB
-	})
+	database := openVideoTaskControllerTestDatabase(t, "video-task-by-request-handler.db")
 	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.AsyncUsageInfo{}))
 	require.NoError(t, database.Create(&model.Channel{
 		ID:   9,
@@ -198,4 +183,22 @@ func TestGetGroupVideoTaskByRequestIDReturnsOnlySafeProjection(t *testing.T) {
 	GetGroupVideoTaskByRequestID(ctx)
 
 	require.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func openVideoTaskControllerTestDatabase(t *testing.T, name string) *gorm.DB {
+	t.Helper()
+	previousDB := model.DB
+	previousLogDB := model.LogDB
+	database, err := model.OpenSQLite(filepath.Join(t.TempDir(), name))
+	require.NoError(t, err)
+	underlying, err := database.DB()
+	require.NoError(t, err)
+	model.DB = database
+	model.LogDB = database
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LogDB = previousLogDB
+		require.NoError(t, underlying.Close())
+	})
+	return database
 }

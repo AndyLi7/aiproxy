@@ -13,16 +13,7 @@ import (
 )
 
 func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
-	previousDB := DB
-	previousLogDB := LogDB
-	database, err := OpenSQLite(filepath.Join(t.TempDir(), "video-tasks.db"))
-	require.NoError(t, err)
-	DB = database
-	LogDB = database
-	t.Cleanup(func() {
-		DB = previousDB
-		LogDB = previousLogDB
-	})
+	database := openVideoTaskViewTestDatabase(t, "video-tasks.db")
 	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
 
 	require.NoError(t, database.Create(&Channel{
@@ -51,6 +42,7 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 			UsageContext: UsageContext{
 				Resolution:       "1280x720",
 				NativeResolution: "720p",
+				Seconds:          5,
 				OutputAudio:      &audio,
 			},
 			Amount:    Amount{UsedAmount: 0.125},
@@ -122,6 +114,7 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 	require.Equal(t, "USD", completed.Currency)
 	require.Equal(t, "1280x720", completed.Params.Size)
 	require.Equal(t, "720p", completed.Params.Resolution)
+	require.Equal(t, 5, completed.Params.Seconds)
 	require.Equal(t, &audio, completed.Params.GenerateAudio)
 	require.NotNil(t, completed.CompletedAt)
 	require.Equal(t, oldest.Add(30*time.Second), *completed.CompletedAt)
@@ -152,16 +145,7 @@ func TestListGroupVideoTasksRejectsUnboundedPagination(t *testing.T) {
 }
 
 func TestFindGroupVideoTaskByRequestIDScopesAndProjectsSafeFields(t *testing.T) {
-	previousDB := DB
-	previousLogDB := LogDB
-	database, err := OpenSQLite(filepath.Join(t.TempDir(), "video-task-by-request.db"))
-	require.NoError(t, err)
-	DB = database
-	LogDB = database
-	t.Cleanup(func() {
-		DB = previousDB
-		LogDB = previousLogDB
-	})
+	database := openVideoTaskViewTestDatabase(t, "video-task-by-request.db")
 	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
 	require.NoError(t, database.Create(&Channel{
 		ID:   8,
@@ -203,16 +187,7 @@ func TestFindGroupVideoTaskByRequestIDScopesAndProjectsSafeFields(t *testing.T) 
 }
 
 func TestFindGroupVideoTaskByRequestIDRejectsWrongGroup(t *testing.T) {
-	previousDB := DB
-	previousLogDB := LogDB
-	database, err := OpenSQLite(filepath.Join(t.TempDir(), "video-task-by-request-wrong-group.db"))
-	require.NoError(t, err)
-	DB = database
-	LogDB = database
-	t.Cleanup(func() {
-		DB = previousDB
-		LogDB = previousLogDB
-	})
+	database := openVideoTaskViewTestDatabase(t, "video-task-by-request-wrong-group.db")
 	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
 	require.NoError(t, database.Create(&Channel{ID: 8, Type: ChannelTypeDoubao}).Error)
 	require.NoError(t, database.Create(&AsyncUsageInfo{
@@ -228,4 +203,22 @@ func TestFindGroupVideoTaskByRequestIDRejectsWrongGroup(t *testing.T) {
 	got, err := FindGroupVideoTaskByRequestID("group-b", "req-only-group-a")
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	require.Nil(t, got)
+}
+
+func openVideoTaskViewTestDatabase(t *testing.T, name string) *gorm.DB {
+	t.Helper()
+	previousDB := DB
+	previousLogDB := LogDB
+	database, err := OpenSQLite(filepath.Join(t.TempDir(), name))
+	require.NoError(t, err)
+	underlying, err := database.DB()
+	require.NoError(t, err)
+	DB = database
+	LogDB = database
+	t.Cleanup(func() {
+		DB = previousDB
+		LogDB = previousLogDB
+		require.NoError(t, underlying.Close())
+	})
+	return database
 }

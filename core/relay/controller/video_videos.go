@@ -67,6 +67,7 @@ func GetVideosRequestUsage(c *gin.Context, mc model.ModelConfig) (RequestUsage, 
 		Context: model.UsageContext{
 			Resolution:       params.size,
 			NativeResolution: params.resolution,
+			Seconds:          params.seconds,
 			OutputAudio:      params.generateAudio,
 		},
 	}, nil

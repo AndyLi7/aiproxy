@@ -983,11 +983,9 @@ func VideoGenerationJobSubmitHandler(
 	}
 
 	return writeDoubaoVideoObject(c, job, adaptor.DoResponseResult{
-		UpstreamID: response.ID,
-		AsyncUsage: true,
-		UsageContext: doubaoVideoUsageContext(
-			&response,
-		).WithFallback(doubaoVideoRequestUsageContext(meta)),
+		UpstreamID:   response.ID,
+		AsyncUsage:   true,
+		UsageContext: doubaoVideoSubmitUsageContext(meta, &response),
 	})
 }
 
@@ -1010,11 +1008,9 @@ func VideosSubmitHandler(
 	video := buildDoubaoVideo(meta, response.ID, &response)
 
 	return writeDoubaoVideoObject(c, video, adaptor.DoResponseResult{
-		UpstreamID: response.ID,
-		AsyncUsage: true,
-		UsageContext: doubaoVideoUsageContext(
-			&response,
-		).WithFallback(doubaoVideoRequestUsageContext(meta)),
+		UpstreamID:   response.ID,
+		AsyncUsage:   true,
+		UsageContext: doubaoVideoSubmitUsageContext(meta, &response),
 	})
 }
 
@@ -1419,6 +1415,19 @@ func doubaoVideoRequestUsageContext(meta *meta.Meta) coremodel.UsageContext {
 		InputVideo:       metadata.InputVideo,
 		OutputAudio:      metadata.OutputAudio,
 	}
+}
+
+func doubaoVideoSubmitUsageContext(
+	meta *meta.Meta,
+	response *relaymodel.DoubaoVideoTaskResponse,
+) coremodel.UsageContext {
+	usageContext := doubaoVideoUsageContext(response)
+	requestContext := doubaoVideoRequestUsageContext(meta)
+	if requestContext.OutputAudio != nil {
+		usageContext.OutputAudio = requestContext.OutputAudio
+	}
+
+	return usageContext.WithFallback(requestContext)
 }
 
 func writeDoubaoVideoObject(

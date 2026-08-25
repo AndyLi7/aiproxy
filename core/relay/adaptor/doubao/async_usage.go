@@ -91,7 +91,7 @@ func doubaoVideoAsyncUsageContext(
 	merged.Ratio = firstNonEmptyString(response.Ratio, metadata.Ratio)
 
 	merged.ServiceTier = firstNonEmptyString(response.ServiceTier, metadata.ServiceTier)
-	if merged.GenerateAudio == nil {
+	if metadata.OutputAudio != nil {
 		merged.GenerateAudio = metadata.OutputAudio
 	}
 

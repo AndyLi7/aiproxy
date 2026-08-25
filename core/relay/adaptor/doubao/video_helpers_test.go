@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	coremodel "github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	relaymeta "github.com/labring/aiproxy/core/relay/meta"
@@ -72,6 +73,39 @@ func TestBuildDoubaoVideoEchoesEffectiveRequestAudio(t *testing.T) {
 
 	require.NotNil(t, video.GenerateAudio)
 	require.False(t, *video.GenerateAudio)
+}
+
+func TestVideosSubmitHandlerUsesEffectiveRequestAudioForAsyncUsage(t *testing.T) {
+	t.Parallel()
+
+	effectiveAudio := false
+	meta := relaymeta.NewMeta(
+		nil,
+		mode.Videos,
+		"bytedance/seedance-1.0-pro",
+		coremodel.ModelConfig{},
+	)
+	setDoubaoVideoMetadata(meta, doubaoVideoStoreMetadata{
+		OutputAudio: &effectiveAudio,
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(bytes.NewBufferString(
+			`{"id":"task-1","status":"queued","generate_audio":true}`,
+		)),
+	}
+
+	result, relayErr := VideosSubmitHandler(meta, &doubaoTestStore{}, ctx, resp)
+	require.Nil(t, relayErr)
+	require.NotNil(t, result.UsageContext.OutputAudio)
+	require.False(t, *result.UsageContext.OutputAudio)
+	var body relaymodel.Video
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.NotNil(t, body.GenerateAudio)
+	require.False(t, *body.GenerateAudio)
 }
 
 func TestStoredDoubaoVideoAudioOverridesConflictingUpstreamValue(t *testing.T) {

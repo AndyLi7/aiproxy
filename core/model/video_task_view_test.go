@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
@@ -147,4 +149,83 @@ func TestListGroupVideoTasksRejectsUnboundedPagination(t *testing.T) {
 			require.EqualError(t, err, tt.message)
 		})
 	}
+}
+
+func TestFindGroupVideoTaskByRequestIDScopesAndProjectsSafeFields(t *testing.T) {
+	previousDB := DB
+	previousLogDB := LogDB
+	database, err := OpenSQLite(filepath.Join(t.TempDir(), "video-task-by-request.db"))
+	require.NoError(t, err)
+	DB = database
+	LogDB = database
+	t.Cleanup(func() {
+		DB = previousDB
+		LogDB = previousLogDB
+	})
+	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
+	require.NoError(t, database.Create(&Channel{
+		ID:   8,
+		Name: "ark-production",
+		Type: ChannelTypeDoubao,
+	}).Error)
+	require.NoError(t, database.Create(&[]AsyncUsageInfo{
+		{
+			RequestID:       "req-video-1",
+			Mode:            int(mode.Videos),
+			ChannelID:       8,
+			GroupID:         "group-a",
+			Status:          AsyncUsageStatusPending,
+			BaseURL:         "https://upstream-secret.invalid",
+			ProcessingToken: "processing-secret",
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+		},
+		{
+			RequestID: "req-video-1",
+			Mode:      int(mode.Videos),
+			ChannelID: 8,
+			GroupID:   "group-b",
+			Status:    AsyncUsageStatusCompleted,
+			CreatedAt: time.Now().Add(time.Second),
+			UpdatedAt: time.Now().Add(time.Second),
+		},
+	}).Error)
+
+	got, err := FindGroupVideoTaskByRequestID("group-a", "req-video-1")
+	require.NoError(t, err)
+	require.Equal(t, "req-video-1", got.RequestID)
+	require.Equal(t, "processing", got.Status)
+	encoded, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "base_url")
+	require.NotContains(t, string(encoded), "processing_token")
+	require.NotContains(t, string(encoded), "prompt")
+}
+
+func TestFindGroupVideoTaskByRequestIDRejectsWrongGroup(t *testing.T) {
+	previousDB := DB
+	previousLogDB := LogDB
+	database, err := OpenSQLite(filepath.Join(t.TempDir(), "video-task-by-request-wrong-group.db"))
+	require.NoError(t, err)
+	DB = database
+	LogDB = database
+	t.Cleanup(func() {
+		DB = previousDB
+		LogDB = previousLogDB
+	})
+	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
+	require.NoError(t, database.Create(&Channel{ID: 8, Type: ChannelTypeDoubao}).Error)
+	require.NoError(t, database.Create(&AsyncUsageInfo{
+		RequestID: "req-only-group-a",
+		Mode:      int(mode.Videos),
+		ChannelID: 8,
+		GroupID:   "group-a",
+		Status:    AsyncUsageStatusPending,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}).Error)
+
+	got, err := FindGroupVideoTaskByRequestID("group-b", "req-only-group-a")
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.Nil(t, got)
 }

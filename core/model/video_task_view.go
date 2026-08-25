@@ -112,6 +112,39 @@ func ListGroupVideoTasks(group string, page, perPage int) (GroupVideoTaskPage, e
 	return GroupVideoTaskPage{Items: items, Total: total}, nil
 }
 
+func FindGroupVideoTaskByRequestID(group, requestID string) (*GroupVideoTaskView, error) {
+	if group == "" || len(group) > 64 {
+		return nil, errors.New("invalid group")
+	}
+	if requestID == "" || len(requestID) > 128 {
+		return nil, errors.New("invalid request id")
+	}
+	if LogDB == nil || DB == nil {
+		return nil, errors.New("database is not initialized")
+	}
+
+	var info AsyncUsageInfo
+	if err := LogDB.
+		Where("group_id = ?", group).
+		Where("request_id = ?", requestID).
+		Where("mode IN ?", videoCreationModes).
+		Order("created_at DESC, id DESC").
+		First(&info).Error; err != nil {
+		return nil, err
+	}
+
+	channels, err := GetChannelsBasicInfoByIDs([]int{info.ChannelID})
+	if err != nil {
+		return nil, err
+	}
+	provider := ""
+	if len(channels) > 0 {
+		provider = channels[0].Type.String()
+	}
+	view := groupVideoTaskView(info, provider)
+	return &view, nil
+}
+
 func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView {
 	view := GroupVideoTaskView{
 		ID:           strconv.Itoa(info.ID),

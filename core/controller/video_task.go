@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"gorm.io/gorm"
 )
 
 const (
@@ -42,6 +44,38 @@ func GetGroupVideoTasks(c *gin.Context) {
 	result, err := model.ListGroupVideoTasks(group, page, perPage)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, "failed to list video tasks")
+		return
+	}
+
+	middleware.SuccessResponse(c, result)
+}
+
+// GetGroupVideoTaskByRequestID godoc
+//
+//	@Summary		Get a safe video task by request ID for a group
+//	@Description	Returns a customer-safe projection of an asynchronous video task
+//	@Tags			video tasks
+//	@Produce		json
+//	@Security		ApiKeyAuth
+//	@Param			group		path	string	true	"Group name"
+//	@Param			request_id	path	string	true	"Request ID"
+//	@Success		200		{object}	middleware.APIResponse{data=model.GroupVideoTaskView}
+//	@Router			/api/video_tasks/{group}/by-request/{request_id} [get]
+func GetGroupVideoTaskByRequestID(c *gin.Context) {
+	group := c.Param("group")
+	requestID := c.Param("request_id")
+	if group == "" || len(group) > 64 || requestID == "" || len(requestID) > 128 {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid parameter")
+		return
+	}
+
+	result, err := model.FindGroupVideoTaskByRequestID(group, requestID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, "video task not found")
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, "failed to find video task")
 		return
 	}
 

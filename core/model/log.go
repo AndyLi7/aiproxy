@@ -721,6 +721,7 @@ func GetGroupLogs(
 	upstreamID string,
 	tokenID int,
 	tokenName string,
+	excludedModes []int,
 	order string,
 	codeType CodeType,
 	code int,
@@ -762,7 +763,7 @@ func GetGroupLogs(
 			withBody,
 			ip,
 			user,
-			OperationalLogFilter{},
+			OperationalLogFilter{ExcludedModes: excludedModes},
 			page,
 			perPage,
 		)

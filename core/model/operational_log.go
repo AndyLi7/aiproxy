@@ -44,8 +44,9 @@ type OperationalFields struct {
 }
 
 type OperationalLogFilter struct {
-	Status     OperationalStatus
-	ChannelIDs []int
+	Status        OperationalStatus
+	ChannelIDs    []int
+	ExcludedModes []int
 }
 
 func (s OperationalStatus) Valid() bool {
@@ -169,6 +170,9 @@ func (l *Log) OperationalStatus() OperationalStatus {
 func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.DB {
 	if len(filter.ChannelIDs) > 0 {
 		tx = tx.Where("channel_id IN ?", filter.ChannelIDs)
+	}
+	if len(filter.ExcludedModes) > 0 {
+		tx = tx.Where("mode IS NULL OR mode NOT IN ?", filter.ExcludedModes)
 	}
 
 	switch filter.Status {

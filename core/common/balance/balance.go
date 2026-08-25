@@ -19,6 +19,14 @@ type PostGroupConsumer interface {
 	PostGroupConsume(ctx context.Context, tokenName string, usage float64) (float64, error)
 }
 
+// ReplaySafePostGroupConsumer explicitly guarantees that repeating a consume
+// call with the same request ID is idempotent. Callers must not assume this for
+// arbitrary balance backends because an error can arrive after a durable debit.
+type ReplaySafePostGroupConsumer interface {
+	PostGroupConsumer
+	CanReplayPostGroupConsume(ctx context.Context) bool
+}
+
 type GroupQuota struct {
 	Total  float64 `json:"total"`
 	Remain float64 `json:"remain"`

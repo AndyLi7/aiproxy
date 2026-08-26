@@ -1164,7 +1164,17 @@ func VideosStatusHandler(
 		if err != nil {
 			common.GetLogger(c).Errorf("find settled video usage failed: %v", err)
 		} else if settled != nil {
-			usage := settled.Usage
+			usage := relaymodel.VideoUsage{Usage: settled.Usage}
+			width, height, ok := coremodel.VerifiedDoubaoVideoBillableDimensions(
+				video.Size,
+				video.Seconds,
+				int64(settled.Usage.OutputTokens),
+			)
+			if ok {
+				usage.BillableSize = strconv.Itoa(width) + "x" + strconv.Itoa(height)
+				usage.BillableWidth = width
+				usage.BillableHeight = height
+			}
 			video.Usage = &usage
 			if settled.PricingCurrency != "" && settled.PricingVersion != "" {
 				cost := settled.Amount.UsedAmount

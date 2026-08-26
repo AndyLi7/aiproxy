@@ -1751,8 +1751,8 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 	}
 
 	store := &doubaoTestStore{saved: []adaptor.StoreCache{{
-		ID:       coremodel.VideoGenerationStoreID("video-123"),
-		Metadata: `{"prompt":"A stored prompt","resolution":"480p","ratio":"16:9","duration":5}`,
+		ID:       coremodel.VideoGenerationStoreID("task-public-123"),
+		Metadata: `{"prompt":"A stored prompt","resolution":"480p","ratio":"16:9","duration":2}`,
 	}}}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -1780,10 +1780,15 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 	}
 
 	var video struct {
-		Cost           *float64         `json:"cost"`
-		Usage          *coremodel.Usage `json:"usage"`
-		Currency       string           `json:"currency"`
-		PricingVersion string           `json:"pricing_version"`
+		Cost  *float64 `json:"cost"`
+		Usage *struct {
+			coremodel.Usage
+			BillableSize   string `json:"billable_size"`
+			BillableWidth  int    `json:"billable_width"`
+			BillableHeight int    `json:"billable_height"`
+		} `json:"usage"`
+		Currency       string `json:"currency"`
+		PricingVersion string `json:"pricing_version"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &video); err != nil {
 		t.Fatalf("unmarshal video response %s: %v", recorder.Body.String(), err)
@@ -1793,6 +1798,11 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 	}
 	if video.Usage == nil || video.Usage.TotalTokens != 19845 {
 		t.Fatalf("expected settled usage, got %#v", video.Usage)
+	}
+	if video.Usage.BillableSize != "864x480" ||
+		video.Usage.BillableWidth != 864 ||
+		video.Usage.BillableHeight != 480 {
+		t.Fatalf("expected verified billable dimensions, got %#v", video.Usage)
 	}
 	if video.Currency != "USD" || video.PricingVersion != "retail-v1" {
 		t.Fatalf("expected explicit retail pricing metadata, got %#v", video)

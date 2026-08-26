@@ -45,6 +45,10 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 				Seconds:          5,
 				OutputAudio:      &audio,
 			},
+			Usage: Usage{
+				OutputTokens: ZeroNullInt64(108900),
+				TotalTokens:  ZeroNullInt64(108900),
+			},
 			Amount:    Amount{UsedAmount: 0.125},
 			CreatedAt: oldest,
 			UpdatedAt: oldest.Add(30 * time.Second),
@@ -113,6 +117,9 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 	require.InDelta(t, 0.125, *completed.Amount, 0.000001)
 	require.Equal(t, "USD", completed.Currency)
 	require.Equal(t, "1280x720", completed.Params.Size)
+	require.Equal(t, "1280x720", completed.Params.BillableSize)
+	require.Equal(t, 1280, completed.Params.BillableWidth)
+	require.Equal(t, 720, completed.Params.BillableHeight)
 	require.Equal(t, "720p", completed.Params.Resolution)
 	require.Equal(t, 5, completed.Params.Seconds)
 	require.Equal(t, &audio, completed.Params.GenerateAudio)

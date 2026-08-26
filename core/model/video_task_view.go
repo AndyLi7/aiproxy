@@ -22,10 +22,13 @@ var videoCreationModes = []int{
 }
 
 type GroupVideoTaskParams struct {
-	Size          string `json:"size,omitempty"`
-	Resolution    string `json:"resolution,omitempty"`
-	Seconds       int    `json:"seconds,omitempty"`
-	GenerateAudio *bool  `json:"generate_audio,omitempty"`
+	Size           string `json:"size,omitempty"`
+	Resolution     string `json:"resolution,omitempty"`
+	Seconds        int    `json:"seconds,omitempty"`
+	GenerateAudio  *bool  `json:"generate_audio,omitempty"`
+	BillableSize   string `json:"billable_size,omitempty"`
+	BillableWidth  int    `json:"billable_width,omitempty"`
+	BillableHeight int    `json:"billable_height,omitempty"`
 }
 
 type GroupVideoTaskView struct {
@@ -167,6 +170,18 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 	if info.Status == AsyncUsageStatusCompleted && info.PricingCurrency != "" {
 		amount := info.Amount.UsedAmount
 		view.Amount = &amount
+	}
+	if info.Status == AsyncUsageStatusCompleted && provider == ChannelTypeDoubao.String() {
+		width, height, ok := VerifiedDoubaoVideoBillableDimensions(
+			info.UsageContext.Resolution,
+			info.UsageContext.Seconds,
+			int64(info.Usage.OutputTokens),
+		)
+		if ok {
+			view.Params.BillableSize = strconv.Itoa(width) + "x" + strconv.Itoa(height)
+			view.Params.BillableWidth = width
+			view.Params.BillableHeight = height
+		}
 	}
 	if info.Status == AsyncUsageStatusCompleted || info.Status == AsyncUsageStatusFailed {
 		completedAt := info.UpdatedAt

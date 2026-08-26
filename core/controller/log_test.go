@@ -109,7 +109,11 @@ func TestGetGroupLogsExcludesModesFromRowsAndTotal(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "group", Value: "group-a"}}
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/log/group-a?page=1&per_page=20&exclude_modes=37", nil)
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/log/group-a?page=1&per_page=20&exclude_modes=37&start_timestamp=1787083199&end_timestamp=1787083203",
+		nil,
+	)
 
 	GetGroupLogs(c)
 

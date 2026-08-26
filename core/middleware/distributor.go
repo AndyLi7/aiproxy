@@ -576,6 +576,16 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	findModel := token.FindModel(requestModel)
 
 	if findModel == "" {
+		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
+			abortUnsupportedPublicVideoModel(
+				c,
+				mode,
+				requestModel,
+				token,
+				GetModelCaches(c),
+			)
+			return
+		}
 		AbortOperationally(
 			c,
 			model.FailureStageModel,
@@ -711,6 +721,40 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	clearRequestBodyNode(c)
 	c.Next()
+}
+
+func abortUnsupportedPublicVideoModel(
+	c *gin.Context,
+	requestMode mode.Mode,
+	requestModel string,
+	token model.TokenCache,
+	caches *model.ModelCaches,
+) {
+	allowedValues := make([]string, 0)
+	token.Range(func(candidate string) bool {
+		mc, ok := caches.EnabledModelConfigsMap[candidate]
+		if ok && CheckRelayMode(requestMode, mc.Type) {
+			allowedValues = append(allowedValues, candidate)
+		}
+		return true
+	})
+	slices.Sort(allowedValues)
+
+	message := fmt.Sprintf("unsupported video model `%s`", requestModel)
+	if len(allowedValues) != 0 {
+		message += ", allowed values: " + strings.Join(allowedValues, ", ")
+	}
+	AbortPublicVideoRequestError(
+		c,
+		model.FailureStageModel,
+		http.StatusBadRequest,
+		"unsupported_by_model",
+		message,
+		"model",
+		requestModel,
+		allowedValues,
+		"one of the allowed video model IDs",
+	)
 }
 
 func GetRequestModel(c *gin.Context) string {

@@ -1,6 +1,7 @@
 .git
 node_modules
 **/node_modules
+**/*_test.go
 web/dist
 .env
 .env.*

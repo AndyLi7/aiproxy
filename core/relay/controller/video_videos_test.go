@@ -334,6 +334,73 @@ func TestValidateVideosRequestAllowsSemanticDimensions(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateVideosRequestAllowsPublishedExtendedVideoDimensions(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	for _, selection := range []struct {
+		name        string
+		size        string
+		aspectRatio string
+	}{
+		{name: "ultrawide", size: "1680x720", aspectRatio: "21:9"},
+		{name: "landscape four three", size: "960x720", aspectRatio: "4:3"},
+		{name: "portrait three four", size: "720x960", aspectRatio: "3:4"},
+	} {
+		t.Run(selection.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"/v1/videos",
+				bytes.NewBufferString(`{"model":"video-model","prompt":"A city street","size":"`+
+					selection.size+`","seconds":5}`),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			err := ValidateVideosRequest(ctx, model.ModelConfig{
+				Config: map[model.ModelConfigKey]any{
+					"resolutions":  []any{"720p"},
+					"aspectRatios": []any{"16:9", selection.aspectRatio},
+					"durations":    []any{float64(5)},
+				},
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateVideosRequestRejectsFixedSizeForAdaptiveOnlyModel(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(`{"model":"video-model","prompt":"A city street","size":"1280x720","seconds":5}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{
+		AllowedResolutions: []string{"720p"},
+		Config: map[model.ModelConfigKey]any{
+			"resolutions":  []any{"720p"},
+			"aspectRatios": []any{"adaptive"},
+			"durations":    []any{float64(5)},
+		},
+	})
+	var paramErr *RequestParamError
+	require.ErrorAs(t, err, &paramErr)
+	require.Equal(t, "unsupported_by_model", paramErr.Code)
+	require.Equal(t, "size", paramErr.Param)
+	require.Empty(t, paramErr.AllowedValues)
+}
+
 func TestGetVideosRequestUsagePreservesSemanticBillingContext(t *testing.T) {
 	t.Parallel()
 

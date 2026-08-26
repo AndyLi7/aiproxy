@@ -150,7 +150,7 @@ func VideoResolutionFromDimensions(width, height int) string {
 func VideoAspectRatioFromSize(size string) string {
 	size = strings.ToLower(strings.TrimSpace(size))
 	switch size {
-	case "16:9", "9:16", "1:1", "4:3", "3:4":
+	case "21:9", "16:9", "9:16", "1:1", "4:3", "3:4":
 		return size
 	}
 
@@ -206,6 +206,7 @@ func ClosestVideoAspectRatio(width, height int) string {
 
 	ratio := float64(width) / float64(height)
 	candidates := []candidate{
+		{"21:9", 21.0 / 9.0},
 		{"16:9", 16.0 / 9.0},
 		{"9:16", 9.0 / 16.0},
 		{"1:1", 1},

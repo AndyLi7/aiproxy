@@ -334,6 +334,10 @@ func newExternalPostGroupConsumer(backend *ExternalHTTP, group string) *External
 	return &ExternalPostGroupConsumer{backend: backend, group: group}
 }
 
+func (*ExternalPostGroupConsumer) CanReplayPostGroupConsume(ctx context.Context) bool {
+	return RequestIDFromContext(ctx) != ""
+}
+
 func (c *ExternalPostGroupConsumer) PostGroupConsume(
 	ctx context.Context,
 	tokenName string,

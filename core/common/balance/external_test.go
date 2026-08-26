@@ -160,6 +160,8 @@ func TestExternalConsumeRequestID(t *testing.T) {
 
 	ctx := context.WithValue(t.Context(), CtxRequestID, "req-abc123")
 	ctx = ContextWithPricing(ctx, "USD", "21")
+	require.True(t, consumer.CanReplayPostGroupConsume(ctx))
+	require.False(t, consumer.CanReplayPostGroupConsume(t.Context()))
 
 	charged, err := consumer.PostGroupConsume(ctx, "token-1", 1.25)
 	require.NoError(t, err)
@@ -198,6 +200,44 @@ func TestExternalConsumeRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.InDelta(t, 3.3, charged, 0)
 	require.Equal(t, int64(3), hits.Load())
+}
+
+func TestExternalConsumeAmbiguousResponseReplaysSameRequestID(t *testing.T) {
+	setFastExternalRetries(t)
+
+	const (
+		group     = "ext-test-consume-ambiguous"
+		requestID = "req-ambiguous-123"
+	)
+
+	var hits atomic.Int64
+	var durableDebits atomic.Int64
+	requestIDs := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req externalConsumeReq
+		require.NoError(t, sonic.ConfigDefault.NewDecoder(r.Body).Decode(&req))
+		requestIDs <- req.RequestID
+
+		if hits.Add(1) == 1 {
+			durableDebits.Add(1)
+			_, _ = w.Write([]byte(`{"code":0`))
+
+			return
+		}
+
+		writeExternalCharged(w, 2.5)
+	}))
+	defer srv.Close()
+
+	consumer := newExternalPostGroupConsumer(NewExternalHTTP(srv.URL, "test-key"), group)
+	ctx := context.WithValue(t.Context(), CtxRequestID, requestID)
+	charged, err := consumer.PostGroupConsume(ctx, "token-1", 2.5)
+	require.NoError(t, err)
+	require.InDelta(t, 2.5, charged, 0)
+	require.Equal(t, int64(2), hits.Load())
+	require.Equal(t, int64(1), durableDebits.Load())
+	require.Equal(t, requestID, <-requestIDs)
+	require.Equal(t, requestID, <-requestIDs)
 }
 
 func TestExternalConsumeZeroUsage(t *testing.T) {

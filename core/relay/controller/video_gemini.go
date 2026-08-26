@@ -51,6 +51,7 @@ func GetGeminiVideoRequestUsage(c *gin.Context, mc model.ModelConfig) (RequestUs
 		Usage: model.Usage{},
 		Context: model.UsageContext{
 			Resolution: params.resolution,
+			Seconds:    params.seconds,
 		},
 	}, nil
 }

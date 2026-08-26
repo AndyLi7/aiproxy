@@ -22,9 +22,13 @@ var videoCreationModes = []int{
 }
 
 type GroupVideoTaskParams struct {
-	Size          string `json:"size,omitempty"`
-	Resolution    string `json:"resolution,omitempty"`
-	GenerateAudio *bool  `json:"generate_audio,omitempty"`
+	Size           string `json:"size,omitempty"`
+	Resolution     string `json:"resolution,omitempty"`
+	Seconds        int    `json:"seconds,omitempty"`
+	GenerateAudio  *bool  `json:"generate_audio,omitempty"`
+	BillableSize   string `json:"billable_size,omitempty"`
+	BillableWidth  int    `json:"billable_width,omitempty"`
+	BillableHeight int    `json:"billable_height,omitempty"`
 }
 
 type GroupVideoTaskView struct {
@@ -112,6 +116,39 @@ func ListGroupVideoTasks(group string, page, perPage int) (GroupVideoTaskPage, e
 	return GroupVideoTaskPage{Items: items, Total: total}, nil
 }
 
+func FindGroupVideoTaskByRequestID(group, requestID string) (*GroupVideoTaskView, error) {
+	if group == "" || len(group) > 64 {
+		return nil, errors.New("invalid group")
+	}
+	if requestID == "" || len(requestID) > 128 {
+		return nil, errors.New("invalid request id")
+	}
+	if LogDB == nil || DB == nil {
+		return nil, errors.New("database is not initialized")
+	}
+
+	var info AsyncUsageInfo
+	if err := LogDB.
+		Where("group_id = ?", group).
+		Where("request_id = ?", requestID).
+		Where("mode IN ?", videoCreationModes).
+		Order("created_at DESC, id DESC").
+		First(&info).Error; err != nil {
+		return nil, err
+	}
+
+	channels, err := GetChannelsBasicInfoByIDs([]int{info.ChannelID})
+	if err != nil {
+		return nil, err
+	}
+	provider := ""
+	if len(channels) > 0 {
+		provider = channels[0].Type.String()
+	}
+	view := groupVideoTaskView(info, provider)
+	return &view, nil
+}
+
 func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView {
 	view := GroupVideoTaskView{
 		ID:           strconv.Itoa(info.ID),
@@ -124,6 +161,7 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 		Params: GroupVideoTaskParams{
 			Size:          info.UsageContext.Resolution,
 			Resolution:    info.UsageContext.NativeResolution,
+			Seconds:       info.UsageContext.Seconds,
 			GenerateAudio: info.UsageContext.OutputAudio,
 		},
 		Currency:  info.PricingCurrency,
@@ -132,6 +170,18 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 	if info.Status == AsyncUsageStatusCompleted && info.PricingCurrency != "" {
 		amount := info.Amount.UsedAmount
 		view.Amount = &amount
+	}
+	if info.Status == AsyncUsageStatusCompleted && provider == ChannelTypeDoubao.String() {
+		width, height, ok := VerifiedDoubaoVideoBillableDimensions(
+			info.UsageContext.Resolution,
+			info.UsageContext.Seconds,
+			int64(info.Usage.OutputTokens),
+		)
+		if ok {
+			view.Params.BillableSize = strconv.Itoa(width) + "x" + strconv.Itoa(height)
+			view.Params.BillableWidth = width
+			view.Params.BillableHeight = height
+		}
 	}
 	if info.Status == AsyncUsageStatusCompleted || info.Status == AsyncUsageStatusFailed {
 		completedAt := info.UpdatedAt

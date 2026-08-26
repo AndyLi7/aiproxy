@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +13,38 @@ import (
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 )
+
+const maxExcludedLogModes = 32
+
+func parseExcludedModes(c *gin.Context) ([]int, error) {
+	raw, present := c.GetQuery("exclude_modes")
+	if !present {
+		return nil, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	if len(parts) == 0 || len(parts) > maxExcludedLogModes {
+		return nil, errors.New("invalid excluded mode count")
+	}
+
+	modes := make([]int, 0, len(parts))
+	seen := make(map[int]struct{}, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseInt(strings.TrimSpace(part), 10, 32)
+		if err != nil || value <= 0 {
+			return nil, errors.New("invalid excluded mode")
+		}
+
+		mode := int(value)
+		if _, exists := seen[mode]; exists {
+			return nil, errors.New("duplicate excluded mode")
+		}
+		seen[mode] = struct{}{}
+		modes = append(modes, mode)
+	}
+
+	return modes, nil
+}
 
 func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, error) {
 	filter := model.OperationalLogFilter{Status: model.OperationalStatus(c.Query("status"))}
@@ -144,6 +177,7 @@ func GetLogs(c *gin.Context) {
 //	@Param			model_name		query		string	false	"Model name"
 //	@Param			channel			query		int		false	"Channel ID"
 //	@Param			token_id		query		int		false	"Token ID"
+//	@Param			exclude_modes	query		string	false	"Comma-separated relay modes to exclude"
 //	@Param			order			query		string	false	"Order"
 //	@Param			request_id		query		string	false	"Request ID"
 //	@Param			upstream_id		query		string	false	"Upstream ID"
@@ -164,7 +198,11 @@ func GetGroupLogs(c *gin.Context) {
 	page, perPage := utils.ParsePageParams(c)
 	startTime, endTime := utils.ParseTimeRange(c, 0)
 	params := parseCommonParams(c)
-
+	excludedModes, err := parseExcludedModes(c)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid exclude_modes parameter")
+		return
+	}
 	result, err := model.GetGroupLogs(
 		group,
 		startTime,
@@ -174,6 +212,7 @@ func GetGroupLogs(c *gin.Context) {
 		params.upstreamID,
 		params.tokenID,
 		params.tokenName,
+		excludedModes,
 		params.order,
 		model.CodeType(params.codeType),
 		params.code,

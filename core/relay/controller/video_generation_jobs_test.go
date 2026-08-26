@@ -42,6 +42,7 @@ func TestGetVideoGenerationJobRequestUsageMultipart(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, usage.Usage.OutputTokens)
 	require.Zero(t, usage.Usage.TotalTokens)
+	require.Equal(t, 5, usage.Context.Seconds)
 }
 
 func TestGetVideoGenerationJobRequestUsageJSON(t *testing.T) {
@@ -70,6 +71,7 @@ func TestGetVideoGenerationJobRequestUsageJSON(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, usage.Usage.OutputTokens)
 	require.Zero(t, usage.Usage.TotalTokens)
+	require.Equal(t, 4, usage.Context.Seconds)
 }
 
 func TestValidateVideoGenerationJobRequestRejectsTooManyVariants(t *testing.T) {

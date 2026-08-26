@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,19 +9,11 @@ import (
 
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
-	previousDB := DB
-	previousLogDB := LogDB
-	database, err := OpenSQLite(filepath.Join(t.TempDir(), "video-tasks.db"))
-	require.NoError(t, err)
-	DB = database
-	LogDB = database
-	t.Cleanup(func() {
-		DB = previousDB
-		LogDB = previousLogDB
-	})
+	database := openVideoTaskViewTestDatabase(t, "video-tasks.db")
 	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
 
 	require.NoError(t, database.Create(&Channel{
@@ -49,7 +42,12 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 			UsageContext: UsageContext{
 				Resolution:       "1280x720",
 				NativeResolution: "720p",
+				Seconds:          5,
 				OutputAudio:      &audio,
+			},
+			Usage: Usage{
+				OutputTokens: ZeroNullInt64(108900),
+				TotalTokens:  ZeroNullInt64(108900),
 			},
 			Amount:    Amount{UsedAmount: 0.125},
 			CreatedAt: oldest,
@@ -119,7 +117,11 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 	require.InDelta(t, 0.125, *completed.Amount, 0.000001)
 	require.Equal(t, "USD", completed.Currency)
 	require.Equal(t, "1280x720", completed.Params.Size)
+	require.Equal(t, "1280x720", completed.Params.BillableSize)
+	require.Equal(t, 1280, completed.Params.BillableWidth)
+	require.Equal(t, 720, completed.Params.BillableHeight)
 	require.Equal(t, "720p", completed.Params.Resolution)
+	require.Equal(t, 5, completed.Params.Seconds)
 	require.Equal(t, &audio, completed.Params.GenerateAudio)
 	require.NotNil(t, completed.CompletedAt)
 	require.Equal(t, oldest.Add(30*time.Second), *completed.CompletedAt)
@@ -147,4 +149,83 @@ func TestListGroupVideoTasksRejectsUnboundedPagination(t *testing.T) {
 			require.EqualError(t, err, tt.message)
 		})
 	}
+}
+
+func TestFindGroupVideoTaskByRequestIDScopesAndProjectsSafeFields(t *testing.T) {
+	database := openVideoTaskViewTestDatabase(t, "video-task-by-request.db")
+	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
+	require.NoError(t, database.Create(&Channel{
+		ID:   8,
+		Name: "ark-production",
+		Type: ChannelTypeDoubao,
+	}).Error)
+	require.NoError(t, database.Create(&[]AsyncUsageInfo{
+		{
+			RequestID:       "req-video-1",
+			Mode:            int(mode.Videos),
+			ChannelID:       8,
+			GroupID:         "group-a",
+			Status:          AsyncUsageStatusPending,
+			BaseURL:         "https://upstream-secret.invalid",
+			ProcessingToken: "processing-secret",
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+		},
+		{
+			RequestID: "req-video-1",
+			Mode:      int(mode.Videos),
+			ChannelID: 8,
+			GroupID:   "group-b",
+			Status:    AsyncUsageStatusCompleted,
+			CreatedAt: time.Now().Add(time.Second),
+			UpdatedAt: time.Now().Add(time.Second),
+		},
+	}).Error)
+
+	got, err := FindGroupVideoTaskByRequestID("group-a", "req-video-1")
+	require.NoError(t, err)
+	require.Equal(t, "req-video-1", got.RequestID)
+	require.Equal(t, "processing", got.Status)
+	encoded, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "base_url")
+	require.NotContains(t, string(encoded), "processing_token")
+	require.NotContains(t, string(encoded), "prompt")
+}
+
+func TestFindGroupVideoTaskByRequestIDRejectsWrongGroup(t *testing.T) {
+	database := openVideoTaskViewTestDatabase(t, "video-task-by-request-wrong-group.db")
+	require.NoError(t, database.AutoMigrate(&Channel{}, &AsyncUsageInfo{}))
+	require.NoError(t, database.Create(&Channel{ID: 8, Type: ChannelTypeDoubao}).Error)
+	require.NoError(t, database.Create(&AsyncUsageInfo{
+		RequestID: "req-only-group-a",
+		Mode:      int(mode.Videos),
+		ChannelID: 8,
+		GroupID:   "group-a",
+		Status:    AsyncUsageStatusPending,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}).Error)
+
+	got, err := FindGroupVideoTaskByRequestID("group-b", "req-only-group-a")
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.Nil(t, got)
+}
+
+func openVideoTaskViewTestDatabase(t *testing.T, name string) *gorm.DB {
+	t.Helper()
+	previousDB := DB
+	previousLogDB := LogDB
+	database, err := OpenSQLite(filepath.Join(t.TempDir(), name))
+	require.NoError(t, err)
+	underlying, err := database.DB()
+	require.NoError(t, err)
+	DB = database
+	LogDB = database
+	t.Cleanup(func() {
+		DB = previousDB
+		LogDB = previousLogDB
+		require.NoError(t, underlying.Close())
+	})
+	return database
 }

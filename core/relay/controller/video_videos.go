@@ -67,6 +67,7 @@ func GetVideosRequestUsage(c *gin.Context, mc model.ModelConfig) (RequestUsage, 
 		Context: model.UsageContext{
 			Resolution:       params.size,
 			NativeResolution: params.resolution,
+			Seconds:          params.seconds,
 			OutputAudio:      params.generateAudio,
 		},
 	}, nil
@@ -234,6 +235,13 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 		)
 	}
 	if hasExactSizes {
+		if len(supportedSizes) == 0 && size != "" {
+			return NewDetailedBadRequestParamError(
+				videoUnsupportedByModelCode,
+				"fixed video sizes are not supported by this model; use resolution with aspect_ratio",
+				"size", size, nil, "resolution with aspect_ratio",
+			)
+		}
 		if size := strings.ToLower(strings.TrimSpace(params.size)); size != "" &&
 			!slices.Contains(supportedSizes, size) {
 			return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
@@ -541,15 +549,25 @@ func exactVideoSizesFromCapabilities(config map[model.ModelConfigKey]any) ([]str
 		if len(parts) != 2 {
 			continue
 		}
+		height, err := strconv.Atoi(parts[1])
+		if err != nil || height <= 0 {
+			continue
+		}
 		for _, aspectRatio := range aspectRatios {
 			var size string
 			switch strings.TrimSpace(aspectRatio) {
+			case "21:9":
+				size = fmt.Sprintf("%dx%d", height*21/9, height)
 			case "16:9":
 				size = landscape
+			case "4:3":
+				size = fmt.Sprintf("%dx%d", height*4/3, height)
 			case "9:16":
 				size = parts[1] + "x" + parts[0]
 			case "1:1":
 				size = parts[1] + "x" + parts[1]
+			case "3:4":
+				size = fmt.Sprintf("%dx%d", height, height*4/3)
 			default:
 				continue
 			}
@@ -558,7 +576,7 @@ func exactVideoSizesFromCapabilities(config map[model.ModelConfigKey]any) ([]str
 			}
 		}
 	}
-	return result, len(result) != 0
+	return result, true
 }
 
 func exactVideoDurationsFromCapabilities(config map[model.ModelConfigKey]any) ([]int, bool) {

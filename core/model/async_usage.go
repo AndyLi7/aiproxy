@@ -50,6 +50,7 @@ type AsyncUsageInfo struct {
 	Amount                      Amount           `gorm:"embedded"                json:"amount,omitempty"`
 	Error                       string           `gorm:"type:text"               json:"error,omitempty"`
 	RetryCount                  int              `                               json:"retry_count"`
+	BalanceConsumeAttempted     bool             `                               json:"balance_consume_attempted"`
 	BalanceConsumed             bool             `                               json:"balance_consumed"`
 	ProcessingToken             string           `gorm:"size:64;index"           json:"-"`
 	NextPollAt                  time.Time        `gorm:"index"                   json:"next_poll_at"`
@@ -210,6 +211,36 @@ func MarkAsyncUsageBalanceConsumed(info *AsyncUsageInfo) error {
 	return updateClaimedAsyncUsageInfo(info, map[string]any{
 		"balance_consumed": true,
 	})
+}
+
+func MarkAsyncUsageBalanceConsumeAttempted(info *AsyncUsageInfo) error {
+	return updateClaimedAsyncUsageInfo(info, map[string]any{
+		"balance_consume_attempted": true,
+	})
+}
+
+func PrepareClaimedAsyncUsageSettlement(
+	info *AsyncUsageInfo,
+	usage Usage,
+	usageContext UsageContext,
+	amount Amount,
+) error {
+	updatesModel := &AsyncUsageInfo{
+		Usage:        usage,
+		UsageContext: usageContext,
+		Amount:       amount,
+	}
+	updates, err := asyncUsageUpdateValues(
+		updatesModel,
+		"Usage",
+		"UsageContext",
+		"Amount",
+	)
+	if err != nil {
+		return err
+	}
+
+	return updateClaimedAsyncUsageInfo(info, updates)
 }
 
 func RetryClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {

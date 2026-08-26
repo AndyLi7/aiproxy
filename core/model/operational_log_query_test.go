@@ -2,12 +2,86 @@ package model
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestGetLogsExcludesModesFromRowsAndTotal(t *testing.T) {
+	database, err := OpenSQLite(filepath.Join(t.TempDir(), "group-logs.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	previousLogDB := LogDB
+	LogDB = database
+	t.Cleanup(func() {
+		LogDB = previousLogDB
+		sqlDB, sqlErr := database.DB()
+		if sqlErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	if err := database.AutoMigrate(&Log{}, &RequestDetail{}); err != nil {
+		t.Fatalf("migrate log database: %v", err)
+	}
+
+	createdAt := time.Unix(1_787_083_200, 0)
+	logs := []Log{
+		{GroupID: "group-a", RequestID: "req-create", Model: "seedance", Mode: 22, Code: 200, CreatedAt: createdAt},
+		{GroupID: "group-a", RequestID: "req-poll", Mode: 37, Code: 500, CreatedAt: createdAt.Add(time.Second)},
+		{GroupID: "group-b", RequestID: "req-other-tenant", Model: "seedance", Mode: 22, Code: 200, CreatedAt: createdAt.Add(2 * time.Second)},
+	}
+	if err := database.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+	if err := database.Table("logs").Create(map[string]any{
+		"group_id":   "group-a",
+		"request_id": "req-legacy",
+		"model":      "legacy-model",
+		"mode":       nil,
+		"code":       200,
+		"created_at": createdAt.Add(3 * time.Second),
+		"request_at": createdAt.Add(3 * time.Second),
+	}).Error; err != nil {
+		t.Fatalf("seed legacy log: %v", err)
+	}
+
+	total, got, err := getLogs(
+		"group-a",
+		time.Time{},
+		time.Time{},
+		"",
+		"",
+		"",
+		0,
+		"",
+		0,
+		"id-desc",
+		CodeTypeAll,
+		0,
+		false,
+		"",
+		"",
+		OperationalLogFilter{ExcludedModes: []int{37}},
+		1,
+		20,
+	)
+	if err != nil {
+		t.Fatalf("get filtered logs: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+	if len(got) != 2 || got[0].RequestID.String() != "req-legacy" || got[1].RequestID.String() != "req-create" {
+		t.Fatalf("logs = %+v, want req-legacy and req-create", got)
+	}
+}
 
 func newOperationalLogDryRunDB(t *testing.T) *gorm.DB {
 	t.Helper()

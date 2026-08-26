@@ -20,15 +20,16 @@ func TestVideoTaskRouteIsAdminProtected(t *testing.T) {
 
 	engine := gin.New()
 	SetAPIRouter(engine)
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(
-		http.MethodGet,
+	for _, path := range []string{
 		"/api/video_tasks/group-a?page=1&per_page=20",
-		nil,
-	)
+		"/api/video_tasks/group-a/by-request/req-1",
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
 
-	engine.ServeHTTP(recorder, request)
+		engine.ServeHTTP(recorder, request)
 
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "unauthorized")
+		require.Equal(t, http.StatusUnauthorized, recorder.Code)
+		require.Contains(t, recorder.Body.String(), "unauthorized")
+	}
 }

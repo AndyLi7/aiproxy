@@ -900,6 +900,7 @@ func (u *Usage) Add(other Usage) {
 type UsageContext struct {
 	Resolution       string `gorm:"size:32" json:"resolution,omitempty"`
 	NativeResolution string `gorm:"size:32" json:"native_resolution,omitempty"`
+	Seconds          int    `gorm:"column:seconds" json:"seconds,omitempty"`
 	Quality          string `gorm:"size:32" json:"quality,omitempty"`
 	ServiceTier      string `gorm:"size:32" json:"service_tier,omitempty"`
 	InputMedia       *bool  `               json:"input_media,omitempty"`
@@ -972,6 +973,10 @@ func (c UsageContext) WithFallback(fallback UsageContext) UsageContext {
 
 	if c.NativeResolution == "" {
 		c.NativeResolution = fallback.NativeResolution
+	}
+
+	if c.Seconds == 0 {
+		c.Seconds = fallback.Seconds
 	}
 
 	if c.Quality == "" {

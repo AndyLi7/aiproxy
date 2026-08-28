@@ -90,11 +90,18 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	underlying, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sqlite db: %v", err)
+	}
 
 	prevLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = prevLogDB
+		if err := underlying.Close(); err != nil {
+			t.Fatalf("close sqlite db: %v", err)
+		}
 	})
 
 	if err := db.AutoMigrate(&model.Log{}, &model.RequestDetail{}); err != nil {
@@ -113,6 +120,7 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 		200,
 		1,
 		"gpt-5.4",
+		"image-to-video",
 		2,
 		"test-token",
 		"/v1/responses",
@@ -150,6 +158,9 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 
 	if got.Usage.WebSearchCount != 1 {
 		t.Fatalf("expected web_search_count=1, got %d", got.Usage.WebSearchCount)
+	}
+	if got.Model != "gpt-5.4" || got.Capability != "image-to-video" {
+		t.Fatalf("expected public model and capability, got model=%q capability=%q", got.Model, got.Capability)
 	}
 }
 

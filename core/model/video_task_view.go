@@ -36,6 +36,7 @@ type GroupVideoTaskView struct {
 	RequestID    string               `json:"request_id"`
 	PublicTaskID string               `json:"public_task_id,omitempty"`
 	Model        string               `json:"model"`
+	Capability   string               `json:"capability,omitempty"`
 	TokenName    string               `json:"token_name,omitempty"`
 	Provider     string               `json:"provider,omitempty"`
 	Status       string               `json:"status"`
@@ -155,6 +156,7 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 		RequestID:    info.RequestID,
 		PublicTaskID: info.UpstreamID,
 		Model:        info.Model,
+		Capability:   info.Capability,
 		TokenName:    info.TokenName,
 		Provider:     provider,
 		Status:       groupVideoTaskStatus(info.Status),

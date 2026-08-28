@@ -597,6 +597,8 @@ func distribute(c *gin.Context, mode mode.Mode) {
 			return
 		}
 	}
+	SetLogModelFields(log.Data, publicModel)
+	SetLogCapabilityField(log.Data, GetVideoCapability(c))
 
 	findModel := token.FindModel(routingModel)
 
@@ -634,8 +636,6 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 		return
 	}
-
-	SetLogModelFields(log.Data, publicModel)
 
 	mc, ok := GetModelCaches(c).ModelConfig.GetModelConfig(findModel)
 	if !ok {

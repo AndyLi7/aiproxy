@@ -31,6 +31,7 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 			RequestAt:       oldest,
 			Mode:            int(mode.Videos),
 			Model:           "seedance-1-5-pro",
+			Capability:      string(ModelCapabilityTextToVideo),
 			ChannelID:       7,
 			GroupID:         "group-a",
 			TokenID:         11,
@@ -110,6 +111,7 @@ func TestListGroupVideoTasksScopesOrdersAndProjectsSafeFields(t *testing.T) {
 	require.NotEmpty(t, completed.ID)
 	require.Equal(t, "req-group-a-completed", completed.RequestID)
 	require.Equal(t, "seedance-1-5-pro", completed.Model)
+	require.Equal(t, string(ModelCapabilityTextToVideo), completed.Capability)
 	require.Equal(t, "customer-key", completed.TokenName)
 	require.Equal(t, "doubao", completed.Provider)
 	require.Equal(t, "completed", completed.Status)

@@ -245,6 +245,7 @@ func SetLogFieldsFromMeta(m *meta.Meta, fields logrus.Fields) {
 
 	SetLogModeField(fields, m.Mode)
 	SetLogModelFields(fields, m.OriginModel)
+	SetLogCapabilityField(fields, m.VideoCapability)
 	SetLogActualModelFields(fields, m.ActualModel)
 
 	SetLogGroupFields(fields, m.Group)
@@ -286,6 +287,14 @@ func SetLogActualModelFields(fields logrus.Fields, actualModel string) {
 
 func SetLogModelFields(fields logrus.Fields, model string) {
 	fields["model"] = model
+}
+
+func SetLogCapabilityField(fields logrus.Fields, capability string) {
+	if capability == "" {
+		return
+	}
+
+	fields["capability"] = capability
 }
 
 func SetLogChannelFields(fields logrus.Fields, channel meta.ChannelMeta) {

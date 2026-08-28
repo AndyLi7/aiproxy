@@ -75,6 +75,7 @@ type Log struct {
 	Content          EmptyNullString  `gorm:"type:text"                                                      json:"content,omitempty"`
 	GroupID          string           `gorm:"size:64"                                                        json:"group,omitempty"`
 	Model            string           `gorm:"size:128"                                                       json:"model"`
+	Capability       string           `gorm:"size:64;index"                                                  json:"capability,omitempty"`
 	RequestID        EmptyNullString  `gorm:"type:varchar(128);index:,where:request_id is not null"          json:"request_id"`
 	UpstreamID       EmptyNullString  `gorm:"type:varchar(256)"                                              json:"upstream_id,omitempty"`
 	AsyncUsageStatus AsyncUsageStatus `                                                                      json:"async_usage_status,omitempty"`
@@ -364,6 +365,7 @@ func RecordConsumeLog(
 	code int,
 	channelID int,
 	modelName string,
+	capability string,
 	tokenID int,
 	tokenName string,
 	endpoint string,
@@ -414,6 +416,7 @@ func RecordConsumeLog(
 		TokenID:          tokenID,
 		TokenName:        tokenName,
 		Model:            modelName,
+		Capability:       capability,
 		Mode:             mode,
 		IP:               EmptyNullString(ip),
 		ChannelID:        channelID,

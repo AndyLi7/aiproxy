@@ -559,6 +559,7 @@ func saveAsyncUsageInfo(
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
 		Model:                       meta.OriginModel,
+		Capability:                  meta.VideoCapability,
 		ChannelID:                   meta.Channel.ID,
 		BaseURL:                     meta.Channel.BaseURL,
 		GroupID:                     meta.Group.ID,

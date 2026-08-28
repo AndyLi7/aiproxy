@@ -72,6 +72,7 @@ func convertOpenAIVideoRequest(
 	if err != nil {
 		return adaptor.ConvertResult{}, err
 	}
+	_, _ = node.Unset("capability")
 
 	jsonData, err := sonic.Marshal(&node)
 	if err != nil {
@@ -101,7 +102,11 @@ func convertMultipartOpenAIVideoRequest(
 	multipartBody := &bytes.Buffer{}
 	multipartWriter := multipart.NewWriter(multipartBody)
 
-	if err := processFormValues(multipartWriter, request.MultipartForm.Value, meta); err != nil {
+	if err := processFormValues(
+		multipartWriter,
+		withoutVideoCapability(request.MultipartForm.Value),
+		meta,
+	); err != nil {
 		return adaptor.ConvertResult{}, fmt.Errorf("process form values: %w", err)
 	}
 
@@ -119,6 +124,16 @@ func convertMultipartOpenAIVideoRequest(
 		},
 		Body: multipartBody,
 	}, nil
+}
+
+func withoutVideoCapability(values map[string][]string) map[string][]string {
+	filtered := make(map[string][]string, len(values))
+	for key, value := range values {
+		if key != "capability" {
+			filtered[key] = value
+		}
+	}
+	return filtered
 }
 
 func ConvertVideoGetJobsRequest(
@@ -197,7 +212,7 @@ func VideoHandler(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		ExpiresAt: time.Now().Add(time.Hour * 24),
 	})
 	if err != nil {
@@ -330,7 +345,7 @@ func saveOpenAIVideoStore(meta *meta.Meta, store adaptor.Store, videoID string) 
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		ExpiresAt: time.Now().Add(time.Hour * 24 * 7),
 	})
 }
@@ -389,7 +404,7 @@ func VideoGetJobsHandler(
 			GroupID:   meta.Group.ID,
 			TokenID:   meta.Token.ID,
 			ChannelID: meta.Channel.ID,
-			Model:     meta.OriginModel,
+			Model:     meta.StoreModel(),
 			ExpiresAt: time.Unix(expiresAt, 0),
 		})
 		if err != nil {

@@ -2148,7 +2148,7 @@ func saveAliVideoJobStore(meta *meta.Meta, store adaptor.Store, jobID string) er
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  aliVideoStoreMetadataString(meta),
 		ExpiresAt: time.Now().Add(aliVideoTaskTTL),
 	})
@@ -2175,7 +2175,7 @@ func saveAliVideoGenerationStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  aliVideoStoreMetadataString(meta, upstreamID),
 		ExpiresAt: expiresAtTime,
 	})

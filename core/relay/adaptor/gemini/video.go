@@ -2400,7 +2400,7 @@ func saveGeminiVideoJobStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  geminiVideoStoreMetadataString(meta, operationName),
 		ExpiresAt: expiresAt,
 	})
@@ -2422,7 +2422,7 @@ func saveGeminiVideoStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  geminiVideoStoreMetadataString(meta, operationName),
 		ExpiresAt: expiresAt,
 	})
@@ -2448,7 +2448,7 @@ func saveGeminiFileStores(
 			GroupID:   meta.Group.ID,
 			TokenID:   meta.Token.ID,
 			ChannelID: meta.Channel.ID,
-			Model:     meta.OriginModel,
+			Model:     meta.StoreModel(),
 			Metadata:  geminiFileStoreMetadataString(uri),
 			ExpiresAt: time.Now().Add(geminiVideoTTL),
 		}); err != nil {

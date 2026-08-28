@@ -1015,7 +1015,7 @@ func saveVideoJobStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  videoStoreMetadataString(meta),
 		ExpiresAt: expiresAt,
 	})
@@ -1036,7 +1036,7 @@ func saveVideoGenerationStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  videoStoreMetadataString(meta),
 		ExpiresAt: expiresAt,
 	})

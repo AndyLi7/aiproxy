@@ -19,6 +19,8 @@ type videosRequestUsageParams struct {
 	resolution      string
 	aspectRatio     string
 	generateAudio   *bool
+	imageInput      bool
+	initialCreate   bool
 }
 
 const (
@@ -115,6 +117,8 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 			resolution:      resolution,
 			aspectRatio:     aspectRatio,
 			generateAudio:   generateAudio,
+			imageInput:      multipartVideoImageInputProvided(c),
+			initialCreate:   c.Request.URL.Path == "/v1/videos",
 		}, nil
 	}
 
@@ -197,10 +201,15 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 		resolution:      resolution,
 		aspectRatio:     aspectRatio,
 		generateAudio:   generateAudio,
+		imageInput:      videoImageInputProvided(&node),
+		initialCreate:   c.Request.URL.Path == "/v1/videos",
 	}, nil
 }
 
 func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.ModelConfig) error {
+	if err := validateVideoCapabilityInput(params, mc.Config); err != nil {
+		return err
+	}
 	if err := validateVideoDimensionSelection(params, mc); err != nil {
 		return err
 	}
@@ -259,6 +268,66 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 	}
 
 	return validateVideosRequestDurationAndAudio(params, mc)
+}
+
+func validateVideoCapabilityInput(
+	params videosRequestUsageParams,
+	config map[model.ModelConfigKey]any,
+) error {
+	if !params.initialCreate {
+		return nil
+	}
+
+	capability, _ := config[model.ModelConfigKey("capability")].(string)
+	switch capability {
+	case string(model.ModelCapabilityImageToVideo):
+		if !params.imageInput {
+			return NewDetailedBadRequestParamError(
+				videoMissingParameterCode,
+				"input_reference is required for image-to-video",
+				"input_reference", nil, nil, "image URL or image file",
+			)
+		}
+	case string(model.ModelCapabilityTextToVideo):
+		if params.imageInput {
+			return NewDetailedBadRequestParamError(
+				videoUnsupportedByModelCode,
+				"input_reference is not supported for text-to-video",
+				"input_reference", nil, nil, "omit image input",
+			)
+		}
+	}
+
+	return nil
+}
+
+func multipartVideoImageInputProvided(c *gin.Context) bool {
+	for _, key := range []string{"input_reference", "image", "image_url", "first_frame_url"} {
+		if strings.TrimSpace(c.PostForm(key)) != "" {
+			return true
+		}
+		if c.Request.MultipartForm != nil && len(c.Request.MultipartForm.File[key]) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func videoImageInputProvided(node *ast.Node) bool {
+	for _, key := range []string{"input_reference", "image", "image_url", "first_frame_url"} {
+		field := node.Get(key)
+		if field == nil || !field.Exists() || field.TypeSafe() == ast.V_NULL {
+			continue
+		}
+		if field.TypeSafe() != ast.V_STRING {
+			return true
+		}
+		value, err := field.String()
+		if err != nil || strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.ModelConfig) error {

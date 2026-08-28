@@ -31,13 +31,15 @@ type Meta struct {
 	Token          model.TokenCache
 	ModelConfig    model.ModelConfig
 
-	Endpoint    string
-	RequestAt   time.Time
-	RetryAt     time.Time
-	RequestID   string
-	OriginModel string
-	ActualModel string
-	Mode        mode.Mode
+	Endpoint        string
+	RequestAt       time.Time
+	RetryAt         time.Time
+	RequestID       string
+	OriginModel     string
+	RoutingModel    string
+	ActualModel     string
+	VideoCapability string
+	Mode            mode.Mode
 
 	RequestTimeout time.Duration
 
@@ -166,6 +168,18 @@ func WithOperationalFields(fields model.OperationalFields) Option {
 	}
 }
 
+func WithRoutingModel(modelName string) Option {
+	return func(meta *Meta) {
+		meta.RoutingModel = modelName
+	}
+}
+
+func WithVideoCapability(capability string) Option {
+	return func(meta *Meta) {
+		meta.VideoCapability = capability
+	}
+}
+
 func NewMeta(
 	channel *model.Channel,
 	mode mode.Mode,
@@ -174,11 +188,12 @@ func NewMeta(
 	opts ...Option,
 ) *Meta {
 	meta := Meta{
-		values:      make(map[string]any),
-		Mode:        mode,
-		OriginModel: modelName,
-		ActualModel: modelName,
-		ModelConfig: modelConfig,
+		values:       make(map[string]any),
+		Mode:         mode,
+		OriginModel:  modelName,
+		RoutingModel: modelName,
+		ActualModel:  modelName,
+		ModelConfig:  modelConfig,
 	}
 
 	for _, opt := range opts {
@@ -212,13 +227,20 @@ func (m *Meta) SetChannel(channel *model.Channel) {
 	m.Channel.ModelMapping = channel.ModelMapping
 	m.ChannelConfigs = channel.Configs
 
-	m.ActualModel, _ = GetMappedModelName(m.OriginModel, channel.ModelMapping)
+	m.ActualModel, _ = GetMappedModelName(m.StoreModel(), channel.ModelMapping)
 }
 
 func (m *Meta) CopyChannelFromMeta(meta *Meta) {
 	m.Channel = meta.Channel
 	m.ChannelConfigs = meta.ChannelConfigs
-	m.ActualModel, _ = GetMappedModelName(meta.OriginModel, meta.Channel.ModelMapping)
+	m.ActualModel, _ = GetMappedModelName(m.StoreModel(), meta.Channel.ModelMapping)
+}
+
+func (m *Meta) StoreModel() string {
+	if m.RoutingModel != "" {
+		return m.RoutingModel
+	}
+	return m.OriginModel
 }
 
 func (m *Meta) ClearValues() {

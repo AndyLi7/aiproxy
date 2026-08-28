@@ -22,6 +22,7 @@ type VideoGenerationJobRequest struct {
 type VideosRequest struct {
 	Prompt         string `json:"prompt,omitempty"`
 	Model          string `json:"model,omitempty"`
+	Capability     string `json:"capability,omitempty"`
 	Seconds        any    `json:"seconds,omitempty"`
 	Size           string `json:"size,omitempty"`
 	InputReference string `json:"input_reference,omitempty"`

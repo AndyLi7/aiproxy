@@ -573,14 +573,50 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
-	findModel := token.FindModel(requestModel)
+	publicModel := requestModel
+	routingModel := requestModel
+	if IsPublicVideoRequest(c.Request.URL.Path, mode) {
+		publicModel, routingModel, err = resolveVideoCapability(c, mode, requestModel)
+		if err != nil {
+			var validationErr *publicVideoRequestValidationError
+			if errors.As(err, &validationErr) {
+				AbortPublicVideoRequestError(
+					c,
+					model.FailureStageValidation,
+					http.StatusBadRequest,
+					validationErr.code,
+					validationErr.message,
+					validationErr.param,
+					validationErr.value,
+					validationErr.allowedValues,
+					validationErr.expected,
+				)
+				return
+			}
+			AbortLogWithMessage(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	findModel := token.FindModel(routingModel)
 
 	if findModel == "" {
 		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
+			if GetVideoCapability(c) != "" {
+				abortUnsupportedPublicVideoCapability(
+					c,
+					mode,
+					publicModel,
+					GetVideoCapability(c),
+					token,
+					GetModelCaches(c),
+				)
+				return
+			}
 			abortUnsupportedPublicVideoModel(
 				c,
 				mode,
-				requestModel,
+				publicModel,
 				token,
 				GetModelCaches(c),
 			)
@@ -599,7 +635,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
-	SetLogModelFields(log.Data, findModel)
+	SetLogModelFields(log.Data, publicModel)
 
 	mc, ok := GetModelCaches(c).ModelConfig.GetModelConfig(findModel)
 	if !ok {
@@ -609,16 +645,30 @@ func distribute(c *gin.Context, mode mode.Mode) {
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist or you do not have access to it.",
-				findModel,
+				publicModel,
 			),
 		)
 
 		return
 	}
+	if _, capability, capabilityRoute := model.ParseModelCapabilityKey(findModel); capabilityRoute {
+		if err := model.ValidateModelCapabilityConfig(mc.Config, publicModel, capability); err != nil {
+			log.Errorf("reject invalid model capability config for %s: %v", publicModel, err)
+			AbortOperationally(
+				c,
+				model.FailureStageModel,
+				http.StatusServiceUnavailable,
+				"the selected model capability is temporarily unavailable",
+			)
+			return
+		}
+	}
 
 	mc = GetGroupAdjustedModelConfig(group, mc)
 
-	c.Set(RequestModel, findModel)
+	c.Set(RequestModel, publicModel)
+	c.Set(PublicRequestModel, publicModel)
+	c.Set(RoutingModel, findModel)
 	c.Set(ModelConfig, mc)
 
 	if !CheckRelayMode(mode, mc.Type) {
@@ -628,7 +678,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 			http.StatusNotFound,
 			fmt.Sprintf(
 				"The model `%s` does not exist on this endpoint.",
-				findModel,
+				publicModel,
 			),
 		)
 
@@ -715,12 +765,52 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		Status:     http.StatusOK,
 		Method:     c.Request.Method,
 		Path:       c.Request.URL.Path,
-		Model:      findModel,
+		Model:      publicModel,
 	})
 	routeStageLogged = true
 
 	clearRequestBodyNode(c)
 	c.Next()
+}
+
+func abortUnsupportedPublicVideoCapability(
+	c *gin.Context,
+	requestMode mode.Mode,
+	publicModel string,
+	capability string,
+	token model.TokenCache,
+	caches *model.ModelCaches,
+) {
+	allowedValues := make([]string, 0)
+	token.Range(func(candidate string) bool {
+		candidateModel, candidateCapability, ok := model.ParseModelCapabilityKey(candidate)
+		if !ok || !strings.EqualFold(candidateModel, publicModel) {
+			return true
+		}
+		mc, ok := caches.EnabledModelConfigsMap[candidate]
+		if ok && CheckRelayMode(requestMode, mc.Type) {
+			allowedValues = append(allowedValues, string(candidateCapability))
+		}
+		return true
+	})
+	slices.Sort(allowedValues)
+	allowedValues = slices.Compact(allowedValues)
+
+	message := fmt.Sprintf("unsupported video capability `%s` for model `%s`", capability, publicModel)
+	if len(allowedValues) != 0 {
+		message += ", allowed values: " + strings.Join(allowedValues, ", ")
+	}
+	AbortPublicVideoRequestError(
+		c,
+		model.FailureStageModel,
+		http.StatusNotFound,
+		"unsupported_capability",
+		message,
+		"capability",
+		capability,
+		allowedValues,
+		"published capability for the selected model",
+	)
 }
 
 func abortUnsupportedPublicVideoModel(
@@ -734,11 +824,12 @@ func abortUnsupportedPublicVideoModel(
 	token.Range(func(candidate string) bool {
 		mc, ok := caches.EnabledModelConfigsMap[candidate]
 		if ok && CheckRelayMode(requestMode, mc.Type) {
-			allowedValues = append(allowedValues, candidate)
+			allowedValues = append(allowedValues, publicVideoModelID(candidate))
 		}
 		return true
 	})
 	slices.Sort(allowedValues)
+	allowedValues = slices.Compact(allowedValues)
 
 	message := fmt.Sprintf("unsupported video model `%s`", requestModel)
 	if len(allowedValues) != 0 {
@@ -818,7 +909,7 @@ func NewMetaByContext(c *gin.Context,
 	requestID := GetRequestID(c)
 	group := GetGroup(c)
 	token := GetToken(c)
-	modelName := GetRequestModel(c)
+	modelName := GetPublicRequestModel(c)
 	modelConfig := GetModelConfig(c)
 	requestAt := GetRequestAt(c)
 	jobID := GetJobID(c)
@@ -833,6 +924,8 @@ func NewMetaByContext(c *gin.Context,
 
 	opts = append(
 		opts,
+		meta.WithRoutingModel(GetRoutingModel(c)),
+		meta.WithVideoCapability(GetVideoCapability(c)),
 		meta.WithRequestAt(requestAt),
 		meta.WithRequestID(requestID),
 		meta.WithGroup(group),
@@ -1190,6 +1283,7 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 
 		c.Set(VideoID, videoID)
 		c.Set(ChannelID, store.ChannelID)
+		return store.Model, nil
 	}
 
 	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "multipart/form-data") {

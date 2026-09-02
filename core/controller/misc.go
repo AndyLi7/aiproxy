@@ -4,10 +4,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/middleware"
+	"github.com/labring/aiproxy/core/model"
 )
 
 type StatusData struct {
-	StartTime int64 `json:"startTime"`
+	StartTime int64    `json:"startTime"`
+	Features  []string `json:"features"`
 }
 
 // GetStatus godoc
@@ -21,5 +23,6 @@ type StatusData struct {
 func GetStatus(c *gin.Context) {
 	middleware.SuccessResponse(c, &StatusData{
 		StartTime: common.StartTime,
+		Features:  []string{model.AdminDemoFeature},
 	})
 }

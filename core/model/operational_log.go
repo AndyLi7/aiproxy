@@ -33,6 +33,8 @@ const (
 const (
 	RequestSourceAPI        = "api"
 	RequestSourcePlayground = "playground"
+	RequestSourceAdminDemo  = "admin_demo"
+	AdminDemoFeature        = "token_platform.admin_demo.v1"
 	maxSafeErrorRunes       = 512
 )
 
@@ -45,8 +47,18 @@ type OperationalFields struct {
 
 type OperationalLogFilter struct {
 	Status        OperationalStatus
+	Source        string
 	ChannelIDs    []int
 	ExcludedModes []int
+}
+
+func ValidRequestSource(source string) bool {
+	switch source {
+	case "", RequestSourceAPI, RequestSourcePlayground, RequestSourceAdminDemo:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s OperationalStatus) Valid() bool {
@@ -71,7 +83,7 @@ func BuildOperationalFields(
 	errorCodes ...string,
 ) OperationalFields {
 	switch requestSource {
-	case RequestSourcePlayground:
+	case RequestSourcePlayground, RequestSourceAdminDemo:
 	default:
 		requestSource = RequestSourceAPI
 	}
@@ -168,6 +180,9 @@ func (l *Log) OperationalStatus() OperationalStatus {
 }
 
 func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.DB {
+	if filter.Source != "" {
+		tx = tx.Where("request_source = ?", filter.Source)
+	}
 	if len(filter.ChannelIDs) > 0 {
 		tx = tx.Where("channel_id IN ?", filter.ChannelIDs)
 	}

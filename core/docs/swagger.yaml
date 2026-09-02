@@ -805,6 +805,10 @@ definitions:
     type: object
   controller.StatusData:
     properties:
+      features:
+        items:
+          type: string
+        type: array
       startTime:
         type: integer
     type: object

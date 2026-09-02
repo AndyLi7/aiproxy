@@ -47,9 +47,15 @@ func parseExcludedModes(c *gin.Context) ([]int, error) {
 }
 
 func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, error) {
-	filter := model.OperationalLogFilter{Status: model.OperationalStatus(c.Query("status"))}
+	filter := model.OperationalLogFilter{
+		Status: model.OperationalStatus(c.Query("status")),
+		Source: strings.TrimSpace(c.Query("request_source")),
+	}
 	if !filter.Status.Valid() {
 		return model.OperationalLogFilter{}, fmt.Errorf("invalid operational status %q", filter.Status)
+	}
+	if !model.ValidRequestSource(filter.Source) {
+		return model.OperationalLogFilter{}, fmt.Errorf("invalid request source %q", filter.Source)
 	}
 
 	rawChannels := strings.TrimSpace(c.Query("channels"))
@@ -116,6 +122,7 @@ func parseCommonParams(c *gin.Context) (params struct {
 //	@Param			channel			query		int		false	"Channel ID"
 //	@Param			channels		query		string	false	"Comma-separated channel IDs"
 //	@Param			status			query		string	false	"Operational status: processing, success, failed, rejected"
+//	@Param			request_source	query		string	false	"Request source: api, playground, admin_demo"
 //	@Param			order			query		string	false	"Order"
 //	@Param			request_id		query		string	false	"Request ID"
 //	@Param			upstream_id		query		string	false	"Upstream ID"
@@ -246,6 +253,7 @@ func GetGroupLogs(c *gin.Context) {
 //	@Param			channel			query		int		false	"Filter by channel"
 //	@Param			channels		query		string	false	"Comma-separated channel IDs"
 //	@Param			status			query		string	false	"Operational status: processing, success, failed, rejected"
+//	@Param			request_source	query		string	false	"Request source: api, playground, admin_demo"
 //	@Param			group			query		string	true	"Group name"
 //	@Param			token_id		query		int		false	"Filter by token id"
 //	@Param			token_name		query		string	false	"Filter by token name"

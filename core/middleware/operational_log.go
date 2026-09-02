@@ -47,8 +47,16 @@ func operationalLogRecorded(c *gin.Context) bool {
 func OperationalFieldsFromContext(c *gin.Context) model.OperationalFields {
 	stage, _ := c.Get(operationalFailureStageKey)
 	failureStage, _ := stage.(model.FailureStage)
+	requestSource := c.GetHeader(OperationalLogSourceHeader)
+	if requestSource == model.RequestSourceAdminDemo {
+		group, ok := c.Get(Group)
+		groupCache, validGroup := group.(model.GroupCache)
+		if !ok || !validGroup || groupCache.Status != model.GroupStatusInternal {
+			requestSource = model.RequestSourceAPI
+		}
+	}
 	return model.BuildOperationalFields(
-		c.GetHeader(OperationalLogSourceHeader),
+		requestSource,
 		failureStage,
 		c.GetString(operationalSafeErrorKey),
 		c.GetString(operationalErrorCodeKey),

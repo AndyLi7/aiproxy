@@ -72,6 +72,24 @@ func TestBuildOperationalFieldsDefaultsUntrustedValues(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalFieldsPreservesAdminDemoSource(t *testing.T) {
+	t.Parallel()
+
+	fields := BuildOperationalFields(RequestSourceAdminDemo, FailureStageNone, "")
+	if fields.RequestSource != RequestSourceAdminDemo {
+		t.Fatalf("request source = %q, want %q", fields.RequestSource, RequestSourceAdminDemo)
+	}
+}
+
+func TestBuildOperationalFieldsNormalizesUnknownSourceToAPI(t *testing.T) {
+	t.Parallel()
+
+	fields := BuildOperationalFields("internal-secret", FailureStageNone, "")
+	if fields.RequestSource != RequestSourceAPI {
+		t.Fatalf("request source = %q, want %q", fields.RequestSource, RequestSourceAPI)
+	}
+}
+
 func TestLogOperationalStatus(t *testing.T) {
 	t.Parallel()
 

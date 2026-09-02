@@ -173,3 +173,18 @@ func TestApplyOperationalLogFilterSupportsMultipleChannels(t *testing.T) {
 		t.Fatalf("multi-channel vars %v, want [10 12]", statement.Vars)
 	}
 }
+
+func TestApplyOperationalLogFilterSupportsRequestSource(t *testing.T) {
+	database := newOperationalLogDryRunDB(t)
+	statement := applyOperationalLogFilter(
+		database.Model(&Log{}),
+		OperationalLogFilter{Source: RequestSourceAdminDemo},
+	).Find(&[]Log{}).Statement
+
+	if !strings.Contains(statement.SQL.String(), "request_source =") {
+		t.Fatalf("source SQL %q does not contain request_source predicate", statement.SQL.String())
+	}
+	if fmt.Sprint(statement.Vars) != "[admin_demo]" {
+		t.Fatalf("source vars %v, want [admin_demo]", statement.Vars)
+	}
+}

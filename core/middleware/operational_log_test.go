@@ -130,6 +130,40 @@ func TestNewMetaByContextCarriesOperationalSource(t *testing.T) {
 	}
 }
 
+func TestAdminDemoSourceRequiresAnInternalGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, test := range []struct {
+		name       string
+		group      model.GroupCache
+		wantSource string
+	}{
+		{
+			name:       "customer token cannot spoof admin demo",
+			group:      model.GroupCache{ID: "customer-group", Status: model.GroupStatusEnabled},
+			wantSource: model.RequestSourceAPI,
+		},
+		{
+			name:       "internal token can mark admin demo",
+			group:      model.GroupCache{ID: "internal-group", Status: model.GroupStatusInternal},
+			wantSource: model.RequestSourceAdminDemo,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+			c.Set(Group, test.group)
+
+			fields := OperationalFieldsFromContext(c)
+			if fields.RequestSource != test.wantSource {
+				t.Fatalf("request source = %q, want %q", fields.RequestSource, test.wantSource)
+			}
+		})
+	}
+}
+
 func TestMaskOperationalIPRemovesHostBits(t *testing.T) {
 	if got := maskOperationalIP("203.0.113.91"); got != "203.0.113.0" {
 		t.Fatalf("masked IPv4 = %q, want 203.0.113.0", got)

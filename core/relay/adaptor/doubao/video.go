@@ -1575,7 +1575,7 @@ func saveDoubaoVideoJobStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  doubaoVideoStoreMetadataString(meta),
 		ExpiresAt: expiresAt,
 	})
@@ -1596,7 +1596,7 @@ func saveDoubaoVideoStore(
 		GroupID:   meta.Group.ID,
 		TokenID:   meta.Token.ID,
 		ChannelID: meta.Channel.ID,
-		Model:     meta.OriginModel,
+		Model:     meta.StoreModel(),
 		Metadata:  doubaoVideoStoreMetadataString(meta),
 		ExpiresAt: expiresAt,
 	})

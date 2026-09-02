@@ -44,6 +44,67 @@ func TestGetVideosRequestUsageMultipart(t *testing.T) {
 	require.Zero(t, usage.Usage.TotalTokens)
 }
 
+func TestValidateVideosRequestEnforcesCapabilityInputShape(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name       string
+		capability string
+		body       string
+		param      string
+	}{
+		{
+			name:       "image capability requires image",
+			capability: "image-to-video",
+			body:       `{"prompt":"A city street","size":"1280x720"}`,
+			param:      "input_reference",
+		},
+		{
+			name:       "text capability rejects image",
+			capability: "text-to-video",
+			body:       `{"prompt":"A city street","size":"1280x720","input_reference":"https://example.com/frame.png"}`,
+			param:      "input_reference",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(tc.body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			err := ValidateVideosRequest(ctx, model.ModelConfig{Config: map[model.ModelConfigKey]any{
+				"capability": tc.capability,
+			}})
+			var paramErr *RequestParamError
+			require.ErrorAs(t, err, &paramErr)
+			require.Equal(t, tc.param, paramErr.Param)
+		})
+	}
+}
+
+func TestValidateVideosRequestAcceptsCapabilityInputShape(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/v1/videos", bytes.NewBufferString(
+			`{"prompt":"A city street","size":"1280x720","input_reference":"https://example.com/frame.png"}`,
+		),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	err := ValidateVideosRequest(ctx, model.ModelConfig{Config: map[model.ModelConfigKey]any{
+		"capability": "image-to-video",
+	}})
+	require.NoError(t, err)
+}
+
 func TestValidateVideosRequestRejectsTooLongSeconds(t *testing.T) {
 	t.Parallel()
 

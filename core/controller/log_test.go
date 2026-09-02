@@ -193,6 +193,22 @@ func TestParseOperationalLogFilterAcceptsStatusAndChannels(t *testing.T) {
 	}
 }
 
+func TestParseOperationalLogFilterAcceptsAdminDemoSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = &http.Request{URL: &url.URL{RawQuery: "request_source=admin_demo"}}
+
+	filter, err := parseOperationalLogFilter(c)
+	if err != nil {
+		t.Fatalf("parse operational filter: %v", err)
+	}
+	if filter.Source != model.RequestSourceAdminDemo {
+		t.Fatalf("source = %q, want %q", filter.Source, model.RequestSourceAdminDemo)
+	}
+}
+
 func TestParseOperationalLogFilterRejectsInvalidValues(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -200,6 +216,7 @@ func TestParseOperationalLogFilterRejectsInvalidValues(t *testing.T) {
 		"status=unknown",
 		"channels=10,invalid",
 		"channels=0",
+		"request_source=unknown",
 	}
 	for _, rawQuery := range tests {
 		t.Run(rawQuery, func(t *testing.T) {

@@ -487,6 +487,8 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 		}),
 		meta.WithGroup(model.GroupCache{ID: "group-1"}),
 		meta.WithToken(model.TokenCache{ID: 22, Name: "token-1"}),
+		meta.WithRoutingModel("test-video-model::image-to-video"),
+		meta.WithVideoCapability(string(model.ModelCapabilityImageToVideo)),
 	)
 
 	saveAsyncUsageInfo(m, model.Price{}, &relaycontroller.HandleResult{
@@ -504,6 +506,8 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 	require.Equal(t, "priority", captured.UsageContext.ServiceTier)
 	require.Equal(t, "USD", captured.PricingCurrency)
 	require.Equal(t, "21", captured.PricingVersion)
+	require.Equal(t, "test-video-model", captured.Model)
+	require.Equal(t, string(model.ModelCapabilityImageToVideo), captured.Capability)
 }
 
 func TestBuildRequestDetailForLogSkipsRequestBodyForUpstreamOnlyStatuses(t *testing.T) {

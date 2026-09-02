@@ -251,6 +251,7 @@ func NewMetaByContext(
 
 func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	requestModel := middleware.GetRequestModel(c)
+	routingModel := middleware.GetRoutingModel(c)
 	mc := middleware.GetModelConfig(c)
 
 	if relayController.ValidateRequest != nil {
@@ -289,7 +290,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 	// Get initial channel
 	channelStartedAt := time.Now()
-	initialChannel, err := getInitialChannel(c, requestModel, mode)
+	initialChannel, err := getInitialChannel(c, routingModel, mode)
 	if err != nil || initialChannel == nil || initialChannel.channel == nil {
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_stage_finished",
@@ -558,6 +559,7 @@ func saveAsyncUsageInfo(
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
 		Model:                       meta.OriginModel,
+		Capability:                  meta.VideoCapability,
 		ChannelID:                   meta.Channel.ID,
 		BaseURL:                     meta.Channel.BaseURL,
 		GroupID:                     meta.Group.ID,

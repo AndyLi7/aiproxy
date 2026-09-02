@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ type AsyncUsageInfo struct {
 	RequestAt                   time.Time        `                               json:"request_at"`
 	Mode                        int              `gorm:"index"                   json:"mode"`
 	Model                       string           `gorm:"size:128"                json:"model"`
+	Capability                  string           `gorm:"size:64;index"           json:"capability,omitempty"`
 	ChannelID                   int              `gorm:"index"                   json:"channel_id"`
 	BaseURL                     string           `gorm:"type:text"               json:"base_url,omitempty"`
 	GroupID                     string           `gorm:"size:64;index"           json:"group_id"`
@@ -59,6 +61,16 @@ type AsyncUsageInfo struct {
 }
 
 func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
+	if info.Capability != "" {
+		capability := ModelCapability(info.Capability)
+		if !capability.Valid() {
+			return fmt.Errorf("invalid async usage capability %q", info.Capability)
+		}
+		if strings.Contains(info.Model, modelCapabilityKeySeparator) {
+			return errors.New("async usage model must be a public model ID")
+		}
+	}
+
 	info.Status = AsyncUsageStatusPending
 	info.CreatedAt = time.Now()
 

@@ -11073,6 +11073,12 @@ const docTemplate = `{
         "controller.StatusData": {
             "type": "object",
             "properties": {
+                "features": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "startTime": {
                     "type": "integer"
                 }

@@ -44,6 +44,7 @@ func recordConsume(
 		code,
 		meta.Channel.ID,
 		meta.OriginModel,
+		meta.VideoCapability,
 		meta.Token.ID,
 		meta.Token.Name,
 		meta.Endpoint,

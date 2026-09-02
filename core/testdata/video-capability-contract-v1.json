@@ -1,0 +1,59 @@
+{
+  "contract_version": 1,
+  "route_delimiter": "::",
+  "capabilities": ["text-to-video", "image-to-video"],
+  "valid_routes": [
+    {
+      "public_model": "bytedance/seedance-2.0",
+      "capability": "text-to-video",
+      "routing_model": "bytedance/seedance-2.0::text-to-video",
+      "channel_id": "channel-seedance-2-text",
+      "gateway_channel_id": 202
+    },
+    {
+      "public_model": "bytedance/seedance-2.0",
+      "capability": "image-to-video",
+      "routing_model": "bytedance/seedance-2.0::image-to-video",
+      "channel_id": "channel-seedance-2-image",
+      "gateway_channel_id": 203
+    }
+  ],
+  "invalid_requests": [
+    {
+      "public_model": "bytedance/seedance-2.0",
+      "error_code": "missing_capability"
+    },
+    {
+      "public_model": "bytedance/seedance-2.0",
+      "capability": "reference-to-video",
+      "error_code": "unsupported_capability"
+    },
+    {
+      "public_model": "bytedance/seedance-2.0::text-to-video",
+      "error_code": "invalid_parameter"
+    }
+  ],
+  "invalid_configs": [
+    {
+      "route_public_model": "bytedance/seedance-2.0",
+      "route_capability": "text-to-video",
+      "config_public_model": "bytedance/other-model",
+      "config_capability": "text-to-video"
+    },
+    {
+      "route_public_model": "bytedance/seedance-2.0",
+      "route_capability": "text-to-video",
+      "config_public_model": "bytedance/seedance-2.0",
+      "config_capability": "image-to-video"
+    }
+  ],
+  "log_projection": {
+    "public_fields": ["model", "capability"],
+    "internal_only_fields": [
+      "routing_model",
+      "route_id",
+      "channel_id",
+      "gateway_channel_id"
+    ]
+  }
+}

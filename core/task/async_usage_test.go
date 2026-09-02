@@ -1095,20 +1095,31 @@ func TestMarkAsyncUsageFailedWritesLogMessage(t *testing.T) {
 	requestID := "async_fail_log"
 	require.NoError(t, db.Create(&model.Log{
 		RequestID:        model.EmptyNullString(requestID),
+		Model:            "bytedance/seedance-2.0",
+		Capability:       string(model.ModelCapabilityImageToVideo),
 		AsyncUsageStatus: model.AsyncUsageStatusPending,
 	}).Error)
 
 	info := &model.AsyncUsageInfo{
 		RequestID:       requestID,
+		Model:           "bytedance/seedance-2.0",
+		Capability:      string(model.ModelCapabilityImageToVideo),
 		Status:          model.AsyncUsageStatusPending,
 		ProcessingToken: "claim-token",
 	}
 	require.NoError(t, db.Create(info).Error)
 
 	markAsyncUsageFailed(info, "upstream task failed")
+	markAsyncUsageFailed(info, "duplicate callback must not overwrite")
 
 	var got model.Log
 	require.NoError(t, db.Where("request_id = ?", requestID).First(&got).Error)
 	require.Equal(t, model.AsyncUsageStatusFailed, got.AsyncUsageStatus)
 	require.Equal(t, "upstream task failed", string(got.Content))
+	require.Equal(t, "bytedance/seedance-2.0", got.Model)
+	require.Equal(t, string(model.ModelCapabilityImageToVideo), got.Capability)
+
+	var failed model.AsyncUsageInfo
+	require.NoError(t, db.First(&failed, info.ID).Error)
+	require.Equal(t, string(model.ModelCapabilityImageToVideo), failed.Capability)
 }

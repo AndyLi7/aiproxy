@@ -651,7 +651,7 @@ func getRetryChannel(
 	ctx context.Context,
 	state *retryState,
 ) (*model.Channel, error) {
-	errorRates, err := monitor.GetModelChannelErrorRate(ctx, state.meta.OriginModel)
+	errorRates, err := monitor.GetModelChannelErrorRate(ctx, state.meta.StoreModel())
 	if err != nil {
 		if errors.Is(err, context.Canceled) ||
 			errors.Is(err, context.DeadlineExceeded) {

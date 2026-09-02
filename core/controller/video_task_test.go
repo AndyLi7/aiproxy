@@ -30,6 +30,7 @@ func TestGetGroupVideoTasksReturnsOnlySafeProjection(t *testing.T) {
 		RequestAt:       time.Now(),
 		Mode:            int(mode.Videos),
 		Model:           "seedance-1-5-pro",
+		Capability:      string(model.ModelCapabilityTextToVideo),
 		ChannelID:       9,
 		BaseURL:         "https://upstream-secret.invalid/?api_key=base-url-secret",
 		GroupID:         "group-a",
@@ -68,6 +69,7 @@ func TestGetGroupVideoTasksReturnsOnlySafeProjection(t *testing.T) {
 	require.Len(t, envelope.Data.Items, 1)
 	require.Equal(t, "req-safe", envelope.Data.Items[0].RequestID)
 	require.Equal(t, 5, envelope.Data.Items[0].Params.Seconds)
+	require.Equal(t, string(model.ModelCapabilityTextToVideo), envelope.Data.Items[0].Capability)
 
 	body := recorder.Body.String()
 	for _, forbidden := range []string{
@@ -78,6 +80,7 @@ func TestGetGroupVideoTasksReturnsOnlySafeProjection(t *testing.T) {
 		"processing_token",
 		"base_url",
 		"metadata",
+		"::",
 	} {
 		require.False(t, strings.Contains(body, forbidden), body)
 	}
@@ -131,6 +134,7 @@ func TestGetGroupVideoTaskByRequestIDReturnsOnlySafeProjection(t *testing.T) {
 		RequestAt:       time.Now(),
 		Mode:            int(mode.Videos),
 		Model:           "seedance-1-5-pro",
+		Capability:      string(model.ModelCapabilityImageToVideo),
 		ChannelID:       9,
 		BaseURL:         "https://upstream-secret.invalid/?api_key=base-url-secret",
 		GroupID:         "group-a",
@@ -162,6 +166,8 @@ func TestGetGroupVideoTaskByRequestIDReturnsOnlySafeProjection(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"request_id":"req-safe"`)
+	require.Contains(t, recorder.Body.String(), `"capability":"image-to-video"`)
+	require.NotContains(t, recorder.Body.String(), "::")
 	for _, forbidden := range []string{
 		"base_url", "processing_token", `"error"`, `"price"`,
 	} {

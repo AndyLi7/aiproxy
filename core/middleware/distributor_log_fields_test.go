@@ -53,6 +53,7 @@ func TestSetLogFieldsFromMeta(t *testing.T) {
 		User:               "user-1",
 		OriginModel:        "gpt-5",
 		ActualModel:        "gpt-5",
+		VideoCapability:    "image-to-video",
 	}, fields)
 
 	assert.Equal(t, "priority", fields["service_tier"])
@@ -62,4 +63,5 @@ func TestSetLogFieldsFromMeta(t *testing.T) {
 	assert.Equal(t, "ChatCompletions", fields["mode"])
 	assert.Equal(t, "gpt-5", fields["model"])
 	assert.Equal(t, "gpt-5", fields["actmodel"])
+	assert.Equal(t, "image-to-video", fields["capability"])
 }

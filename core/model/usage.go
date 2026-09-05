@@ -78,7 +78,12 @@ type Price struct {
 }
 
 func normalizeServiceTier(serviceTier string) string {
-	return strings.ToLower(strings.TrimSpace(serviceTier))
+	normalized := strings.ToLower(strings.TrimSpace(serviceTier))
+	if normalized == "fast" {
+		return "priority"
+	}
+
+	return normalized
 }
 
 func isAllowedServiceTier(serviceTier string) bool {
@@ -528,7 +533,7 @@ func (p *Price) ValidateConditionalPrices() error {
 
 		if !isAllowedServiceTier(condition.ServiceTier) {
 			return fmt.Errorf(
-				"conditional price %d: invalid service tier %q (allowed: auto, default, flex, scale, priority)",
+				"conditional price %d: invalid service tier %q (allowed: auto, default, flex, scale, priority, fast)",
 				i,
 				condition.ServiceTier,
 			)

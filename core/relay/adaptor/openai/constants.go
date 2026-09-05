@@ -9,6 +9,71 @@ import (
 
 var ModelList = []model.ModelConfig{
 	{
+		Model: "gpt-6-astra",
+		Type:  mode.ChatCompletions,
+		Owner: model.ModelOwnerOpenAI,
+		Price: model.Price{
+			InputPrice:         0.020,
+			OutputPrice:        0.075,
+			CachedPrice:        0.002,
+			CacheCreationPrice: 0.025,
+			ConditionalPrices: []model.ConditionalPrice{
+				{
+					Condition: model.PriceCondition{InputTokenMax: 272000, ServiceTier: "priority"},
+					Price: model.Price{
+						InputPrice:         0.020,
+						OutputPrice:        0.100,
+						CachedPrice:        0.002,
+						CacheCreationPrice: 0.025,
+					},
+				},
+				{
+					Condition: model.PriceCondition{InputTokenMin: 272001, ServiceTier: "priority"},
+					Price: model.Price{
+						InputPrice:         0.040,
+						OutputPrice:        0.150,
+						CachedPrice:        0.004,
+						CacheCreationPrice: 0.050,
+					},
+				},
+				{
+					Condition: model.PriceCondition{InputTokenMax: 272000, ServiceTier: "flex"},
+					Price: model.Price{
+						InputPrice:         0.005,
+						OutputPrice:        0.025,
+						CachedPrice:        0.0005,
+						CacheCreationPrice: 0.00625,
+					},
+				},
+				{
+					Condition: model.PriceCondition{InputTokenMin: 272001, ServiceTier: "flex"},
+					Price: model.Price{
+						InputPrice:         0.010,
+						OutputPrice:        0.0375,
+						CachedPrice:        0.001,
+						CacheCreationPrice: 0.0125,
+					},
+				},
+				{
+					Condition: model.PriceCondition{InputTokenMax: 272000},
+					Price: model.Price{
+						InputPrice:         0.010,
+						OutputPrice:        0.050,
+						CachedPrice:        0.001,
+						CacheCreationPrice: 0.0125,
+					},
+				},
+			},
+		},
+		SummaryServiceTier: true,
+		Config: model.NewModelConfig(
+			model.WithModelConfigMaxContextTokens(1050000),
+			model.WithModelConfigMaxInputTokens(922000),
+			model.WithModelConfigMaxOutputTokens(128000),
+			model.WithModelConfigToolChoice(true),
+		),
+	},
+	{
 		Model: "gpt-5.6",
 		Type:  mode.ChatCompletions,
 		Owner: model.ModelOwnerOpenAI,

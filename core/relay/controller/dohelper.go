@@ -365,8 +365,8 @@ func handleResponse(
 	}
 
 	if result.UpstreamID == "" && resp != nil && resp.Header != nil &&
-		resp.Header.Get("x-request-id") != "" {
-		result.UpstreamID = resp.Header.Get("x-request-id")
+		resp.Header.Get("X-Request-ID") != "" {
+		result.UpstreamID = resp.Header.Get("X-Request-ID")
 	}
 
 	return result, relayErr

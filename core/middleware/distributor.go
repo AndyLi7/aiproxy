@@ -574,7 +574,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	}
 
 	publicModel := requestModel
-	routingModel := requestModel
+	routingModel := resolveImageCapability(c, mode, requestModel)
 	if IsPublicVideoRequest(c.Request.URL.Path, mode) {
 		publicModel, routingModel, err = resolveVideoCapability(c, mode, requestModel)
 		if err != nil {

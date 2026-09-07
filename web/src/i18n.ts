@@ -10,6 +10,9 @@ i18n
     .use(initReactI18next)
     .init({
         fallbackLng: 'en',
+        supportedLngs: ['zh', 'en'],
+        load: 'languageOnly',
+        nonExplicitSupportedLngs: true,
         debug: ENV.isDevelopment,
         interpolation: {
             escapeValue: false,
@@ -19,4 +22,4 @@ i18n
         }
     })
 
-export default i18n 
+export default i18n

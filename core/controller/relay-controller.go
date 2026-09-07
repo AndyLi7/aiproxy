@@ -388,6 +388,12 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	// First attempt. For async video submission this measures the upstream's
 	// initial acknowledgement, not the later video-generation duration.
 	upstreamStartedAt := time.Now()
+	retryTimes, retryDeadline := getRetryLimits(
+		mc,
+		config.GetRetryTimes(),
+		config.GetRetryBudget(),
+		upstreamStartedAt,
+	)
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
@@ -415,12 +421,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		ErrorType:  upstreamErrorType,
 	})
 
-	retryTimes := int(config.GetRetryTimes())
-	if mc.RetryTimes > 0 {
-		retryTimes = int(mc.RetryTimes)
-	}
-
-	if handleRelayResult(c, result.Error, retry, retryTimes) {
+	if handleRelayResult(c, result.Error, retry, retryTimes, retryDeadline) {
 		recordResult(
 			c,
 			meta,
@@ -443,6 +444,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		price,
 		time.Now(),
 	)
+	retryState.retryDeadline = retryDeadline
 
 	// Retry loop
 	retryLoop(c, mode, retryState, relayController.Handler)
@@ -637,7 +639,10 @@ func buildBodyDetailOption(meta *meta.Meta) controller.BodyDetailOption {
 }
 
 type retryState struct {
+	channelSelectionState
+
 	retryTimes        int
+	retryDeadline     time.Time
 	designatedChannel *model.Channel
 	preferChannelIDs  []int
 	ignoreChannelIDs  map[int64]struct{}
@@ -663,11 +668,32 @@ const (
 	relayRetryMaxJitter = time.Second
 )
 
+func getRetryLimits(
+	mc model.ModelConfig,
+	defaultRetryTimes, defaultRetryBudget int64,
+	startedAt time.Time,
+) (int, time.Time) {
+	retryTimes, budget := mc.RetryLimits(defaultRetryTimes, defaultRetryBudget)
+
+	var deadline time.Time
+	if budget > 0 {
+		deadline = startedAt.Add(budget)
+	}
+
+	return int(retryTimes), deadline
+}
+
+func (s *retryState) canRetry(attempts int, now time.Time) bool {
+	return (s.retryTimes < 0 || attempts < s.retryTimes) &&
+		(s.retryDeadline.IsZero() || now.Before(s.retryDeadline))
+}
+
 func handleRelayResult(
 	c *gin.Context,
 	bizErr adaptor.Error,
 	retry bool,
 	retryTimes int,
+	retryDeadline time.Time,
 ) (done bool) {
 	if bizErr == nil {
 		return true
@@ -675,6 +701,7 @@ func handleRelayResult(
 
 	if !retry ||
 		retryTimes == 0 ||
+		(!retryDeadline.IsZero() && !time.Now().Before(retryDeadline)) ||
 		c.Request.Context().Err() != nil {
 		ErrorWithRequestID(c, bizErr)
 		return true
@@ -692,17 +719,18 @@ func initRetryState(
 	initialEndAt time.Time,
 ) *retryState {
 	state := &retryState{
-		retryTimes:          retryTimes,
-		preferChannelIDs:    channel.preferChannelIDs,
-		ignoreChannelIDs:    channel.ignoreChannelIDs,
-		meta:                meta,
-		result:              result,
-		price:               price,
-		requestUsage:        meta.RequestUsage,
-		requestUsageContext: meta.RequestUsageContext,
-		migratedChannels:    channel.migratedChannels,
-		failedChannelIDs:    make(map[int64]struct{}),
-		channelRetryInfo:    make(map[int]channelRetryInfo),
+		channelSelectionState: channel.channelSelectionState,
+		retryTimes:            retryTimes,
+		preferChannelIDs:      channel.preferChannelIDs,
+		ignoreChannelIDs:      channel.ignoreChannelIDs,
+		meta:                  meta,
+		result:                result,
+		price:                 price,
+		requestUsage:          meta.RequestUsage,
+		requestUsageContext:   meta.RequestUsageContext,
+		migratedChannels:      channel.migratedChannels,
+		failedChannelIDs:      make(map[int64]struct{}),
+		channelRetryInfo:      make(map[int]channelRetryInfo),
 	}
 
 	// Record initial failed channel
@@ -781,32 +809,36 @@ func (s *retryState) remainingRelayDelay(
 func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayController RelayHandler) {
 	log := common.GetLogger(c)
 
-	// retryTimes can grow when permission failures add more eligible-channel attempts
+	// The budget limits scheduling and backoff, while in-flight requests keep their own timeout.
+	ctx := c.Request.Context()
+	if !state.retryDeadline.IsZero() {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithDeadline(ctx, state.retryDeadline)
+		defer cancel()
+	}
+
 	i := 0
 
-	for {
-		newChannel, err := getRetryChannel(c.Request.Context(), state)
+	for state.canRetry(i, time.Now()) && ctx.Err() == nil {
+		newChannel, err := getRetryChannel(ctx, state)
 		if err == nil {
 			err = prepareRetry(c)
 		}
 
+		if err == nil {
+			err = relayDelay(ctx, state, newChannel.ID)
+		}
+
 		if err != nil {
-			if !errors.Is(err, ErrChannelsExhausted) {
+			if !errors.Is(err, ErrChannelsExhausted) && ctx.Err() == nil {
 				log.Errorf("prepare retry failed: %+v", err)
 			}
-			// when the last request has not recorded the result, record the result
-			if state.meta != nil && state.result != nil {
-				recordResult(
-					c,
-					state.meta,
-					state.price,
-					state.result,
-					i,
-					true,
-					middleware.GetRequestMetadata(c),
-				)
-			}
 
+			break
+		}
+
+		if !state.canRetry(i, time.Now()) || ctx.Err() != nil {
 			break
 		}
 		// when the last request has not recorded the result, record the result
@@ -820,20 +852,16 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 				false,
 				middleware.GetRequestMetadata(c),
 			)
-			state.meta = nil
-			state.result = nil
 		}
 
 		log.Data["retry"] = strconv.Itoa(i + 1)
 
-		log.Warnf("using channel %s (type: %d, id: %d) to retry (remain times %d)",
+		log.Warnf("using channel %s (type: %d, id: %d) to retry (attempt %d)",
 			newChannel.Name,
 			newChannel.Type,
 			newChannel.ID,
-			state.retryTimes-i,
+			i+1,
 		)
-
-		relayDelay(state, newChannel.ID)
 
 		state.meta = NewMetaByContext(
 			c,
@@ -847,6 +875,8 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		var retry bool
 
 		state.result, retry = RelayHelper(c, state.meta, relayController)
+		i++
+
 		if state.result.Error != nil && shouldBackoffStatus(state.result.Error.StatusCode()) {
 			state.recordChannelFailure(newChannel.ID, time.Now())
 		}
@@ -858,22 +888,20 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 			state.failedChannelIDs[int64(newChannel.ID)] = struct{}{}
 		}
 
-		if done || i == state.retryTimes-1 {
-			recordResult(
-				c,
-				state.meta,
-				state.price,
-				state.result,
-				i+1,
-				true,
-				middleware.GetRequestMetadata(c),
-			)
-
+		if done {
 			break
 		}
-
-		i++
 	}
+
+	recordResult(
+		c,
+		state.meta,
+		state.price,
+		state.result,
+		i,
+		true,
+		middleware.GetRequestMetadata(c),
+	)
 
 	if state.result.Error != nil {
 		ErrorWithRequestID(c, state.result.Error)
@@ -917,7 +945,6 @@ func handleRetryResult(
 		}
 
 		state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
-		state.retryTimes++
 	}
 
 	return false
@@ -928,15 +955,23 @@ func shouldBackoffStatus(statusCode int) bool {
 		statusCode == http.StatusServiceUnavailable
 }
 
-func relayDelay(state *retryState, channelID int) {
+func relayDelay(ctx context.Context, state *retryState, channelID int) error {
 	jitter := time.Duration(rand.Int64N(int64(relayRetryMaxJitter)))
 
 	delay := state.remainingRelayDelay(channelID, time.Now(), jitter)
 	if delay <= 0 {
-		return
+		return ctx.Err()
 	}
 
-	time.Sleep(delay)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
 }
 
 func RelayNotImplemented(c *gin.Context) {

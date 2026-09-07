@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { channelApi, ChannelTestResult } from '@/api/channel'
 import { modelApi } from '@/api/model'
 import { useState, useCallback } from 'react'
-import { ChannelCreateRequest, ChannelUpdateRequest, ChannelStatusRequest } from '@/types/channel'
+import { ChannelBasicInfo, ChannelCreateRequest, ChannelUpdateRequest, ChannelStatusRequest } from '@/types/channel'
 import { toast } from 'sonner'
 
 // 获取渠道类型元数据
@@ -64,6 +64,17 @@ export const useAllChannels = (enabled = true) => {
     }
 }
 
+export const useChannelInfoMap = (ids: number[] = [], enabled = true) => {
+    return useQuery({
+        queryKey: ['channelBasicInfo', ids],
+        queryFn: () => channelApi.getChannelBatchInfo(ids),
+        enabled: enabled && ids.length > 0,
+        select: (infos): Record<number, ChannelBasicInfo> => Object.fromEntries(
+            infos.map(info => [info.id, info]),
+        ),
+    })
+}
+
 // 创建渠道
 export const useCreateChannel = () => {
     const queryClient = useQueryClient()
@@ -103,6 +114,9 @@ export const useUpdateChannel = () => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['channels'] })
+            queryClient.invalidateQueries({ queryKey: ['allChannels'] })
+            queryClient.invalidateQueries({ queryKey: ['modelSets'] })
+            queryClient.invalidateQueries({ queryKey: ['channelBasicInfo'] })
             setError(null)
             toast.success('渠道更新成功')
         },
@@ -159,6 +173,9 @@ export const useUpdateChannelStatus = () => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['channels'] })
+            queryClient.invalidateQueries({ queryKey: ['allChannels'] })
+            queryClient.invalidateQueries({ queryKey: ['modelSets'] })
+            queryClient.invalidateQueries({ queryKey: ['channelBasicInfo'] })
             setError(null)
             toast.success('状态更新成功')
         },

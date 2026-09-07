@@ -14,6 +14,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateImagesRequestUsesDeclaredSizeTiers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, size := range []string{"2K", "3K", "4K"} {
+		t.Run(size, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/v1/images/generations", strings.NewReader(`{"prompt":"test","size":"`+size+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = req
+			mc := model.ModelConfig{Config: map[model.ModelConfigKey]any{"image_size_tiers": []any{"2K", "3K", "4K"}}}
+			require.NoError(t, ValidateImagesRequest(c, mc))
+		})
+	}
+	for _, config := range []map[model.ModelConfigKey]any{nil, {"image_size_tiers": []string{"3K"}}, {"image_size_tiers": "2K"}} {
+		require.Error(t, validateSupportedImageResolution("2K", model.ModelConfig{Config: config}))
+	}
+	mc := model.ModelConfig{Config: map[model.ModelConfigKey]any{"image_size_tiers": []string{"2K", "3K"}}}
+	require.NoError(t, validateSupportedImageResolution("2K", mc))
+	require.NoError(t, validateSupportedImageResolution("2048x2048", mc))
+	require.Error(t, validateSupportedImageResolution("4K", mc))
+	require.Error(t, validateSupportedImageResolution("0x0", mc))
+}
+
 func TestValidateImagesRequestSkipsMissingN(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

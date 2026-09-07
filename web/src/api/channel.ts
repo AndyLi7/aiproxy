@@ -7,6 +7,7 @@ import {
     ChannelCreateRequest,
     ChannelUpdateRequest,
     ChannelStatusRequest,
+    ChannelBasicInfo,
     Channel
 } from '@/types/channel'
 
@@ -65,8 +66,8 @@ export const channelApi = {
         return response
     },
 
-    getChannelBatchInfo: async (ids: number[]): Promise<{ id: number; name: string; type: number }[]> => {
-        const response = await post<{ id: number; name: string; type: number }[]>('channels/batch_info', ids)
+    getChannelBatchInfo: async (ids: number[]): Promise<ChannelBasicInfo[]> => {
+        const response = await post<ChannelBasicInfo[]>('channels/batch_info', ids)
         return response
     },
 

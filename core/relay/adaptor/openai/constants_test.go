@@ -50,6 +50,67 @@ func TestGPT56ModelConfigs(t *testing.T) {
 	}
 }
 
+func TestGPT6AstraModelConfig(t *testing.T) {
+	config := findOpenAIModelConfig(t, "gpt-6-astra")
+	require.Equal(t, mode.ChatCompletions, config.Type)
+	require.False(t, openai.IsResponsesOnlyModel(&config, config.Model))
+	require.True(t, config.ShouldSummaryServiceTier())
+	require.NoError(t, config.Price.ValidateConditionalPrices())
+
+	maxContextTokens, ok := config.MaxContextTokens()
+	require.True(t, ok)
+	require.Equal(t, 1050000, maxContextTokens)
+
+	maxInputTokens, ok := config.MaxInputTokens()
+	require.True(t, ok)
+	require.Equal(t, 922000, maxInputTokens)
+
+	maxOutputTokens, ok := config.MaxOutputTokens()
+	require.True(t, ok)
+	require.Equal(t, 128000, maxOutputTokens)
+}
+
+func TestGPT6AstraConditionalPricing(t *testing.T) {
+	config := findOpenAIModelConfig(t, "gpt-6-astra")
+	tests := []struct {
+		name               string
+		inputTokens        int64
+		serviceTier        string
+		inputPrice         float64
+		cachedPrice        float64
+		cacheCreationPrice float64
+		outputPrice        float64
+	}{
+		{"standard", 272000, "", 0.010, 0.001, 0.0125, 0.050},
+		{"standard long context", 272001, "", 0.020, 0.002, 0.025, 0.075},
+		{"flex", 272000, "flex", 0.005, 0.0005, 0.00625, 0.025},
+		{"flex long context", 272001, "flex", 0.010, 0.001, 0.0125, 0.0375},
+		{"priority", 272000, "priority", 0.020, 0.002, 0.025, 0.100},
+		{"priority long context", 272001, "priority", 0.040, 0.004, 0.050, 0.150},
+		{"fast", 272000, "fast", 0.020, 0.002, 0.025, 0.100},
+		{"fast long context", 272001, "fast", 0.040, 0.004, 0.050, 0.150},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			price := config.Price.SelectConditionalPriceWithOptions(
+				coremodel.Usage{InputTokens: coremodel.ZeroNullInt64(tt.inputTokens)},
+				coremodel.UsageContext{ServiceTier: tt.serviceTier},
+				coremodel.PriceSelectionOptions{},
+			)
+			require.InDelta(t, tt.inputPrice, float64(price.InputPrice), 1e-12)
+			require.InDelta(t, tt.cachedPrice, float64(price.CachedPrice), 1e-12)
+			require.InDelta(
+				t,
+				tt.cacheCreationPrice,
+				float64(price.CacheCreationPrice),
+				1e-12,
+			)
+			require.InDelta(t, tt.outputPrice, float64(price.OutputPrice), 1e-12)
+		})
+	}
+}
+
 func TestGPT56SolConditionalPricing(t *testing.T) {
 	config := findOpenAIModelConfig(t, "gpt-5.6-sol")
 	tests := []struct {

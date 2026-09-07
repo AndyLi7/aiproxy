@@ -217,7 +217,7 @@ func IsStreamResponseWithHeader(header http.Header) bool {
 		strings.Contains(contentType, "x-ndjson")
 }
 
-const scannerBufferSize = 256 * 1024
+const scannerBufferSize = 8 * 1024 * 1024
 
 var scannerBufferPool = sync.Pool{
 	New: func() any {

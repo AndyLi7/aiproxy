@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/bytedance/sonic/ast"
 	"github.com/gin-gonic/gin"
@@ -152,6 +153,25 @@ func ValidateImagesRequest(c *gin.Context, mc model.ModelConfig) error {
 }
 
 func validateSupportedImageResolution(resolution string, mc model.ModelConfig) error {
+	// Native size tiers are explicit per-model capabilities, not pixel aliases.
+	// Preserve the request value so the provider can choose the aspect ratio.
+	tier := strings.TrimSpace(resolution)
+	if tier == "2K" || tier == "3K" || tier == "4K" {
+		switch declared := mc.Config["image_size_tiers"].(type) {
+		case []string:
+			for _, value := range declared {
+				if value == tier {
+					return nil
+				}
+			}
+		case []any:
+			for _, value := range declared {
+				if value == tier {
+					return nil
+				}
+			}
+		}
+	}
 	fuzzy := !mc.DisableResolutionFuzzyMatch
 	if err := validateOpenAIImageResolutionFormat(
 		resolution,

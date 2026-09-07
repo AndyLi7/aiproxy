@@ -228,6 +228,14 @@ func TestSummaryDataAddServiceTierBreakdown(t *testing.T) {
 			wantPriorityTTFBMs:   300,
 		},
 		{
+			name:                 "fast tier tracked as priority",
+			serviceTier:          "fast",
+			wantPriorityCount:    1,
+			wantPriorityUsedCost: 4,
+			wantPriorityTimeMs:   1200,
+			wantPriorityTTFBMs:   300,
+		},
+		{
 			name:        "auto maps to default total only",
 			serviceTier: "auto",
 		},

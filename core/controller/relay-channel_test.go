@@ -48,7 +48,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(10, 10)
 
-		channel, migratedChannels, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -58,8 +58,8 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			nil,
 		)
 		require.NoError(t, err)
-		require.Len(t, migratedChannels, 2)
-		assert.Equal(t, 2, channel.ID)
+		require.Len(t, initial.migratedChannels, 2)
+		assert.Equal(t, 2, initial.channel.ID)
 	})
 
 	t.Run("uses prefer id order instead of priority", func(t *testing.T) {
@@ -67,7 +67,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(100, 1)
 
-		channel, _, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -77,7 +77,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			nil,
 		)
 		require.NoError(t, err)
-		assert.Equal(t, 2, channel.ID)
+		assert.Equal(t, 2, initial.channel.ID)
 	})
 
 	t.Run("falls back from preferred when preferred exceeds max error rate", func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(10, 10)
 
-		channel, _, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -95,7 +95,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			nil,
 		)
 		require.NoError(t, err)
-		assert.Equal(t, 1, channel.ID)
+		assert.Equal(t, 1, initial.channel.ID)
 	})
 
 	t.Run("preferred path shares fallback semantics with default path", func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(10, 10)
 
-		channel, _, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -113,7 +113,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			map[int64]struct{}{1: {}},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, 2, channel.ID)
+		assert.Equal(t, 2, initial.channel.ID)
 	})
 }
 
@@ -519,7 +519,7 @@ func TestGetChannelWithFallbackHandlesNilInputs(t *testing.T) {
 		},
 	}
 
-	channel, migratedChannels, err := getChannelWithFallback(
+	initial, err := getChannelWithFallback(
 		mc,
 		[]string{model.ChannelDefaultSet},
 		"gpt-5",
@@ -529,9 +529,9 @@ func TestGetChannelWithFallbackHandlesNilInputs(t *testing.T) {
 		nil,
 	)
 	require.NoError(t, err)
-	require.Len(t, migratedChannels, 1)
-	require.NotNil(t, channel)
-	assert.Equal(t, 1, channel.ID)
+	require.Len(t, initial.migratedChannels, 1)
+	require.NotNil(t, initial.channel)
+	assert.Equal(t, 1, initial.channel.ID)
 }
 
 func TestGetRetryChannelHandlesNilInputs(t *testing.T) {

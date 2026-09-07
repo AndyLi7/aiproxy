@@ -10,6 +10,7 @@ export interface ModelSetsResponse {
       type: number;
       name: string;
       priority: number;
+      backup_only?: boolean;
       weight: number; // 权重百分比 (0-100)
     }>;
   };

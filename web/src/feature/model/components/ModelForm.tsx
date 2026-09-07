@@ -107,6 +107,7 @@ const MANAGED_MODEL_KEYS = new Set([
     'rpm',
     'tpm',
     'retry_times',
+    'retry_budget',
     'timeout_config',
     'force_save_detail',
     'max_image_generation_count',
@@ -271,6 +272,7 @@ const buildChangeSummaries = (
     addScalar('rpm', labels.rpm, next.rpm)
     addScalar('tpm', labels.tpm, next.tpm)
     addScalar('retry_times', labels.retryTimes, next.retry_times)
+    addScalar('retry_budget', labels.retryBudget, next.retry_budget)
     addScalar('force_save_detail', labels.forceSaveDetail, next.force_save_detail)
     addScalar('summary_service_tier', labels.summaryServiceTier, next.summary_service_tier)
     addScalar('summary_claude_long_context', labels.summaryClaudeLongContext, next.summary_claude_long_context)
@@ -328,6 +330,7 @@ interface ModelFormProps {
         rpm?: number
         tpm?: number
         retry_times?: number
+        retry_budget?: number
         timeout_config?: ModelConfig['timeout_config']
         timeout?: number
         stream_timeout?: number
@@ -415,6 +418,7 @@ export function ModelForm({
             rpm: defaultValues.rpm,
             tpm: defaultValues.tpm,
             retry_times: defaultValues.retry_times,
+            retry_budget: defaultValues.retry_budget,
             timeout: defaultValues.timeout,
             stream_timeout: defaultValues.stream_timeout ?? defaultValues.timeout_config?.stream_request_timeout,
             force_save_detail: defaultValues.force_save_detail ?? false,
@@ -460,6 +464,7 @@ export function ModelForm({
         rpm: t("model.dialog.rpm"),
         tpm: t("model.dialog.tpm"),
         retryTimes: t("model.dialog.retryTimes"),
+        retryBudget: t("model.dialog.retryBudget"),
         forceSaveDetail: t("model.dialog.forceSaveDetail"),
         summaryServiceTier: t("model.dialog.recordServiceTier"),
         summaryClaudeLongContext: t("model.dialog.recordClaudeLongContext"),
@@ -916,6 +921,7 @@ export function ModelForm({
             ...(data.rpm !== undefined && { rpm: Number(data.rpm) }),
             ...(data.tpm !== undefined && { tpm: Number(data.tpm) }),
             ...(data.retry_times !== undefined && { retry_times: Number(data.retry_times) }),
+            ...(data.retry_budget !== undefined && { retry_budget: Number(data.retry_budget) }),
             ...(mergedTimeoutConfig && { timeout_config: mergedTimeoutConfig }),
             ...(data.force_save_detail !== undefined && { force_save_detail: data.force_save_detail }),
             ...(supportImageGenerationCountLimit && data.max_image_generation_count !== undefined && {
@@ -1052,6 +1058,7 @@ export function ModelForm({
                         <AdvancedErrorDisplay error={new Error(configExtrasError)} />
                     )}
 
+                    <section className="form-section"><h3>{t("ui.identity")}</h3><div className="grid gap-4 sm:grid-cols-2">
                     {/* Model name field */}
                     <FormField
                         control={form.control}
@@ -1125,6 +1132,7 @@ export function ModelForm({
                         )}
                     />
 
+                    </div></section><section className="form-section"><h3>{t("ui.connection")}</h3><div className="grid gap-4 sm:grid-cols-2">
                     {/* RPM Field */}
                     <FormField
                         control={form.control}
@@ -1177,6 +1185,29 @@ export function ModelForm({
                                         type="number"
                                         placeholder={t("model.dialog.retryTimesPlaceholder")}
                                         {...field}
+                                        onChange={(e) => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+
+                    <FormField
+                        control={form.control}
+                        name="retry_budget"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>{t("model.dialog.retryBudget")}</FormLabel>
+                                <FormControl>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        max={180}
+                                        step={1}
+                                        placeholder={t("model.dialog.retryBudgetPlaceholder")}
+                                        {...field}
+                                        value={field.value ?? ''}
                                         onChange={(e) => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
                                     />
                                 </FormControl>
@@ -1328,7 +1359,7 @@ export function ModelForm({
                         control={form.control}
                         name="force_save_detail"
                         render={({ field }) => (
-                            <FormItem className="flex flex-row items-center justify-between py-2">
+                            <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                 <div className="space-y-1">
                                     <FormLabel>{t("model.dialog.forceSaveDetail")}</FormLabel>
                                     <FormDescription>{t("model.dialog.forceSaveDetailDescription")}</FormDescription>
@@ -1347,7 +1378,7 @@ export function ModelForm({
                         control={form.control}
                         name="exclude_from_tests"
                         render={({ field }) => (
-                            <FormItem className="flex flex-row items-center justify-between py-2">
+                            <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                 <div className="space-y-1">
                                     <FormLabel>{t("model.dialog.excludeFromTests")}</FormLabel>
                                     <FormDescription>{t("model.dialog.excludeFromTestsDescription")}</FormDescription>
@@ -1407,7 +1438,7 @@ export function ModelForm({
                         control={form.control}
                         name="summary_service_tier"
                         render={({ field }) => (
-                            <FormItem className="flex flex-row items-center justify-between py-2">
+                            <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                 <div className="space-y-1">
                                     <FormLabel>{t("model.dialog.recordServiceTier")}</FormLabel>
                                     <FormDescription>{t("model.dialog.recordServiceTierDescription")}</FormDescription>
@@ -1426,7 +1457,7 @@ export function ModelForm({
                         control={form.control}
                         name="summary_claude_long_context"
                         render={({ field }) => (
-                            <FormItem className="flex flex-row items-center justify-between py-2">
+                            <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                 <div className="space-y-1">
                                     <FormLabel>{t("model.dialog.recordClaudeLongContext")}</FormLabel>
                                     <FormDescription>{t("model.dialog.recordClaudeLongContextDescription")}</FormDescription>
@@ -1446,7 +1477,7 @@ export function ModelForm({
                             control={form.control}
                             name="disable_resolution_fuzzy_match"
                             render={({ field }) => (
-                                <FormItem className="flex flex-row items-center justify-between py-2">
+                                <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                     <div className="space-y-1">
                                         <FormLabel>{t("model.dialog.disableResolutionFuzzyMatch")}</FormLabel>
                                         <FormDescription>{t("model.dialog.disableResolutionFuzzyMatchDescription")}</FormDescription>
@@ -1462,6 +1493,7 @@ export function ModelForm({
                         />
                     )}
 
+                    </div></section>
                     <Collapsible open={configExpanded} onOpenChange={setConfigExpanded}>
                         <CollapsibleTrigger className="flex items-center justify-between w-full py-3 px-4 border rounded-lg hover:bg-muted/50 transition-colors">
                             <div className="text-left">
@@ -1731,6 +1763,7 @@ export function ModelForm({
                                                 <FormItem className="flex items-center space-x-2">
                                                     <FormControl>
                                                         <Switch
+                                                            aria-label={t("model.dialog.cachePlugin.title")}
                                                             checked={field.value}
                                                             onCheckedChange={field.onChange}
                                                         />
@@ -1798,7 +1831,7 @@ export function ModelForm({
                                             control={form.control}
                                             name="plugin.cache.add_cache_hit_header"
                                             render={({ field }) => (
-                                                <FormItem className="flex flex-row items-center justify-between py-2">
+                                                <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                                     <FormLabel>{t("model.dialog.cachePlugin.addCacheHitHeader")}</FormLabel>
                                                     <FormControl>
                                                         <Switch
@@ -1843,6 +1876,7 @@ export function ModelForm({
                                         <FormItem className="flex items-center space-x-2">
                                             <FormControl>
                                                 <Switch
+                                                            aria-label={t("model.dialog.cacheFollowPlugin.title")}
                                                     checked={field.value}
                                                     onCheckedChange={field.onChange}
                                                 />
@@ -1934,6 +1968,7 @@ export function ModelForm({
                                                 <FormItem className="flex items-center space-x-2">
                                                     <FormControl>
                                                         <Switch
+                                                            aria-label={t("model.dialog.webSearchPlugin.title")}
                                                             checked={field.value}
                                                             onCheckedChange={field.onChange}
                                                         />
@@ -2044,7 +2079,7 @@ export function ModelForm({
                                             control={form.control}
                                             name="plugin.web-search.force_search"
                                             render={({ field }) => (
-                                                <FormItem className="flex flex-row items-center justify-between py-2">
+                                                <FormItem className="flex flex-row items-center justify-between gap-4 border-t py-3 sm:col-span-2">
                                                     <FormLabel>{t("model.dialog.webSearchPlugin.forceSearch")}</FormLabel>
                                                     <FormControl>
                                                         <Switch
@@ -2092,6 +2127,7 @@ export function ModelForm({
                                         <FormItem className="flex items-center space-x-2">
                                             <FormControl>
                                                 <Switch
+                                                            aria-label={t("model.dialog.thinkSplitPlugin.title")}
                                                     checked={field.value}
                                                     onCheckedChange={field.onChange}
                                                 />
@@ -2118,6 +2154,7 @@ export function ModelForm({
                                         <FormItem className="flex items-center space-x-2">
                                             <FormControl>
                                                 <Switch
+                                                            aria-label={t("model.dialog.streamFakePlugin.title")}
                                                     checked={field.value}
                                                     onCheckedChange={field.onChange}
                                                 />
@@ -2134,7 +2171,7 @@ export function ModelForm({
                     </div>
 
                     {/* Submit button */}
-                    <div className="flex justify-end">
+                    <div className="form-actions">
                         <AnimatedButton >
                             <Button type="submit" disabled={isLoading}>
                                 {isLoading

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { EChartsOption } from 'echarts'
 
@@ -9,7 +9,7 @@ import { ChartDataPoint, ModelSummary } from '@/types/dashboard'
 import { cn } from '@/lib/utils'
 import { ChevronRight } from 'lucide-react'
 import { channelApi } from '@/api/channel'
-import { useChannelTypeMetas } from '@/feature/channel/hooks'
+import { useChannelInfoMap, useChannelTypeMetas } from '@/feature/channel/hooks'
 import { ChannelLabel } from '@/components/common/ChannelLabel'
 import { ChannelDialog } from '@/feature/channel/components/ChannelDialog'
 import type { Channel } from '@/types/channel'
@@ -29,6 +29,18 @@ interface MonitorChartsProps {
 
 type DisplayMode = 'incremental' | 'cumulative'
 type TokenChartMode = 'breakdown' | 'total'
+
+type TooltipParam = {
+    dataIndex?: number
+    marker?: string
+    seriesName?: string
+    value?: unknown
+}
+
+const normalizeTooltipParams = (params: unknown): TooltipParam[] => {
+    const values = Array.isArray(params) ? params : [params]
+    return values.filter((value): value is TooltipParam => Boolean(value && typeof value === 'object'))
+}
 
 function ToggleGroup({ value, onChange, options }: {
     value: string
@@ -165,16 +177,17 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
             backgroundColor: 'transparent',
             tooltip: {
                 trigger: 'axis',
+                confine: true,
                 backgroundColor: themeColors.tooltipBg,
                 borderColor: themeColors.tooltipBorder,
                 borderWidth: 1,
                 borderRadius: 8,
                 textStyle: { color: themeColors.tooltipTextColor, fontSize: 12 },
-                formatter: (params: any) => {
-                    const p = Array.isArray(params) ? params[0] : params
-                    const idx = p.dataIndex
+                formatter: (params: unknown) => {
+                    const p = normalizeTooltipParams(params)[0]
+                    const idx = p?.dataIndex ?? 0
                     const point = chartData[idx]
-                    const val = opts?.formatter ? opts.formatter(p.value) : Number(p.value).toLocaleString()
+                    const val = opts?.formatter ? opts.formatter(Number(p?.value ?? 0)) : Number(p?.value ?? 0).toLocaleString()
                     return `<div style="font-size:12px"><div style="margin-bottom:4px">${point?.xLabel || point?.x}</div><div>${val}</div></div>`
                 }
             },
@@ -184,7 +197,7 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                 boundaryGap: false,
                 data: xLabels,
                 axisLine: { lineStyle: { color: themeColors.axisLineColor } },
-                axisLabel: { color: themeColors.textColor, fontSize: 11 },
+                axisLabel: { color: themeColors.textColor, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false },
                 axisTick: { show: false },
             },
             yAxis: {
@@ -295,7 +308,6 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
     }, [groupTokennameModelMetrics])
 
     // Batch fetch channel info for detail rows
-    const [channelInfoMap, setChannelInfoMap] = useState<Record<number, { name: string; type: number }>>({})
     const detailChannelIds = useMemo(() => {
         const ids = new Set<number>()
         for (const m of detailRanking) {
@@ -304,28 +316,7 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
         return [...ids]
     }, [detailRanking])
 
-    useEffect(() => {
-        if (detailChannelIds.length === 0) return
-        const missing = detailChannelIds.filter(id => !(id in channelInfoMap))
-        if (missing.length === 0) return
-        channelApi.getChannelBatchInfo(missing)
-            .then(infos => {
-                setChannelInfoMap(prev => {
-                    const next = { ...prev }
-                    for (const info of infos) next[info.id] = { name: info.name, type: info.type }
-                    return next
-                })
-            })
-            .catch(() => {
-                setChannelInfoMap(prev => {
-                    const next = { ...prev }
-                    for (const id of missing) {
-                        if (!(id in next)) next[id] = { name: `#${id}`, type: 0 }
-                    }
-                    return next
-                })
-            })
-    }, [detailChannelIds]) // eslint-disable-line react-hooks/exhaustive-deps
+    const { data: channelInfoMap = {} } = useChannelInfoMap(detailChannelIds)
 
     if (loading) {
         return (
@@ -387,35 +378,39 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                                 color: colors,
                                 tooltip: {
                                     trigger: 'axis',
+                confine: true,
                                     backgroundColor: themeColors.tooltipBg,
                                     borderColor: themeColors.tooltipBorder,
                                     borderWidth: 1,
                                     borderRadius: 8,
                                     textStyle: { color: themeColors.tooltipTextColor, fontSize: 12 },
-                                    formatter: (params: any) => {
-                                        const ps = Array.isArray(params) ? params : [params]
-                                        const idx = ps[0]?.dataIndex
+                                    formatter: (params: unknown) => {
+                                        const ps = normalizeTooltipParams(params)
+                                        const idx = ps[0]?.dataIndex ?? 0
                                         const point = chartData[idx]
                                         let html = `<div style="font-size:12px"><div style="margin-bottom:4px">${point?.xLabel || point?.x}</div>`
                                         for (const p of ps) {
-                                            html += `<div>${p.marker} ${p.seriesName}: ${Number(p.value).toLocaleString()}</div>`
+                                            html += `<div>${p.marker} ${p.seriesName}: ${Number(p?.value ?? 0).toLocaleString()}</div>`
                                         }
                                         html += '</div>'
                                         return html
                                     }
                                 },
                                 legend: {
+                                    type: 'scroll',
+                                    pageIconColor: themeColors.textColor,
+                                    pageTextStyle: { color: themeColors.textColor },
                                     bottom: 0,
                                     textStyle: { color: themeColors.textColor, fontSize: 11 },
                                     itemWidth: 12, itemHeight: 8,
                                 },
-                                grid: { left: 10, right: 10, bottom: 28, top: 10, containLabel: true },
+                                grid: { left: 10, right: 10, bottom: 38, top: 10, containLabel: true },
                                 xAxis: {
                                     type: 'category',
                                     boundaryGap: false,
                                     data: xLabels,
                                     axisLine: { lineStyle: { color: themeColors.axisLineColor } },
-                                    axisLabel: { color: themeColors.textColor, fontSize: 11 },
+                                    axisLabel: { color: themeColors.textColor, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false },
                                     axisTick: { show: false },
                                 },
                                 yAxis: {
@@ -478,19 +473,20 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                                 color: statusSeries.map(s => s.color),
                                 tooltip: {
                                     trigger: 'axis',
+                confine: true,
                                     backgroundColor: themeColors.tooltipBg,
                                     borderColor: themeColors.tooltipBorder,
                                     borderWidth: 1,
                                     borderRadius: 8,
                                     textStyle: { color: themeColors.tooltipTextColor, fontSize: 12 },
-                                    formatter: (params: any) => {
-                                        const ps = Array.isArray(params) ? params : [params]
-                                        const idx = ps[0]?.dataIndex
+                                    formatter: (params: unknown) => {
+                                        const ps = normalizeTooltipParams(params)
+                                        const idx = ps[0]?.dataIndex ?? 0
                                         const point = chartData[idx]
                                         let html = `<div style="font-size:12px"><div style="margin-bottom:4px">${point?.xLabel || point?.x}</div>`
                                         for (const p of ps) {
-                                            if (p.value > 0) {
-                                                html += `<div>${p.marker} ${p.seriesName}: ${Number(p.value).toLocaleString()}</div>`
+                                            if (Number(p.value ?? 0) > 0) {
+                                                html += `<div>${p.marker} ${p.seriesName}: ${Number(p?.value ?? 0).toLocaleString()}</div>`
                                             }
                                         }
                                         html += '</div>'
@@ -498,17 +494,20 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                                     }
                                 },
                                 legend: {
+                                    type: 'scroll',
+                                    pageIconColor: themeColors.textColor,
+                                    pageTextStyle: { color: themeColors.textColor },
                                     bottom: 0,
                                     textStyle: { color: themeColors.textColor, fontSize: 11 },
                                     itemWidth: 12, itemHeight: 8,
                                 },
-                                grid: { left: 10, right: 10, bottom: 28, top: 10, containLabel: true },
+                                grid: { left: 10, right: 10, bottom: 38, top: 10, containLabel: true },
                                 xAxis: {
                                     type: 'category',
                                     boundaryGap: false,
                                     data: xLabels,
                                     axisLine: { lineStyle: { color: themeColors.axisLineColor } },
-                                    axisLabel: { color: themeColors.textColor, fontSize: 11 },
+                                    axisLabel: { color: themeColors.textColor, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false },
                                     axisTick: { show: false },
                                 },
                                 yAxis: {
@@ -576,19 +575,20 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                                 color: activeSeries.map(s => s.color),
                                 tooltip: {
                                     trigger: 'axis',
+                confine: true,
                                     backgroundColor: themeColors.tooltipBg,
                                     borderColor: themeColors.tooltipBorder,
                                     borderWidth: 1,
                                     borderRadius: 8,
                                     textStyle: { color: themeColors.tooltipTextColor, fontSize: 12 },
-                                    formatter: (params: any) => {
-                                        const ps = Array.isArray(params) ? params : [params]
-                                        const idx = ps[0]?.dataIndex
+                                    formatter: (params: unknown) => {
+                                        const ps = normalizeTooltipParams(params)
+                                        const idx = ps[0]?.dataIndex ?? 0
                                         const point = chartData[idx]
                                         let html = `<div style="font-size:12px"><div style="margin-bottom:4px">${point?.xLabel || point?.x}</div>`
                                         for (const p of ps) {
-                                            if (p.value > 0) {
-                                                html += `<div>${p.marker} ${p.seriesName}: ${Number(p.value).toLocaleString()}</div>`
+                                            if (Number(p.value ?? 0) > 0) {
+                                                html += `<div>${p.marker} ${p.seriesName}: ${Number(p?.value ?? 0).toLocaleString()}</div>`
                                             }
                                         }
                                         html += '</div>'
@@ -596,17 +596,20 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                                     }
                                 },
                                 legend: {
+                                    type: 'scroll',
+                                    pageIconColor: themeColors.textColor,
+                                    pageTextStyle: { color: themeColors.textColor },
                                     bottom: 0,
                                     textStyle: { color: themeColors.textColor, fontSize: 11 },
                                     itemWidth: 12, itemHeight: 8,
                                 },
-                                grid: { left: 10, right: 10, bottom: 28, top: 10, containLabel: true },
+                                grid: { left: 10, right: 10, bottom: 38, top: 10, containLabel: true },
                                 xAxis: {
                                     type: 'category',
                                     boundaryGap: false,
                                     data: xLabels,
                                     axisLine: { lineStyle: { color: themeColors.axisLineColor } },
-                                    axisLabel: { color: themeColors.textColor, fontSize: 11 },
+                                    axisLabel: { color: themeColors.textColor, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false },
                                     axisTick: { show: false },
                                 },
                                 yAxis: {
@@ -678,19 +681,20 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                             color: activeSeries.map(s => s.color),
                             tooltip: {
                                 trigger: 'axis',
+                confine: true,
                                 backgroundColor: themeColors.tooltipBg,
                                 borderColor: themeColors.tooltipBorder,
                                 borderWidth: 1,
                                 borderRadius: 8,
                                 textStyle: { color: themeColors.tooltipTextColor, fontSize: 12 },
-                                formatter: (params: any) => {
-                                    const ps = Array.isArray(params) ? params : [params]
-                                    const idx = ps[0]?.dataIndex
+                                formatter: (params: unknown) => {
+                                    const ps = normalizeTooltipParams(params)
+                                    const idx = ps[0]?.dataIndex ?? 0
                                     const point = chartData[idx]
                                     let html = `<div style="font-size:12px"><div style="margin-bottom:4px">${point?.xLabel || point?.x}</div>`
                                     for (const p of ps) {
-                                        if (p.value > 0) {
-                                            html += `<div>${p.marker} ${p.seriesName}: $${Number(p.value).toFixed(4)}</div>`
+                                        if (Number(p.value ?? 0) > 0) {
+                                            html += `<div>${p.marker} ${p.seriesName}: $${Number(p.value ?? 0).toFixed(4)}</div>`
                                         }
                                     }
                                     html += '</div>'
@@ -698,17 +702,20 @@ export function MonitorCharts({ chartData, modelRanking, detailRanking = [], has
                                 }
                             },
                             legend: {
+                                    type: 'scroll',
+                                    pageIconColor: themeColors.textColor,
+                                    pageTextStyle: { color: themeColors.textColor },
                                 bottom: 0,
                                 textStyle: { color: themeColors.textColor, fontSize: 11 },
                                 itemWidth: 12, itemHeight: 8,
                             },
-                            grid: { left: 10, right: 10, bottom: 28, top: 10, containLabel: true },
+                            grid: { left: 10, right: 10, bottom: 38, top: 10, containLabel: true },
                             xAxis: {
                                 type: 'category',
                                 boundaryGap: false,
                                 data: xLabels,
                                 axisLine: { lineStyle: { color: themeColors.axisLineColor } },
-                                axisLabel: { color: themeColors.textColor, fontSize: 11 },
+                                axisLabel: { color: themeColors.textColor, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false },
                                 axisTick: { show: false },
                             },
                             yAxis: {

@@ -790,6 +790,48 @@ func TestPrice_SelectConditionalPrice_WithServiceTier(t *testing.T) {
 			serviceTier:   "PRIORITY",
 			expectedInput: 0.003,
 		},
+		{
+			name: "fast service tier matches priority condition",
+			price: model.Price{
+				InputPrice: 0.001,
+				ConditionalPrices: []model.ConditionalPrice{
+					{
+						Condition: model.PriceCondition{
+							ServiceTier: "priority",
+						},
+						Price: model.Price{
+							InputPrice: 0.003,
+						},
+					},
+				},
+			},
+			usage: model.Usage{
+				InputTokens: 1000,
+			},
+			serviceTier:   "fast",
+			expectedInput: 0.003,
+		},
+		{
+			name: "priority service tier matches fast condition",
+			price: model.Price{
+				InputPrice: 0.001,
+				ConditionalPrices: []model.ConditionalPrice{
+					{
+						Condition: model.PriceCondition{
+							ServiceTier: "fast",
+						},
+						Price: model.Price{
+							InputPrice: 0.003,
+						},
+					},
+				},
+			},
+			usage: model.Usage{
+				InputTokens: 1000,
+			},
+			serviceTier:   "priority",
+			expectedInput: 0.003,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1403,6 +1445,22 @@ func TestPrice_ValidateConditionalPrices_WithServiceTier(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid fast service tier",
+			price: model.Price{
+				ConditionalPrices: []model.ConditionalPrice{
+					{
+						Condition: model.PriceCondition{
+							ServiceTier: "fast",
+						},
+						Price: model.Price{
+							InputPrice: 0.003,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "invalid service tier",
 			price: model.Price{
 				ConditionalPrices: []model.ConditionalPrice{
@@ -1445,6 +1503,28 @@ func TestPrice_ValidateConditionalPrices_WithServiceTier(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "priority and fast conditions overlap",
+			price: model.Price{
+				ConditionalPrices: []model.ConditionalPrice{
+					{
+						Condition: model.PriceCondition{
+							InputTokenMax: 32000,
+							ServiceTier:   "priority",
+						},
+						Price: model.Price{InputPrice: 0.003},
+					},
+					{
+						Condition: model.PriceCondition{
+							InputTokenMax: 32000,
+							ServiceTier:   "fast",
+						},
+						Price: model.Price{InputPrice: 0.003},
+					},
+				},
+			},
+			wantErr: true,
 		},
 		{
 			name: "same token range with wildcard and specific tier is allowed",

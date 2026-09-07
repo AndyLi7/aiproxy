@@ -1,5 +1,5 @@
 // src/feature/channel/components/ChannelTestDialog.tsx
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
     Dialog,
@@ -14,6 +14,8 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ChannelTestResult } from '@/api/channel'
 import { JsonViewer } from '@/feature/log/components/JsonViewer'
+import { useChannelInfoMap } from '../hooks'
+import { ChannelLabel } from '@/components/common/ChannelLabel'
 
 interface ChannelTestDialogProps {
     open: boolean
@@ -35,6 +37,10 @@ export function ChannelTestDialog({
     showChannelInfo = false,
 }: ChannelTestDialogProps) {
     const { t } = useTranslation()
+    const channelIds = useMemo(() => [...new Set(
+        results.flatMap(result => result.data?.channel_id ? [result.data.channel_id] : []),
+    )], [results])
+    const { data: channelInfoMap = {} } = useChannelInfoMap(channelIds, open && showChannelInfo)
     const [activeTab, setActiveTab] = useState<'all' | 'success' | 'failed'>('all')
     const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
     const resultScrollRef = useRef<HTMLDivElement | null>(null)
@@ -257,11 +263,9 @@ export function ChannelTestDialog({
                                                     )}
 
                                                     <div className="min-w-0 flex-1">
-                                                        {showChannelInfo && result.data?.channel_name && (
-                                                            <div className="mb-1 flex items-center gap-1.5">
-                                                                <span className="text-xs font-medium text-primary dark:text-primary/80">
-                                                                    {result.data.channel_name}
-                                                                </span>
+                                                        {showChannelInfo && result.data?.channel_id && (
+                                                            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                                                                <ChannelLabel id={result.data.channel_id} info={channelInfoMap[result.data.channel_id]} compact className="text-primary dark:text-primary/80" />
                                                                 {result.data.channel_id && (
                                                                     <span className="text-xs text-muted-foreground">
                                                                         (ID: {result.data.channel_id})

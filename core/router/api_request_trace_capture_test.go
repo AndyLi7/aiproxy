@@ -1,0 +1,243 @@
+package router
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/requesttrace"
+	"github.com/labring/aiproxy/core/middleware"
+	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/mode"
+	"github.com/labring/aiproxy/core/trace"
+	"github.com/stretchr/testify/require"
+)
+
+func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
+	tests := []struct {
+		name, path string
+		body       func() (*bytes.Buffer, string)
+		wantStages []requesttrace.Stage
+	}{
+		{
+			name: "image generation", path: "/v1/images/generations",
+			body: func() (*bytes.Buffer, string) {
+				return bytes.NewBufferString(`{"model":"trace-image","prompt":"private prompt"}`), "application/json"
+			},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageChannelSelection, requesttrace.StageValidation, requesttrace.StageUpstreamAttempt},
+		},
+		{
+			name: "image edit", path: "/v1/images/edits",
+			body: func() (*bytes.Buffer, string) {
+				var body bytes.Buffer
+				writer := multipart.NewWriter(&body)
+				require.NoError(t, writer.WriteField("model", "trace-image"))
+				require.NoError(t, writer.WriteField("prompt", "private edit prompt"))
+				part, err := writer.CreateFormFile("image", "input.png")
+				require.NoError(t, err)
+				_, err = part.Write([]byte("not-a-real-image"))
+				require.NoError(t, err)
+				require.NoError(t, writer.Close())
+				return &body, writer.FormDataContentType()
+			},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageChannelSelection, requesttrace.StageValidation, requesttrace.StageUpstreamAttempt},
+		},
+		{
+			name: "video submission", path: "/v1/videos",
+			body: func() (*bytes.Buffer, string) {
+				return bytes.NewBufferString(`{"model":"trace-video","capability":"text-to-video","prompt":"private video prompt","size":"480x480","seconds":4}`), "application/json"
+			},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageChannelSelection, requesttrace.StageValidation, requesttrace.StageUpstreamAttempt},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newTraceCaptureFixture(t)
+			requestID := "trace-capture-" + strings.ReplaceAll(tt.name, " ", "-")
+			body, contentType := tt.body()
+			request := httptest.NewRequest(http.MethodPost, tt.path, body)
+			request.Header.Set("Authorization", "Bearer trace-test-key")
+			request.Header.Set(middleware.RequestIDHeader, requestID)
+			request.Header.Set("Content-Type", contentType)
+			response := httptest.NewRecorder()
+			fixture.engine.ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			fixture.awaitConsume(t, requestID)
+			fixture.flush(t)
+
+			page, err := fixture.store.FindRequests(t.Context(), model.TraceRequestQuery{GroupID: "group-a", RequestID: requestID})
+			require.NoError(t, err)
+			require.Len(t, page.Items, 1)
+			spans, err := fixture.store.List(t.Context(), model.TraceQuery{GroupID: "group-a", TraceID: page.Items[0].TraceID, Service: requesttrace.ServiceAIProxy, Limit: 100})
+			require.NoError(t, err)
+			require.NotEmpty(t, spans.Items)
+			completed := make([]requesttrace.Stage, 0)
+			var rootSpanID string
+			for _, span := range spans.Items {
+				attributes, err := json.Marshal(span.Attributes)
+				require.NoError(t, err)
+				require.NotContains(t, string(attributes), "private")
+				if span.Status != requesttrace.StatusRunning {
+					require.Equal(t, requesttrace.StatusSuccess, span.Status)
+					completed = append(completed, span.Stage)
+					if span.Stage == requesttrace.StageRequest {
+						rootSpanID = span.SpanID
+					}
+				}
+			}
+			require.NotEmpty(t, rootSpanID)
+			for _, span := range spans.Items {
+				if span.Stage == requesttrace.StageRequest {
+					require.Empty(t, span.ParentSpanID)
+				} else {
+					require.Equal(t, rootSpanID, span.ParentSpanID)
+				}
+			}
+			for _, stage := range tt.wantStages {
+				require.Contains(t, completed, stage)
+			}
+			if tt.name == "video submission" {
+				require.NotContains(t, completed, requesttrace.StageAsyncObservedResult)
+			}
+			require.Equal(t, int32(1), fixture.providerCalls.Load())
+		})
+	}
+}
+
+func TestRequestTraceCaptureStopsBeforeUpstreamOnGatewayRejections(t *testing.T) {
+	tests := []struct {
+		name       string
+		prepare    func(*testing.T, *traceCaptureFixture)
+		authorized bool
+		body       string
+		wantStatus int
+		wantAbsent []requesttrace.Stage
+	}{
+		{name: "authentication rejection", body: `{"model":"trace-image"}`, wantStatus: http.StatusUnauthorized, wantAbsent: []requesttrace.Stage{requesttrace.StageBalanceCheck, requesttrace.StageUpstreamAttempt}},
+		{name: "parameter rejection", authorized: true, body: `{}`, wantStatus: http.StatusBadRequest, wantAbsent: []requesttrace.Stage{requesttrace.StageChannelSelection, requesttrace.StageUpstreamAttempt}},
+		{
+			name: "channel unavailable", authorized: true, body: `{"model":"trace-image","prompt":"safe"}`, wantStatus: http.StatusNotFound,
+			prepare: func(t *testing.T, _ *traceCaptureFixture) {
+				require.NoError(t, model.DB.Model(&model.Channel{}).Where("name = ?", "trace-image").Update("status", model.ChannelStatusDisabled).Error)
+				require.NoError(t, model.InitModelConfigAndChannelCache())
+			},
+			wantAbsent: []requesttrace.Stage{requesttrace.StageUpstreamAttempt},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newTraceCaptureFixture(t)
+			if tt.prepare != nil {
+				tt.prepare(t, fixture)
+			}
+			requestID := "trace-reject-" + strings.ReplaceAll(tt.name, " ", "-")
+			request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set(middleware.RequestIDHeader, requestID)
+			if tt.authorized {
+				request.Header.Set("Authorization", "Bearer trace-test-key")
+			}
+			response := httptest.NewRecorder()
+			fixture.engine.ServeHTTP(response, request)
+			require.Equal(t, tt.wantStatus, response.Code, response.Body.String())
+			require.Equal(t, int32(0), fixture.providerCalls.Load())
+			fixture.flush(t)
+			var spans []model.RequestTraceSpan
+			require.NoError(t, model.LogDB.Where("request_id = ?", requestID).Find(&spans).Error)
+			require.NotEmpty(t, spans)
+			for _, absent := range tt.wantAbsent {
+				for _, span := range spans {
+					require.NotEqual(t, absent, span.Stage)
+				}
+			}
+		})
+	}
+}
+
+type traceCaptureFixture struct {
+	engine        *gin.Engine
+	store         *model.TraceStore
+	runtime       *trace.Runtime
+	providerCalls atomic.Int32
+}
+
+func newTraceCaptureFixture(t *testing.T) *traceCaptureFixture {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	f := &traceCaptureFixture{}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.providerCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/videos" {
+			_, _ = w.Write([]byte(`{"id":"video_trace","object":"video","status":"queued","model":"trace-video","created_at":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"created":1,"data":[{"url":"https://provider.invalid/private.png"}]}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "trace-capture.db"))
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	oldDB, oldLogDB, oldRedis, oldSQLite := model.DB, model.LogDB, common.RedisEnabled, common.UsingSQLite
+	model.DB, model.LogDB, common.RedisEnabled, common.UsingSQLite = db, db, false, true
+	t.Cleanup(func() {
+		model.DB, model.LogDB, common.RedisEnabled, common.UsingSQLite = oldDB, oldLogDB, oldRedis, oldSQLite
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, db.AutoMigrate(&model.ModelConfig{}, &model.Channel{}, &model.Log{}, &model.StoreV2{}, &model.AsyncUsageInfo{}))
+	require.NoError(t, db.Create(&[]model.ModelConfig{
+		{Model: "trace-image", Type: mode.ImagesGenerations},
+		{
+			Model: "trace-video::text-to-video", Type: mode.Videos,
+			Config: map[model.ModelConfigKey]any{
+				"capability_contract_version": model.ModelCapabilityContractVersion,
+				"public_model":                "trace-video", "capability": "text-to-video",
+			},
+		},
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Channel{
+		{Name: "trace-image", Status: model.ChannelStatusEnabled, Type: model.ChannelTypeOpenAI, Key: "provider-secret", BaseURL: provider.URL, Models: []string{"trace-image"}},
+		{Name: "trace-video", Status: model.ChannelStatusEnabled, Type: model.ChannelTypeOpenAI, Key: "provider-secret", BaseURL: provider.URL, Models: []string{"trace-video::text-to-video"}},
+	}).Error)
+	require.NoError(t, model.InitModelConfigAndChannelCache())
+	require.NoError(t, model.CacheSetGroup(&model.GroupCache{ID: "group-a", Status: model.GroupStatusInternal}))
+	require.NoError(t, model.CacheSetToken(&model.TokenCache{ID: 71, Key: "trace-test-key", Group: "group-a", Status: model.TokenStatusEnabled}))
+	t.Cleanup(func() { _ = model.CacheDeleteToken("trace-test-key"); _ = model.CacheDeleteGroup("group-a") })
+
+	f.store = model.NewTraceStore(db)
+	f.runtime = trace.Start(t.Context(), db, trace.Options{Enabled: true})
+	require.True(t, f.runtime.Health().Ready)
+	restore := trace.Install(f.runtime)
+	t.Cleanup(restore)
+	f.engine = gin.New()
+	f.engine.Use(middleware.RequestIDMiddleware)
+	SetRelayRouter(f.engine)
+	return f
+}
+
+func (f *traceCaptureFixture) flush(t *testing.T) {
+	t.Helper()
+	require.NoError(t, f.runtime.Close(context.Background()))
+}
+
+func (f *traceCaptureFixture) awaitConsume(t *testing.T, requestID string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		var count int64
+		return model.LogDB.Model(&model.Log{}).
+			Where("request_id = ?", requestID).
+			Count(&count).Error == nil && count == 1
+	}, 3*time.Second, 10*time.Millisecond)
+}

@@ -34,7 +34,9 @@ type WriterOptions struct {
 // full queue plus accepted spans lost to exhausted writes or canceled shutdown.
 // Persisted counts successful sink writes, and WriteErrors counts failed sink
 // calls (including calls canceled during shutdown). These categories are not
-// all disjoint: an accepted span can later be counted as dropped.
+// all disjoint: an accepted span can later be counted as dropped. After Close
+// returns a context error, worker-owned counters can continue changing until
+// the canceled sink call returns and the worker exits.
 type WriterStats struct {
 	Accepted    uint64
 	Persisted   uint64
@@ -139,8 +141,9 @@ func (w *Writer) Stats() WriterStats {
 }
 
 // Close prevents new submissions and waits for accepted spans to drain. If ctx
-// expires first, Close cancels the worker; the sink's context compliance bounds
-// how quickly that cancellation completes.
+// expires first, Close cancels the worker and returns ctx.Err without waiting
+// for sink cleanup. The sink must honor its context so the worker can exit and
+// finalize loss counters promptly.
 func (w *Writer) Close(ctx context.Context) error {
 	if w == nil {
 		return nil
@@ -171,7 +174,6 @@ func (w *Writer) Close(ctx context.Context) error {
 		if cancel != nil {
 			cancel()
 		}
-		<-done
 		return ctx.Err()
 	}
 }

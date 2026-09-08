@@ -230,8 +230,55 @@ func TestWriterCloseCancellationDropsInFlightAndQueuedSpans(t *testing.T) {
 	if err := w.Close(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Close returned %v, want context cancellation", err)
 	}
+	awaitSignal(t, w.done, "worker cancellation accounting")
 	if got := w.Stats(); got != (WriterStats{Accepted: 2, Dropped: 2, WriteErrors: 1}) {
 		t.Fatalf("unexpected canceled-close stats: %+v", got)
+	}
+}
+
+func TestWriterCloseDeadlineReturnsBeforeCanceledSinkFinishesCleanup(t *testing.T) {
+	entered := make(chan struct{})
+	cancellationReceived := make(chan struct{})
+	cleanupGate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCleanup := func() { releaseOnce.Do(func() { close(cleanupGate) }) }
+	defer releaseCleanup()
+	w := NewWriter(sinkFunc(func(ctx context.Context, _ Span) error {
+		close(entered)
+		<-ctx.Done()
+		close(cancellationReceived)
+		<-cleanupGate
+		return ctx.Err()
+	}), WriterOptions{WriteTimeout: time.Hour, MaxAttempts: 1})
+	if !w.Submit(validCompletedSpan()) {
+		t.Fatal("span was not accepted")
+	}
+	awaitSignal(t, entered, "sink call")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	closeResult := make(chan error, 1)
+	go func() { closeResult <- w.Close(ctx) }()
+	awaitSignal(t, cancellationReceived, "sink cancellation")
+
+	select {
+	case err := <-closeResult:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close returned %v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		releaseCleanup()
+		<-closeResult
+		t.Fatal("Close waited for sink cleanup after its context was canceled")
+	}
+
+	if got := w.Stats(); got != (WriterStats{Accepted: 1}) {
+		t.Fatalf("stats were finalized before sink cleanup: %+v", got)
+	}
+	releaseCleanup()
+	awaitSignal(t, w.done, "worker cleanup")
+	if got := w.Stats(); got != (WriterStats{Accepted: 1, Dropped: 1, WriteErrors: 1}) {
+		t.Fatalf("unexpected eventual canceled-close stats: %+v", got)
 	}
 }
 

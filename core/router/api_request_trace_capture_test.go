@@ -37,7 +37,7 @@ func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
 			body: func() (*bytes.Buffer, string) {
 				return bytes.NewBufferString(`{"model":"trace-image","prompt":"private prompt"}`), "application/json"
 			},
-			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageChannelSelection, requesttrace.StageValidation, requesttrace.StageUpstreamAttempt},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageValidation, requesttrace.StageChannelSelection, requesttrace.StageUpstreamAttempt},
 		},
 		{
 			name: "image edit", path: "/v1/images/edits",
@@ -53,14 +53,14 @@ func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
 				require.NoError(t, writer.Close())
 				return &body, writer.FormDataContentType()
 			},
-			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageChannelSelection, requesttrace.StageValidation, requesttrace.StageUpstreamAttempt},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageValidation, requesttrace.StageChannelSelection, requesttrace.StageUpstreamAttempt},
 		},
 		{
 			name: "video submission", path: "/v1/videos",
 			body: func() (*bytes.Buffer, string) {
 				return bytes.NewBufferString(`{"model":"trace-video","capability":"text-to-video","prompt":"private video prompt","size":"480x480","seconds":4}`), "application/json"
 			},
-			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageChannelSelection, requesttrace.StageValidation, requesttrace.StageUpstreamAttempt},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution, requesttrace.StageValidation, requesttrace.StageChannelSelection, requesttrace.StageUpstreamAttempt},
 		},
 	}
 	for _, tt := range tests {
@@ -83,58 +83,87 @@ func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
 			require.Len(t, page.Items, 1)
 			spans, err := fixture.store.List(t.Context(), model.TraceQuery{GroupID: "group-a", TraceID: page.Items[0].TraceID, Service: requesttrace.ServiceAIProxy, Limit: 100})
 			require.NoError(t, err)
-			require.NotEmpty(t, spans.Items)
-			completed := make([]requesttrace.Stage, 0)
-			var rootSpanID string
+			require.Len(t, spans.Items, len(tt.wantStages))
 			for _, span := range spans.Items {
 				attributes, err := json.Marshal(span.Attributes)
 				require.NoError(t, err)
 				require.NotContains(t, string(attributes), "private")
-				if span.Status != requesttrace.StatusRunning {
-					require.Equal(t, requesttrace.StatusSuccess, span.Status)
-					completed = append(completed, span.Stage)
-					if span.Stage == requesttrace.StageRequest {
-						rootSpanID = span.SpanID
-					}
-				}
+				require.Equal(t, requesttrace.StatusSuccess, span.Status)
 			}
-			require.NotEmpty(t, rootSpanID)
-			for _, span := range spans.Items {
-				if span.Stage == requesttrace.StageRequest {
-					require.Empty(t, span.ParentSpanID)
-				} else {
-					require.Equal(t, rootSpanID, span.ParentSpanID)
-				}
-			}
-			for _, stage := range tt.wantStages {
-				require.Contains(t, completed, stage)
-			}
+			assertExactTraceLifecycle(t, spans.Items, tt.wantStages)
 			if tt.name == "video submission" {
-				require.NotContains(t, completed, requesttrace.StageAsyncObservedResult)
+				for _, span := range spans.Items {
+					require.NotEqual(t, requesttrace.StageAsyncObservedResult, span.Stage)
+				}
 			}
 			require.Equal(t, int32(1), fixture.providerCalls.Load())
 		})
 	}
 }
 
+func assertExactTraceLifecycle(t *testing.T, spans []requesttrace.Span, stages []requesttrace.Stage) {
+	t.Helper()
+	byStage := make(map[requesttrace.Stage]requesttrace.Span, len(spans))
+	for _, span := range spans {
+		_, duplicate := byStage[span.Stage]
+		require.False(t, duplicate, "duplicate terminal stage %s", span.Stage)
+		byStage[span.Stage] = span
+	}
+	require.Len(t, byStage, len(stages))
+	root, ok := byStage[requesttrace.StageRequest]
+	require.True(t, ok, "missing request root")
+	require.Empty(t, root.ParentSpanID)
+	require.NotNil(t, root.EndedAt)
+	var previous *requesttrace.Span
+	for _, stage := range stages[1:] {
+		span, ok := byStage[stage]
+		require.True(t, ok, "missing stage %s", stage)
+		require.Equal(t, root.SpanID, span.ParentSpanID)
+		require.NotNil(t, span.EndedAt)
+		require.False(t, span.StartedAt.Before(root.StartedAt))
+		require.False(t, root.EndedAt.Before(*span.EndedAt))
+		if previous != nil {
+			require.False(t, span.StartedAt.Before(previous.StartedAt), "%s started before %s", stage, previous.Stage)
+		}
+		copy := span
+		previous = &copy
+	}
+}
+
+func assertExactModelTraceLifecycle(t *testing.T, spans []model.RequestTraceSpan, stages []requesttrace.Stage, statuses []requesttrace.Status) {
+	t.Helper()
+	require.Len(t, stages, len(statuses))
+	converted := make([]requesttrace.Span, 0, len(spans))
+	statusByStage := make(map[requesttrace.Stage]requesttrace.Status, len(spans))
+	for _, span := range spans {
+		converted = append(converted, requesttrace.Span{SpanID: span.SpanID, ParentSpanID: span.ParentSpanID, Stage: span.Stage, Status: span.Status, StartedAt: span.StartedAt, EndedAt: span.EndedAt})
+		statusByStage[span.Stage] = span.Status
+	}
+	assertExactTraceLifecycle(t, converted, stages)
+	for index, stage := range stages {
+		require.Equal(t, statuses[index], statusByStage[stage], "stage %s", stage)
+	}
+}
+
 func TestRequestTraceCaptureStopsBeforeUpstreamOnGatewayRejections(t *testing.T) {
 	tests := []struct {
-		name       string
-		prepare    func(*testing.T, *traceCaptureFixture)
-		authorized bool
-		body       string
-		wantStatus int
-		wantAbsent []requesttrace.Stage
+		name         string
+		prepare      func(*testing.T, *traceCaptureFixture)
+		authorized   bool
+		body         string
+		wantStatus   int
+		wantStages   []requesttrace.Stage
+		wantStatuses []requesttrace.Status
 	}{
-		{name: "authentication rejection", body: `{"model":"trace-image"}`, wantStatus: http.StatusUnauthorized, wantAbsent: []requesttrace.Stage{requesttrace.StageBalanceCheck, requesttrace.StageUpstreamAttempt}},
-		{name: "parameter rejection", authorized: true, body: `{}`, wantStatus: http.StatusBadRequest, wantAbsent: []requesttrace.Stage{requesttrace.StageChannelSelection, requesttrace.StageUpstreamAttempt}},
+		{name: "authentication rejection", body: `{"model":"trace-image"}`, wantStatus: http.StatusUnauthorized, wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication}, wantStatuses: []requesttrace.Status{requesttrace.StatusError, requesttrace.StatusError}},
+		{name: "parameter rejection", authorized: true, body: `{}`, wantStatus: http.StatusBadRequest, wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution}, wantStatuses: []requesttrace.Status{requesttrace.StatusError, requesttrace.StatusSuccess, requesttrace.StatusSuccess, requesttrace.StatusError}},
 		{
 			name: "channel unavailable", authorized: true, body: `{"model":"trace-image","prompt":"safe"}`, wantStatus: http.StatusNotFound,
 			prepare: func(t *testing.T, _ *traceCaptureFixture) {
 				require.NoError(t, model.DB.Model(&model.Channel{}).Where("type = ?", model.ChannelTypeOpenAI).Update("status", model.ChannelStatusDisabled).Error)
 				require.NoError(t, model.InitModelConfigAndChannelCache())
 			},
-			wantAbsent: []requesttrace.Stage{requesttrace.StageUpstreamAttempt},
+			wantStages: []requesttrace.Stage{requesttrace.StageRequest, requesttrace.StageAuthentication, requesttrace.StageBalanceCheck, requesttrace.StageModelResolution}, wantStatuses: []requesttrace.Status{requesttrace.StatusError, requesttrace.StatusSuccess, requesttrace.StatusSuccess, requesttrace.StatusError},
 		},
 	}
 	for _, tt := range tests {
@@ -157,12 +186,8 @@ func TestRequestTraceCaptureStopsBeforeUpstreamOnGatewayRejections(t *testing.T)
 			fixture.flush(t)
 			var spans []model.RequestTraceSpan
 			require.NoError(t, model.LogDB.Where("request_id = ?", requestID).Find(&spans).Error)
-			require.NotEmpty(t, spans)
-			for _, absent := range tt.wantAbsent {
-				for _, span := range spans {
-					require.NotEqual(t, absent, span.Stage)
-				}
-			}
+			require.Len(t, spans, len(tt.wantStages))
+			assertExactModelTraceLifecycle(t, spans, tt.wantStages, tt.wantStatuses)
 		})
 	}
 }
@@ -236,6 +261,20 @@ func TestRequestTraceEnabledAndDisabledPreserveGatewayAndConsumption(t *testing.
 }
 
 func TestRequestTraceBlockedAndFullQueueDoNotChangeGatewayResult(t *testing.T) {
+	baseline := newTraceCaptureFixture(t)
+	baselineRequestID := "trace-unblocked-baseline"
+	baselineRequest := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"trace-image","prompt":"unaffected"}`))
+	baselineRequest.Header.Set("Content-Type", "application/json")
+	baselineRequest.Header.Set("Authorization", "Bearer trace-test-key")
+	baselineRequest.Header.Set(middleware.RequestIDHeader, baselineRequestID)
+	baselineResponse := httptest.NewRecorder()
+	baseline.engine.ServeHTTP(baselineResponse, baselineRequest)
+	baseline.awaitConsume(t, baselineRequestID)
+	var baselineConsumes int64
+	require.NoError(t, model.LogDB.Model(&model.Log{}).Where("request_id = ?", baselineRequestID).Count(&baselineConsumes).Error)
+	baselineCalls := baseline.providerCalls.Load()
+	baseline.flush(t)
+
 	fixture := newTraceCaptureFixture(t)
 	blocked := make(chan struct{})
 	require.NoError(t, model.LogDB.Callback().Create().Before("gorm:create").Register("test:block_trace_writes", func(tx *gorm.DB) {
@@ -262,11 +301,20 @@ func TestRequestTraceBlockedAndFullQueueDoNotChangeGatewayResult(t *testing.T) {
 	require.Equal(t, int32(1), fixture.providerCalls.Load())
 	close(blocked)
 	fixture.awaitConsume(t, requestID)
+	var blockedConsumes int64
+	require.NoError(t, model.LogDB.Model(&model.Log{}).Where("request_id = ?", requestID).Count(&blockedConsumes).Error)
 	fixture.flush(t)
+	require.Equal(t, baselineResponse.Code, response.Code)
+	require.JSONEq(t, baselineResponse.Body.String(), response.Body.String())
+	require.Equal(t, baselineCalls, fixture.providerCalls.Load())
+	require.Equal(t, baselineConsumes, blockedConsumes)
 }
 
 func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testing.T) {
 	fixture := newTraceCaptureFixture(t)
+	fixture.failFirst.Store(true)
+	require.NoError(t, model.DB.Exec("UPDATE model_configs SET retry_times = ? WHERE model = ?", 1, "trace-image").Error)
+	require.NoError(t, model.InitModelConfigAndChannelCache())
 	requestID := "shared-malicious-request"
 	for _, key := range []string{"trace-test-key", "trace-other-key"} {
 		request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"trace-image","prompt":"PROMPT_SENTINEL"}`))
@@ -282,6 +330,7 @@ func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testi
 		fixture.engine.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	}
+	require.Equal(t, int32(3), fixture.providerCalls.Load(), "the injected raw upstream error must be followed by one successful retry")
 	require.Eventually(t, func() bool {
 		var count int64
 		return model.LogDB.Model(&model.Log{}).Where("request_id = ?", requestID).Count(&count).Error == nil && count == 2
@@ -315,7 +364,7 @@ func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testi
 	apiResponse := httptest.NewRecorder()
 	fixture.engine.ServeHTTP(apiResponse, apiRequest)
 	require.Equal(t, http.StatusOK, apiResponse.Code, apiResponse.Body.String())
-	for _, forbidden := range []string{"PROMPT_SENTINEL", "SOURCE_SENTINEL", "provider-secret", "provider.invalid/private.png"} {
+	for _, forbidden := range []string{"PROMPT_SENTINEL", "SOURCE_SENTINEL", "provider-secret", "private upstream failure", "provider.invalid/private.png", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cccccccccccccccccccccccccccccccc"} {
 		require.NotContains(t, apiResponse.Body.String(), forbidden)
 	}
 }

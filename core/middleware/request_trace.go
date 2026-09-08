@@ -12,9 +12,14 @@ import (
 )
 
 const requestTraceSessionKey = "request_trace_session"
+const requestTraceEnvelopeKey = "request_trace_envelope"
+const requestTracePendingOwnerKey = "request_trace_pending_owner"
 
 func RequestTraceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Service credentials must never be forwarded to an upstream provider.
+		wire := c.GetHeader("X-Platform-Trace")
+		c.Request.Header.Del("X-Platform-Trace")
 		if !isRequestTraceRoute(c.Request.Method, c.Request.URL.Path) {
 			c.Next()
 			return
@@ -26,8 +31,16 @@ func RequestTraceMiddleware() gin.HandlerFunc {
 			return
 		}
 		c.Set(requestTraceSessionKey, session)
+		if len(wire) <= 2048 {
+			c.Set(requestTraceEnvelopeKey, wire)
+		}
 
 		defer func() {
+			if group, ok := c.Get(requestTracePendingOwnerKey); ok {
+				if owner, ok := group.(string); ok {
+					session.BindGroup(owner)
+				}
+			}
 			if recovered := recover(); recovered != nil {
 				session.Finish(requesttrace.StatusError)
 				panic(recovered)
@@ -39,7 +52,41 @@ func RequestTraceMiddleware() gin.HandlerFunc {
 }
 
 func BindRequestTraceGroup(c *gin.Context, groupID string) bool {
-	return requestTraceSession(c).BindGroup(groupID)
+	if c == nil {
+		return false
+	}
+	if c.Request == nil {
+		return requestTraceSession(c).BindGroup(groupID)
+	}
+	if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodDelete {
+		// The distributor will resolve task ownership before flushing identity.
+		c.Set(requestTracePendingOwnerKey, groupID)
+		c.Set(requestTraceEnvelopeKey, "")
+		return requestTraceSession(c) != nil
+	}
+	wire, _ := c.Get(requestTraceEnvelopeKey)
+	c.Set(requestTraceEnvelopeKey, "")
+	envelope, _ := wire.(string)
+	return trace.Current().BindRequest(c.Request.Context(), requestTraceSession(c), envelope, requesttrace.TrustedRequest{
+		GroupID: groupID, RequestID: GetRequestID(c), Method: c.Request.Method, Path: c.Request.URL.Path,
+	})
+}
+
+func BindRequestTraceTask(c *gin.Context, group string, tokenID, channelID int, taskID string) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodDelete {
+		return
+	}
+	trace.Current().BindTask(c.Request.Context(), requestTraceSession(c), group, tokenID, channelID, taskID)
+}
+
+func SaveRequestTraceTask(c *gin.Context, asyncID int, group string) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	trace.Current().SaveTask(c.Request.Context(), requestTraceSession(c), asyncID, group)
 }
 
 func BeginRequestTraceStage(

@@ -550,11 +550,12 @@ func recordResult(
 	)
 
 	if asyncUsageStatus == model.AsyncUsageStatusPending {
-		saveAsyncUsageInfo(meta, price, result)
+		saveAsyncUsageInfo(c, meta, price, result)
 	}
 }
 
 func saveAsyncUsageInfo(
+	c *gin.Context,
 	meta *meta.Meta,
 	price model.Price,
 	result *controller.HandleResult,
@@ -566,7 +567,7 @@ func saveAsyncUsageInfo(
 
 	pricingCurrency, pricingVersion, _ := meta.ModelConfig.RetailPricingMetadata()
 
-	if err := model.CreateAsyncUsageInfo(&model.AsyncUsageInfo{
+	info := &model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
@@ -583,9 +584,12 @@ func saveAsyncUsageInfo(
 		UpstreamID:                  result.UpstreamID,
 		UsageContext:                result.UsageContext.WithFallback(meta.RequestUsageContext),
 		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
-	}); err != nil {
-		log.Errorf("failed to save async usage info: %v", err)
 	}
+	if err := model.CreateAsyncUsageInfo(info); err != nil {
+		log.Errorf("failed to save async usage info: %v", err)
+		return
+	}
+	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
 }
 
 func effectiveDetailBodyMaxSize(modelLimit, globalLimit int64) int64 {

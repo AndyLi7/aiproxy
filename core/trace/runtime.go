@@ -22,10 +22,12 @@ const (
 )
 
 type Options struct {
-	Enabled bool
+	Enabled     bool
+	TrustedKeys map[string][]byte
 }
 
 type Health struct {
+	CorrelationFailures  uint64                   `json:"correlation_failures"`
 	Enabled              bool                     `json:"enabled"`
 	Ready                bool                     `json:"ready"`
 	Writer               requesttrace.WriterStats `json:"writer"`
@@ -34,6 +36,8 @@ type Health struct {
 }
 
 type Runtime struct {
+	correlationFailures  atomic.Uint64
+	trustedKeys          map[string][]byte
 	enabled              bool
 	ready                bool
 	initializationFailed bool
@@ -78,6 +82,10 @@ func Start(ctx context.Context, db *gorm.DB, options Options) *Runtime {
 	}
 
 	runtime.ready = true
+	runtime.trustedKeys = make(map[string][]byte, len(options.TrustedKeys))
+	for id, key := range options.TrustedKeys {
+		runtime.trustedKeys[id] = append([]byte(nil), key...)
+	}
 	runtime.store = store
 	runtime.writer = requesttrace.NewWriter(store, requesttrace.WriterOptions{})
 	cleanupCtx, cancelCleanup := context.WithCancel(ctx)
@@ -94,11 +102,53 @@ func (r *Runtime) NewRequest(requestID string) *requesttrace.Session {
 	return requesttrace.NewSession(requestID, r.writer.Submit)
 }
 
+// BindRequest keeps a local trace whenever authenticated correlation is unavailable.
+func (r *Runtime) BindRequest(ctx context.Context, session *requesttrace.Session, wire string, actual requesttrace.TrustedRequest) bool {
+	if session == nil {
+		return false
+	}
+	if r != nil && r.ready && wire != "" {
+		verified, err := requesttrace.VerifyTrustedContext(ctx, wire, r.trustedKeys, actual, time.Now(), r.store)
+		if err == nil && session.BindVerifiedContext(actual.GroupID, verified) {
+			return true
+		}
+		r.correlationFailures.Add(1)
+	}
+	return session.BindGroup(actual.GroupID)
+}
+
+func (r *Runtime) SaveTask(ctx context.Context, session *requesttrace.Session, asyncID int, group string) {
+	if r == nil || !r.ready || session == nil {
+		return
+	}
+	bounded, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	// Diagnostic persistence must never alter the successful task or billing path.
+	if r.store.SaveTaskTrace(bounded, asyncID, group, session.TraceID(), session.RootID()) != nil {
+		r.correlationFailures.Add(1)
+	}
+}
+
+func (r *Runtime) BindTask(ctx context.Context, session *requesttrace.Session, group string, tokenID, channelID int, taskID string) bool {
+	if r == nil || !r.ready || session == nil {
+		return false
+	}
+	bounded, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	link, err := r.store.ResolveTaskTrace(bounded, group, tokenID, channelID, taskID, time.Now())
+	if err != nil {
+		r.correlationFailures.Add(1)
+		return session.BindGroup(group)
+	}
+	return session.BindStoredTask(group, link.TraceID, link.ParentSpanID)
+}
+
 func (r *Runtime) Health() Health {
 	if r == nil {
 		return Health{}
 	}
 	health := Health{
+		CorrelationFailures:  r.correlationFailures.Load(),
 		Enabled:              r.enabled,
 		Ready:                r.ready,
 		CleanupErrors:        r.cleanupErrors.Load(),
@@ -160,8 +210,10 @@ func (r *Runtime) runCleanup(ctx context.Context) {
 		case <-ticks:
 			cleanupCtx, cancel := context.WithTimeout(ctx, cleanupTimeout)
 			_, err := r.store.CleanExpired(cleanupCtx, time.Now().UTC(), cleanupBatchSize)
+			_, nonceErr := r.store.CleanTraceNonces(cleanupCtx, time.Now().UTC(), cleanupBatchSize)
+			_, taskErr := r.store.CleanTaskTraces(cleanupCtx, time.Now().UTC(), cleanupBatchSize)
 			cancel()
-			if err != nil && ctx.Err() == nil {
+			if (err != nil || nonceErr != nil || taskErr != nil) && ctx.Err() == nil {
 				r.cleanupErrors.Add(1)
 				log.Error("request_trace_cleanup_failed")
 			}

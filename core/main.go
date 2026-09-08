@@ -69,8 +69,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	traceKeys, traceKeyErr := requesttraceruntime.ParseTrustedKeys(env.String("REQUEST_TRACE_SERVICE_KEYS", ""))
+	if traceKeyErr != nil {
+		log.Warn("request_trace_service_keys_unavailable")
+	}
 	traceRuntime := startRequestTraceRuntime(ctx, requesttraceruntime.Options{
-		Enabled: env.Bool("REQUEST_TRACE_ENABLED", false),
+		Enabled:     env.Bool("REQUEST_TRACE_ENABLED", false),
+		TrustedKeys: traceKeys,
 	})
 	restoreTraceRuntime := requesttraceruntime.Install(traceRuntime)
 	defer restoreTraceRuntime()

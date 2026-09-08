@@ -59,14 +59,30 @@ func (r *Recorder) Truncated() bool {
 	return r.truncated
 }
 
+func (r *Recorder) markTruncated() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.truncated = true
+	r.mu.Unlock()
+}
+
 // Begin emits a running span. The returned handle is always non-nil.
 func (r *Recorder) Begin(stage Stage, parentID string) *Handle {
+	return r.BeginWithAttributes(stage, parentID, Attributes{})
+}
+
+// BeginWithAttributes emits a running span with an immutable snapshot of the
+// supplied whitelist attributes. The returned handle is always non-nil.
+func (r *Recorder) BeginWithAttributes(stage Stage, parentID string, attrs Attributes) *Handle {
 	if r == nil {
 		return disabledHandle()
 	}
 	started := time.Now()
+	attrs = cloneAttributes(attrs)
 	r.mu.Lock()
-	if r.disabled || !validStage(stage) || (parentID != "" && !r.ownsSpan(parentID)) {
+	if r.disabled || !validStage(stage) || validateAttributes(attrs) != nil || (parentID != "" && !r.ownsSpan(parentID)) {
 		r.mu.Unlock()
 		return disabledHandle()
 	}
@@ -94,14 +110,48 @@ func (r *Recorder) Begin(stage Stage, parentID string) *Handle {
 		Status:       StatusRunning,
 		StartedAt:    started.UTC(),
 		Revision:     1,
+		Attributes:   attrs,
 	}
 	emit := r.emit
 	r.mu.Unlock()
 
 	if !emit(span) {
-		return disabledHandle()
+		r.markTruncated()
 	}
 	return &Handle{recorder: r, span: span, started: started}
+}
+
+func cloneAttributes(attrs Attributes) Attributes {
+	cloned := attrs
+	if attrs.ChannelID != nil {
+		value := *attrs.ChannelID
+		cloned.ChannelID = &value
+	}
+	if attrs.Attempt != nil {
+		value := *attrs.Attempt
+		cloned.Attempt = &value
+	}
+	if attrs.HTTPStatus != nil {
+		value := *attrs.HTTPStatus
+		cloned.HTTPStatus = &value
+	}
+	if attrs.Width != nil {
+		value := *attrs.Width
+		cloned.Width = &value
+	}
+	if attrs.Height != nil {
+		value := *attrs.Height
+		cloned.Height = &value
+	}
+	if attrs.Seconds != nil {
+		value := *attrs.Seconds
+		cloned.Seconds = &value
+	}
+	if attrs.GenerateAudio != nil {
+		value := *attrs.GenerateAudio
+		cloned.GenerateAudio = &value
+	}
+	return cloned
 }
 
 func (r *Recorder) ownsSpan(spanID string) bool {
@@ -154,6 +204,9 @@ func (h *Handle) Finish(status Status) bool {
 			return
 		}
 		accepted = h.recorder.emit(finished)
+		if !accepted {
+			h.recorder.markTruncated()
+		}
 	})
 	return accepted
 }

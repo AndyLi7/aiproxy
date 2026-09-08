@@ -101,6 +101,9 @@ func TestFinishReportsEmitterRejectionOnce(t *testing.T) {
 	if emissions != 2 {
 		t.Fatalf("got %d emissions, want one start and one completion attempt", emissions)
 	}
+	if !r.Truncated() {
+		t.Fatal("rejected completion did not truncate recorder")
+	}
 }
 
 func TestInvalidFinishDoesNotConsumeTheValidFinish(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const (
@@ -62,7 +63,11 @@ func Start(ctx context.Context, db *gorm.DB, options Options) *Runtime {
 		ctx = context.Background()
 	}
 
-	store := model.NewTraceStore(db)
+	traceDB := db
+	if db != nil {
+		traceDB = db.Session(&gorm.Session{NewDB: true, Logger: logger.Discard})
+	}
+	store := model.NewTraceStore(traceDB)
 	migrateCtx, cancelMigrate := context.WithTimeout(ctx, initializationTimeout)
 	err := store.Migrate(migrateCtx)
 	cancelMigrate()
@@ -128,6 +133,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 		select {
 		case <-cleanupDone:
 		case <-ctx.Done():
+			_ = writer.Close(ctx)
 			return ctx.Err()
 		}
 	}

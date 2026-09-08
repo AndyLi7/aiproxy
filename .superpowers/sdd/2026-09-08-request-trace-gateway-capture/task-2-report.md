@@ -90,3 +90,67 @@ An attempted unrestricted `go test ./model -count=1` was not usable as a green g
 ## Concerns
 
 - The repository's full model test package requires nested Docker services unavailable inside the supplied Linux helper. This is an environment limitation, not a failure in the focused trace tests.
+
+## Review Fix Round 1
+
+### Changes
+
+- Fixed the cleanup-wait timeout branch so it still calls `writer.Close` with the same already-expired caller context. This closes submissions and cancels the writer immediately without adding another wait.
+- Created a trace-scoped `gorm.Session` with `logger.Discard` before constructing `TraceStore`. Migration, writer, and cleanup database failures therefore cannot reach the production GORM warning logger, while the caller's original database logger remains unchanged.
+- Added focused regressions for a cleanup goroutine held pending past Close's deadline and for migration/cleanup driver-error redaction.
+
+### TDD RED
+
+Command:
+
+```text
+docker exec token-trace-b1-test sh -lc 'cd /workspace/core && /usr/local/go/bin/gofmt -w trace/runtime_test.go && /usr/local/go/bin/go test ./trace -run "TestCloseDeadlineStillClosesWriterWhenCleanupHasNotStopped|TestTraceDatabaseFailuresDoNotLeakThroughGORMLogger|TestCleanupDatabaseFailuresDoNotLeakThroughGORMLogger" -count=1'
+```
+
+Relevant expected failures:
+
+```text
+--- FAIL: TestCloseDeadlineStillClosesWriterWhenCleanupHasNotStopped
+    Error: "0" is not greater than "0"
+--- FAIL: TestTraceDatabaseFailuresDoNotLeakThroughGORMLogger
+    Error: "... sql: database is closed ... CREATE TABLE ..." should not contain "database is closed"
+FAIL github.com/labring/aiproxy/core/trace
+```
+
+The first failure proved the writer remained open after cleanup waiting consumed the deadline. The second proved the shared GORM warning logger leaked the raw driver sentinel and SQL before the runtime emitted its fixed error code.
+
+### GREEN and verification
+
+Focused regression command after the fixes:
+
+```text
+docker exec token-trace-b1-test sh -lc 'cd /workspace/core && /usr/local/go/bin/gofmt -w trace/runtime.go && /usr/local/go/bin/go test ./trace -run "TestCloseDeadlineStillClosesWriterWhenCleanupHasNotStopped|TestTraceDatabaseFailuresDoNotLeakThroughGORMLogger|TestCleanupDatabaseFailuresDoNotLeakThroughGORMLogger" -count=1'
+ok github.com/labring/aiproxy/core/trace 0.130s
+```
+
+Fresh final verification:
+
+```text
+go test ./trace -count=1
+ok github.com/labring/aiproxy/core/trace 0.348s
+
+go test -race ./trace -count=1
+ok github.com/labring/aiproxy/core/trace 1.470s
+
+go test ./common/requesttrace -run "TestWriter" -count=1
+ok github.com/labring/aiproxy/core/common/requesttrace 0.135s
+
+go test . -run "^$" -count=1
+? github.com/labring/aiproxy/core [no test files]
+
+go vet ./trace
+(no output; exit 0)
+```
+
+An intermediate race run exposed a race in the new test's ticker-factory restoration while the held cleanup goroutine was still starting. The test now synchronizes ticker creation and cleanup completion before restoring the package seam; the fresh race run above passes.
+
+### Self-review
+
+- The timeout branch uses the original expired context, so writer closure changes state synchronously and cancellation occurs without a second deadline or unbounded wait.
+- The scoped GORM session shares the same connection pool but does not mutate the caller's logger; the regression asserts logger identity remains unchanged.
+- Runtime-owned logs remain fixed codes, and both initialization and cleanup failure tests verify the raw `database is closed` sentinel never reaches the configured database logger.

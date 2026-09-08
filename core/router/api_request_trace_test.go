@@ -16,6 +16,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/trace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,6 +46,123 @@ func TestRequestTraceRouteRequiresAdminHeaderAndValidatesInput(t *testing.T) {
 			engine.ServeHTTP(recorder, request)
 			require.Equal(t, testCase.want, recorder.Code)
 		})
+	}
+}
+
+func TestRequestTraceByRequestRouteReturnsScopedCandidatesAndValidatesAdminHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine, _ := requestTraceRouter(t, false)
+	now := time.Now().UTC()
+	require.NoError(t, model.LogDB.Create(&[]model.RequestTraceSpan{
+		{SpanID: requestTraceID(11), TraceID: requestTraceID(21), GroupID: "group-one", RequestID: "duplicate", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now},
+		{SpanID: requestTraceID(12), TraceID: requestTraceID(22), GroupID: "group-one", RequestID: "duplicate", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusError, StartedAt: now, UpdatedAt: now},
+		{SpanID: requestTraceID(13), TraceID: requestTraceID(23), GroupID: "group-two", RequestID: "duplicate", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now},
+	}).Error)
+
+	for _, tc := range []struct {
+		name, path, header string
+		want               int
+	}{
+		{"missing credentials", "/api/trace/group-one/by-request/duplicate", "", http.StatusUnauthorized},
+		{"ordinary key", "/api/trace/group-one/by-request/duplicate", "Bearer client-key", http.StatusUnauthorized},
+		{"query-only key", "/api/trace/group-one/by-request/duplicate?key=admin-key", "", http.StatusUnauthorized},
+		{"invalid group", "/api/trace/%01/by-request/duplicate", "Bearer admin-key", http.StatusBadRequest},
+		{"invalid request", "/api/trace/group-one/by-request/%01", "Bearer admin-key", http.StatusBadRequest},
+		{"invalid cursor", "/api/trace/group-one/by-request/duplicate?after=bad", "Bearer admin-key", http.StatusBadRequest},
+		{"invalid limit", "/api/trace/group-one/by-request/duplicate?limit=101", "Bearer admin-key", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, req)
+			require.Equal(t, tc.want, response.Code)
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/trace/group-one/by-request/duplicate?limit=1", nil)
+	req.Header.Set("Authorization", "Bearer admin-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+	require.Equal(t, http.StatusOK, response.Code)
+	var payload struct {
+		Data model.TraceRequestPage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.Len(t, payload.Data.Items, 1)
+	require.Equal(t, requestTraceID(21), payload.Data.Items[0].TraceID)
+	require.Equal(t, requestTraceID(11), payload.Data.NextCursor)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/trace/group-one/by-request/duplicate?after="+payload.Data.NextCursor+"&limit=1", nil)
+	req.Header.Set("Authorization", "Bearer admin-key")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+	require.Equal(t, http.StatusOK, response.Code)
+	payload = struct {
+		Data model.TraceRequestPage `json:"data"`
+	}{}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.Len(t, payload.Data.Items, 1)
+	require.Equal(t, requestTraceID(22), payload.Data.Items[0].TraceID)
+	require.Empty(t, payload.Data.NextCursor)
+}
+
+func TestRequestTraceRouteReportsPersistedTruncationWithoutPaginationCursor(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine, traceID := requestTraceRouter(t, false)
+	now := time.Now().UTC()
+	require.NoError(t, model.LogDB.Create(&model.RequestTraceHead{TraceID: traceID, Service: requesttrace.ServiceAIProxy, GroupID: "group-one", Truncated: true, UpdatedAt: now}).Error)
+	require.NoError(t, model.LogDB.Create(&model.RequestTraceSpan{SpanID: requestTraceID(31), TraceID: traceID, GroupID: "group-one", RequestID: "request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now}).Error)
+	req := httptest.NewRequest(http.MethodGet, "/api/trace/group-one/"+traceID+"?service=aiproxy", nil)
+	req.Header.Set("Authorization", "Bearer admin-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+	require.Equal(t, http.StatusOK, response.Code)
+	var payload struct {
+		Data struct {
+			Truncated  bool   `json:"truncated"`
+			NextCursor string `json:"next_cursor"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.True(t, payload.Data.Truncated)
+	require.Empty(t, payload.Data.NextCursor)
+}
+
+func TestTraceHealthRequiresAdminHeaderAndUsesSafeSnakeCaseProjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousAdminKey := config.AdminKey
+	config.AdminKey = "admin-key"
+	t.Cleanup(func() { config.AdminKey = previousAdminKey })
+	restore := trace.Install(trace.Start(context.Background(), nil, trace.Options{Enabled: true}))
+	t.Cleanup(restore)
+	engine := gin.New()
+	SetAPIRouter(engine)
+
+	for _, tc := range []struct {
+		path, header string
+		want         int
+	}{
+		{"/api/trace-health", "", http.StatusUnauthorized},
+		{"/api/trace-health?key=admin-key", "", http.StatusUnauthorized},
+		{"/api/trace-health", "Bearer client-key", http.StatusUnauthorized},
+		{"/api/trace-health", "Bearer admin-key", http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		if tc.header != "" {
+			req.Header.Set("Authorization", tc.header)
+		}
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, req)
+		require.Equal(t, tc.want, response.Code)
+		if tc.want == http.StatusOK {
+			require.Contains(t, response.Body.String(), `"initialization_failed":true`)
+			require.Contains(t, response.Body.String(), `"write_errors":0`)
+			require.NotContains(t, response.Body.String(), "WriteErrors")
+			require.NotContains(t, response.Body.String(), "postgres")
+		}
 	}
 }
 

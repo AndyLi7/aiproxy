@@ -10,6 +10,7 @@ import (
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/trace"
 )
 
 const defaultRequestTraceLimit = 50
@@ -65,6 +66,88 @@ func GetRequestTrace(c *gin.Context) {
 		return
 	}
 	middleware.SuccessResponse(c, projectTracePage(page))
+}
+
+func GetRequestTracesByRequest(c *gin.Context) {
+	if c.GetHeader("Authorization") == "" {
+		middleware.ErrorResponse(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	query, ok := parseTraceRequestQuery(c)
+	if !ok {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid trace request query")
+		return
+	}
+	if model.LogDB == nil {
+		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
+		return
+	}
+	page, err := model.NewTraceStore(model.LogDB).FindRequests(c.Request.Context(), query)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
+		return
+	}
+	middleware.SuccessResponse(c, page)
+}
+
+func parseTraceRequestQuery(c *gin.Context) (model.TraceRequestQuery, bool) {
+	groupID, requestID := c.Param("group"), c.Param("request_id")
+	if !validTraceGroup(groupID) || !validTraceRequestID(requestID) {
+		return model.TraceRequestQuery{}, false
+	}
+	after := c.Query("after")
+	if after != "" && !validTraceID(after) {
+		return model.TraceRequestQuery{}, false
+	}
+	limit := defaultRequestTraceLimit
+	if raw, present := c.GetQuery("limit"); present {
+		parsed, err := strconv.ParseUint(raw, 10, 8)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return model.TraceRequestQuery{}, false
+		}
+		limit = int(parsed)
+	}
+	return model.TraceRequestQuery{GroupID: groupID, RequestID: requestID, AfterSpanID: after, Limit: limit}, true
+}
+
+func validTraceRequestID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+type safeTraceHealth struct {
+	Enabled              bool                  `json:"enabled"`
+	Ready                bool                  `json:"ready"`
+	Writer               safeTraceWriterHealth `json:"writer"`
+	CleanupErrors        uint64                `json:"cleanup_errors"`
+	InitializationFailed bool                  `json:"initialization_failed"`
+}
+
+type safeTraceWriterHealth struct {
+	Accepted    uint64 `json:"accepted"`
+	Persisted   uint64 `json:"persisted"`
+	Rejected    uint64 `json:"rejected"`
+	Dropped     uint64 `json:"dropped"`
+	WriteErrors uint64 `json:"write_errors"`
+}
+
+func GetTraceHealth(c *gin.Context) {
+	if c.GetHeader("Authorization") == "" {
+		middleware.ErrorResponse(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	health := trace.Current().Health()
+	middleware.SuccessResponse(c, safeTraceHealth{
+		Enabled: health.Enabled, Ready: health.Ready, CleanupErrors: health.CleanupErrors, InitializationFailed: health.InitializationFailed,
+		Writer: safeTraceWriterHealth{Accepted: health.Writer.Accepted, Persisted: health.Writer.Persisted, Rejected: health.Writer.Rejected, Dropped: health.Writer.Dropped, WriteErrors: health.Writer.WriteErrors},
+	})
 }
 
 func parseTraceQuery(c *gin.Context) (model.TraceQuery, bool) {

@@ -196,6 +196,50 @@ func TestTraceStoreListUsesPersistedTraceTruncationNotPaginationLookahead(t *tes
 	require.False(t, crossGroupPage.Items[0].Truncated)
 }
 
+func TestTraceStoreFindRequestsScopesExactRootRequestsAndPaginatesCandidates(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+
+	now := time.Now().UTC()
+	fixtures := []RequestTraceSpan{
+		{SpanID: traceTestID(901), TraceID: traceTestID(801), GroupID: "group-a", RequestID: "reused-request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now.Add(-time.Minute), UpdatedAt: now},
+		{SpanID: traceTestID(902), TraceID: traceTestID(802), GroupID: "group-a", RequestID: "reused-request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusError, StartedAt: now, UpdatedAt: now},
+		{SpanID: traceTestID(903), TraceID: traceTestID(803), GroupID: "group-b", RequestID: "reused-request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now},
+		{SpanID: traceTestID(904), TraceID: traceTestID(804), GroupID: "group-a", RequestID: "reused-request", Service: requesttrace.ServiceApp, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now},
+		{SpanID: traceTestID(905), TraceID: traceTestID(805), GroupID: "group-a", RequestID: "reused-request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageGatewayCall, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now},
+		{SpanID: traceTestID(906), TraceID: traceTestID(806), GroupID: "group-a", RequestID: "reused-request", ParentSpanID: traceTestID(1), Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now, UpdatedAt: now},
+		{SpanID: traceTestID(907), TraceID: traceTestID(807), GroupID: "group-a", RequestID: "reused-request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest, Status: requesttrace.StatusSuccess, StartedAt: now.Add(-15 * 24 * time.Hour), UpdatedAt: now.Add(-15 * 24 * time.Hour)},
+	}
+	require.NoError(t, db.Create(&fixtures).Error)
+
+	first, err := store.FindRequests(context.Background(), TraceRequestQuery{GroupID: "group-a", RequestID: "reused-request", Limit: 1})
+	require.NoError(t, err)
+	require.Equal(t, []TraceRequestCandidate{{TraceID: traceTestID(801), SpanID: traceTestID(901), StartedAt: fixtures[0].StartedAt, Status: requesttrace.StatusSuccess}}, first.Items)
+	require.Equal(t, traceTestID(901), first.NextCursor)
+
+	second, err := store.FindRequests(context.Background(), TraceRequestQuery{GroupID: "group-a", RequestID: "reused-request", AfterSpanID: first.NextCursor, Limit: 1})
+	require.NoError(t, err)
+	require.Equal(t, []TraceRequestCandidate{{TraceID: traceTestID(802), SpanID: traceTestID(902), StartedAt: fixtures[1].StartedAt, Status: requesttrace.StatusError}}, second.Items)
+	require.Empty(t, second.NextCursor)
+
+	other, err := store.FindRequests(context.Background(), TraceRequestQuery{GroupID: "group-b", RequestID: "reused-request"})
+	require.NoError(t, err)
+	require.Len(t, other.Items, 1)
+	require.Equal(t, traceTestID(803), other.Items[0].TraceID)
+}
+
+func TestTraceStoreFindRequestsRejectsUnscopedQueriesAndBoundsLimit(t *testing.T) {
+	store := NewTraceStore(openTraceSQLite(t))
+	require.NoError(t, store.Migrate(context.Background()))
+	for _, query := range []TraceRequestQuery{{RequestID: "request"}, {GroupID: "group"}} {
+		_, err := store.FindRequests(context.Background(), query)
+		require.Error(t, err)
+	}
+	_, err := NewTraceStore(nil).FindRequests(context.Background(), TraceRequestQuery{GroupID: "group", RequestID: "request"})
+	require.Error(t, err)
+}
+
 func TestTraceStoreCleanExpiredDeletesOnlyExpiredTraceRowsInBoundedBatches(t *testing.T) {
 	db := openTraceSQLite(t)
 	store := NewTraceStore(db)

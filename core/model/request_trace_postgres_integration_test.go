@@ -87,10 +87,14 @@ func TestTraceStorePostgresCleanupRechecksCutoffAndCreatesTraceIndexes(t *testin
 	store := NewTraceStore(db)
 	require.NoError(t, store.Migrate(context.Background()))
 	require.True(t, db.Migrator().HasIndex(&RequestTraceSpan{}, "idx_request_trace_scope"))
+	require.True(t, db.Migrator().HasIndex(&RequestTraceSpan{}, "idx_request_trace_request_scope"))
 	require.True(t, db.Migrator().HasIndex(&RequestTraceHead{}, "idx_request_trace_head_updated_at"))
 	var scopeIndex string
 	require.NoError(t, db.Raw("SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?", "idx_request_trace_scope").Scan(&scopeIndex).Error)
 	require.Contains(t, scopeIndex, "(group_id, trace_id, service, span_id)")
+	var requestScopeIndex string
+	require.NoError(t, db.Raw("SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?", "idx_request_trace_request_scope").Scan(&requestScopeIndex).Error)
+	require.Contains(t, requestScopeIndex, "(group_id, request_id, service, stage, span_id)")
 
 	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 	span := traceTestSpan(900)

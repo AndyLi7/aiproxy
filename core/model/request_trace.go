@@ -31,14 +31,14 @@ func (RequestTraceHead) TableName() string {
 
 // RequestTraceSpan is the safe, validated database projection of requesttrace.Span.
 type RequestTraceSpan struct {
-	SpanID       string `gorm:"primaryKey;size:32;index:idx_request_trace_scope,priority:4"`
+	SpanID       string `gorm:"primaryKey;size:32;index:idx_request_trace_scope,priority:4;index:idx_request_trace_request_scope,priority:5"`
 	Version      int
 	TraceID      string               `gorm:"size:32;index:idx_request_trace_scope,priority:2"`
-	Service      requesttrace.Service `gorm:"size:16;index:idx_request_trace_scope,priority:3"`
-	GroupID      string               `gorm:"size:64;index:idx_request_trace_scope,priority:1"`
-	RequestID    string               `gorm:"size:128;index"`
+	Service      requesttrace.Service `gorm:"size:16;index:idx_request_trace_scope,priority:3;index:idx_request_trace_request_scope,priority:3"`
+	GroupID      string               `gorm:"size:64;index:idx_request_trace_scope,priority:1;index:idx_request_trace_request_scope,priority:1"`
+	RequestID    string               `gorm:"size:128;index;index:idx_request_trace_request_scope,priority:2"`
 	ParentSpanID string               `gorm:"size:32"`
-	Stage        requesttrace.Stage   `gorm:"size:32"`
+	Stage        requesttrace.Stage   `gorm:"size:32;index:idx_request_trace_request_scope,priority:4"`
 	Status       requesttrace.Status  `gorm:"size:16;index"`
 	StartedAt    time.Time            `gorm:"index"`
 	EndedAt      *time.Time

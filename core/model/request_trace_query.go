@@ -10,6 +10,7 @@ import (
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 const (
@@ -35,6 +36,65 @@ type TracePage struct {
 	Items      []requesttrace.Span
 	NextCursor string
 	Truncated  bool
+}
+
+type TraceRequestQuery struct {
+	GroupID     string
+	RequestID   string
+	AfterSpanID string
+	Limit       int
+}
+
+type TraceRequestCandidate struct {
+	TraceID   string              `json:"trace_id"`
+	SpanID    string              `json:"span_id"`
+	StartedAt time.Time           `json:"started_at"`
+	Status    requesttrace.Status `json:"status"`
+}
+
+type TraceRequestPage struct {
+	Items      []TraceRequestCandidate `json:"items"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
+}
+
+func (s *TraceStore) FindRequests(ctx context.Context, q TraceRequestQuery) (TraceRequestPage, error) {
+	if s == nil || s.db == nil {
+		return TraceRequestPage{}, errors.New("request trace store database is nil")
+	}
+	if q.GroupID == "" || q.RequestID == "" {
+		return TraceRequestPage{}, errors.New("request trace lookup requires group and request ID")
+	}
+	if err := ctx.Err(); err != nil {
+		return TraceRequestPage{}, err
+	}
+	limit := q.Limit
+	if limit <= 0 {
+		limit = defaultTracePageLimit
+	}
+	if limit > maxTracePageLimit {
+		limit = maxTracePageLimit
+	}
+
+	query := s.db.Session(&gorm.Session{NewDB: true, Logger: logger.Discard}).WithContext(ctx).
+		Model(&RequestTraceSpan{}).
+		Select("trace_id", "span_id", "started_at", "status").
+		Where("group_id = ? AND request_id = ? AND service = ? AND stage = ? AND parent_span_id = ?", q.GroupID, q.RequestID, requesttrace.ServiceAIProxy, requesttrace.StageRequest, "").
+		Where("updated_at >= ?", time.Now().UTC().Add(-traceRetention))
+	if q.AfterSpanID != "" {
+		query = query.Where("span_id > ?", q.AfterSpanID)
+	}
+	var rows []TraceRequestCandidate
+	if err := query.Order("span_id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return TraceRequestPage{}, fmt.Errorf("find request trace candidates: %w", err)
+	}
+	page := TraceRequestPage{Items: make([]TraceRequestCandidate, 0, min(len(rows), limit))}
+	if len(rows) > limit {
+		page.Items = append(page.Items, rows[:limit]...)
+		page.NextCursor = page.Items[len(page.Items)-1].SpanID
+	} else {
+		page.Items = append(page.Items, rows...)
+	}
+	return page, nil
 }
 
 type traceSpanProjection struct {

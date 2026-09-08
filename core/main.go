@@ -12,9 +12,11 @@ import (
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
+	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/controller"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/task"
+	requesttraceruntime "github.com/labring/aiproxy/core/trace"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -62,6 +64,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	traceRuntime := requesttraceruntime.Start(ctx, model.DB, requesttraceruntime.Options{
+		Enabled: env.Bool("REQUEST_TRACE_ENABLED", false),
+	})
+	restoreTraceRuntime := requesttraceruntime.Install(traceRuntime)
+	defer restoreTraceRuntime()
 
 	var wg sync.WaitGroup
 	startSyncServices(ctx, &wg)
@@ -138,6 +146,12 @@ func main() {
 	defer cleanCancel()
 
 	model.CleanBatchUpdatesSummary(cleanCtx)
+
+	traceCloseCtx, traceCloseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer traceCloseCancel()
+	if err := traceRuntime.Close(traceCloseCtx); err != nil {
+		log.Error("request_trace_shutdown_failed")
+	}
 
 	log.Info("server exiting")
 }

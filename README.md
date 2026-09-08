@@ -157,7 +157,13 @@ REDIS=redis://localhost:6379     # Redis for caching
 ```bash
 BILLING_ENABLED=true           # Enable billing features
 SAVE_ALL_LOG_DETAIL=true     # Log all request details
+REQUEST_TRACE_ENABLED=false  # Opt in to request-stage trace capture
 ```
+
+Request-stage trace capture is disabled by default. Enabling it creates only the
+new request-trace tables in the configured gateway database; deployments must
+explicitly opt in with `REQUEST_TRACE_ENABLED=true`. Local development and tests
+should use a temporary database rather than an existing business database.
 
 ### Advanced Configuration
 

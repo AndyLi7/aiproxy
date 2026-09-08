@@ -9,7 +9,12 @@ import (
 func SetRelayRouter(router *gin.Engine) {
 	// https://platform.openai.com/docs/api-reference/introduction
 	v1Router := router.Group("/v1")
-	v1Router.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
+	v1Router.Use(
+		middleware.RequestTraceMiddleware(),
+		middleware.OperationalLogMiddleware(),
+		middleware.IPBlock,
+		middleware.TokenAuth,
+	)
 
 	v1betaRouter := router.Group("/v1beta")
 	v1betaRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)

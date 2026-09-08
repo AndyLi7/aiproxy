@@ -26,9 +26,9 @@ func TestRequestTraceMiddlewareAcceptsOnlySupportedB1Routes(t *testing.T) {
 	}{
 		{http.MethodPost, "/v1/images/generations", true},
 		{http.MethodPost, "/v1/images/edits", true},
-		{http.MethodPost, "/v1/video/generations/jobs", true},
-		{http.MethodGet, "/v1/video/generations/jobs/job-1", true},
-		{http.MethodGet, "/v1/video/generations/job-1/content/video", true},
+		{http.MethodPost, "/v1/video/generations/jobs", false},
+		{http.MethodGet, "/v1/video/generations/jobs/job-1", false},
+		{http.MethodGet, "/v1/video/generations/job-1/content/video", false},
 		{http.MethodPost, "/v1/videos", true},
 		{http.MethodGet, "/v1/videos/video-1", true},
 		{http.MethodGet, "/v1/videos/video-1/content", true},

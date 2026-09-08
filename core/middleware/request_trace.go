@@ -80,16 +80,10 @@ func isRequestTraceRoute(method, path string) bool {
 	case http.MethodPost:
 		return path == "/v1/images/generations" ||
 			path == "/v1/images/edits" ||
-			path == "/v1/video/generations/jobs" ||
 			path == "/v1/videos"
 	case http.MethodGet:
 		parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-		return len(parts) == 5 && parts[0] == "v1" && parts[1] == "video" &&
-			parts[2] == "generations" && parts[3] == "jobs" && parts[4] != "" ||
-			len(parts) == 6 && parts[0] == "v1" && parts[1] == "video" &&
-				parts[2] == "generations" && parts[3] != "" && parts[4] == "content" &&
-				parts[5] == "video" ||
-			len(parts) == 3 && parts[0] == "v1" && parts[1] == "videos" && parts[2] != "" ||
+		return len(parts) == 3 && parts[0] == "v1" && parts[1] == "videos" && parts[2] != "" ||
 			len(parts) == 4 && parts[0] == "v1" && parts[1] == "videos" &&
 				parts[2] != "" && parts[3] == "content"
 	case http.MethodDelete:

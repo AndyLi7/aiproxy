@@ -175,7 +175,7 @@ func (s *TraceStore) writeTransaction(tx *gorm.DB, span requesttrace.Span) error
 		ParentSpanID: span.ParentSpanID,
 		Stage:        span.Stage,
 		Status:       span.Status,
-		StartedAt:    span.StartedAt,
+		StartedAt:    canonicalTraceTimestamp(span.StartedAt),
 		EndedAt:      span.EndedAt,
 		DurationMS:   span.DurationMS,
 		Revision:     span.Revision,
@@ -197,7 +197,11 @@ func sameTraceSpanIdentity(persisted RequestTraceSpan, span requesttrace.Span) b
 		persisted.RequestID == span.RequestID &&
 		persisted.ParentSpanID == span.ParentSpanID &&
 		persisted.Stage == span.Stage &&
-		persisted.StartedAt.Equal(span.StartedAt)
+		canonicalTraceTimestamp(persisted.StartedAt).Equal(canonicalTraceTimestamp(span.StartedAt))
+}
+
+func canonicalTraceTimestamp(value time.Time) time.Time {
+	return value.Truncate(time.Microsecond)
 }
 
 func terminalTraceStatus(status requesttrace.Status) bool {

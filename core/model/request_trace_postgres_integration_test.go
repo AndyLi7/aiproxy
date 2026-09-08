@@ -8,10 +8,37 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestTraceStorePostgresMatchesLifecycleAfterTimestampPrecisionRoundTrip(t *testing.T) {
+	db := openTracePostgres(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+
+	started := traceTestSpan(500)
+	started.StartedAt = time.Date(2026, 9, 8, 1, 2, 3, 123456789, time.UTC)
+	require.NoError(t, store.Write(context.Background(), started))
+
+	completed := started
+	completed.Status = requesttrace.StatusSuccess
+	completed.Revision = 2
+	endedAt := started.StartedAt.Add(987654321 * time.Nanosecond)
+	duration := 987.654321
+	completed.EndedAt = &endedAt
+	completed.DurationMS = &duration
+	require.NoError(t, store.Write(context.Background(), completed))
+
+	var persisted RequestTraceSpan
+	require.NoError(t, db.First(&persisted, "span_id = ?", started.SpanID).Error)
+	require.Equal(t, requesttrace.StatusSuccess, persisted.Status)
+	require.Equal(t, 2, persisted.Revision)
+	require.InDelta(t, duration, *persisted.DurationMS, 0.000001)
+}
 
 func TestTraceStorePostgresSerializesConcurrent256thAnd257thSpan(t *testing.T) {
 	db := openTracePostgres(t)

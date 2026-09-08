@@ -67,3 +67,36 @@ The PostgreSQL test reads `TRACE_TEST_POSTGRES_DSN` and skips with an explicit m
 - same-revision retention timestamp stability and sticky truncation;
 - aggregate attribute validation, safe attribute projection, and canceled context;
 - actual PostgreSQL transaction contention at the 256/257 cap.
+
+## Round 1 review fix — PostgreSQL timestamp precision
+
+The reviewer identified that PostgreSQL rounds persisted timestamps to microseconds while recorder snapshots can retain nanoseconds. A revision 1 start inserted with sub-microsecond nanoseconds therefore compared unequal to the otherwise identical revision 2 completion and was rejected as an ownership mismatch.
+
+An actual PostgreSQL start-to-finish regression with `StartedAt` nanoseconds `123456789` reproduced the failure before the fix:
+
+```text
+> go test ./model -run TestTraceStorePostgresMatchesLifecycleAfterTimestampPrecisionRoundTrip -count=1
+--- FAIL: TestTraceStorePostgresMatchesLifecycleAfterTimestampPrecisionRoundTrip (0.08s)
+    request_trace_postgres_integration_test.go:34: Received unexpected error:
+        request trace span ownership mismatch
+FAIL github.com/labring/aiproxy/core/model 0.416s
+```
+
+`StartedAt` is now truncated to microsecond precision both before insertion and during immutable identity comparison. `DurationMS` remains the recorder's independent measurement and is not recomputed from canonicalized wall-clock timestamps.
+
+The same PostgreSQL regression then passed:
+
+```text
+> go test ./model -run TestTraceStorePostgresMatchesLifecycleAfterTimestampPrecisionRoundTrip -count=1
+ok github.com/labring/aiproxy/core/model 0.474s
+```
+
+Final focused verification, with the disposable PostgreSQL DSN supplied through the environment, covered all SQLite and PostgreSQL trace tests:
+
+```text
+> go test ./model -run Trace -count=1
+ok github.com/labring/aiproxy/core/model 3.903s
+
+> go vet ./model
+# exit 0, no output
+```

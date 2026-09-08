@@ -113,10 +113,13 @@ func TestSessionConcurrentLifecycleAndAttempts(t *testing.T) {
 			s.Begin(StageUpstreamAttempt, Attributes{}).Finish(StatusSuccess)
 		}()
 	}
-	wg.Add(2)
-	go func() { defer wg.Done(); s.BindGroup("group-a") }()
-	go func() { defer wg.Done(); s.Finish(StatusSuccess) }()
+	if !s.BindGroup("group-a") {
+		t.Fatal("owner binding failed")
+	}
 	wg.Wait()
+	if !s.Finish(StatusSuccess) {
+		t.Fatal("root completion failed")
+	}
 	close(attempts)
 	seen := make(map[int]bool)
 	for n := range attempts {
@@ -127,14 +130,28 @@ func TestSessionConcurrentLifecycleAndAttempts(t *testing.T) {
 	}
 	emitMu.Lock()
 	defer emitMu.Unlock()
-	owner := ""
-	if len(saved) != 0 {
-		owner = saved[0].GroupID
+	if len(saved) != 202 {
+		t.Fatalf("got %d updates, want 202", len(saved))
 	}
+	rootSpanID := saved[0].SpanID
+	rootCompletions := 0
+	children := make(map[string]bool, workers)
 	for _, span := range saved {
-		if span.GroupID != owner {
-			t.Fatalf("mixed ownership: %q then %q", owner, span.GroupID)
+		if span.GroupID != "group-a" {
+			t.Fatalf("mixed ownership: got %q", span.GroupID)
 		}
+		if span.SpanID == rootSpanID && span.Status != StatusRunning {
+			rootCompletions++
+		}
+		if span.SpanID != rootSpanID {
+			if span.ParentSpanID != rootSpanID {
+				t.Fatalf("child %q parent = %q, want root %q", span.SpanID, span.ParentSpanID, rootSpanID)
+			}
+			children[span.SpanID] = true
+		}
+	}
+	if rootCompletions != 1 || len(children) != workers {
+		t.Fatalf("got %d root completions and %d children", rootCompletions, len(children))
 	}
 }
 

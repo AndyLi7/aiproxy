@@ -30,6 +30,10 @@ func init() {
 	flag.IntVar(&pprofPort, "pprof-port", 15000, "pport http server port")
 }
 
+func startRequestTraceRuntime(ctx context.Context, options requesttraceruntime.Options) *requesttraceruntime.Runtime {
+	return requesttraceruntime.Start(ctx, model.LogDB, options)
+}
+
 // Swagger godoc
 //
 //	@title						AI Proxy Swagger API
@@ -65,7 +69,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	traceRuntime := requesttraceruntime.Start(ctx, model.DB, requesttraceruntime.Options{
+	traceRuntime := startRequestTraceRuntime(ctx, requesttraceruntime.Options{
 		Enabled: env.Bool("REQUEST_TRACE_ENABLED", false),
 	})
 	restoreTraceRuntime := requesttraceruntime.Install(traceRuntime)

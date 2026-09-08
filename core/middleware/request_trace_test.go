@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,41 @@ func TestRequestTraceMiddlewareAcceptsOnlySupportedB1Routes(t *testing.T) {
 			require.Equal(t, tt.want, isRequestTraceRoute(tt.method, tt.path))
 		})
 	}
+}
+
+func TestRequestTraceMiddlewarePersistsRootErrorAndRethrowsPanic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "panic-trace.db"))
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	runtime := trace.Start(context.Background(), db, trace.Options{Enabled: true})
+	restore := trace.Install(runtime)
+	t.Cleanup(restore)
+
+	var recovered any
+	engine := gin.New()
+	engine.Use(RequestIDMiddleware, func(c *gin.Context) {
+		defer func() { recovered = recover() }()
+		c.Next()
+	}, RequestTraceMiddleware())
+	engine.POST("/v1/images/generations", func(c *gin.Context) {
+		require.True(t, BindRequestTraceGroup(c, "panic-group"))
+		panic("panic-sentinel")
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	request.Header.Set(RequestIDHeader, "panic-request")
+	engine.ServeHTTP(httptest.NewRecorder(), request)
+	require.Equal(t, "panic-sentinel", recovered)
+	require.NoError(t, runtime.Close(context.Background()))
+
+	page, err := model.NewTraceStore(db).FindRequests(context.Background(), model.TraceRequestQuery{
+		GroupID: "panic-group", RequestID: "panic-request",
+	})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, requesttrace.StatusError, page.Items[0].Status)
 }
 
 func TestRequestTraceHelpersBindTrustedGroupAndCreateStages(t *testing.T) {

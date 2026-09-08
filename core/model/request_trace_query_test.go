@@ -230,13 +230,35 @@ func TestTraceStoreFindRequestsScopesExactRootRequestsAndPaginatesCandidates(t *
 }
 
 func TestTraceStoreFindRequestsRejectsUnscopedQueriesAndBoundsLimit(t *testing.T) {
-	store := NewTraceStore(openTraceSQLite(t))
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
 	require.NoError(t, store.Migrate(context.Background()))
+	now := time.Now().UTC()
+	fixtures := make([]RequestTraceSpan, 101)
+	for i := range fixtures {
+		fixtures[i] = RequestTraceSpan{
+			SpanID: traceTestID(1100 + i), TraceID: traceTestID(1000 + i), GroupID: "group",
+			RequestID: "request", Service: requesttrace.ServiceAIProxy, Stage: requesttrace.StageRequest,
+			Status: requesttrace.StatusSuccess, StartedAt: now.Add(time.Duration(i) * time.Second), UpdatedAt: now,
+		}
+	}
+	require.NoError(t, db.Create(&fixtures).Error)
+
+	defaultPage, err := store.FindRequests(context.Background(), TraceRequestQuery{GroupID: "group", RequestID: "request"})
+	require.NoError(t, err)
+	require.Len(t, defaultPage.Items, 50)
+	require.Equal(t, fixtures[49].SpanID, defaultPage.NextCursor)
+
+	maximumPage, err := store.FindRequests(context.Background(), TraceRequestQuery{GroupID: "group", RequestID: "request", Limit: 1000})
+	require.NoError(t, err)
+	require.Len(t, maximumPage.Items, 100)
+	require.Equal(t, fixtures[99].SpanID, maximumPage.NextCursor)
+
 	for _, query := range []TraceRequestQuery{{RequestID: "request"}, {GroupID: "group"}} {
-		_, err := store.FindRequests(context.Background(), query)
+		_, err = store.FindRequests(context.Background(), query)
 		require.Error(t, err)
 	}
-	_, err := NewTraceStore(nil).FindRequests(context.Background(), TraceRequestQuery{GroupID: "group", RequestID: "request"})
+	_, err = NewTraceStore(nil).FindRequests(context.Background(), TraceRequestQuery{GroupID: "group", RequestID: "request"})
 	require.Error(t, err)
 }
 

@@ -194,6 +194,7 @@ func SetAPIRouter(router *gin.Engine) {
 		}
 
 		apiRouter.GET("/capability_resolution", controller.CheckCapabilityResolution)
+		apiRouter.GET("/trace/:group/:trace_id", controller.GetRequestTrace)
 		modelConfigsRoute := apiRouter.Group("/model_configs")
 		{
 			modelConfigsRoute.GET("/", controller.GetModelConfigs)

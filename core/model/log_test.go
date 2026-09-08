@@ -6,7 +6,17 @@ import (
 	"time"
 
 	"github.com/labring/aiproxy/core/model"
+	"gorm.io/gorm"
 )
+
+func closeTestSQLite(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sqlite handle: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+}
 
 func TestRequestDetailApplyBodySizeLimits(t *testing.T) {
 	detail := &model.RequestDetail{
@@ -169,6 +179,7 @@ func TestRecordConsumeLogLoadsNullWebSearchCountAsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	closeTestSQLite(t, db)
 
 	if err := db.AutoMigrate(&model.Log{}, &model.RequestDetail{}); err != nil {
 		t.Fatalf("migrate log db: %v", err)
@@ -208,6 +219,7 @@ func TestCleanupFinishedAsyncUsagesKeepsPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
 	model.LogDB = db
@@ -264,6 +276,7 @@ func TestGetPendingAsyncUsagesOrdersByUpdatedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
 	model.LogDB = db
@@ -324,6 +337,7 @@ func TestGetPendingAsyncUsagesSkipsFutureNextPollAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
 	model.LogDB = db
@@ -368,6 +382,7 @@ func TestTryClaimAsyncUsageInfoIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
 	model.LogDB = db
@@ -435,6 +450,7 @@ func TestRenewAsyncUsageClaimRequiresToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
 	model.LogDB = db

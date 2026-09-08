@@ -55,7 +55,7 @@ func TestTraceStoreListScopesByGroupTraceAndServiceAndPaginatesBySpanID(t *testi
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{traceTestID(200601), traceTestID(200602)}, tracePageSpanIDs(first))
-	require.True(t, first.Truncated)
+	require.False(t, first.Truncated)
 	require.Equal(t, traceTestID(200602), first.NextCursor)
 
 	second, err := store.List(context.Background(), TraceQuery{
@@ -91,14 +91,14 @@ func TestTraceStoreListUsesDefaultAndMaximumLimitsAndReturnsDatabaseErrors(t *te
 	})
 	require.NoError(t, err)
 	require.Len(t, page.Items, 50)
-	require.True(t, page.Truncated)
+	require.False(t, page.Truncated)
 
 	page, err = store.List(context.Background(), TraceQuery{
 		GroupID: "group-one", TraceID: traceID, Service: requesttrace.ServiceAIProxy, Limit: 1000,
 	})
 	require.NoError(t, err)
 	require.Len(t, page.Items, 100)
-	require.True(t, page.Truncated)
+	require.False(t, page.Truncated)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -107,6 +107,93 @@ func TestTraceStoreListUsesDefaultAndMaximumLimitsAndReturnsDatabaseErrors(t *te
 
 	_, err = NewTraceStore(nil).List(context.Background(), TraceQuery{})
 	require.Error(t, err)
+}
+
+func TestTraceStoreListUsesPersistedTraceTruncationNotPaginationLookahead(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+
+	truncatedTraceID := traceTestID(750)
+	for sequence := 750; sequence < 753; sequence++ {
+		span := traceTestSpan(sequence)
+		span.TraceID = truncatedTraceID
+		span.Truncated = sequence == 752
+		require.NoError(t, store.Write(context.Background(), span))
+	}
+
+	first, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-one", TraceID: truncatedTraceID, Service: requesttrace.ServiceAIProxy, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.True(t, first.Truncated)
+	require.Equal(t, traceTestID(200751), first.NextCursor)
+	for _, item := range first.Items {
+		require.True(t, item.Truncated)
+	}
+
+	last, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-one", TraceID: truncatedTraceID, Service: requesttrace.ServiceAIProxy,
+		AfterSpanID: first.NextCursor, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.True(t, last.Truncated, "persisted truncation remains visible after the final page")
+	require.Empty(t, last.NextCursor)
+	require.Len(t, last.Items, 1)
+	require.True(t, last.Items[0].Truncated)
+
+	emptyTraceID := traceTestID(755)
+	require.NoError(t, db.Create(&RequestTraceHead{
+		TraceID: emptyTraceID, Service: requesttrace.ServiceAIProxy, GroupID: "group-one", Truncated: true,
+	}).Error)
+	empty, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-one", TraceID: emptyTraceID, Service: requesttrace.ServiceAIProxy,
+	})
+	require.NoError(t, err)
+	require.Empty(t, empty.Items)
+	require.True(t, empty.Truncated)
+	require.Empty(t, empty.NextCursor)
+
+	normalTraceID := traceTestID(760)
+	for sequence := 760; sequence < 763; sequence++ {
+		span := traceTestSpan(sequence)
+		span.TraceID = normalTraceID
+		require.NoError(t, store.Write(context.Background(), span))
+	}
+	normal, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-one", TraceID: normalTraceID, Service: requesttrace.ServiceAIProxy, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.False(t, normal.Truncated, "a next cursor is pagination, not trace-data truncation")
+	require.Equal(t, traceTestID(200761), normal.NextCursor)
+	for _, item := range normal.Items {
+		require.False(t, item.Truncated)
+	}
+
+	crossGroup := traceTestSpan(770)
+	crossGroup.TraceID = truncatedTraceID
+	crossGroup.GroupID = "group-other"
+	require.NoError(t, db.Create(&RequestTraceSpan{
+		SpanID:       crossGroup.SpanID,
+		Version:      crossGroup.Version,
+		TraceID:      crossGroup.TraceID,
+		GroupID:      crossGroup.GroupID,
+		Service:      crossGroup.Service,
+		RequestID:    crossGroup.RequestID,
+		ParentSpanID: crossGroup.ParentSpanID,
+		Stage:        crossGroup.Stage,
+		Status:       crossGroup.Status,
+		StartedAt:    crossGroup.StartedAt,
+		Revision:     crossGroup.Revision,
+		Attributes:   crossGroup.Attributes,
+	}).Error)
+	crossGroupPage, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-other", TraceID: truncatedTraceID, Service: requesttrace.ServiceAIProxy,
+	})
+	require.NoError(t, err)
+	require.False(t, crossGroupPage.Truncated)
+	require.Len(t, crossGroupPage.Items, 1)
+	require.False(t, crossGroupPage.Items[0].Truncated)
 }
 
 func TestTraceStoreCleanExpiredDeletesOnlyExpiredTraceRowsInBoundedBatches(t *testing.T) {

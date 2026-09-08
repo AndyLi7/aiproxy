@@ -29,7 +29,8 @@ type TraceQuery struct {
 	Limit       int
 }
 
-// TracePage is a span-ID ordered page. Truncated reports whether another page exists.
+// TracePage is a span-ID ordered page. Truncated reports persisted trace-data truncation;
+// NextCursor alone reports whether another page exists.
 type TracePage struct {
 	Items      []requesttrace.Span
 	NextCursor string
@@ -53,6 +54,10 @@ type traceSpanProjection struct {
 	Attributes   requesttrace.Attributes `gorm:"serializer:json;type:text"`
 }
 
+type traceHeadProjection struct {
+	Truncated bool
+}
+
 func (s *TraceStore) List(ctx context.Context, q TraceQuery) (TracePage, error) {
 	if s == nil || s.db == nil {
 		return TracePage{}, errors.New("request trace store database is nil")
@@ -69,6 +74,14 @@ func (s *TraceStore) List(ctx context.Context, q TraceQuery) (TracePage, error) 
 		limit = maxTracePageLimit
 	}
 
+	var head traceHeadProjection
+	err := s.db.WithContext(ctx).Model(&RequestTraceHead{}).Select("truncated").
+		Where("group_id = ? AND trace_id = ? AND service = ?", q.GroupID, q.TraceID, q.Service).
+		First(&head).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return TracePage{}, fmt.Errorf("read request trace head: %w", err)
+	}
+
 	query := s.db.WithContext(ctx).Model(&RequestTraceSpan{}).Select([]string{
 		"version", "trace_id", "span_id", "parent_span_id", "request_id", "group_id",
 		"service", "stage", "status", "started_at", "ended_at", "duration_ms", "revision", "attributes",
@@ -82,9 +95,9 @@ func (s *TraceStore) List(ctx context.Context, q TraceQuery) (TracePage, error) 
 		return TracePage{}, fmt.Errorf("list request trace spans: %w", err)
 	}
 
-	page := TracePage{Items: make([]requesttrace.Span, 0, min(len(rows), limit))}
+	page := TracePage{Truncated: head.Truncated, Items: make([]requesttrace.Span, 0, min(len(rows), limit))}
+	hasNextPage := len(rows) > limit
 	if len(rows) > limit {
-		page.Truncated = true
 		rows = rows[:limit]
 	}
 	for _, row := range rows {
@@ -102,10 +115,11 @@ func (s *TraceStore) List(ctx context.Context, q TraceQuery) (TracePage, error) 
 			EndedAt:      row.EndedAt,
 			DurationMS:   row.DurationMS,
 			Revision:     row.Revision,
+			Truncated:    head.Truncated,
 			Attributes:   row.Attributes,
 		})
 	}
-	if page.Truncated {
+	if hasNextPage {
 		page.NextCursor = page.Items[len(page.Items)-1].SpanID
 	}
 	return page, nil

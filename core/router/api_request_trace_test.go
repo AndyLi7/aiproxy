@@ -18,6 +18,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/trace"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestRequestTraceRouteRequiresAdminHeaderAndValidatesInput(t *testing.T) {
@@ -107,6 +108,34 @@ func TestRequestTraceByRequestRouteReturnsScopedCandidatesAndValidatesAdminHeade
 	require.Len(t, payload.Data.Items, 1)
 	require.Equal(t, requestTraceID(22), payload.Data.Items[0].TraceID)
 	require.Empty(t, payload.Data.NextCursor)
+}
+
+func TestRequestTraceByRequestRouteReturnsFixedValidationError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine, _ := requestTraceRouter(t, false)
+	request := httptest.NewRequest(http.MethodGet, "/api/trace/group-one/by-request/duplicate?limit=101", nil)
+	request.Header.Set("Authorization", "Bearer admin-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.JSONEq(t, `{"success":false,"message":"invalid trace request query"}`, response.Body.String())
+}
+
+func TestRequestTraceByRequestRouteReturnsFixedUnavailableError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine, _ := requestTraceRouter(t, false)
+	require.NoError(t, model.LogDB.Callback().Query().Before("gorm:query").Register("test:raw_trace_lookup_failure", func(tx *gorm.DB) {
+		tx.AddError(errors.New("raw-database-sentinel"))
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/api/trace/group-one/by-request/duplicate", nil)
+	request.Header.Set("Authorization", "Bearer admin-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.JSONEq(t, `{"success":false,"message":"trace_unavailable"}`, response.Body.String())
+	require.NotContains(t, response.Body.String(), "raw-database-sentinel")
 }
 
 func TestRequestTraceRouteReportsPersistedTruncationWithoutPaginationCursor(t *testing.T) {

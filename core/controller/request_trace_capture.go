@@ -39,15 +39,37 @@ func requestTraceAttemptAttributes(m *meta.Meta, attempt int) requesttrace.Attri
 	}
 	channelID := m.Channel.ID
 	attrs.ChannelID = &channelID
-	publicModel := m.ModelConfig.Model
-	if publicModel == "" {
+	routingModel := m.ModelConfig.Model
+	if routingModel == "" {
 		return attrs
 	}
-	attrs.PublicModelID = publicModel
-	if mapped, ok := meta.GetMappedModelName(publicModel, m.Channel.ModelMapping); ok && mapped == m.ActualModel {
+	attrs.PublicModelID = trustedCapabilityPublicModel(m.ModelConfig)
+	if mapped, ok := meta.GetMappedModelName(routingModel, m.Channel.ModelMapping); ok && mapped == m.ActualModel {
 		attrs.UpstreamModelID = mapped
 	}
 	return attrs
+}
+
+func trustedCapabilityPublicModel(mc model.ModelConfig) string {
+	if publicModel, capability, ok := model.ParseModelCapabilityKey(mc.Model); ok {
+		if model.ValidateModelCapabilityConfig(mc.Config, publicModel, capability) == nil {
+			return publicModel
+		}
+	}
+	publicCapabilityModel, ok := mc.Config[model.ModelConfigKey("public_capability_model")].(string)
+	if !ok || publicCapabilityModel == "" {
+		return ""
+	}
+	resolved, capability := model.ResolveImageCapabilityRoute(
+		publicCapabilityModel,
+		func(route string) (map[model.ModelConfigKey]any, bool) {
+			return mc.Config, route == mc.Model
+		},
+	)
+	if capability == "" || resolved != mc.Model {
+		return ""
+	}
+	return publicCapabilityModel
 }
 
 func requestTraceResultStatus(ctx context.Context, result *relaycontroller.HandleResult) requesttrace.Status {

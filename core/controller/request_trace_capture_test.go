@@ -43,7 +43,7 @@ func TestRelayHelperTracesEachActualAttemptWithoutOverwritingPreviousAttempt(t *
 	require.Equal(t, 2, *attempts[1].Attributes.Attempt)
 	require.Equal(t, 11, *attempts[0].Attributes.ChannelID)
 	require.Equal(t, 22, *attempts[1].Attributes.ChannelID)
-	require.Equal(t, "public-model", attempts[0].Attributes.PublicModelID)
+	require.Empty(t, attempts[0].Attributes.PublicModelID)
 	require.Equal(t, "upstream-a", attempts[0].Attributes.UpstreamModelID)
 	require.NotNil(t, attempts[0].DurationMS)
 	require.NotNil(t, attempts[1].DurationMS)
@@ -107,8 +107,48 @@ func TestAttemptAttributesOmitUnverifiedRequestModels(t *testing.T) {
 	m.Channel.ModelMapping = nil
 	m.ActualModel = "incoming-model"
 	attrs := requestTraceAttemptAttributes(m, 1)
-	require.Equal(t, "public-model", attrs.PublicModelID)
+	require.Empty(t, attrs.PublicModelID)
 	require.Empty(t, attrs.UpstreamModelID)
+}
+
+func TestAttemptAttributesOmitSyntheticDefaultConfigModel(t *testing.T) {
+	const attackerModel = "attacker-supplied-model"
+	m := meta.NewMeta(nil, mode.ImagesGenerations, attackerModel, model.NewDefaultModelConfig(attackerModel))
+	attrs := requestTraceAttemptAttributes(m, 1)
+	require.Empty(t, attrs.PublicModelID)
+	require.Empty(t, attrs.UpstreamModelID)
+	wire, err := json.Marshal(attrs)
+	require.NoError(t, err)
+	require.NotContains(t, string(wire), attackerModel)
+}
+
+func TestAttemptAttributesUseValidatedCapabilityPublicIdentity(t *testing.T) {
+	t.Run("video capability uses public parent not internal route", func(t *testing.T) {
+		mc := model.NewDefaultModelConfig("video-model::text-to-video")
+		mc.Config = map[model.ModelConfigKey]any{
+			"capability_contract_version": model.ModelCapabilityContractVersion,
+			"public_model":                "video-model",
+			"capability":                  "text-to-video",
+		}
+		m := meta.NewMeta(nil, mode.Videos, "video-model", mc, meta.WithRoutingModel(mc.Model))
+		attrs := requestTraceAttemptAttributes(m, 1)
+		require.Equal(t, "video-model", attrs.PublicModelID)
+		require.NotEqual(t, mc.Model, attrs.PublicModelID)
+	})
+
+	t.Run("image capability uses validated public capability ID", func(t *testing.T) {
+		mc := model.NewDefaultModelConfig("image-model::text-to-image")
+		mc.Config = map[model.ModelConfigKey]any{
+			"capability_contract_version": model.ModelCapabilityContractVersion,
+			"public_model":                "image-model",
+			"capability":                  "text-to-image",
+			"public_capability_model":     "image-model/text-to-image",
+		}
+		m := meta.NewMeta(nil, mode.ImagesGenerations, "image-model/text-to-image", mc, meta.WithRoutingModel(mc.Model))
+		attrs := requestTraceAttemptAttributes(m, 1)
+		require.Equal(t, "image-model/text-to-image", attrs.PublicModelID)
+		require.NotEqual(t, mc.Model, attrs.PublicModelID)
+	})
 }
 
 func captureTestMeta(channelID int, mapped string) *meta.Meta {

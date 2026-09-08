@@ -1,0 +1,213 @@
+package model
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/labring/aiproxy/core/common/requesttrace"
+	"github.com/stretchr/testify/require"
+)
+
+func TestTraceStoreListScopesByGroupTraceAndServiceAndPaginatesBySpanID(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+
+	traceID := traceTestID(600)
+	for _, fixture := range []struct {
+		sequence int
+		group    string
+		service  requesttrace.Service
+		traceID  string
+	}{
+		{601, "group-a", requesttrace.ServiceAIProxy, traceID},
+		{602, "group-a", requesttrace.ServiceAIProxy, traceID},
+		{603, "group-a", requesttrace.ServiceAIProxy, traceID},
+		{604, "group-b", requesttrace.ServiceAIProxy, traceTestID(604)},
+		{605, "group-a", requesttrace.ServiceApp, traceID},
+		{606, "", requesttrace.ServiceAIProxy, traceTestID(606)},
+	} {
+		span := traceTestSpan(fixture.sequence)
+		span.TraceID = fixture.traceID
+		span.GroupID = fixture.group
+		span.Service = fixture.service
+		if fixture.sequence == 601 || fixture.sequence == 604 {
+			span.RequestID = "same-request-id"
+		}
+		require.NoError(t, store.Write(context.Background(), span))
+	}
+	require.NoError(t, db.Create(&RequestTraceSpan{
+		SpanID:    traceTestID(200607),
+		Version:   requesttrace.Version,
+		TraceID:   traceTestID(606),
+		GroupID:   "group-a",
+		Service:   requesttrace.ServiceAIProxy,
+		RequestID: "same-request-id",
+		Stage:     requesttrace.StageRequest,
+		Status:    requesttrace.StatusRunning,
+		StartedAt: time.Date(2026, 9, 8, 1, 2, 7, 0, time.UTC),
+		Revision:  1,
+	}).Error)
+
+	first, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-a", TraceID: traceID, Service: requesttrace.ServiceAIProxy, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{traceTestID(200601), traceTestID(200602)}, tracePageSpanIDs(first))
+	require.True(t, first.Truncated)
+	require.Equal(t, traceTestID(200602), first.NextCursor)
+
+	second, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-a", TraceID: traceID, Service: requesttrace.ServiceAIProxy,
+		AfterSpanID: first.NextCursor, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{traceTestID(200603)}, tracePageSpanIDs(second))
+	require.False(t, second.Truncated)
+	require.Empty(t, second.NextCursor)
+
+	emptyGroup, err := store.List(context.Background(), TraceQuery{
+		TraceID: traceTestID(606), Service: requesttrace.ServiceAIProxy,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{traceTestID(200606)}, tracePageSpanIDs(emptyGroup))
+}
+
+func TestTraceStoreListUsesDefaultAndMaximumLimitsAndReturnsDatabaseErrors(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+
+	traceID := traceTestID(700)
+	for i := 0; i < 101; i++ {
+		span := traceTestSpan(700 + i)
+		span.TraceID = traceID
+		require.NoError(t, store.Write(context.Background(), span))
+	}
+
+	page, err := store.List(context.Background(), TraceQuery{
+		GroupID: "group-one", TraceID: traceID, Service: requesttrace.ServiceAIProxy,
+	})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 50)
+	require.True(t, page.Truncated)
+
+	page, err = store.List(context.Background(), TraceQuery{
+		GroupID: "group-one", TraceID: traceID, Service: requesttrace.ServiceAIProxy, Limit: 1000,
+	})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 100)
+	require.True(t, page.Truncated)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = store.List(ctx, TraceQuery{GroupID: "group-one", TraceID: traceID, Service: requesttrace.ServiceAIProxy})
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = NewTraceStore(nil).List(context.Background(), TraceQuery{})
+	require.Error(t, err)
+}
+
+func TestTraceStoreCleanExpiredDeletesOnlyExpiredTraceRowsInBoundedBatches(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+	require.NoError(t, db.AutoMigrate(&Log{}, &Token{}))
+
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-14 * 24 * time.Hour)
+	old := cutoff.Add(-time.Nanosecond)
+	boundary := cutoff
+	fresh := cutoff.Add(time.Nanosecond)
+
+	oldTrace := traceTestID(800)
+	require.NoError(t, db.Create(&Log{CreatedAt: old}).Error)
+	require.NoError(t, db.Create(&Token{GroupID: "group-one", Name: "retained-quota", UsedAmount: 12.5, Quota: 50}).Error)
+	for _, fixture := range []struct {
+		sequence int
+		traceID  string
+		updated  time.Time
+	}{
+		{801, oldTrace, old},
+		{802, oldTrace, old},
+		{803, traceTestID(803), boundary},
+		{804, traceTestID(804), fresh},
+	} {
+		span := traceTestSpan(fixture.sequence)
+		span.TraceID = fixture.traceID
+		require.NoError(t, store.Write(context.Background(), span))
+		require.NoError(t, db.Model(&RequestTraceSpan{}).Where("span_id = ?", span.SpanID).UpdateColumn("updated_at", fixture.updated).Error)
+		require.NoError(t, db.Model(&RequestTraceHead{}).Where("trace_id = ? AND service = ?", span.TraceID, span.Service).UpdateColumn("updated_at", fixture.updated).Error)
+	}
+
+	deleted, err := store.CleanExpired(context.Background(), now, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
+	deleted, err = store.CleanExpired(context.Background(), now, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
+	deleted, err = store.CleanExpired(context.Background(), now, 1)
+	require.NoError(t, err)
+	require.Zero(t, deleted)
+
+	var spans []RequestTraceSpan
+	require.NoError(t, db.Order("span_id").Find(&spans).Error)
+	require.Equal(t, []string{traceTestID(200803), traceTestID(200804)}, traceStoredSpanIDs(spans))
+	var heads []RequestTraceHead
+	require.NoError(t, db.Find(&heads).Error)
+	require.Len(t, heads, 2)
+	var logCount, tokenCount int64
+	require.NoError(t, db.Model(&Log{}).Count(&logCount).Error)
+	require.NoError(t, db.Model(&Token{}).Count(&tokenCount).Error)
+	require.Equal(t, int64(1), logCount)
+	require.Equal(t, int64(1), tokenCount)
+
+	for _, batchSize := range []int{0, -1, 1001} {
+		_, err := store.CleanExpired(context.Background(), now, batchSize)
+		require.Error(t, err)
+	}
+
+	_, err = NewTraceStore(nil).CleanExpired(context.Background(), now, 1)
+	require.Error(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = store.CleanExpired(ctx, now, 1)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestTraceStoreCleanExpiredRemovesStaleEmptyHead(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	require.NoError(t, store.Migrate(context.Background()))
+
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	head := RequestTraceHead{
+		TraceID: traceTestID(850), Service: requesttrace.ServiceAIProxy, GroupID: "group-one",
+		UpdatedAt: now.Add(-14*24*time.Hour - time.Nanosecond),
+	}
+	require.NoError(t, db.Create(&head).Error)
+
+	deleted, err := store.CleanExpired(context.Background(), now, 1)
+	require.NoError(t, err)
+	require.Zero(t, deleted)
+	var count int64
+	require.NoError(t, db.Model(&RequestTraceHead{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func tracePageSpanIDs(page TracePage) []string {
+	ids := make([]string, len(page.Items))
+	for i, span := range page.Items {
+		ids[i] = span.SpanID
+	}
+	return ids
+}
+
+func traceStoredSpanIDs(spans []RequestTraceSpan) []string {
+	ids := make([]string, len(spans))
+	for i, span := range spans {
+		ids[i] = span.SpanID
+	}
+	return ids
+}

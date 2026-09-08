@@ -22,7 +22,7 @@ type RequestTraceHead struct {
 	GroupID   string               `gorm:"size:64;index"`
 	SpanCount int
 	Truncated bool
-	UpdatedAt time.Time
+	UpdatedAt time.Time `gorm:"index:idx_request_trace_head_updated_at"`
 }
 
 func (RequestTraceHead) TableName() string {
@@ -31,11 +31,11 @@ func (RequestTraceHead) TableName() string {
 
 // RequestTraceSpan is the safe, validated database projection of requesttrace.Span.
 type RequestTraceSpan struct {
-	SpanID       string `gorm:"primaryKey;size:32"`
+	SpanID       string `gorm:"primaryKey;size:32;index:idx_request_trace_scope,priority:4"`
 	Version      int
-	TraceID      string               `gorm:"size:32;index:idx_request_trace_scope"`
-	Service      requesttrace.Service `gorm:"size:16;index:idx_request_trace_scope"`
-	GroupID      string               `gorm:"size:64;index"`
+	TraceID      string               `gorm:"size:32;index:idx_request_trace_scope,priority:2"`
+	Service      requesttrace.Service `gorm:"size:16;index:idx_request_trace_scope,priority:3"`
+	GroupID      string               `gorm:"size:64;index:idx_request_trace_scope,priority:1"`
 	RequestID    string               `gorm:"size:128;index"`
 	ParentSpanID string               `gorm:"size:32"`
 	Stage        requesttrace.Stage   `gorm:"size:32"`

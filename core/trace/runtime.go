@@ -16,7 +16,7 @@ import (
 
 const (
 	initializationTimeout = 5 * time.Second
-	cleanupInterval       = time.Hour
+	cleanupInterval       = time.Minute
 	cleanupTimeout        = 10 * time.Second
 	cleanupBatchSize      = 500
 )

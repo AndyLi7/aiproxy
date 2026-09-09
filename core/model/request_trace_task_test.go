@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+func TestTraceTaskSummaryReturnsOnlyAggregateFacts(t *testing.T) {
+	db := openTraceSQLite(t)
+	store := NewTraceStore(db)
+	ctx := context.Background()
+	require.NoError(t, store.Migrate(ctx))
+	now := time.Now().UTC()
+	traceID := "11111111111111111111111111111111"
+	require.NoError(t, db.Create(&RequestTraceTask{AsyncUsageID: 1, GroupID: "group-a", TraceID: traceID, PollCount: 260, FirstPollAt: &now, LastPollAt: &now, ExpiresAt: now.Add(time.Hour)}).Error)
+	summary, err := store.TaskTraceSummary(ctx, "group-a", traceID, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 260, summary.PollCount)
+	require.NotNil(t, summary.FirstPollAt)
+}
+
 func TestTaskTracePersistsAndResolvesFromStoredTaskIdentity(t *testing.T) {
 	db := openTraceSQLite(t)
 	store := NewTraceStore(db)

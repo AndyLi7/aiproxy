@@ -16,16 +16,41 @@ type RequestTraceTask struct {
 	FirstPollAt  *time.Time
 	LastPollAt   *time.Time
 	AsyncUsageID int       `gorm:"primaryKey"`
-	GroupID      string    `gorm:"size:64;index:idx_trace_task_owner,priority:1"`
+	GroupID      string    `gorm:"size:64;index:idx_trace_task_owner,priority:1;index:idx_trace_task_trace,priority:1"`
 	TokenID      int       `gorm:"index:idx_trace_task_owner,priority:2"`
 	ChannelID    int       `gorm:"index:idx_trace_task_owner,priority:3"`
 	TaskID       string    `gorm:"size:256;index:idx_trace_task_owner,priority:4"`
-	TraceID      string    `gorm:"size:32"`
+	TraceID      string    `gorm:"size:32;index:idx_trace_task_trace,priority:2"`
 	ParentSpanID string    `gorm:"size:32"`
 	ExpiresAt    time.Time `gorm:"index"`
 }
 
 func (RequestTraceTask) TableName() string { return "request_trace_tasks" }
+
+// No task, token or upstream identifiers are exposed by the aggregate view.
+type TraceTaskSummary struct {
+	PollCount   int64      `json:"poll_count"`
+	FirstPollAt *time.Time `json:"first_poll_at,omitempty"`
+	LastPollAt  *time.Time `json:"last_poll_at,omitempty"`
+}
+
+func (s *TraceStore) TaskTraceSummary(ctx context.Context, group, traceID string, now time.Time) (*TraceTaskSummary, error) {
+	if s == nil || s.db == nil || ctx == nil || group == "" || !traceTaskRandomID(traceID) {
+		return nil, errors.New("trace summary unavailable")
+	}
+	var rows []RequestTraceTask
+	err := s.db.WithContext(ctx).Select("poll_count, first_poll_at, last_poll_at").Where("group_id = ? AND trace_id = ? AND expires_at > ?", group, traceID, now.UTC()).Limit(2).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if len(rows) != 1 {
+		return nil, errors.New("trace summary ambiguous")
+	}
+	return &TraceTaskSummary{PollCount: rows[0].PollCount, FirstPollAt: rows[0].FirstPollAt, LastPollAt: rows[0].LastPollAt}, nil
+}
 
 func (s *TraceStore) SaveTaskTrace(ctx context.Context, asyncID int, group, traceID, parentID string) error {
 	if s == nil || s.db == nil || ctx == nil || asyncID <= 0 || group == "" || !traceTaskRandomID(traceID) || !traceTaskRandomID(parentID) {

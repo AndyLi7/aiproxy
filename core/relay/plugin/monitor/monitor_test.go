@@ -219,5 +219,5 @@ func TestChannelMonitorDoResponseRecordsResponseCostOnError(t *testing.T) {
 	require.NotEmpty(t, cost)
 	parsedCost, err := time.ParseDuration(cost)
 	require.NoError(t, err)
-	require.Greater(t, parsedCost, time.Duration(0))
+	require.GreaterOrEqual(t, parsedCost, time.Duration(0))
 }

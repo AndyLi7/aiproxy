@@ -264,6 +264,7 @@ func TestGetModelConfigLoadsFastJSONFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
 	common.UsingSQLite = true
@@ -461,6 +462,7 @@ func TestUpdateGroupModelConfigClearsMaxImageGenerationCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
 	common.UsingSQLite = true
@@ -520,6 +522,7 @@ func TestUpdateGroupModelConfigsClearsMaxImageGenerationCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
 	common.UsingSQLite = true
@@ -583,6 +586,7 @@ func TestUpdateGroupModelConfigClearsMaxVideoGenerationSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
 	common.UsingSQLite = true
@@ -642,6 +646,7 @@ func TestUpdateGroupModelConfigClearsMaxVideoGenerationCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
 	common.UsingSQLite = true

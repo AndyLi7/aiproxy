@@ -31,6 +31,8 @@ func TestAddChannelReturnsSanitizedCreatedChannelID(t *testing.T) {
 	previousDisableModelConfig := config.DisableModelConfig
 	testDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "channel.db"))
 	require.NoError(t, err)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
 	model.DB = testDB
 	model.LogDB = nil
 	common.UsingSQLite = true
@@ -40,6 +42,7 @@ func TestAddChannelReturnsSanitizedCreatedChannelID(t *testing.T) {
 		model.LogDB = previousLogDB
 		common.UsingSQLite = previousUsingSQLite
 		config.DisableModelConfig = previousDisableModelConfig
+		require.NoError(t, sqlDB.Close())
 	})
 	require.NoError(t, testDB.AutoMigrate(&model.Channel{}, &model.ModelConfig{}))
 
@@ -75,6 +78,8 @@ func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
 	previousDisableModelConfig := config.DisableModelConfig
 	testDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "channels.db"))
 	require.NoError(t, err)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
 	model.DB = testDB
 	model.LogDB = nil
 	common.UsingSQLite = true
@@ -84,6 +89,7 @@ func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
 		model.LogDB = previousLogDB
 		common.UsingSQLite = previousUsingSQLite
 		config.DisableModelConfig = previousDisableModelConfig
+		require.NoError(t, sqlDB.Close())
 	})
 	require.NoError(t, testDB.AutoMigrate(&model.Channel{}, &model.ModelConfig{}))
 

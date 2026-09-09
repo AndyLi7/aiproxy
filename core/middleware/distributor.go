@@ -696,6 +696,11 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
+	if validationErr := validateImageRegistryRequest(c, mode, publicModel, mc.Config); validationErr != nil {
+		AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+		return
+	}
+
 	user, err := getRequestUser(c, mode)
 	if err != nil {
 		AbortLogWithMessage(

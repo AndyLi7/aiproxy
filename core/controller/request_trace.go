@@ -18,9 +18,11 @@ const defaultRequestTraceLimit = 50
 // safeTracePage is the only trace response shape exposed by the admin API.
 // It deliberately has no request or response payload fields.
 type safeTracePage struct {
-	Items      []safeTraceSpan `json:"items"`
-	NextCursor string          `json:"next_cursor,omitempty"`
-	Truncated  bool            `json:"truncated"`
+	Items                  []safeTraceSpan         `json:"items"`
+	NextCursor             string                  `json:"next_cursor,omitempty"`
+	Truncated              bool                    `json:"truncated"`
+	TaskSummary            *model.TraceTaskSummary `json:"task_summary,omitempty"`
+	TaskSummaryUnavailable bool                    `json:"task_summary_unavailable,omitempty"`
 }
 
 type safeTraceSpan struct {
@@ -65,7 +67,11 @@ func GetRequestTrace(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
 		return
 	}
-	middleware.SuccessResponse(c, projectTracePage(page))
+	projected := projectTracePage(page)
+	summary, summaryErr := model.NewTraceStore(model.LogDB).TaskTraceSummary(c.Request.Context(), query.GroupID, query.TraceID, time.Now())
+	projected.TaskSummary = summary
+	projected.TaskSummaryUnavailable = summaryErr != nil
+	middleware.SuccessResponse(c, projected)
 }
 
 func GetRequestTracesByRequest(c *gin.Context) {
@@ -123,6 +129,7 @@ func validTraceRequestID(value string) bool {
 }
 
 type safeTraceHealth struct {
+	CorrelationFailures  uint64                `json:"correlation_failures"`
 	Enabled              bool                  `json:"enabled"`
 	Ready                bool                  `json:"ready"`
 	Writer               safeTraceWriterHealth `json:"writer"`
@@ -145,7 +152,8 @@ func GetTraceHealth(c *gin.Context) {
 	}
 	health := trace.Current().Health()
 	middleware.SuccessResponse(c, safeTraceHealth{
-		Enabled: health.Enabled, Ready: health.Ready, CleanupErrors: health.CleanupErrors, InitializationFailed: health.InitializationFailed,
+		CorrelationFailures: health.CorrelationFailures,
+		Enabled:             health.Enabled, Ready: health.Ready, CleanupErrors: health.CleanupErrors, InitializationFailed: health.InitializationFailed,
 		Writer: safeTraceWriterHealth{Accepted: health.Writer.Accepted, Persisted: health.Writer.Persisted, Rejected: health.Writer.Rejected, Dropped: health.Writer.Dropped, WriteErrors: health.Writer.WriteErrors},
 	})
 }

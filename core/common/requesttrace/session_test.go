@@ -133,7 +133,9 @@ func TestSessionConcurrentLifecycleAndAttempts(t *testing.T) {
 	if len(saved) != 202 {
 		t.Fatalf("got %d updates, want 202", len(saved))
 	}
-	rootSpanID := saved[0].SpanID
+	// Concurrent emitters can overtake the buffered root's flush.
+	// Identity, not emission order, determines the root.
+	rootSpanID := s.RootID()
 	rootCompletions := 0
 	children := make(map[string]bool, workers)
 	for _, span := range saved {

@@ -1467,6 +1467,7 @@ func getStoredVideoRequestModel(c *gin.Context, group string, tokenID int) (stri
 	c.Set(VideoID, videoID)
 	c.Set(GenerationID, videoID)
 	c.Set(ChannelID, store.ChannelID)
+	BindRequestTraceTask(c, group, tokenID, store.ChannelID, videoID)
 
 	return store.Model, nil
 }

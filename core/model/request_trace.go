@@ -68,7 +68,7 @@ func (s *TraceStore) Migrate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).AutoMigrate(&RequestTraceHead{}, &RequestTraceSpan{})
+	return s.db.WithContext(ctx).AutoMigrate(&RequestTraceHead{}, &RequestTraceSpan{}, &RequestTraceNonce{}, &RequestTraceTask{})
 }
 
 func (s *TraceStore) Write(ctx context.Context, span requesttrace.Span) error {

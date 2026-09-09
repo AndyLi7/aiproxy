@@ -492,7 +492,7 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 		meta.WithVideoCapability(string(model.ModelCapabilityImageToVideo)),
 	)
 
-	saveAsyncUsageInfo(m, model.Price{}, &relaycontroller.HandleResult{
+	saveAsyncUsageInfo(nil, m, model.Price{}, &relaycontroller.HandleResult{
 		UpstreamID: "video-123",
 		Usage: model.Usage{
 			OutputTokens: 99,

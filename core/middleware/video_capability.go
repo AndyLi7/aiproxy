@@ -38,6 +38,29 @@ func resolveVideoCapability(
 		setVideoCapabilityContext(c, publicModel, requestModel, "")
 		return publicModel, requestModel, nil
 	}
+	// Public catalog IDs carry the capability as their last path component.
+	// Keep the internal route separate and preserve legacy model + capability callers.
+	if slash := strings.LastIndex(requestModel, "/"); slash > 0 {
+		embedded := model.ModelCapability(requestModel[slash+1:])
+		if embedded.Valid() {
+			explicit, err := getInitialVideoCapability(c)
+			if err != nil {
+				validation, missing := err.(*publicVideoRequestValidationError)
+				if !missing || validation.code != "missing_capability" {
+					return "", "", err
+				}
+			} else if explicit != embedded {
+				return "", "", &publicVideoRequestValidationError{code: "invalid_parameter", message: "capability does not match model ID", param: "capability"}
+			}
+			publicModel = requestModel[:slash]
+			route, err := model.BuildModelCapabilityKey(publicModel, embedded)
+			if err != nil {
+				return "", "", &publicVideoRequestValidationError{code: "invalid_parameter", message: "invalid public model ID", param: "model"}
+			}
+			setVideoCapabilityContext(c, publicModel, route, embedded)
+			return publicModel, route, nil
+		}
+	}
 
 	capability, err := getInitialVideoCapability(c)
 	if err != nil {

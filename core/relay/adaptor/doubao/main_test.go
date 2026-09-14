@@ -1558,7 +1558,8 @@ func TestAdaptorDoResponseVideoSubmitStoresJob(t *testing.T) {
 	}
 
 	if result.UsageContext.Resolution != "1280x720" ||
-		result.UsageContext.NativeResolution != "720p" {
+		result.UsageContext.NativeResolution != "720p" ||
+		result.UsageContext.VideoSeconds != 5 {
 		t.Fatalf("unexpected submit usage context: %#v", result.UsageContext)
 	}
 }
@@ -1924,11 +1925,82 @@ func TestAdaptorDoResponseVideoContentDownloadsGeneratedVideo(t *testing.T) {
 			if recorder.Header().Get("Content-Type") != "video/mp4" {
 				t.Fatalf("expected video/mp4, got %s", recorder.Header().Get("Content-Type"))
 			}
+			if recorder.Header().Get("Accept-Ranges") != "bytes" {
+				t.Fatalf(
+					"expected Accept-Ranges bytes, got %q",
+					recorder.Header().Get("Accept-Ranges"),
+				)
+			}
 
 			if recorder.Body.String() != "video-bytes" {
 				t.Fatalf("expected video bytes, got %q", recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestAdaptorDoResponseVideoContentSynthesizesRangeWhenSourceIgnoresIt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	videoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Range"); got != "bytes=2-4" {
+			t.Errorf("expected Range bytes=2-4, got %q", got)
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", "8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte{0, 1, 2, 3, 4, 5, 6, 7})
+	}))
+	defer videoServer.Close()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/v1/videos/video-123/content",
+		nil,
+	)
+	ctx.Request.Header.Set("Range", "bytes=2-4")
+
+	m := meta.NewMeta(
+		&coremodel.Channel{ID: 9},
+		mode.VideosContent,
+		"doubao-seedance-2-0-260128",
+		coremodel.ModelConfig{},
+		meta.WithVideoID("video-123"),
+	)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"video-123",
+			"status":"succeeded",
+			"content":{"video_url":"` + videoServer.URL + `"}
+		}`)),
+	}
+
+	result, relayErr := (&Adaptor{}).DoResponse(m, nil, ctx, resp)
+	if relayErr != nil {
+		t.Fatalf("DoResponse returned error: %v", relayErr)
+	}
+	if result.UpstreamID != "video-123" {
+		t.Fatalf("unexpected upstream id: %q", result.UpstreamID)
+	}
+	if recorder.Code != http.StatusPartialContent {
+		t.Fatalf("expected status 206, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Range"); got != "bytes 2-4/8" {
+		t.Fatalf("expected Content-Range bytes 2-4/8, got %q", got)
+	}
+	if got := recorder.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Fatalf("expected Accept-Ranges bytes, got %q", got)
+	}
+	if got := recorder.Header().Get("Content-Length"); got != "3" {
+		t.Fatalf("expected Content-Length 3, got %q", got)
+	}
+	if got := recorder.Body.Bytes(); !bytes.Equal(got, []byte{2, 3, 4}) {
+		t.Fatalf("unexpected body: %v", got)
 	}
 }
 

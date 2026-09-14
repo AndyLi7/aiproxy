@@ -48,19 +48,35 @@ func OperationalFieldsFromContext(c *gin.Context) model.OperationalFields {
 	stage, _ := c.Get(operationalFailureStageKey)
 	failureStage, _ := stage.(model.FailureStage)
 	requestSource := c.GetHeader(OperationalLogSourceHeader)
-	if requestSource == model.RequestSourceAdminDemo {
-		group, ok := c.Get(Group)
-		groupCache, validGroup := group.(model.GroupCache)
-		if !ok || !validGroup || groupCache.Status != model.GroupStatusInternal {
-			requestSource = model.RequestSourceAPI
-		}
+	if requestSource == model.RequestSourceAdminDemo && !isInternalGroupContext(c) {
+		requestSource = model.RequestSourceAPI
 	}
-	return model.BuildOperationalFields(
+	fields := model.BuildOperationalFields(
 		requestSource,
 		failureStage,
 		c.GetString(operationalSafeErrorKey),
 		c.GetString(operationalErrorCodeKey),
 	)
+	fields.RequestedModel = GetRequestedModel(c)
+	fields.PublicModel = GetPublicModel(c)
+	fields.PublicCapabilityModel = GetPublicCapabilityModel(c)
+	fields.ResolvedCapability = GetResolvedCapability(c)
+	return fields
+}
+
+func isInternalGroupContext(c *gin.Context) bool {
+	value, ok := c.Get(Group)
+	if !ok {
+		return false
+	}
+	switch group := value.(type) {
+	case model.GroupCache:
+		return group.Status == model.GroupStatusInternal
+	case *model.GroupCache:
+		return group != nil && group.Status == model.GroupStatusInternal
+	default:
+		return false
+	}
 }
 
 func OperationalLogMiddleware() gin.HandlerFunc {
@@ -83,6 +99,12 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		requestAt = now
 	}
 	fields := OperationalFieldsFromContext(c)
+	metadata := GetRequestMetadata(c)
+	modelName, capability := model.PublicLogIdentity(
+		GetRequestModel(c),
+		fields.PublicModel,
+		fields.ResolvedCapability,
+	)
 
 	entry := &model.Log{
 		RequestID:     model.EmptyNullString(GetRequestID(c)),
@@ -93,12 +115,14 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		IP:            model.EmptyNullString(maskOperationalIP(c.ClientIP())),
 		ChannelID:     GetChannelID(c),
 		Endpoint:      model.EmptyNullString(truncateOperationalText(c.Request.Method+" "+c.Request.URL.Path, 64)),
-		Model:         GetRequestModel(c),
+		Model:         modelName,
+		Capability:    capability,
 		User:          model.EmptyNullString(GetRequestUser(c)),
 		RequestSource: fields.RequestSource,
 		FailureStage:  fields.FailureStage,
 		ErrorCode:     fields.ErrorCode,
 		SafeError:     fields.SafeError,
+		Metadata:      metadata,
 	}
 
 	if value, ok := c.Get(Token); ok {

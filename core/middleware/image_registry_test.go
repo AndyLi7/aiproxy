@@ -76,3 +76,33 @@ func TestImageRegistryGuardStopsDispatch(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvedBaseImageRegistryPreservesRequestedIdentity(t *testing.T) {
+	const parent = "vendor/image"
+	const capabilityID = parent + "/text-to-image"
+	config := map[model.ModelConfigKey]any{
+		"public_model": parent, "capability": "text-to-image", "public_capability_model": capabilityID,
+		"x_token_platform_capability_contract": map[string]any{"entry_id": capabilityID, "contract": map[string]any{
+			"entry_id": capabilityID, "validation_version": 1,
+			"input_schema": map[string]any{"type": "object", "properties": map[string]any{"prompt": map[string]any{"type": "string"}}, "required": []string{"prompt"}, "additionalProperties": false},
+		}},
+	}
+	for _, requested := range []string{parent, capabilityID} {
+		t.Run(requested, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			body, _ := json.Marshal(map[string]any{"model": requested, "prompt": "A teapot"})
+			c.Request = httptest.NewRequest("POST", "/v1/images/generations", strings.NewReader(string(body)))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set(RequestedModel, requested)
+			c.Set(PublicModel, parent)
+			c.Set(PublicCapabilityModel, capabilityID)
+			c.Set(ResolvedCapability, "text-to-image")
+			require.Nil(t, validateImageRegistryRequest(c, mode.ImagesGenerations, requested, config))
+			raw, err := common.GetRequestBodyReusable(c.Request)
+			require.NoError(t, err)
+			var result map[string]any
+			require.NoError(t, json.Unmarshal(raw, &result))
+			require.Equal(t, requested, result["model"])
+		})
+	}
+}

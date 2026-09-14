@@ -442,6 +442,19 @@ func TestValidateImagesRequestRejectsInvalidResolutionFormat(t *testing.T) {
 	)
 }
 
+func TestConfiguredImageSizeTiers(t *testing.T) {
+	for _, tier := range []string{"1K", "2K", "3K", "4K"} {
+		mc := model.ModelConfig{}
+		require.Error(t, validateSupportedImageResolution(tier, mc))
+		mc.Config = map[model.ModelConfigKey]any{"image_size_tiers": []any{"1K", "2K", "3K", "4K"}}
+		require.NoError(t, validateSupportedImageResolution(tier, mc))
+		if tier == "1K" {
+			require.NoError(t, validateSupportedImageResolution("1k", mc))
+		}
+		require.Error(t, validateSupportedImageResolution("8K", mc))
+	}
+}
+
 func TestValidateImagesRequestRejectsNonOpenAIDimensionDelimiter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

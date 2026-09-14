@@ -19,6 +19,18 @@ func TestCalculateVideoUsageKeepsLandscapeDimensions(t *testing.T) {
 	})
 
 	require.Equal(t, "1280x720", usageContext.Resolution)
+	require.Equal(t, int64(5), usageContext.VideoSeconds)
+}
+
+func TestCalculateOfficialVideoUsageCarriesVideoSeconds(t *testing.T) {
+	t.Parallel()
+
+	_, usageContext := calculateOfficialVideoUsage(&model.Video{
+		Seconds: 8,
+		Size:    "1280x720",
+	})
+
+	require.Equal(t, int64(8), usageContext.VideoSeconds)
 }
 
 func TestCalculateVideoUsageKeepsPortraitDimensions(t *testing.T) {

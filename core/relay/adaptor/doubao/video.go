@@ -1243,12 +1243,11 @@ func fetchDoubaoVideoContentHandler(
 			http.StatusInternalServerError,
 		)
 	}
-
 	videoResp, err := fetchDoubaoVideoContentWithRetry(
 		c.Request.Context(),
 		meta,
 		videoURL,
-		fetchDoubaoVideoContent,
+		doubaoVideoContentRangeFetcher(c.GetHeader("Range")),
 		doubaoVideoContentRetryDelays,
 	)
 	if err != nil {
@@ -1261,7 +1260,8 @@ func fetchDoubaoVideoContentHandler(
 	}
 	defer videoResp.Body.Close()
 
-	if videoResp.StatusCode != http.StatusOK {
+	if videoResp.StatusCode != http.StatusOK &&
+		videoResp.StatusCode != http.StatusPartialContent {
 		status := http.StatusBadGateway
 		if isRetryableDoubaoVideoContentStatus(videoResp.StatusCode) {
 			c.Header("Retry-After", "2")
@@ -1274,12 +1274,104 @@ func fetchDoubaoVideoContentHandler(
 		)
 	}
 
+	responseStatus := videoResp.StatusCode
+	copyStart := int64(0)
+	copyLength := int64(-1)
+	if responseStatus == http.StatusOK && c.GetHeader("Range") != "" {
+		contentLength, parseErr := strconv.ParseInt(
+			videoResp.Header.Get("Content-Length"),
+			10,
+			64,
+		)
+		if parseErr == nil {
+			start, end, ok := resolveDoubaoVideoByteRange(
+				c.GetHeader("Range"),
+				contentLength,
+			)
+			if ok {
+				responseStatus = http.StatusPartialContent
+				copyStart = start
+				copyLength = end - start + 1
+				videoResp.Header.Set("Content-Length", strconv.FormatInt(copyLength, 10))
+				videoResp.Header.Set(
+					"Content-Range",
+					fmt.Sprintf("bytes %d-%d/%d", start, end, contentLength),
+				)
+				videoResp.Header.Set("Accept-Ranges", "bytes")
+			}
+		}
+	}
+
 	c.Writer.Header().
 		Set("Content-Type", firstNonEmptyString(videoResp.Header.Get("Content-Type"), "video/mp4"))
-	c.Writer.Header().Set("Content-Length", videoResp.Header.Get("Content-Length"))
-	_, _ = io.Copy(c.Writer, videoResp.Body)
+	// Generated MP4 files can place their metadata at the end of the file. Even
+	// when the storage origin does not advertise range support, this relay can
+	// serve byte ranges itself, so tell media clients that seeking is available.
+	c.Writer.Header().Set("Accept-Ranges", "bytes")
+	for _, header := range []string{
+		"Content-Length",
+		"Content-Range",
+		"ETag",
+		"Last-Modified",
+	} {
+		if value := videoResp.Header.Get(header); value != "" {
+			c.Writer.Header().Set(header, value)
+		}
+	}
+	c.Writer.WriteHeader(responseStatus)
+	if copyStart > 0 {
+		_, _ = io.CopyN(io.Discard, videoResp.Body, copyStart)
+	}
+	if copyLength >= 0 {
+		_, _ = io.CopyN(c.Writer, videoResp.Body, copyLength)
+	} else {
+		_, _ = io.Copy(c.Writer, videoResp.Body)
+	}
 
 	return adaptor.DoResponseResult{UpstreamID: id}, nil
+}
+
+func resolveDoubaoVideoByteRange(value string, size int64) (int64, int64, bool) {
+	if size <= 0 || !strings.HasPrefix(value, "bytes=") {
+		return 0, 0, false
+	}
+
+	spec := strings.TrimPrefix(value, "bytes=")
+	if strings.Contains(spec, ",") {
+		return 0, 0, false
+	}
+	parts := strings.SplitN(spec, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	if parts[0] == "" {
+		suffix, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || suffix <= 0 {
+			return 0, 0, false
+		}
+		if suffix > size {
+			suffix = size
+		}
+		return size - suffix, size - 1, true
+	}
+
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || start < 0 || start >= size {
+		return 0, 0, false
+	}
+	if parts[1] == "" {
+		return start, size - 1, true
+	}
+
+	end, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || end < start {
+		return 0, 0, false
+	}
+	if end >= size {
+		end = size - 1
+	}
+	return start, end, true
 }
 
 func buildDoubaoVideoJob(
@@ -1411,6 +1503,7 @@ func doubaoVideoUsageContext(response *relaymodel.DoubaoVideoTaskResponse) corem
 		Resolution:       doubaoVideoSize(resolution, ratio),
 		NativeResolution: resolution,
 		ServiceTier:      response.ServiceTier,
+		VideoSeconds:     int64(response.Duration),
 		OutputAudio:      response.GenerateAudio,
 	}
 }
@@ -1422,6 +1515,7 @@ func doubaoVideoRequestUsageContext(meta *meta.Meta) coremodel.UsageContext {
 		Resolution:       doubaoVideoSize(metadata.Resolution, metadata.Ratio),
 		NativeResolution: metadata.Resolution,
 		ServiceTier:      metadata.ServiceTier,
+		VideoSeconds:     int64(metadata.Duration),
 		InputVideo:       metadata.InputVideo,
 		OutputAudio:      metadata.OutputAudio,
 	}
@@ -1462,9 +1556,31 @@ func fetchDoubaoVideoContent(
 	meta *meta.Meta,
 	videoURL string,
 ) (*http.Response, error) {
+	return fetchDoubaoVideoContentWithRange(ctx, meta, videoURL, "")
+}
+
+func doubaoVideoContentRangeFetcher(rangeHeader string) doubaoVideoContentFetchFunc {
+	return func(
+		ctx context.Context,
+		meta *meta.Meta,
+		videoURL string,
+	) (*http.Response, error) {
+		return fetchDoubaoVideoContentWithRange(ctx, meta, videoURL, rangeHeader)
+	}
+}
+
+func fetchDoubaoVideoContentWithRange(
+	ctx context.Context,
+	meta *meta.Meta,
+	videoURL string,
+	rangeHeader string,
+) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
 	if err != nil {
 		return nil, err
+	}
+	if rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
 	}
 
 	var (

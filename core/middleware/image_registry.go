@@ -30,14 +30,23 @@ func validateImageRegistryRequest(c *gin.Context, requestMode mode.Mode, publicI
 	if json.Unmarshal(encoded, &wrapper) != nil || wrapper.ID == "" {
 		return unavailable
 	}
-	if wrapper.ID != publicID {
+	// Resolve base-model aliases only from distributor-owned context and the
+	// selected server configuration. Preserve the original body model below.
+	bindingID := publicID
+	if GetRequestedModel(c) == publicID && GetPublicModel(c) == publicID &&
+		GetPublicCapabilityModel(c) != "" &&
+		config["public_capability_model"] == GetPublicCapabilityModel(c) &&
+		config["capability"] == GetResolvedCapability(c) {
+		bindingID = GetPublicCapabilityModel(c)
+	}
+	if wrapper.ID != bindingID {
 		// Private demo projections bind a transport ID to the original registry
 		// contract. Only server-owned configuration may establish this binding.
 		parent, _ := config["public_model"].(string)
 		capability, _ := config["capability"].(string)
 		if parent == "" || (capability != "edit" && capability != "text-to-image") ||
 			config["public_capability_model"] != parent+"/"+capability ||
-			(publicID != parent+"::"+capability && publicID != parent+"/"+capability) {
+			(bindingID != parent+"::"+capability && bindingID != parent+"/"+capability) {
 			return unavailable
 		}
 	}

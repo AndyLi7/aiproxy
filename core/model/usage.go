@@ -908,6 +908,7 @@ type UsageContext struct {
 	Seconds          int    `gorm:"column:seconds" json:"seconds,omitempty"`
 	Quality          string `gorm:"size:32" json:"quality,omitempty"`
 	ServiceTier      string `gorm:"size:32" json:"service_tier,omitempty"`
+	VideoSeconds     int64  `               json:"video_seconds,omitempty"`
 	InputMedia       *bool  `               json:"input_media,omitempty"`
 	InputVideo       *bool  `               json:"input_video,omitempty"`
 	OutputAudio      *bool  `               json:"output_audio,omitempty"`
@@ -986,6 +987,10 @@ func (c UsageContext) WithFallback(fallback UsageContext) UsageContext {
 
 	if c.Quality == "" {
 		c.Quality = fallback.Quality
+	}
+
+	if c.VideoSeconds <= 0 {
+		c.VideoSeconds = fallback.VideoSeconds
 	}
 
 	if c.InputMedia == nil {

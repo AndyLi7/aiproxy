@@ -472,12 +472,17 @@ func recordResult(
 ) {
 	fields := middleware.OperationalFieldsFromContext(c)
 	if result.Error != nil {
-		fields = model.BuildOperationalFields(
+		failureFields := model.BuildOperationalFields(
 			fields.RequestSource,
 			model.FailureStageUpstream,
 			result.Error.Error(),
 			"upstream_error",
 		)
+		failureFields.RequestedModel = fields.RequestedModel
+		failureFields.PublicModel = fields.PublicModel
+		failureFields.PublicCapabilityModel = fields.PublicCapabilityModel
+		failureFields.ResolvedCapability = fields.ResolvedCapability
+		fields = failureFields
 	}
 	meta.OperationalFields = fields
 	middleware.MarkOperationalLogRecorded(c)

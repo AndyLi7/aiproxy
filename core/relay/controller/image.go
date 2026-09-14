@@ -153,21 +153,29 @@ func ValidateImagesRequest(c *gin.Context, mc model.ModelConfig) error {
 }
 
 func validateSupportedImageResolution(resolution string, mc model.ModelConfig) error {
-	// Native size tiers are explicit per-model capabilities, not pixel aliases.
-	// Preserve the request value so the provider can choose the aspect ratio.
-	tier := strings.TrimSpace(resolution)
-	if tier == "2K" || tier == "3K" || tier == "4K" {
-		switch declared := mc.Config["image_size_tiers"].(type) {
+	// Provider-native tiers are opt-in; do not weaken standard OpenAI size validation.
+	tier := strings.ToUpper(strings.TrimSpace(resolution))
+	if tier == "1K" || tier == "2K" || tier == "3K" || tier == "4K" {
+		var tiers []string
+		switch values := mc.Config["image_size_tiers"].(type) {
 		case []string:
-			for _, value := range declared {
-				if value == tier {
-					return nil
+			tiers = values
+		case []any:
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					tiers = append(tiers, text)
 				}
 			}
-		case []any:
-			for _, value := range declared {
-				if value == tier {
+		}
+		for _, allowed := range tiers {
+			if strings.EqualFold(strings.TrimSpace(allowed), tier) {
+				if len(mc.AllowedResolutions) == 0 {
 					return nil
+				}
+				for _, limit := range mc.AllowedResolutions {
+					if strings.EqualFold(strings.TrimSpace(limit), tier) {
+						return nil
+					}
 				}
 			}
 		}

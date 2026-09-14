@@ -239,6 +239,93 @@ func TestVideoRemixUsesStoredCapabilityRoute(t *testing.T) {
 	})
 }
 
+func TestCapabilityRoutingResolvesEntitledPublicVideoModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	publicModel := "bytedance/seedance-1-0-pro"
+	textInternal := publicModel + "::text-to-video"
+	imageInternal := publicModel + "::image-to-video"
+	modelConfig := func(internal, capability string, required []string) coremodel.ModelConfig {
+		properties := make(map[string]any, len(required))
+		for _, name := range required {
+			properties[name] = map[string]any{"type": "string"}
+		}
+		return coremodel.ModelConfig{
+			Model: internal,
+			Config: map[coremodel.ModelConfigKey]any{
+				coremodel.ModelConfigCapabilityContractVersionKey: 1,
+				coremodel.ModelConfigPublicModelKey:               publicModel,
+				coremodel.ModelConfigPublicCapabilityModelKey:     publicModel + "/" + capability,
+				coremodel.ModelConfigCapabilityKey:                capability,
+				coremodel.ModelConfigParameterSchemaKey: map[string]any{
+					"type":                 "object",
+					"properties":           properties,
+					"required":             required,
+					"additionalProperties": false,
+				},
+				coremodel.ModelConfigDefaultParametersKey: map[string]any{},
+			},
+		}
+	}
+	configs := map[string]coremodel.ModelConfig{
+		textInternal:  modelConfig(textInternal, "text-to-video", []string{"prompt"}),
+		imageInternal: modelConfig(imageInternal, "image-to-video", []string{"prompt", "first_frame_url"}),
+	}
+	token := coremodel.TokenCache{Models: []string{textInternal, imageInternal}}
+	token.SetAvailableSets([]string{coremodel.ChannelDefaultSet})
+	token.SetModelsBySet(map[string][]string{
+		coremodel.ChannelDefaultSet: {textInternal, imageInternal},
+	})
+
+	tests := []struct {
+		name           string
+		body           string
+		wantInternal   string
+		wantCapability string
+	}{
+		{
+			name:           "base id automatically selects image capability",
+			body:           `{"model":"bytedance/seedance-1-0-pro","prompt":"animate","first_frame_url":"https://example.com/a.png"}`,
+			wantInternal:   imageInternal,
+			wantCapability: "image-to-video",
+		},
+		{
+			name:           "full capability id selects the same image capability",
+			body:           `{"model":"bytedance/seedance-1-0-pro/image-to-video","prompt":"animate","first_frame_url":"https://example.com/a.png"}`,
+			wantInternal:   imageInternal,
+			wantCapability: "image-to-video",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"/v1/videos",
+				bytes.NewBufferString(test.body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			requested, err := getRequestModel(ctx, mode.Videos, "group-1", 7)
+			require.NoError(t, err)
+			resolved, err := resolveCapabilityRequest(ctx, token, configs, requested)
+			require.NoError(t, err)
+			assert.Equal(t, test.wantInternal, resolved.InternalModel)
+			assert.Equal(t, publicModel, resolved.PublicModel)
+			assert.Equal(t, test.wantCapability, resolved.Capability)
+		})
+	}
+}
+
+func TestCapabilityRoutingCreateModesIncludeImageGeneration(t *testing.T) {
+	require.True(t, isCapabilityCreateMode(mode.ImagesGenerations))
+	require.True(t, isCapabilityCreateMode(mode.Videos))
+	require.False(t, isCapabilityCreateMode(mode.ChatCompletions))
+}
+
 func TestGetRequestModelVideosEditFallsBackToStoredVideoModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

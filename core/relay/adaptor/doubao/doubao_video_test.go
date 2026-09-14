@@ -27,7 +27,7 @@ func TestConvertNativeVideoRequestPreservesBodyAndRewritesModel(t *testing.T) {
 		http.MethodPost,
 		"/api/v3/contents/generations/tasks",
 		bytes.NewBufferString(
-			`{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"go"},{"type":"video_url","video_url":{"url":"https://example.com/in.mp4"}}],"resolution":"720p","generate_audio":false}`,
+			`{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"go"},{"type":"video_url","video_url":{"url":"https://example.com/in.mp4"}}],"resolution":"720p","duration":5,"generate_audio":false}`,
 		),
 	)
 	req.Header.Set("Content-Type", "application/json")
@@ -60,6 +60,7 @@ func TestConvertNativeVideoRequestPreservesBodyAndRewritesModel(t *testing.T) {
 
 	if usageContext := doubaoNativeVideoRequestUsageContext(m); usageContext.Resolution != "720p" ||
 		usageContext.NativeResolution != "720p" ||
+		usageContext.VideoSeconds != 5 ||
 		boolValue(usageContext.InputVideo) != true ||
 		boolValue(usageContext.OutputAudio) != false {
 		t.Fatalf(

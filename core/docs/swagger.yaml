@@ -1475,6 +1475,9 @@ definitions:
     - 53
     - 54
     - 55
+    - 56
+    - 57
+    - 58
     type: integer
     x-enum-varnames:
     - ChannelTypeOpenAI
@@ -1520,6 +1523,9 @@ definitions:
     - ChannelTypeFake
     - ChannelTypeAntLing
     - ChannelTypeFakeError
+    - ChannelTypeQwenCloud
+    - ChannelTypeAIProxyHZH
+    - ChannelTypeAIProxyUSW1
   model.ChartData:
     properties:
       audio_input_amount:
@@ -7371,6 +7377,9 @@ paths:
         - 53
         - 54
         - 55
+        - 56
+        - 57
+        - 58
         in: path
         name: type
         required: true

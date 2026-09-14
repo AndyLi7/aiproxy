@@ -39,10 +39,14 @@ const (
 )
 
 type OperationalFields struct {
-	RequestSource string
-	FailureStage  FailureStage
-	ErrorCode     string
-	SafeError     string
+	RequestSource         string
+	FailureStage          FailureStage
+	ErrorCode             string
+	SafeError             string
+	RequestedModel        string
+	PublicModel           string
+	PublicCapabilityModel string
+	ResolvedCapability    string
 }
 
 type OperationalLogFilter struct {

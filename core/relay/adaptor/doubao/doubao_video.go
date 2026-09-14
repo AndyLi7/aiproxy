@@ -206,6 +206,7 @@ func doubaoNativeVideoUsageContextFromContext(
 	if nativeResolution == "" &&
 		usageContext.ServiceTier == "" &&
 		usageContext.Quality == "" &&
+		usageContext.VideoSeconds == 0 &&
 		usageContext.InputVideo == nil &&
 		usageContext.OutputAudio == nil {
 		return coremodel.UsageContext{}
@@ -216,6 +217,7 @@ func doubaoNativeVideoUsageContextFromContext(
 		NativeResolution: nativeResolution,
 		ServiceTier:      usageContext.ServiceTier,
 		Quality:          usageContext.Quality,
+		VideoSeconds:     usageContext.VideoSeconds,
 		InputVideo:       usageContext.InputVideo,
 		OutputAudio:      usageContext.OutputAudio,
 	}

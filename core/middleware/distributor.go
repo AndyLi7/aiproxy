@@ -3,6 +3,7 @@ package middleware
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -573,9 +574,27 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
+	channelHeader := c.Request.Header.Get("Aiproxy-Channel")
+	adminChannelBypass := config.EnableAdminBypassChannelModelCheck &&
+		group.Status == model.GroupStatusInternal && channelHeader != ""
 	publicModel := requestModel
 	routingModel := requestModel
-	if IsPublicVideoRequest(c.Request.URL.Path, mode) {
+	resolvedLocal := false
+	if isCapabilityCreateMode(mode) {
+		resolution, resolveErr := resolveCapabilityRequest(c, token, GetModelCaches(c).EnabledModelConfigsMap, requestModel)
+		if resolveErr == nil {
+			publicModel, routingModel = resolution.PublicModel, resolution.InternalModel
+			c.Set(RequestedModel, resolution.RequestedModel)
+			c.Set(PublicModel, resolution.PublicModel)
+			c.Set(PublicCapabilityModel, resolution.PublicCapabilityModel)
+			c.Set(ResolvedCapability, resolution.Capability)
+			if isVideosCreateMode(mode) {
+				setVideoCapabilityContext(c, publicModel, routingModel, model.ModelCapability(resolution.Capability))
+			}
+			resolvedLocal = true
+		}
+	}
+	if !resolvedLocal && IsPublicVideoRequest(c.Request.URL.Path, mode) {
 		publicModel, routingModel, err = resolveVideoCapability(c, mode, requestModel)
 		if err != nil {
 			var validationErr *publicVideoRequestValidationError
@@ -598,11 +617,15 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		}
 	}
 	SetLogModelFields(log.Data, publicModel)
-	SetLogCapabilityField(log.Data, GetVideoCapability(c))
+	capability := GetResolvedCapability(c)
+	if capability == "" {
+		capability = string(GetVideoCapability(c))
+	}
+	SetLogCapabilityField(log.Data, capability)
 
 	findModel := token.FindModel(routingModel)
 
-	if findModel == "" {
+	if findModel == "" && !adminChannelBypass {
 		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
 			if GetVideoCapability(c) != "" {
 				abortUnsupportedPublicVideoCapability(
@@ -637,7 +660,18 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
+	if findModel == "" {
+		findModel = routingModel
+	}
+
 	mc, ok := GetModelCaches(c).ModelConfig.GetModelConfig(findModel)
+	if !ok {
+		if adminChannelBypass {
+			mc = model.NewDefaultModelConfig(findModel)
+			ok = true
+		}
+	}
+
 	if !ok {
 		AbortOperationally(
 			c,
@@ -852,6 +886,22 @@ func GetRequestModel(c *gin.Context) string {
 	return c.GetString(RequestModel)
 }
 
+func GetRequestedModel(c *gin.Context) string {
+	return c.GetString(RequestedModel)
+}
+
+func GetPublicModel(c *gin.Context) string {
+	return c.GetString(PublicModel)
+}
+
+func GetPublicCapabilityModel(c *gin.Context) string {
+	return c.GetString(PublicCapabilityModel)
+}
+
+func GetResolvedCapability(c *gin.Context) string {
+	return c.GetString(ResolvedCapability)
+}
+
 func GetRequestUser(c *gin.Context) string {
 	return c.GetString(RequestUser)
 }
@@ -889,7 +939,34 @@ func GetFileID(c *gin.Context) string {
 }
 
 func GetRequestMetadata(c *gin.Context) map[string]string {
-	return c.GetStringMapString(RequestMetadata)
+	metadata := maps.Clone(c.GetStringMapString(RequestMetadata))
+	if metadata == nil {
+		metadata = make(map[string]string, 4)
+	}
+	for _, key := range []string{
+		"requested_model",
+		"public_model",
+		"public_capability_model",
+		"resolved_capability",
+	} {
+		delete(metadata, key)
+	}
+	if requestedModel := GetRequestedModel(c); requestedModel != "" {
+		metadata["requested_model"] = requestedModel
+	}
+	if publicModel := GetPublicModel(c); publicModel != "" {
+		metadata["public_model"] = publicModel
+	}
+	if publicCapabilityModel := GetPublicCapabilityModel(c); publicCapabilityModel != "" {
+		metadata["public_capability_model"] = publicCapabilityModel
+	}
+	if capability := GetResolvedCapability(c); capability != "" {
+		metadata["resolved_capability"] = capability
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 func GetModelConfig(c *gin.Context) model.ModelConfig {
@@ -989,6 +1066,55 @@ func clearRequestBodyNode(c *gin.Context) {
 	}
 
 	delete(c.Keys, requestBodyNode)
+}
+
+func capabilityRequestFields(c *gin.Context) (map[string]any, error) {
+	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := common.ParseMultipartFormWithLimit(c.Request); err != nil {
+			return nil, err
+		}
+		fields := make(map[string]any, len(c.Request.MultipartForm.Value))
+		for name, values := range c.Request.MultipartForm.Value {
+			if len(values) != 0 {
+				fields[name] = values[0]
+			}
+		}
+		return fields, nil
+	}
+
+	node, err := getRequestBodyNode(c)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := node.Raw()
+	if err != nil {
+		return nil, err
+	}
+	fields := make(map[string]any)
+	if err := sonic.UnmarshalString(raw, &fields); err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func resolveCapabilityRequest(
+	c *gin.Context,
+	token model.TokenCache,
+	configs map[string]model.ModelConfig,
+	requested string,
+) (model.CapabilityResolution, error) {
+	fields, err := capabilityRequestFields(c)
+	if err != nil {
+		return model.CapabilityResolution{}, err
+	}
+	entitled := make([]model.ModelConfig, 0)
+	token.Range(func(modelName string) bool {
+		if config, ok := configs[modelName]; ok {
+			entitled = append(entitled, config)
+		}
+		return true
+	})
+	return model.ResolveCapabilityModel(requested, fields, entitled)
 }
 
 func getStringFieldFromNode(node *ast.Node, key, errMessage string) (string, error) {
@@ -1263,6 +1389,10 @@ func isVideosCreateMode(m mode.Mode) bool {
 		m == mode.VideosRemix ||
 		m == mode.VideosEdits ||
 		m == mode.VideosExtensions
+}
+
+func isCapabilityCreateMode(m mode.Mode) bool {
+	return isVideosCreateMode(m) || m == mode.ImagesGenerations
 }
 
 func isVideosStoredMode(m mode.Mode) bool {

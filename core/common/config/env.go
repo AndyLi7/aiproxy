@@ -8,19 +8,20 @@ import (
 )
 
 var (
-	DebugEnabled         bool
-	DebugSQLEnabled      bool
-	DisableAutoMigrateDB bool
-	AdminKey             string
-	WebPath              string
-	DisableWeb           bool
-	DisableWebRoot       bool
-	FfmpegEnabled        bool
-	InternalToken        string
-	DisableModelConfig   bool
-	Redis                string
-	RedisKeyPrefix       string
-	ConfigFilePath       string
+	DebugEnabled                       bool
+	DebugSQLEnabled                    bool
+	DisableAutoMigrateDB               bool
+	AdminKey                           string
+	WebPath                            string
+	DisableWeb                         bool
+	DisableWebRoot                     bool
+	FfmpegEnabled                      bool
+	InternalToken                      string
+	DisableModelConfig                 bool
+	EnableAdminBypassChannelModelCheck bool
+	Redis                              string
+	RedisKeyPrefix                     string
+	ConfigFilePath                     string
 
 	// OnCall Lark configuration for urgent alerts
 	OnCallLarkAppID     string
@@ -29,6 +30,8 @@ var (
 )
 
 func ReloadEnv() {
+	SetRetryBudget(GetRetryBudget())
+
 	DebugEnabled = env.Bool("DEBUG", false)
 	DebugSQLEnabled = env.Bool("DEBUG_SQL", false)
 	DisableAutoMigrateDB = env.Bool("DISABLE_AUTO_MIGRATE_DB", false)
@@ -39,6 +42,7 @@ func ReloadEnv() {
 	FfmpegEnabled = env.Bool("FFMPEG_ENABLED", false)
 	InternalToken = os.Getenv("INTERNAL_TOKEN")
 	DisableModelConfig = env.Bool("DISABLE_MODEL_CONFIG", false)
+	EnableAdminBypassChannelModelCheck = env.Bool("ENABLE_ADMIN_BYPASS_CHANNEL_MODEL_CHECK", false)
 	Redis = env.String("REDIS", os.Getenv("REDIS_CONN_STRING"))
 	RedisKeyPrefix = os.Getenv("REDIS_KEY_PREFIX")
 	ConfigFilePath = env.String("CONFIG_FILE_PATH", "./config.yaml")

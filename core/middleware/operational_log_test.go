@@ -73,6 +73,49 @@ func TestOperationalLogMiddlewareRecordsRejectedRequestOnce(t *testing.T) {
 	}
 }
 
+func TestOperationalLogUsesPublicCapabilityIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logs := captureOperationalLogs(t)
+
+	router := gin.New()
+	router.Use(OperationalLogMiddleware())
+	router.POST("/v1/videos", func(c *gin.Context) {
+		c.Set(RequestModel, "bytedance/seedance-1-0-pro::image-to-video")
+		c.Set(RequestedModel, "bytedance/seedance-1-0-pro")
+		c.Set(PublicModel, "bytedance/seedance-1-0-pro")
+		c.Set(PublicCapabilityModel, "bytedance/seedance-1-0-pro/image-to-video")
+		c.Set(ResolvedCapability, "image-to-video")
+		SetFailureStage(c, model.FailureStageBalance, "insufficient balance")
+		c.Status(http.StatusPaymentRequired)
+	})
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodPost, "/v1/videos", nil),
+	)
+
+	if len(*logs) != 1 {
+		t.Fatalf("recorded %d logs, want 1", len(*logs))
+	}
+	entry := (*logs)[0]
+	if entry.Model != "bytedance/seedance-1-0-pro" {
+		t.Fatalf("model = %q, want public base model", entry.Model)
+	}
+	if entry.Capability != "image-to-video" {
+		t.Fatalf("capability = %q, want image-to-video", entry.Capability)
+	}
+	if entry.Metadata["requested_model"] != "bytedance/seedance-1-0-pro" ||
+		entry.Metadata["public_capability_model"] != "bytedance/seedance-1-0-pro/image-to-video" {
+		t.Fatalf("metadata = %#v, want public request identity", entry.Metadata)
+	}
+	for _, value := range entry.Metadata {
+		if strings.Contains(value, "::") {
+			t.Fatalf("metadata leaked internal route: %#v", entry.Metadata)
+		}
+	}
+}
+
 func TestOperationalLogMiddlewareDoesNotDuplicateNormalResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logs := captureOperationalLogs(t)
@@ -106,6 +149,32 @@ func TestOperationalLogMiddlewareDefaultsSourceToAPI(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/test", nil))
 	if len(*logs) != 1 || (*logs)[0].RequestSource != model.RequestSourceAPI {
 		t.Fatalf("logs = %+v, want one API-source log", *logs)
+	}
+}
+
+func TestOperationalFieldsRejectSpoofedAdminDemoSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+	c.Set(Group, model.GroupCache{ID: "customer-group", Status: model.GroupStatusEnabled})
+
+	if got := OperationalFieldsFromContext(c).RequestSource; got != model.RequestSourceAPI {
+		t.Fatalf("request source = %q, want api", got)
+	}
+}
+
+func TestOperationalFieldsAllowAdminDemoSourceForInternalGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+	c.Set(Group, model.GroupCache{ID: "tp_admin_demo", Status: model.GroupStatusInternal})
+
+	if got := OperationalFieldsFromContext(c).RequestSource; got != model.RequestSourceAdminDemo {
+		t.Fatalf("request source = %q, want admin_demo", got)
 	}
 }
 

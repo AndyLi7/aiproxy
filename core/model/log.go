@@ -96,6 +96,19 @@ type Log struct {
 	Metadata map[string]string `gorm:"serializer:fastjson;type:text" json:"metadata,omitempty"`
 }
 
+func PublicLogIdentity(
+	modelName string,
+	publicModel string,
+	capability string,
+) (string, string) {
+	publicModel = strings.TrimSpace(publicModel)
+	capability = strings.TrimSpace(capability)
+	if publicModel == "" || capability == "" {
+		return modelName, ""
+	}
+	return publicModel, capability
+}
+
 func CreateLogIndexes(db *gorm.DB) error {
 	var indexes []string
 	if common.UsingSQLite {
@@ -403,6 +416,13 @@ func RecordConsumeLog(
 	const maxUpstreamIDLength = 256
 	if len(upstreamID) > maxUpstreamIDLength {
 		upstreamID = upstreamID[:maxUpstreamIDLength]
+	}
+	if operationalFields.PublicModel != "" || operationalFields.ResolvedCapability != "" {
+		modelName, capability = PublicLogIdentity(
+			modelName,
+			operationalFields.PublicModel,
+			operationalFields.ResolvedCapability,
+		)
 	}
 
 	log := &Log{

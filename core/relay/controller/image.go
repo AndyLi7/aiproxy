@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/bytedance/sonic/ast"
 	"github.com/gin-gonic/gin"
@@ -152,6 +153,33 @@ func ValidateImagesRequest(c *gin.Context, mc model.ModelConfig) error {
 }
 
 func validateSupportedImageResolution(resolution string, mc model.ModelConfig) error {
+	// Provider-native tiers are opt-in; do not weaken standard OpenAI size validation.
+	tier := strings.ToUpper(strings.TrimSpace(resolution))
+	if tier == "1K" || tier == "2K" || tier == "3K" || tier == "4K" {
+		var tiers []string
+		switch values := mc.Config["image_size_tiers"].(type) {
+		case []string:
+			tiers = values
+		case []any:
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					tiers = append(tiers, text)
+				}
+			}
+		}
+		for _, allowed := range tiers {
+			if strings.EqualFold(strings.TrimSpace(allowed), tier) {
+				if len(mc.AllowedResolutions) == 0 {
+					return nil
+				}
+				for _, limit := range mc.AllowedResolutions {
+					if strings.EqualFold(strings.TrimSpace(limit), tier) {
+						return nil
+					}
+				}
+			}
+		}
+	}
 	fuzzy := !mc.DisableResolutionFuzzyMatch
 	if err := validateOpenAIImageResolutionFormat(
 		resolution,

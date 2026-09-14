@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
@@ -16,6 +17,147 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetInitialChannelBypassChannelModelCheck(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	original := config.EnableAdminBypassChannelModelCheck
+	t.Cleanup(func() { config.EnableAdminBypassChannelModelCheck = original })
+
+	channel := &model.Channel{ID: 42, Type: model.ChannelTypeOpenAI}
+
+	tests := []struct {
+		name      string
+		feature   bool
+		status    int
+		wantError string
+	}{
+		{
+			name:    "internal bypasses model and set checks",
+			feature: true,
+			status:  model.GroupStatusInternal,
+		},
+		{name: "feature off", status: model.GroupStatusInternal, wantError: "not found for model"},
+		{
+			name:      "regular group denied",
+			feature:   true,
+			status:    model.GroupStatusEnabled,
+			wantError: "channel header is not allowed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.EnableAdminBypassChannelModelCheck = tt.feature
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequestWithContext(
+				t.Context(),
+				"POST",
+				"/v1/chat/completions",
+				nil,
+			)
+			c.Request.Header.Set(AIProxyChannelHeader, "42")
+			c.Set(middleware.Group, model.GroupCache{Status: tt.status})
+			c.Set(middleware.ModelCaches, &model.ModelCaches{
+				ChannelsByID: map[int]*model.Channel{42: channel},
+			})
+
+			initial, err := getInitialChannel(c, "unsaved-model", mode.ChatCompletions)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				return
+			}
+
+			require.NoError(t, err)
+			require.True(t, initial.designatedChannel)
+			assert.Same(t, channel, initial.channel)
+		})
+	}
+}
+
+func TestGetChannelFromHeaderModelCheck(t *testing.T) {
+	original := config.EnableAdminBypassChannelModelCheck
+	t.Cleanup(func() { config.EnableAdminBypassChannelModelCheck = original })
+
+	tests := []struct {
+		name      string
+		feature   bool
+		status    int
+		header    string
+		modelName string
+		mode      mode.Mode
+		wantError string
+	}{
+		{
+			name:    "enabled channel with no configured models",
+			feature: true,
+			status:  model.ChannelStatusEnabled,
+		},
+		{
+			name:    "disabled channel with no configured models",
+			feature: true,
+			status:  model.ChannelStatusDisabled,
+		},
+		{name: "feature off", wantError: "not found for model"},
+		{name: "configured model without feature", modelName: "configured-model"},
+		{name: "unknown channel", feature: true, header: "43", wantError: "channel 43 not found"},
+		{name: "invalid channel ID", feature: true, header: "invalid", wantError: "invalid syntax"},
+		{
+			name:      "unsupported mode",
+			feature:   true,
+			mode:      mode.Mode(-1),
+			wantError: "not supported by adaptor",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.EnableAdminBypassChannelModelCheck = tt.feature
+
+			channel := &model.Channel{ID: 42, Type: model.ChannelTypeOpenAI, Status: tt.status}
+			if !tt.feature {
+				channel.Models = []string{"configured-model"}
+			}
+
+			mc := &model.ModelCaches{
+				ChannelsByID: map[int]*model.Channel{42: channel},
+			}
+			if !tt.feature {
+				mc.EnabledModel2ChannelsBySet = map[string]map[string][]*model.Channel{
+					model.ChannelDefaultSet: {"configured-model": {channel}},
+				}
+			}
+
+			header := tt.header
+			if header == "" {
+				header = "42"
+			}
+
+			modelName := tt.modelName
+			if modelName == "" {
+				modelName = "unsaved-model"
+			}
+
+			m := tt.mode
+			if m == 0 {
+				m = mode.ChatCompletions
+			}
+
+			got, err := GetChannelFromHeader(
+				header,
+				mc,
+				modelName,
+				m,
+			)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Nil(t, got)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Same(t, channel, got)
+		})
+	}
+}
 
 func TestGetChannelWithFallbackPreferred(t *testing.T) {
 	t.Parallel()
@@ -48,7 +190,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(10, 10)
 
-		channel, migratedChannels, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -58,8 +200,8 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			nil,
 		)
 		require.NoError(t, err)
-		require.Len(t, migratedChannels, 2)
-		assert.Equal(t, 2, channel.ID)
+		require.Len(t, initial.migratedChannels, 2)
+		assert.Equal(t, 2, initial.channel.ID)
 	})
 
 	t.Run("uses prefer id order instead of priority", func(t *testing.T) {
@@ -67,7 +209,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(100, 1)
 
-		channel, _, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -77,7 +219,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			nil,
 		)
 		require.NoError(t, err)
-		assert.Equal(t, 2, channel.ID)
+		assert.Equal(t, 2, initial.channel.ID)
 	})
 
 	t.Run("falls back from preferred when preferred exceeds max error rate", func(t *testing.T) {
@@ -85,7 +227,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(10, 10)
 
-		channel, _, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -95,7 +237,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			nil,
 		)
 		require.NoError(t, err)
-		assert.Equal(t, 1, channel.ID)
+		assert.Equal(t, 1, initial.channel.ID)
 	})
 
 	t.Run("preferred path shares fallback semantics with default path", func(t *testing.T) {
@@ -103,7 +245,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 
 		mc := newModelCaches(10, 10)
 
-		channel, _, err := getChannelWithFallback(
+		initial, err := getChannelWithFallback(
 			mc,
 			[]string{model.ChannelDefaultSet},
 			"gpt-5",
@@ -113,7 +255,7 @@ func TestGetChannelWithFallbackPreferred(t *testing.T) {
 			map[int64]struct{}{1: {}},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, 2, channel.ID)
+		assert.Equal(t, 2, initial.channel.ID)
 	})
 }
 
@@ -519,7 +661,7 @@ func TestGetChannelWithFallbackHandlesNilInputs(t *testing.T) {
 		},
 	}
 
-	channel, migratedChannels, err := getChannelWithFallback(
+	initial, err := getChannelWithFallback(
 		mc,
 		[]string{model.ChannelDefaultSet},
 		"gpt-5",
@@ -529,9 +671,9 @@ func TestGetChannelWithFallbackHandlesNilInputs(t *testing.T) {
 		nil,
 	)
 	require.NoError(t, err)
-	require.Len(t, migratedChannels, 1)
-	require.NotNil(t, channel)
-	assert.Equal(t, 1, channel.ID)
+	require.Len(t, initial.migratedChannels, 1)
+	require.NotNil(t, initial.channel)
+	assert.Equal(t, 1, initial.channel.ID)
 }
 
 func TestGetRetryChannelHandlesNilInputs(t *testing.T) {

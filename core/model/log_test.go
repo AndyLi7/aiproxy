@@ -8,6 +8,28 @@ import (
 	"github.com/labring/aiproxy/core/model"
 )
 
+func TestPublicLogIdentityProjectsCapabilityMetadata(t *testing.T) {
+	modelName, capability := model.PublicLogIdentity(
+		"bytedance/seedance-1-0-pro::image-to-video",
+		"bytedance/seedance-1-0-pro",
+		"image-to-video",
+	)
+
+	if modelName != "bytedance/seedance-1-0-pro" {
+		t.Fatalf("model = %q, want public base model", modelName)
+	}
+	if capability != "image-to-video" {
+		t.Fatalf("capability = %q, want image-to-video", capability)
+	}
+}
+
+func TestPublicLogIdentityLeavesOrdinaryModelsUntouched(t *testing.T) {
+	modelName, capability := model.PublicLogIdentity("gpt-5", "", "")
+	if modelName != "gpt-5" || capability != "" {
+		t.Fatalf("identity = (%q, %q), want ordinary model unchanged", modelName, capability)
+	}
+}
+
 func TestRequestDetailApplyBodySizeLimits(t *testing.T) {
 	detail := &model.RequestDetail{
 		RequestBody:  "abcdef",

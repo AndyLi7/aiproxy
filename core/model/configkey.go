@@ -5,13 +5,19 @@ import "reflect"
 type ModelConfigKey string
 
 const (
-	ModelConfigMaxContextTokensKey ModelConfigKey = "max_context_tokens"
-	ModelConfigMaxInputTokensKey   ModelConfigKey = "max_input_tokens"
-	ModelConfigMaxOutputTokensKey  ModelConfigKey = "max_output_tokens"
-	ModelConfigVisionKey           ModelConfigKey = "vision"
-	ModelConfigToolChoiceKey       ModelConfigKey = "tool_choice"
-	ModelConfigSupportFormatsKey   ModelConfigKey = "support_formats"
-	ModelConfigSupportVoicesKey    ModelConfigKey = "support_voices"
+	ModelConfigMaxContextTokensKey          ModelConfigKey = "max_context_tokens"
+	ModelConfigMaxInputTokensKey            ModelConfigKey = "max_input_tokens"
+	ModelConfigMaxOutputTokensKey           ModelConfigKey = "max_output_tokens"
+	ModelConfigVisionKey                    ModelConfigKey = "vision"
+	ModelConfigToolChoiceKey                ModelConfigKey = "tool_choice"
+	ModelConfigSupportFormatsKey            ModelConfigKey = "support_formats"
+	ModelConfigSupportVoicesKey             ModelConfigKey = "support_voices"
+	ModelConfigCapabilityContractVersionKey ModelConfigKey = "capability_contract_version"
+	ModelConfigPublicModelKey               ModelConfigKey = "public_model"
+	ModelConfigPublicCapabilityModelKey     ModelConfigKey = "public_capability_model"
+	ModelConfigCapabilityKey                ModelConfigKey = "capability"
+	ModelConfigParameterSchemaKey           ModelConfigKey = "parameter_schema"
+	ModelConfigDefaultParametersKey         ModelConfigKey = "default_parameters"
 )
 
 type ModelConfigOption func(config map[ModelConfigKey]any)

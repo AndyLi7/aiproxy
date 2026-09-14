@@ -8,3 +8,9 @@
 !**/.env.template
 data/local.db
 npm-debug.log*
+
+.output
+.nitro
+data/*.db
+src/paraglide
+src/routeTree.gen.ts

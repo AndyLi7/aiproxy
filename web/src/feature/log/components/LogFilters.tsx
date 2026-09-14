@@ -15,9 +15,8 @@ import {
 import { DateRangePicker } from '@/components/common/DateRangePicker'
 import { TimezoneInput } from '@/components/common/TimezoneInput'
 import { ChannelLabel } from '@/components/common/ChannelLabel'
+import { useChannelInfoMap, useChannelTypeMetas } from '@/feature/channel/hooks'
 import type { LogFilters as LogFiltersType } from '@/types/log'
-import { channelApi } from '@/api/channel'
-import { useChannelTypeMetas } from '@/feature/channel/hooks'
 import { DEFAULT_TIMEZONE, zonedBoundaryToUnixMs } from '@/utils/timezone'
 
 interface LogFiltersProps {
@@ -42,34 +41,7 @@ export function LogFilters({
     const { t } = useTranslation()
     const { data: typeMetas } = useChannelTypeMetas()
 
-    // Batch fetch channel names
-    const [channelInfoMap, setChannelInfoMap] = useState<Record<number, { name: string; type: number }>>({})
-
-    useEffect(() => {
-        if (!availableChannels || availableChannels.length === 0) return
-        const missing = availableChannels.filter(id => !(id in channelInfoMap))
-        if (missing.length === 0) return
-
-        channelApi.getChannelBatchInfo(missing)
-            .then(infos => {
-                setChannelInfoMap(prev => {
-                    const next = { ...prev }
-                    for (const info of infos) {
-                        next[info.id] = { name: info.name, type: info.type }
-                    }
-                    return next
-                })
-            })
-            .catch(() => {
-                setChannelInfoMap(prev => {
-                    const next = { ...prev }
-                    for (const id of missing) {
-                        if (!(id in next)) next[id] = { name: `#${id}`, type: 0 }
-                    }
-                    return next
-                })
-            })
-    }, [availableChannels]) // eslint-disable-line react-hooks/exhaustive-deps
+    const { data: channelInfoMap = {} } = useChannelInfoMap(availableChannels)
 
     const getDefaultDateRange = (): DateRange => {
         const today = new Date()
@@ -153,9 +125,9 @@ export function LogFilters({
 
     // Channel filter
     const channelFilter = showChannel && (
-        <div className="w-56 flex-shrink-0">
+        <div className="w-64 flex-shrink-0">
             <Select value={channel} onValueChange={setChannel} disabled={loading}>
-                <SelectTrigger className="h-9">
+                <SelectTrigger className="h-9 max-sm:[&_[data-slot=channel-type]]:hidden">
                     <SelectValue placeholder={t('log.filters.channelPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -205,8 +177,8 @@ export function LogFilters({
     )
 
     return (
-        <div className="bg-card border border-border rounded-lg p-3 shadow-none">
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0">
+            <div className="filter-bar">
                 {/* 根据 tokenNameFirst 控制顺序 */}
                 {tokenNameFirst ? (
                     <>{tokenNameFilter}{channelFilter}{modelFilter}</>
@@ -232,10 +204,10 @@ export function LogFilters({
                     </Select>
                 </div>
 
-                <div className="flex-1" />
+                <div className="hidden xl:block xl:flex-1" />
 
                 {/* Date range */}
-                <div className="w-56 flex-shrink-0">
+                <div className="w-64 flex-shrink-0">
                     <DateRangePicker
                         value={dateRange}
                         onChange={setDateRange}
@@ -252,9 +224,9 @@ export function LogFilters({
                 />
 
                 {/* Keyword search */}
-                <div className="w-40 flex-shrink-0">
+                <div className="w-48 flex-shrink-0">
                     <Input
-                        placeholder={t('common.search')}
+                        aria-label={t("common.search")} placeholder={t('common.search')}
                         value={keyword}
                         onChange={(e) => setKeyword(e.target.value)}
                         disabled={loading}
@@ -266,13 +238,12 @@ export function LogFilters({
                 <Button
                     type="button"
                     variant="outline"
-                    onClick={handleReset}
+                    onClick={handleReset} aria-label={t("log.filters.reset")} title={t("log.filters.reset")}
                     disabled={loading}
-                    className="h-9 px-3 flex-shrink-0"
+                    className="size-9 shrink-0 p-0"
                     size="sm"
                 >
-                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                    {t('log.filters.reset')}
+                    <RotateCcw className="size-4" />
                 </Button>
             </div>
         </div>

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/monitor"
@@ -61,54 +63,33 @@ func adaptorSupportsMode(
 func GetChannelFromHeader(
 	header string,
 	mc *model.ModelCaches,
-	availableSet []string,
-	model string,
+	modelName string,
 	m mode.Mode,
 ) (*model.Channel, error) {
-	channelIDInt, err := strconv.ParseInt(header, 10, 64)
+	channelIDInt, err := strconv.Atoi(header)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, set := range availableSet {
-		enabledChannels := mc.EnabledModel2ChannelsBySet[set][model]
-		if len(enabledChannels) > 0 {
-			for _, channel := range enabledChannels {
-				if int64(channel.ID) == channelIDInt {
-					a, ok := adaptors.GetAdaptor(channel.Type)
-					if !ok {
-						return nil, fmt.Errorf("adaptor not found for channel %d", channel.ID)
-					}
-
-					if !adaptorSupportsMode(a, mc, channel, model, m) {
-						return nil, fmt.Errorf("channel %d not supported by adaptor", channel.ID)
-					}
-
-					return channel, nil
-				}
-			}
-		}
-
-		disabledChannels := mc.DisabledModel2ChannelsBySet[set][model]
-		if len(disabledChannels) > 0 {
-			for _, channel := range disabledChannels {
-				if int64(channel.ID) == channelIDInt {
-					a, ok := adaptors.GetAdaptor(channel.Type)
-					if !ok {
-						return nil, fmt.Errorf("adaptor not found for channel %d", channel.ID)
-					}
-
-					if !adaptorSupportsMode(a, mc, channel, model, m) {
-						return nil, fmt.Errorf("channel %d not supported by adaptor", channel.ID)
-					}
-
-					return channel, nil
-				}
-			}
-		}
+	channel, ok := mc.ChannelsByID[channelIDInt]
+	if !ok {
+		return nil, fmt.Errorf("channel %d not found", channelIDInt)
 	}
 
-	return nil, fmt.Errorf("channel %d not found for model `%s`", channelIDInt, model)
+	if !config.EnableAdminBypassChannelModelCheck && !slices.Contains(channel.Models, modelName) {
+		return nil, fmt.Errorf("channel %d not found for model `%s`", channelIDInt, modelName)
+	}
+
+	a, ok := adaptors.GetAdaptor(channel.Type)
+	if !ok {
+		return nil, fmt.Errorf("adaptor not found for channel %d", channel.ID)
+	}
+
+	if !adaptorSupportsMode(a, mc, channel, modelName, m) {
+		return nil, fmt.Errorf("channel %d not supported by adaptor", channel.ID)
+	}
+
+	return channel, nil
 }
 
 func needPinChannel(m mode.Mode) bool {
@@ -321,7 +302,7 @@ func getChannelWithFallback(
 	preferChannelIDs []int,
 	errorRates map[int64]float64,
 	ignoreChannelIDs map[int64]struct{},
-) (*model.Channel, []*model.Channel, error) {
+) (*initialChannel, error) {
 	migratedChannels, err := getAvailableChannels(
 		cache,
 		availableSet,
@@ -329,55 +310,101 @@ func getChannelWithFallback(
 		mode,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	filteredChannels := filterChannels(
-		migratedChannels,
-		errorRates,
-		maxRetryErrorRate,
-		ignoreChannelIDs,
-	)
-
-	if len(preferChannelIDs) > 0 {
-		channel := pickPreferredChannel(
-			filteredChannels,
-			preferChannelIDs,
-		)
-		if channel != nil {
-			return channel, migratedChannels, nil
-		}
+	initial := &initialChannel{
+		preferChannelIDs: preferChannelIDs,
+		ignoreChannelIDs: ignoreChannelIDs,
+		migratedChannels: migratedChannels,
 	}
 
+	filtered := filterChannels(migratedChannels, errorRates, maxRetryErrorRate, ignoreChannelIDs)
+
+	channel, err := initial.selectChannel(filtered, preferChannelIDs, errorRates)
+	if err == nil {
+		initial.channel = channel
+		return initial, nil
+	}
+
+	primaryChannels := nonBackupChannels(migratedChannels)
+	backupChannels := backupOnlyChannels(migratedChannels)
+
+	// Preserve the initial request's last-resort fallbacks after healthy backups.
 	pipeline := []func() []*model.Channel{
 		func() []*model.Channel {
-			return filteredChannels
+			return filterChannels(primaryChannels, errorRates, 0, ignoreChannelIDs)
 		},
 		func() []*model.Channel {
-			return filterChannels(
-				migratedChannels,
-				errorRates,
-				0,
-				ignoreChannelIDs,
-			)
+			return filterChannels(backupChannels, errorRates, 0, ignoreChannelIDs)
 		},
 		func() []*model.Channel {
-			return filterChannels(
-				migratedChannels,
-				errorRates,
-				0,
-			)
+			return filterChannels(primaryChannels, errorRates, 0)
+		},
+		func() []*model.Channel {
+			return filterChannels(backupChannels, errorRates, 0)
 		},
 	}
-
 	for _, step := range pipeline {
 		channel, err := pickChannel(step(), errorRates)
 		if err == nil {
-			return channel, migratedChannels, nil
+			initial.channel = channel
+			return initial, nil
 		}
 	}
 
-	return nil, nil, ErrChannelsExhausted
+	return nil, ErrChannelsExhausted
+}
+
+type channelSelectionState struct {
+	backupOnlyEnabled bool // Remains enabled across retry rounds for this request.
+}
+
+// Preferences bypass backup-only gating, while health and failure filters still apply.
+func (s *channelSelectionState) selectChannel(
+	channels []*model.Channel,
+	preferChannelIDs []int,
+	errorRates map[int64]float64,
+) (*model.Channel, error) {
+	if channel := pickPreferredChannel(channels, preferChannelIDs); channel != nil {
+		return channel, nil
+	}
+
+	for {
+		candidates := channels
+		if !s.backupOnlyEnabled {
+			candidates = nonBackupChannels(channels)
+		}
+
+		channel, err := pickChannel(candidates, errorRates)
+		if err == nil || s.backupOnlyEnabled {
+			return channel, err
+		}
+
+		s.backupOnlyEnabled = true
+	}
+}
+
+func nonBackupChannels(channels []*model.Channel) []*model.Channel {
+	primary := make([]*model.Channel, 0, len(channels))
+	for _, channel := range channels {
+		if channel != nil && !channel.BackupOnly {
+			primary = append(primary, channel)
+		}
+	}
+
+	return primary
+}
+
+func backupOnlyChannels(channels []*model.Channel) []*model.Channel {
+	backups := make([]*model.Channel, 0, len(channels))
+	for _, channel := range channels {
+		if channel != nil && channel.BackupOnly {
+			backups = append(backups, channel)
+		}
+	}
+
+	return backups
 }
 
 func pickPreferredChannel(
@@ -409,6 +436,8 @@ func pickPreferredChannel(
 }
 
 type initialChannel struct {
+	channelSelectionState
+
 	channel           *model.Channel
 	designatedChannel bool
 	preferChannelIDs  []int
@@ -430,7 +459,6 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 		channel, err := GetChannelFromHeader(
 			channelHeader,
 			middleware.GetModelCaches(c),
-			availableSet,
 			modelName,
 			m,
 		)
@@ -488,7 +516,7 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 		log.Data["prefer_channels"] = fmt.Sprintf("%v", preferChannelIDs)
 	}
 
-	channel, migratedChannels, err := getChannelWithFallback(
+	return getChannelWithFallback(
 		mc,
 		availableSet,
 		modelName,
@@ -497,16 +525,6 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 		errorRates,
 		ignoreChannelIDs,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &initialChannel{
-		channel:          channel,
-		preferChannelIDs: preferChannelIDs,
-		ignoreChannelIDs: ignoreChannelIDs,
-		migratedChannels: migratedChannels,
-	}, nil
 }
 
 func supportsPromptCacheKeyMode(m mode.Mode) bool {
@@ -631,7 +649,7 @@ func getWebSearchChannel(
 	ignoreChannelIDs, _ := monitor.GetBannedChannelsMapWithModel(ctx, modelName)
 	errorRates, _ := monitor.GetModelChannelErrorRate(ctx, modelName)
 
-	channel, _, err := getChannelWithFallback(
+	initial, err := getChannelWithFallback(
 		mc,
 		nil,
 		modelName,
@@ -644,7 +662,7 @@ func getWebSearchChannel(
 		return nil, err
 	}
 
-	return channel, nil
+	return initial.channel, nil
 }
 
 func getRetryChannel(
@@ -673,33 +691,41 @@ func getRetryChannel(
 		return state.designatedChannel, nil
 	}
 
-	filteredChannels := getRetryCandidates(state, errorRates)
+	return state.selectRetryChannel(errorRates)
+}
 
-	if len(state.preferChannelIDs) > 0 {
-		newChannel := pickPreferredChannel(
-			filteredChannels,
-			state.preferChannelIDs,
-		)
-		if newChannel != nil {
-			return newChannel, nil
-		}
+func (s *retryState) selectRetryChannel(
+	errorRates map[int64]float64,
+) (*model.Channel, error) {
+	candidates := getRetryCandidates(s, errorRates)
+	if channel := pickPreferredChannel(candidates, s.preferChannelIDs); channel != nil {
+		return channel, nil
 	}
 
-	newChannel, err := pickChannel(
-		filteredChannels,
+	if !s.backupOnlyEnabled && len(candidates) > 0 && len(nonBackupChannels(candidates)) == 0 {
+		// Adding eligible backups starts a fresh round while preserving cache preferences.
+		s.backupOnlyEnabled = true
+		s.failedChannelIDs = make(map[int64]struct{})
+		candidates = getRetryCandidates(s, errorRates)
+	}
+
+	newChannel, err := s.selectChannel(
+		candidates,
+		s.preferChannelIDs,
 		errorRates,
 	)
 	if err != nil {
-		if !errors.Is(err, ErrChannelsExhausted) || len(state.failedChannelIDs) == 0 {
+		if !errors.Is(err, ErrChannelsExhausted) || len(s.failedChannelIDs) == 0 {
 			return nil, err
 		}
 
 		// Start a new round so every currently eligible channel gets another attempt.
-		state.failedChannelIDs = make(map[int64]struct{})
-		state.preferChannelIDs = nil
+		s.failedChannelIDs = make(map[int64]struct{})
+		s.preferChannelIDs = nil
 
-		return pickChannel(
-			getRetryCandidates(state, errorRates),
+		return s.selectChannel(
+			getRetryCandidates(s, errorRates),
+			s.preferChannelIDs,
 			errorRates,
 		)
 	}

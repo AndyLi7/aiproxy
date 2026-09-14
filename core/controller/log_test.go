@@ -179,7 +179,7 @@ func TestParseOperationalLogFilterAcceptsStatusAndChannels(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = &http.Request{URL: &url.URL{RawQuery: "status=rejected&channels=10,12"}}
+	c.Request = &http.Request{URL: &url.URL{RawQuery: "status=rejected&channels=10,12&request_source=admin_demo"}}
 
 	filter, err := parseOperationalLogFilter(c)
 	if err != nil {
@@ -190,6 +190,9 @@ func TestParseOperationalLogFilterAcceptsStatusAndChannels(t *testing.T) {
 	}
 	if len(filter.ChannelIDs) != 2 || filter.ChannelIDs[0] != 10 || filter.ChannelIDs[1] != 12 {
 		t.Fatalf("channel IDs = %v, want [10 12]", filter.ChannelIDs)
+	}
+	if filter.Source != model.RequestSourceAdminDemo {
+		t.Fatalf("source = %q, want %q", filter.Source, model.RequestSourceAdminDemo)
 	}
 }
 
@@ -214,6 +217,7 @@ func TestParseOperationalLogFilterRejectsInvalidValues(t *testing.T) {
 
 	tests := []string{
 		"status=unknown",
+		"request_source=unknown",
 		"channels=10,invalid",
 		"channels=0",
 		"request_source=unknown",

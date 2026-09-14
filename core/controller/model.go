@@ -261,20 +261,22 @@ func EnabledModelsSet(c *gin.Context) {
 }
 
 type EnabledModelChannel struct {
-	ID       int               `json:"id"`
-	Type     model.ChannelType `json:"type"`
-	Name     string            `json:"name"`
-	Priority int32             `json:"priority"`
-	Weight   float64           `json:"weight"` // 权重百分比 (0-100)
+	ID         int               `json:"id"`
+	Type       model.ChannelType `json:"type"`
+	Name       string            `json:"name"`
+	Priority   int32             `json:"priority"`
+	Weight     float64           `json:"weight"` // 权重百分比 (0-100)
+	BackupOnly bool              `json:"backup_only"`
 }
 
 func newEnabledModelChannel(ch *model.Channel) EnabledModelChannel {
 	return EnabledModelChannel{
-		ID:       ch.ID,
-		Type:     ch.Type,
-		Name:     ch.Name,
-		Priority: ch.GetPriority(),
-		Weight:   0, // 将在后面计算
+		ID:         ch.ID,
+		Type:       ch.Type,
+		Name:       ch.Name,
+		Priority:   ch.GetPriority(),
+		BackupOnly: ch.BackupOnly,
+		Weight:     0, // 将在后面计算
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/conv"
+	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
@@ -224,8 +225,17 @@ func RelayHelper(
 	c *gin.Context,
 	meta *meta.Meta,
 	handel RelayHandler,
-) (*controller.HandleResult, bool) {
-	result := handel(c, meta)
+) (result *controller.HandleResult, retry bool) {
+	attempt := middleware.NextRequestTraceAttempt(c)
+	handle := middleware.BeginRequestTraceStage(c, requesttrace.StageUpstreamAttempt, requestTraceAttemptAttributes(meta, attempt))
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			handle.Finish(requesttrace.StatusError)
+			panic(recovered)
+		}
+		handle.Finish(requestTraceResultStatus(c.Request.Context(), result))
+	}()
+	result = handel(c, meta)
 	if result.Error == nil {
 		return result, false
 	}
@@ -255,7 +265,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	mc := middleware.GetModelConfig(c)
 
 	if relayController.ValidateRequest != nil {
-		if err := relayController.ValidateRequest(c, mc); err != nil {
+		if err := validateRelayRequest(c, mc, relayController.ValidateRequest); err != nil {
 			statusCode := http.StatusInternalServerError
 			errorCode := ""
 			if requestParamErr, ok := errors.AsType[*controller.RequestParamError](err); ok {
@@ -290,7 +300,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 	// Get initial channel
 	channelStartedAt := time.Now()
-	initialChannel, err := getInitialChannel(c, routingModel, mode)
+	initialChannel, err := getInitialChannelWithTrace(c, routingModel, mode)
 	if err != nil || initialChannel == nil || initialChannel.channel == nil {
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_stage_finished",
@@ -388,12 +398,11 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	// First attempt. For async video submission this measures the upstream's
 	// initial acknowledgement, not the later video-generation duration.
 	upstreamStartedAt := time.Now()
-	firstAttemptAt := upstreamStartedAt
 	retryTimes, retryDeadline := getRetryLimits(
 		mc,
 		config.GetRetryTimes(),
 		config.GetRetryBudget(),
-		firstAttemptAt,
+		upstreamStartedAt,
 	)
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
@@ -546,11 +555,12 @@ func recordResult(
 	)
 
 	if asyncUsageStatus == model.AsyncUsageStatusPending {
-		saveAsyncUsageInfo(meta, price, result)
+		saveAsyncUsageInfo(c, meta, price, result)
 	}
 }
 
 func saveAsyncUsageInfo(
+	c *gin.Context,
 	meta *meta.Meta,
 	price model.Price,
 	result *controller.HandleResult,
@@ -562,7 +572,7 @@ func saveAsyncUsageInfo(
 
 	pricingCurrency, pricingVersion, _ := meta.ModelConfig.RetailPricingMetadata()
 
-	if err := model.CreateAsyncUsageInfo(&model.AsyncUsageInfo{
+	info := &model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
@@ -579,9 +589,12 @@ func saveAsyncUsageInfo(
 		UpstreamID:                  result.UpstreamID,
 		UsageContext:                result.UsageContext.WithFallback(meta.RequestUsageContext),
 		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
-	}); err != nil {
-		log.Errorf("failed to save async usage info: %v", err)
 	}
+	if err := model.CreateAsyncUsageInfo(info); err != nil {
+		log.Errorf("failed to save async usage info: %v", err)
+		return
+	}
+	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
 }
 
 func effectiveDetailBodyMaxSize(modelLimit, globalLimit int64) int64 {
@@ -827,7 +840,7 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 	i := 0
 
 	for state.canRetry(i, time.Now()) && ctx.Err() == nil {
-		newChannel, err := getRetryChannel(ctx, state)
+		newChannel, err := getRetryChannelWithTrace(c, ctx, state)
 		if err == nil {
 			err = prepareRetry(c)
 		}

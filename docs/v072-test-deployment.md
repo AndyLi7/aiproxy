@@ -2,6 +2,8 @@
 
 This branch integrates upstream tag `v0.7.2` (3f11d928) with the Token Platform fork and the original checkout's pending capability/demo/image changes. Do not deploy the upstream image: it does not include the external wallet and capability contract integration.
 
+The branch also incorporates fork `main` at `b89acf2`, retaining tracing and executable Registry image validation. A merge interaction between resolved base-model identities and the image validator was corrected: binding uses the trusted resolved capability while body matching/restoration uses the original requested identity. The new regression test failed before the fix and passes afterward.
+
 ## Verified locally
 
 - `core`: `go test ./...` passed.
@@ -12,7 +14,7 @@ This branch integrates upstream tag `v0.7.2` (3f11d928) with the Token Platform 
 
 ## Before deployment
 
-1. Push this gateway integration branch to the fork and fetch that exact commit on the test server. Commit/push the platform's pending Seedream Registry fixes separately before building the platform there.
+1. Review gateway PR #12 and platform PR #68; both have been pushed. Fetch their approved exact commits on the test server after merge. Platform #68 includes the Seedream 4.x fix and all commits from #65; #65 should not be merged separately.
 2. Preserve the current platform and gateway commit IDs and image tags. Back up both databases. Review new gateway schema fields (channel `remark`/`backup_only`, model/group retry budgets and pending log fields); the gateway may migrate tables at startup. Do not assume image rollback reverses database migrations.
 3. Use the fork checkout as `AIPROXY_BUILD_CONTEXT` in the platform's `deploy/production` Compose environment. Default is the sibling `aiproxy-src` directory; point it explicitly at the new checkout if retaining the old one.
 4. Build a uniquely tagged gateway image via the existing production Compose configuration. Do not overwrite the previous rollback image. Keep the gateway admin API private and retain the existing wallet/config secrets.

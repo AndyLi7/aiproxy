@@ -158,7 +158,12 @@ REDIS=redis://localhost:6379     # Redis 缓存
 ```bash
 BILLING_ENABLED=true           # 启用计费功能
 SAVE_ALL_LOG_DETAIL=true     # 记录所有请求详情
+REQUEST_TRACE_ENABLED=false  # 显式开启请求阶段 Trace 采集
 ```
+
+请求阶段 Trace 采集默认关闭。开启后只会在网关配置的数据库中新建请求 Trace
+相关表；实际部署必须显式设置 `REQUEST_TRACE_ENABLED=true`。本地开发和测试应仅使用
+临时数据库，不应使用现有业务数据库。
 
 ### 高级配置
 

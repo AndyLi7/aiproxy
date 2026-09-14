@@ -40,6 +40,30 @@ func TestResolveInitialVideoCapabilityJSON(t *testing.T) {
 	require.Equal(t, "image-to-video", GetVideoCapability(ctx))
 }
 
+func TestResolvePlatformExactVideoCapability(t *testing.T) {
+	for _, capability := range []string{"text-to-video", "image-to-video"} {
+		t.Run(capability, func(t *testing.T) {
+			id := "bytedance/seedance-1.0-pro/" + capability
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"`+id+`","prompt":"test","resolution":"480p","aspect_ratio":"16:9","seconds":5,"generate_audio":false}`))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			public, route, err := resolveVideoCapability(ctx, mode.Videos, id)
+			require.NoError(t, err)
+			require.Equal(t, "bytedance/seedance-1.0-pro", public)
+			require.Equal(t, "bytedance/seedance-1.0-pro::"+capability, route)
+			require.Equal(t, capability, GetVideoCapability(ctx))
+		})
+	}
+}
+
+func TestResolveExactVideoCapabilityRejectsConflictingField(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"bytedance/seedance-1.0-pro/text-to-video","capability":"image-to-video"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	_, _, err := resolveVideoCapability(ctx, mode.Videos, "bytedance/seedance-1.0-pro/text-to-video")
+	require.Error(t, err)
+}
+
 func TestResolveInitialVideoCapabilityMultipart(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)

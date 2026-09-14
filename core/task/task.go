@@ -26,6 +26,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/adaptors"
+	"github.com/labring/aiproxy/core/trace"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -483,11 +484,13 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		return
 	}
 
+	finishTracePoll := trace.Current().BeginTaskPoll(ctx, info)
 	usage, usageContext, completed, err := fetcher.FetchAsyncUsage(ctx, adaptor.AsyncUsageRequest{
 		Channel: channel,
 		Info:    info,
 		Store:   controller.AdaptorStore,
 	})
+	finishTracePoll(completed, err)
 	if err != nil {
 		if completed {
 			log.Debugf(

@@ -92,6 +92,7 @@ func TestRetryBudgetSerializationAndValidation(t *testing.T) {
 func TestRetryBudgetPersistence(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "retry.db"))
 	require.NoError(t, err)
+	closeTestSQLite(t, db)
 
 	previousDB := model.DB
 	model.DB = db

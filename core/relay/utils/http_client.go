@@ -163,9 +163,6 @@ func createTransport(
 		return nil, fmt.Errorf("unsupported outbound policy: %q", policy)
 	}
 
-	if proxyURL == "" {
-		return transport, nil
-	}
 	parsed, err := parseProxyURL(proxyURL)
 	if err != nil {
 		return nil, err

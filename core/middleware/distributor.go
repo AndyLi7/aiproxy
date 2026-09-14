@@ -20,6 +20,7 @@ import (
 	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/common/reqlimit"
+	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -268,6 +269,14 @@ func GetGroupMinimumBalance() float64 {
 }
 
 func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
+	traceStage := BeginRequestTraceStage(c, requesttrace.StageBalanceCheck, requesttrace.Attributes{})
+	defer func() {
+		status := requesttrace.StatusError
+		if ok {
+			status = requesttrace.StatusSuccess
+		}
+		traceStage.Finish(status)
+	}()
 	startedAt := time.Now()
 	defer func() {
 		outcome := "success"
@@ -493,11 +502,13 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 	routeStartedAt := time.Now()
+	traceStage := BeginRequestTraceStage(c, requesttrace.StageModelResolution, requesttrace.Attributes{})
 	routeStageLogged := false
 	defer func() {
 		if routeStageLogged {
 			return
 		}
+		traceStage.Finish(requesttrace.StatusError)
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_stage_finished",
 			RequestID:  GetRequestID(c),
@@ -578,7 +589,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	adminChannelBypass := config.EnableAdminBypassChannelModelCheck &&
 		group.Status == model.GroupStatusInternal && channelHeader != ""
 	publicModel := requestModel
-	routingModel := requestModel
+	routingModel := resolveImageCapability(c, mode, requestModel)
 	resolvedLocal := false
 	if isCapabilityCreateMode(mode) {
 		resolution, resolveErr := resolveCapabilityRequest(c, token, GetModelCaches(c).EnabledModelConfigsMap, requestModel)
@@ -719,6 +730,11 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
+	if validationErr := validateImageRegistryRequest(c, mode, requestModel, mc.Config); validationErr != nil {
+		AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+		return
+	}
+
 	user, err := getRequestUser(c, mode)
 	if err != nil {
 		AbortLogWithMessage(
@@ -802,6 +818,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		Model:      publicModel,
 	})
 	routeStageLogged = true
+	traceStage.Finish(requesttrace.StatusSuccess)
 
 	clearRequestBodyNode(c)
 	c.Next()
@@ -1585,6 +1602,7 @@ func getStoredVideoRequestModel(c *gin.Context, group string, tokenID int) (stri
 	c.Set(VideoID, videoID)
 	c.Set(GenerationID, videoID)
 	c.Set(ChannelID, store.ChannelID)
+	BindRequestTraceTask(c, group, tokenID, store.ChannelID, videoID)
 
 	return store.Model, nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/network"
 	"github.com/labring/aiproxy/core/common/oncall"
+	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -74,6 +75,13 @@ func AdminAuth(c *gin.Context) {
 }
 
 func TokenAuth(c *gin.Context) {
+	authTrace := BeginRequestTraceStage(c, requesttrace.StageAuthentication, requesttrace.Attributes{})
+	authTraceFinished := false
+	defer func() {
+		if !authTraceFinished {
+			authTrace.Finish(requesttrace.StatusError)
+		}
+	}()
 	startedAt := time.Now()
 	stageLogged := false
 	defer func() {
@@ -178,6 +186,7 @@ func TokenAuth(c *gin.Context) {
 
 		group = *groupCache
 	}
+	BindRequestTraceGroup(c, group.ID)
 
 	c.Header("Group", group.ID)
 
@@ -205,6 +214,8 @@ func TokenAuth(c *gin.Context) {
 		Path:       c.Request.URL.Path,
 	})
 	stageLogged = true
+	authTrace.Finish(requesttrace.StatusSuccess)
+	authTraceFinished = true
 
 	c.Next()
 }

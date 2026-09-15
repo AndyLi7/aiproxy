@@ -10,7 +10,7 @@ type DoubaoVideoTaskResponse struct {
 	Seed                  int64             `json:"seed,omitempty"`
 	Resolution            string            `json:"resolution,omitempty"`
 	Ratio                 string            `json:"ratio,omitempty"`
-	Duration              int               `json:"duration,omitempty"`
+	Duration              float64           `json:"duration,omitempty"`
 	Frames                int               `json:"frames,omitempty"`
 	FramesPerSecond       int               `json:"framespersecond,omitempty"`
 	CreatedAt             int64             `json:"created_at,omitempty"`

@@ -44,6 +44,8 @@ type doubaoVideoContentFetchFunc func(
 ) (*http.Response, error)
 
 type doubaoVideoRequest struct {
+	OmniReferenceTaskType string               `json:"omni_reference_task_type,omitempty"`
+	OutputFormat          string               `json:"output_format,omitempty"`
 	Model                 string               `json:"model,omitempty"`
 	Content               []doubaoVideoContent `json:"content,omitempty"`
 	CallbackURL           string               `json:"callback_url,omitempty"`
@@ -316,13 +318,14 @@ type doubaoDraftTask struct {
 }
 
 type doubaoVideoStoreMetadata struct {
-	Prompt      string `json:"prompt,omitempty"`
-	Resolution  string `json:"resolution,omitempty"`
-	Ratio       string `json:"ratio,omitempty"`
-	Duration    int    `json:"duration,omitempty"`
-	ServiceTier string `json:"service_tier,omitempty"`
-	InputVideo  *bool  `json:"input_video,omitempty"`
-	OutputAudio *bool  `json:"output_audio,omitempty"`
+	ReferenceTaskType string `json:"reference_task_type,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	Resolution        string `json:"resolution,omitempty"`
+	Ratio             string `json:"ratio,omitempty"`
+	Duration          int    `json:"duration,omitempty"`
+	ServiceTier       string `json:"service_tier,omitempty"`
+	InputVideo        *bool  `json:"input_video,omitempty"`
+	OutputAudio       *bool  `json:"output_audio,omitempty"`
 }
 
 func ConvertVideoGenerationJobRequest(
@@ -382,6 +385,13 @@ func convertDoubaoVideoGenerationJobRequest(
 }
 
 func convertDoubaoVideosRequest(meta *meta.Meta, req *http.Request) (adaptor.ConvertResult, error) {
+	if isSeedance25ReferenceCapability(meta) {
+		request, err := parseSeedance25ReferenceRequest(req)
+		if err != nil {
+			return adaptor.ConvertResult{}, convertRequestError(meta, err.Error())
+		}
+		return convertDoubaoVideoRequest(meta, request)
+	}
 	request, err := parseDoubaoVideosRequest(req)
 	if err != nil {
 		return adaptor.ConvertResult{}, convertRequestError(meta, err.Error())
@@ -1165,15 +1175,19 @@ func VideosStatusHandler(
 			common.GetLogger(c).Errorf("find settled video usage failed: %v", err)
 		} else if settled != nil {
 			usage := relaymodel.VideoUsage{Usage: settled.Usage}
-			width, height, ok := coremodel.VerifiedDoubaoVideoBillableDimensions(
-				video.Size,
-				video.Seconds,
-				int64(settled.Usage.OutputTokens),
-			)
-			if ok {
-				usage.BillableSize = strconv.Itoa(width) + "x" + strconv.Itoa(height)
-				usage.BillableWidth = width
-				usage.BillableHeight = height
+			// Legacy dimension inference is not a verified formula for references
+			// or fractional-duration editing. Keep their actual token usage only.
+			if doubaoVideoMetadataFromMeta(meta).ReferenceTaskType == "" && video.Seconds == float64(int(video.Seconds)) {
+				width, height, ok := coremodel.VerifiedDoubaoVideoBillableDimensions(
+					video.Size,
+					int(video.Seconds),
+					int64(settled.Usage.OutputTokens),
+				)
+				if ok {
+					usage.BillableSize = strconv.Itoa(width) + "x" + strconv.Itoa(height)
+					usage.BillableWidth = width
+					usage.BillableHeight = height
+				}
 			}
 			video.Usage = &usage
 			if settled.PricingCurrency != "" && settled.PricingVersion != "" {
@@ -1395,7 +1409,7 @@ func buildDoubaoVideoJob(
 		Prompt:      metadata.Prompt,
 		Model:       meta.OriginModel,
 		NVariants:   1,
-		NSeconds:    firstPositiveInt(response.Duration, metadata.Duration),
+		NSeconds:    firstPositiveInt(int(response.Duration), metadata.Duration),
 	}
 
 	resolution, ratio := doubaoVideoResolutionAndRatio(response, metadata)
@@ -1429,11 +1443,18 @@ func buildDoubaoVideoJob(
 	return job
 }
 
+// Keep other adaptors' legacy integer response types untouched. Ark editing
+// may return fractional duration; this field shadows the embedded seconds.
+type doubaoPublicVideo struct {
+	relaymodel.Video
+	Seconds float64 `json:"seconds,omitempty"`
+}
+
 func buildDoubaoVideo(
 	meta *meta.Meta,
 	id string,
 	response *relaymodel.DoubaoVideoTaskResponse,
-) relaymodel.Video {
+) doubaoPublicVideo {
 	now := time.Now().Unix()
 	metadata := doubaoVideoMetadataFromMeta(meta)
 	resolution, ratio := doubaoVideoResolutionAndRatio(response, metadata)
@@ -1448,7 +1469,6 @@ func buildDoubaoVideo(
 		Status:        doubaoVideoStatus(response.Status),
 		Model:         meta.OriginModel,
 		Prompt:        metadata.Prompt,
-		Seconds:       firstPositiveInt(response.Duration, metadata.Duration),
 		Size:          doubaoVideoSize(resolution, ratio),
 		Resolution:    resolution,
 		AspectRatio:   ratio,
@@ -1468,7 +1488,11 @@ func buildDoubaoVideo(
 		video.Error = map[string]any{"message": response.Error.Message}
 	}
 
-	return video
+	seconds := response.Duration
+	if seconds <= 0 {
+		seconds = float64(max(metadata.Duration, 0))
+	}
+	return doubaoPublicVideo{Video: video, Seconds: seconds}
 }
 
 func doubaoVideoUsageToModelUsage(usage relaymodel.DoubaoVideoUsage) coremodel.Usage {
@@ -1515,7 +1539,7 @@ func doubaoVideoRequestUsageContext(meta *meta.Meta) coremodel.UsageContext {
 		Resolution:       doubaoVideoSize(metadata.Resolution, metadata.Ratio),
 		NativeResolution: metadata.Resolution,
 		ServiceTier:      metadata.ServiceTier,
-		VideoSeconds:     int64(metadata.Duration),
+		VideoSeconds:     int64(max(metadata.Duration, 0)),
 		InputVideo:       metadata.InputVideo,
 		OutputAudio:      metadata.OutputAudio,
 	}
@@ -1761,7 +1785,7 @@ func applyStoredDoubaoVideoMetadata(
 	}
 
 	if response.Duration == 0 {
-		response.Duration = metadata.Duration
+		response.Duration = float64(max(metadata.Duration, 0))
 	}
 
 	if response.ServiceTier == "" {
@@ -1800,19 +1824,23 @@ func setDoubaoVideoMetadata(meta *meta.Meta, metadata doubaoVideoStoreMetadata) 
 
 func doubaoVideoMetadataFromRequest(request doubaoVideoRequest) doubaoVideoStoreMetadata {
 	return doubaoVideoStoreMetadata{
-		Prompt:      doubaoVideoPrompt(request.Content),
-		Resolution:  request.Resolution,
-		Ratio:       request.Ratio,
-		Duration:    intFromPtr(request.Duration),
-		ServiceTier: firstNonEmptyString(request.ServiceTier, "default"),
-		InputVideo:  new(doubaoVideoContentHasVideo(request.Content)),
-		OutputAudio: doubaoVideoOutputAudioFromRequest(request),
+		ReferenceTaskType: request.OmniReferenceTaskType,
+		Prompt:            doubaoVideoPrompt(request.Content),
+		Resolution:        request.Resolution,
+		Ratio:             request.Ratio,
+		Duration:          intFromPtr(request.Duration),
+		ServiceTier:       firstNonEmptyString(request.ServiceTier, "default"),
+		InputVideo:        new(doubaoVideoContentHasVideo(request.Content)),
+		OutputAudio:       doubaoVideoOutputAudioFromRequest(request),
 	}
 }
 
 func (metadata doubaoVideoStoreMetadata) WithFallback(
 	fallback doubaoVideoStoreMetadata,
 ) doubaoVideoStoreMetadata {
+	if metadata.ReferenceTaskType == "" {
+		metadata.ReferenceTaskType = fallback.ReferenceTaskType
+	}
 	if metadata.Prompt == "" {
 		metadata.Prompt = fallback.Prompt
 	}

@@ -63,7 +63,10 @@ type AsyncUsageInfo struct {
 func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
 	if info.Capability != "" {
 		capability := ModelCapability(info.Capability)
-		if !capability.Valid() {
+		// This is persistence after the distributor has authorized the model's
+		// compiled contract. Reference is a v2 capability; do not expand the
+		// legacy v1 ModelCapability.Valid permission surface to store its usage.
+		if !capability.Valid() && info.Capability != "reference-to-video" {
 			return fmt.Errorf("invalid async usage capability %q", info.Capability)
 		}
 		if strings.Contains(info.Model, modelCapabilityKeySeparator) {

@@ -416,6 +416,7 @@ func claimAsyncUsage(info *model.AsyncUsageInfo) (bool, error) {
 func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	ctx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
 	defer stopRenew()
+
 	if info.ImageTaskID != "" {
 		processOneImageUsage(ctx, info)
 		return

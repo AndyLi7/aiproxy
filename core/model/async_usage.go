@@ -30,8 +30,6 @@ const (
 var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
-	LogID                       int              `json:"-"`
-	ImageTaskID                 string           `gorm:"size:128;index" json:"-"`
 	ID                          int              `gorm:"primaryKey"              json:"id"`
 	RequestID                   string           `gorm:"type:varchar(128);index" json:"request_id"`
 	RequestAt                   time.Time        `                               json:"request_at"`
@@ -60,6 +58,8 @@ type AsyncUsageInfo struct {
 	NextPollAt                  time.Time        `gorm:"index"                   json:"next_poll_at"`
 	CreatedAt                   time.Time        `                               json:"created_at"`
 	UpdatedAt                   time.Time        `                               json:"updated_at"`
+	LogID                       int              `                               json:"-"`
+	ImageTaskID                 string           `gorm:"size:128;index"          json:"-"`
 }
 
 func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
@@ -426,10 +426,12 @@ func UpdateLogUsageByRequestID(
 	logIDs ...int,
 ) error {
 	var logEntry Log
+
 	query := LogDB.Where("request_id = ?", requestID)
 	if len(logIDs) > 0 && logIDs[0] > 0 {
 		query = query.Where("id = ?", logIDs[0])
 	}
+
 	if err := query.First(&logEntry).Error; err != nil {
 		return err
 	}

@@ -12,6 +12,7 @@ func (c ChannelType) String() string {
 }
 
 const (
+	ChannelTypeFal                     ChannelType = 59
 	ChannelTypeOpenAI                  ChannelType = 1
 	ChannelTypeAzure                   ChannelType = 3
 	ChannelTypeAzure2                  ChannelType = 4
@@ -61,6 +62,7 @@ const (
 )
 
 var channelTypeNames = map[ChannelType]string{
+	ChannelTypeFal:                     "fal",
 	ChannelTypeOpenAI:                  "openai",
 	ChannelTypeAzure:                   "azure (deprecated)",
 	ChannelTypeAzure2:                  "azure",

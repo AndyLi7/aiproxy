@@ -228,6 +228,7 @@ func migrateLogDB(batchSize int) error {
 		&Summary{},
 		&ConsumeError{},
 		&AsyncUsageInfo{},
+		&ImageTask{},
 		&StoreV2{},
 		&SummaryMinute{},
 		&GroupSummaryMinute{},

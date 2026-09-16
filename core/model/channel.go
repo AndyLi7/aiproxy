@@ -412,6 +412,13 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 }
 
 func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
+	sensitive := (update.Key != nil && *update.Key != channel.Key) || (update.Type != nil && *update.Type != channel.Type) || (update.BaseURL != nil && *update.BaseURL != channel.BaseURL) || (update.ProxyURL != nil && *update.ProxyURL != channel.ProxyURL)
+	if sensitive {
+		if err := CheckImageChannelRetention([]int{channel.ID}); err != nil {
+			return err
+		}
+	}
+
 	defer func() {
 		if err == nil {
 			_ = InitModelConfigAndChannelCache()
@@ -515,6 +522,9 @@ func (c *Channel) UpdateBalance(balance float64) error {
 }
 
 func DeleteChannelByID(id int) (err error) {
+	if err := CheckImageChannelRetention([]int{id}); err != nil {
+		return err
+	}
 	defer func() {
 		if err == nil {
 			_ = InitModelConfigAndChannelCache()
@@ -528,6 +538,9 @@ func DeleteChannelByID(id int) (err error) {
 }
 
 func DeleteChannelsByIDs(ids []int) (err error) {
+	if err := CheckImageChannelRetention(ids); err != nil {
+		return err
+	}
 	defer func() {
 		if err == nil {
 			_ = InitModelConfigAndChannelCache()

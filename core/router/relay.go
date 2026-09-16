@@ -31,6 +31,9 @@ func SetRelayRouter(router *gin.Engine) {
 		modelsRouter.GET("/:model", controller.RetrieveModel)
 	}
 
+	v1Router.POST("/images/tasks", controller.ImageTasks()...)
+	v1Router.GET("/images/tasks/:id", controller.GetImageTask)
+
 	// provider-native video APIs
 	{
 		aliRouter.POST(

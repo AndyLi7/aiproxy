@@ -312,6 +312,10 @@ func AsyncUsagePollTask(ctx context.Context) {
 }
 
 func processAsyncUsages(ctx context.Context) bool {
+	// An interrupted submit cannot safely be replayed. Keep its reservation.
+	if err := model.RecoverStaleImageSubmissions(time.Now()); err != nil {
+		log.WithError(err).Warn("recover interrupted image submissions")
+	}
 	infos, err := model.GetPendingAsyncUsages(asyncUsageBatchSize)
 	if err != nil {
 		notify.ErrorThrottle(
@@ -412,6 +416,10 @@ func claimAsyncUsage(info *model.AsyncUsageInfo) (bool, error) {
 func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	ctx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
 	defer stopRenew()
+	if info.ImageTaskID != "" {
+		processOneImageUsage(ctx, info)
+		return
+	}
 
 	log.Debugf(
 		"async usage poll: start id=%d request_id=%s upstream_id=%s mode=%d model=%s channel_id=%d retry=%d next_poll_at=%s",
@@ -742,6 +750,9 @@ func completeAsyncUsage(
 		info.Amount = amount
 	}
 
+	if info.ImageTaskID != "" && info.LogID == 0 {
+		return errors.New("image task accounting log is missing")
+	}
 	// Persist the finalized usage before notifying an external balance provider.
 	// The provider callback may immediately calculate its own settlement from this
 	// log, so charging first exposes an incomplete usage snapshot and leaves that
@@ -754,8 +765,9 @@ func completeAsyncUsage(
 		amount,
 		info.PricingCurrency,
 		info.PricingVersion,
+		info.LogID,
 	); err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if info.ImageTaskID != "" || !errors.Is(err, gorm.ErrRecordNotFound) {
 			notify.ErrorThrottle(
 				"asyncUsageUpdateLog",
 				time.Minute*5,

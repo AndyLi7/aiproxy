@@ -1,0 +1,158 @@
+{
+  "entry_id": "minimax/image-01/text-to-image",
+  "contract_hash": "sha256:ed1bc6ea5b78de9c9868415a48626dc76b900b5660c9a332aa13422c99d97ac9",
+  "contract": {
+    "entry_id": "minimax/image-01/text-to-image",
+    "validation_version": 1,
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "aspect_ratio": {
+          "default": "1:1",
+          "type": "string",
+          "enum": [
+            "1:1",
+            "16:9",
+            "4:3",
+            "3:2",
+            "2:3",
+            "3:4",
+            "9:16",
+            "21:9"
+          ]
+        },
+        "n": {
+          "default": 1,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "prompt_optimizer": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "prompt",
+        "aspect_ratio",
+        "n",
+        "prompt_optimizer"
+      ],
+      "additionalProperties": false
+    },
+    "parameter_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500,
+          "title": "Prompt",
+          "uiControl": "textarea"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "1:1",
+            "16:9",
+            "4:3",
+            "3:2",
+            "2:3",
+            "3:4",
+            "9:16",
+            "21:9"
+          ],
+          "title": "Aspect ratio",
+          "uiControl": "select"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1,
+          "title": "Number of images",
+          "description": "One image per request."
+        },
+        "prompt_optimizer": {
+          "type": "boolean",
+          "title": "Optimize prompt"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "default_parameters": {
+      "aspect_ratio": "1:1",
+      "n": 1,
+      "prompt_optimizer": false
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "data": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "pattern": "^https:\\/\\/"
+              },
+              "content_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "providers": {
+      "fal": {
+        "adapter": "fal-image",
+        "parameterMapping": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio",
+          "n": "num_images",
+          "prompt_optimizer": "prompt_optimizer"
+        },
+        "allowedPassthroughParameters": [],
+        "billingBasis": {
+          "metric": "image",
+          "dimensions": [],
+          "minimumBillableUnits": 1,
+          "rounding": "none"
+        },
+        "source": {
+          "url": "https://fal.ai/models/fal-ai/minimax/image-01/api",
+          "verifiedAt": "2026-09-16",
+          "verifiedBy": "platform-engineering"
+        }
+      }
+    },
+    "execution": {
+      "mode": "async",
+      "output": "image",
+      "endpoint": "/v1/images/tasks",
+      "statusEndpoint": "/v1/images/tasks/{id}",
+      "supportsCancellation": false
+    }
+  }
+}

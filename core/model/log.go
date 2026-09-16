@@ -267,7 +267,7 @@ func cleanLog(batchSize int) error {
 
 	logStorageHours := config.GetLogStorageHours()
 	if logStorageHours != 0 {
-		subQuery := LogDB.
+		subQuery := preserveImageAccountingLogs(LogDB).
 			Model(&Log{}).
 			Where(
 				"created_at < ?",
@@ -1482,7 +1482,7 @@ func SearchGroupLogs(
 }
 
 func DeleteOldLog(timestamp time.Time) (int64, error) {
-	result := LogDB.Where("created_at < ?", timestamp).Delete(&Log{})
+	result := preserveImageAccountingLogs(LogDB).Where("created_at < ?", timestamp).Delete(&Log{})
 	return result.RowsAffected, result.Error
 }
 
@@ -1491,7 +1491,7 @@ func DeleteGroupLogs(groupID string) (int64, error) {
 		return 0, errors.New("group is required")
 	}
 
-	result := LogDB.Where("group_id = ?", groupID).Delete(&Log{})
+	result := preserveImageAccountingLogs(LogDB).Where("group_id = ?", groupID).Delete(&Log{})
 
 	return result.RowsAffected, result.Error
 }

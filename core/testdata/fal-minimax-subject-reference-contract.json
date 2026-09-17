@@ -1,8 +1,8 @@
 {
-  "entry_id": "minimax/image-01/text-to-image",
-  "contract_hash": "sha256:b915b523fba7e993de1ba84dd30b2a1a991729f944ce57d12286d068bac4e80d",
+  "entry_id": "minimax/image-01/subject-reference",
+  "contract_hash": "sha256:63347e4c36a69ec4d3dbc3f28ad215781dab12c4eedeea66d0de40d42e27a10b",
   "contract": {
-    "entry_id": "minimax/image-01/text-to-image",
+    "entry_id": "minimax/image-01/subject-reference",
     "validation_version": 1,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36,13 +36,18 @@
         "prompt_optimizer": {
           "default": false,
           "type": "boolean"
+        },
+        "image_url": {
+          "type": "string",
+          "format": "uri"
         }
       },
       "required": [
         "prompt",
         "aspect_ratio",
         "n",
-        "prompt_optimizer"
+        "prompt_optimizer",
+        "image_url"
       ],
       "additionalProperties": false
     },
@@ -81,10 +86,18 @@
         "prompt_optimizer": {
           "type": "boolean",
           "title": "Optimize prompt"
+        },
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "title": "Subject reference",
+          "description": "One human face reference. The API accepts a public image URL or Base64 data URI; the platform uploader accepts PNG, JPEG and WebP up to 10 MB.",
+          "uiControl": "image"
         }
       },
       "required": [
-        "prompt"
+        "prompt",
+        "image_url"
       ],
       "additionalProperties": false
     },
@@ -131,7 +144,8 @@
           "prompt": "prompt",
           "aspect_ratio": "aspect_ratio",
           "n": "num_images",
-          "prompt_optimizer": "prompt_optimizer"
+          "prompt_optimizer": "prompt_optimizer",
+          "image_url": "image_url"
         },
         "allowedPassthroughParameters": [],
         "billingBasis": {
@@ -141,7 +155,7 @@
           "rounding": "none"
         },
         "source": {
-          "url": "https://fal.ai/models/fal-ai/minimax/image-01/api",
+          "url": "https://fal.ai/models/fal-ai/minimax/image-01/subject-reference/api",
           "verifiedAt": "2026-09-17",
           "verifiedBy": "platform-engineering"
         }

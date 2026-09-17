@@ -5,9 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"testing"
 
+	"github.com/labring/aiproxy/core/common/registryvalidation"
+	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/adaptor/fal"
 	"github.com/stretchr/testify/require"
@@ -157,6 +160,77 @@ func TestSubmissionRejectionIsDistinctFromUnknownAcceptance(t *testing.T) {
 			)
 			require.Error(t, err)
 			require.Equal(t, code < 500, errors.Is(err, adaptor.ErrImageSubmissionRejected))
+		})
+	}
+}
+
+func TestSubjectReferenceMapsAndSubmitsURLOrData(t *testing.T) {
+	raw, err := os.ReadFile("../../../testdata/fal-minimax-subject-reference-contract.json")
+	require.NoError(t, err)
+
+	var wrapper struct {
+		Contract json.RawMessage `json:"contract"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &wrapper))
+
+	var contract any
+	require.NoError(t, json.Unmarshal(raw, &contract))
+
+	config := map[model.ModelConfigKey]any{"x_token_platform_capability_contract": contract}
+	for _, reference := range []string{"https://cdn.example/subject.png", "data:image/png;base64,aGVsbG8="} {
+		t.Run(reference, func(t *testing.T) {
+			input, err := json.Marshal(
+				map[string]any{
+					"model":     "minimax/image-01/subject-reference",
+					"prompt":    "portrait",
+					"n":         9,
+					"image_url": reference,
+				},
+			)
+			require.NoError(t, err)
+
+			normalized, validationErr := registryvalidation.ValidateImage(
+				wrapper.Contract,
+				"minimax/image-01/subject-reference",
+				input,
+			)
+			require.Nil(t, validationErr)
+
+			mapped, err := adaptor.MapImageProviderInput(config, "fal-image", normalized)
+			require.NoError(t, err)
+
+			calls := 0
+
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+
+					require.Equal(t, "/fal-ai/minimax/image-01/subject-reference", r.URL.Path)
+					require.Equal(t, http.MethodPost, r.Method)
+
+					var body map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+					require.Equal(t, reference, body["image_url"])
+					require.Equal(t, float64(9), body["num_images"])
+					require.NotContains(t, body, "n")
+					require.NotContains(t, body, "model")
+
+					if _, err := w.Write([]byte(`{"request_id":"subject"}`)); err != nil {
+						t.Errorf("write response: %v", err)
+					}
+				}),
+			)
+			defer server.Close()
+
+			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL}
+			id, err := client.Submit(
+				t.Context(),
+				"fal-ai/minimax/image-01/subject-reference",
+				mapped,
+			)
+			require.NoError(t, err)
+			require.Equal(t, "subject", id)
+			require.Equal(t, 1, calls)
 		})
 	}
 }

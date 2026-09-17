@@ -316,9 +316,13 @@ func getChannelWithFallback(
 
 	for _, accept := range eligible {
 		if accept != nil {
-			migratedChannels = slices.DeleteFunc(migratedChannels, func(ch *model.Channel) bool { return !accept(ch) })
+			migratedChannels = slices.DeleteFunc(
+				migratedChannels,
+				func(ch *model.Channel) bool { return !accept(ch) },
+			)
 		}
 	}
+
 	if len(migratedChannels) == 0 {
 		return nil, ErrChannelsNotFound
 	}

@@ -1017,13 +1017,39 @@ func withTestStoreDB(t *testing.T, fn func()) {
 }
 
 func TestProviderCompatibilityFilterCannotReenterFallback(t *testing.T) {
-	channels := []*model.Channel{{ID: 1, Type: model.ChannelTypeOpenAI, Priority: 100, Status: model.ChannelStatusEnabled}, {ID: 2, Type: model.ChannelTypeOpenAI, Priority: 1, Status: model.ChannelStatusEnabled}}
-	mc := &model.ModelCaches{EnabledModel2ChannelsBySet: map[string]map[string][]*model.Channel{"default": {"image": channels}}}
-	initial, err := getChannelWithFallback(mc, []string{"default"}, "image", mode.ImagesGenerations, []int{1}, map[int64]float64{2: 0.5}, nil, func(ch *model.Channel) bool { return ch.ID == 2 })
+	channels := []*model.Channel{
+		{ID: 1, Type: model.ChannelTypeOpenAI, Priority: 100, Status: model.ChannelStatusEnabled},
+		{ID: 2, Type: model.ChannelTypeOpenAI, Priority: 1, Status: model.ChannelStatusEnabled},
+	}
+	mc := &model.ModelCaches{
+		EnabledModel2ChannelsBySet: map[string]map[string][]*model.Channel{
+			"default": {"image": channels},
+		},
+	}
+	initial, err := getChannelWithFallback(
+		mc,
+		[]string{"default"},
+		"image",
+		mode.ImagesGenerations,
+		[]int{1},
+		map[int64]float64{2: 0.5},
+		nil,
+		func(ch *model.Channel) bool { return ch.ID == 2 },
+	)
 	require.NoError(t, err)
 	require.Equal(t, 2, initial.channel.ID)
 	require.Len(t, initial.migratedChannels, 1)
 	require.Equal(t, 2, initial.migratedChannels[0].ID)
-	_, err = getChannelWithFallback(mc, []string{"default"}, "image", mode.ImagesGenerations, nil, nil, nil, func(*model.Channel) bool { return false })
+
+	_, err = getChannelWithFallback(
+		mc,
+		[]string{"default"},
+		"image",
+		mode.ImagesGenerations,
+		nil,
+		nil,
+		nil,
+		func(*model.Channel) bool { return false },
+	)
 	require.Error(t, err)
 }

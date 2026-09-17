@@ -59,8 +59,10 @@ type Client struct {
 	BaseURL, Key string
 }
 
-var segment = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-var modelSegment = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$`)
+var (
+	segment      = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	modelSegment = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$`)
+)
 
 func endpoint(modelName string) (string, error) {
 	parts := strings.Split(modelName, "/")
@@ -158,7 +160,11 @@ func failed(code string) adaptor.ImageTaskResult {
 	}
 }
 
-func (c *Client) Poll(ctx context.Context, modelName, id string, frozenContracts ...[]byte) (adaptor.ImageTaskResult, error) {
+func (c *Client) Poll(
+	ctx context.Context,
+	modelName, id string,
+	frozenContracts ...[]byte,
+) (adaptor.ImageTaskResult, error) {
 	root, err := endpoint(modelName)
 	if err != nil {
 		return adaptor.ImageTaskResult{}, err
@@ -170,11 +176,17 @@ func (c *Client) Poll(ctx context.Context, modelName, id string, frozenContracts
 
 	path := root + "/requests/" + id
 	statusPath := path + "/status"
+
 	if len(frozenContracts) > 1 {
 		return adaptor.ImageTaskResult{}, errors.New("multiple task contracts")
 	}
+
 	if len(frozenContracts) == 1 && registryvalidation.HasProviderContracts(frozenContracts[0]) {
-		statusPath, path, err = registryvalidation.FrozenFalQueuePaths(frozenContracts[0], modelName, id)
+		statusPath, path, err = registryvalidation.FrozenFalQueuePaths(
+			frozenContracts[0],
+			modelName,
+			id,
+		)
 		if err != nil {
 			return failed("invalid_contract"), nil
 		}
@@ -211,6 +223,7 @@ func (c *Client) Poll(ctx context.Context, modelName, id string, frozenContracts
 	}
 
 	var rawResult json.RawMessage
+
 	code, err := c.request(ctx, http.MethodGet, path, nil, &rawResult)
 	if err != nil {
 		if code == 400 || code == 422 {
@@ -224,6 +237,7 @@ func (c *Client) Poll(ctx context.Context, modelName, id string, frozenContracts
 			return failed("invalid_result"), nil
 		}
 	}
+
 	if json.Unmarshal(rawResult, &result) != nil {
 		return adaptor.ImageTaskResult{}, errors.New("invalid fal result")
 	}

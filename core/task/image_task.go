@@ -23,10 +23,12 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	}
 
 	if task.Status == "completed" {
-		if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs || (task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
+		if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs ||
+			(task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
 			markAsyncUsageFailed(info, "unexpected stored image count")
 			return
 		}
+
 		completeImageTaskUsage(ctx, info, task.Data)
 
 		return
@@ -109,6 +111,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		retryImageUsage(info, err)
 		return
 	}
+
 	switch saved.Status {
 	case "completed":
 		if len(saved.Data) == 0 || len(saved.Data) > model.ImageBillingMaxOutputs ||
@@ -116,6 +119,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 			markAsyncUsageFailed(info, "unexpected stored image count")
 			return
 		}
+
 		completeImageTaskUsage(ctx, info, saved.Data)
 	case "failed":
 		markAsyncUsageFailed(info, "image generation failed")
@@ -136,36 +140,61 @@ func retryImageUsage(info *model.AsyncUsageInfo, err error) {
 	}
 }
 
-func completeImageTaskUsage(ctx context.Context, info *model.AsyncUsageInfo, outputs []model.ImageOutput) {
+func completeImageTaskUsage(
+	ctx context.Context,
+	info *model.AsyncUsageInfo,
+	outputs []model.ImageOutput,
+) {
 	usage := model.Usage{ImageOutputTokens: model.ZeroNullInt64(len(outputs))}
+
 	usageContext := info.UsageContext
 	if usageContext.ImageUsage != nil {
 		evidence := *usageContext.ImageUsage
 		evidence.State = "complete"
 		count := int64(len(outputs))
 		evidence.GeneratedCount = &count
+
 		evidence.Outputs = make([]model.ImageUsageOutput, len(outputs))
 		for i, out := range outputs {
-			evidence.Outputs[i] = model.ImageUsageOutput{Index: int64(i), Width: out.Width, Height: out.Height}
+			evidence.Outputs[i] = model.ImageUsageOutput{
+				Index:  int64(i),
+				Width:  out.Width,
+				Height: out.Height,
+			}
 		}
+
 		usageContext.ImageUsage = &evidence
 	}
+
 	if info.Price.HasImageBilling() && !info.MeasuredImage {
-		amount := consume.CalculateMeasuredImageAmount(http.StatusOK, usageContext.ImageUsage, info.Price)
-		if err := model.PrepareClaimedImageTaskMeasurement(info, usage, usageContext, amount); err != nil {
+		amount := consume.CalculateMeasuredImageAmount(
+			http.StatusOK,
+			usageContext.ImageUsage,
+			info.Price,
+		)
+		if err := model.PrepareClaimedImageTaskMeasurement(
+			info,
+			usage,
+			usageContext,
+			amount,
+		); err != nil {
 			retryImageUsage(info, err)
 			return
 		}
+
 		info.MeasuredImage = true
 		info.Usage = usage
 		info.UsageContext = usageContext
 		info.Amount = amount
 	}
-	if info.MeasuredImage && (info.Amount.ImageBillingResult == nil || info.Amount.ImageBillingResult.State == "pending") {
+
+	if info.MeasuredImage &&
+		(info.Amount.ImageBillingResult == nil || info.Amount.ImageBillingResult.State == "pending") {
 		if err := model.ParkMeasuredImageUsage(info); err != nil {
 			retryImageUsage(info, err)
 		}
 		return
 	}
+
 	completePolledAsyncUsage(ctx, info, usage, usageContext)
 }

@@ -313,10 +313,17 @@ type syncTaskFake struct {
 }
 
 func (*syncTaskFake) ImageAdapterName() string { return "volcengine-ark-image" }
-func (a *syncTaskFake) GenerateImage(context.Context, *meta.Meta, []byte, []byte) (adaptor.ImageTaskResult, error) {
+
+func (a *syncTaskFake) GenerateImage(
+	context.Context,
+	*meta.Meta,
+	[]byte,
+	[]byte,
+) (adaptor.ImageTaskResult, error) {
 	a.calls++
 	return a.result, a.err
 }
+
 func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 	for _, tc := range []struct {
 		name, status string
@@ -331,27 +338,64 @@ func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync-dispatch.db"))
 			require.NoError(t, err)
-			require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+			require.NoError(
+				t,
+				db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}),
+			)
+
 			old := model.LogDB
 			model.LogDB = db
 			t.Cleanup(func() { model.LogDB = old })
-			original := &model.ImageTask{ID: "sync-test", Model: "m", GroupID: "g", TokenID: 1, Fingerprint: "f", ExpectedImages: 1}
-			saved, created, err := model.ReserveImageTask(original, &model.AsyncUsageInfo{RequestID: original.ID})
+
+			original := &model.ImageTask{
+				ID:             "sync-test",
+				Model:          "m",
+				GroupID:        "g",
+				TokenID:        1,
+				Fingerprint:    "f",
+				ExpectedImages: 1,
+			}
+			saved, created, err := model.ReserveImageTask(
+				original,
+				&model.AsyncUsageInfo{RequestID: original.ID},
+			)
 			require.NoError(t, err)
 			require.True(t, created)
-			a := &syncTaskFake{err: tc.err, result: adaptor.ImageTaskResult{Status: "completed", Data: tc.data}}
+
+			a := &syncTaskFake{
+				err:    tc.err,
+				result: adaptor.ImageTaskResult{Status: "completed", Data: tc.data},
+			}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest("POST", "/v1/images/tasks", nil)
+			c.Request = httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"/v1/images/tasks",
+				nil,
+			)
 			dispatchSyncImageTask(c, t.Context(), saved, a, &meta.Meta{}, nil)
+
 			got, err := model.GetImageTask(original.ID, "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, tc.status, got.Status)
-			_, created, err = model.ReserveImageTask(&model.ImageTask{ID: original.ID, Model: "m", GroupID: "g", TokenID: 1, Fingerprint: "f"}, &model.AsyncUsageInfo{})
+
+			_, created, err = model.ReserveImageTask(
+				&model.ImageTask{
+					ID:          original.ID,
+					Model:       "m",
+					GroupID:     "g",
+					TokenID:     1,
+					Fingerprint: "f",
+				},
+				&model.AsyncUsageInfo{},
+			)
 			require.NoError(t, err)
 			require.False(t, created)
 			require.Equal(t, 1, a.calls)
+
 			var info model.AsyncUsageInfo
 			require.NoError(t, db.First(&info).Error)
+
 			switch tc.status {
 			case "completed":
 				require.Equal(t, model.AsyncUsageStatusPending, info.Status)

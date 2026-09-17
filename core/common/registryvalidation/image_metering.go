@@ -26,58 +26,80 @@ type ImageMeteringEvidence struct {
 }
 
 //nolint:gocyclo // This is one auditable validation pass for the provider metering contract.
-func ResolveImageMetering(raw []byte, binding ProviderBinding, mapped []byte, n, cap int, required bool) (ImageMeteringEvidence, error) {
+func ResolveImageMetering(
+	raw []byte,
+	binding ProviderBinding,
+	mapped []byte,
+	n, maxOutputs int,
+	required bool,
+) (ImageMeteringEvidence, error) {
 	result := ImageMeteringEvidence{MaximumOutputs: n}
+
 	var native map[string]any
 	if json.Unmarshal(mapped, &native) != nil || native == nil {
 		return result, ErrProviderContract
 	}
+
 	batchParameter, hasBatchParameter := native["max_images"]
 	hasBatchParameter = hasBatchParameter && batchParameter != float64(1)
-	if n < 1 || n > cap {
+
+	if n < 1 || n > maxOutputs {
 		return result, ErrProviderContract
 	}
+
 	if !HasProviderContracts(raw) {
 		if required {
 			return result, ErrProviderContract
 		}
 		return result, nil
 	}
+
 	p, err := bound(raw, binding)
 	if err != nil {
 		return result, err
 	}
+
 	if len(p.Upstream.Metering) == 0 {
 		if required || hasBatchParameter {
 			return result, ErrProviderContract
 		}
 		return result, nil
 	}
+
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(p.Upstream.Metering, &fields) != nil || fields == nil {
 		return result, ErrProviderContract
 	}
+
 	for _, key := range []string{"inputImagesParameter", "outputCountMultiplierParameter", "maxInputImages", "maxCombinedImages"} {
-		if value, exists := fields[key]; exists && (string(value) == "null" || string(value) == `""`) {
+		if value, exists := fields[key]; exists &&
+			(string(value) == "null" || string(value) == `""`) {
 			return result, ErrProviderContract
 		}
 	}
+
 	var m ImageMetering
+
 	d := json.NewDecoder(bytes.NewReader(p.Upstream.Metering))
 	d.DisallowUnknownFields()
-	if d.Decode(&m) != nil || m.Version != 1 || p.Adapter != "fal-image" || p.Upstream.Execution.Mode != "async" {
+
+	if d.Decode(&m) != nil || m.Version != 1 || p.Adapter != "fal-image" ||
+		p.Upstream.Execution.Mode != "async" {
 		return result, ErrProviderContract
 	}
+
 	for _, key := range []string{m.InputImagesParameter, m.OutputCountMultiplierParameter} {
 		if key != "" && (!meteringParameter.MatchString(key)) {
 			return result, ErrProviderContract
 		}
 	}
+
 	for _, limit := range []*int64{m.MaxInputImages, m.MaxCombinedImages} {
-		if limit != nil && (*limit < 1 || *limit > int64(cap)) {
+		if limit != nil && (*limit < 1 || *limit > int64(maxOutputs)) {
 			return result, ErrProviderContract
 		}
 	}
+
 	if m.MaxInputImages != nil && m.InputImagesParameter == "" {
 		return result, ErrProviderContract
 	}
@@ -89,40 +111,53 @@ func ResolveImageMetering(raw []byte, binding ProviderBinding, mapped []byte, n,
 			return result, ErrProviderContract
 		}
 	}
+
 	body := native
+
 	if hasBatchParameter && m.OutputCountMultiplierParameter != "max_images" {
 		return result, ErrProviderContract
 	}
+
 	count, ok := body["num_images"].(float64)
 	if !ok || count != float64(n) {
 		return result, ErrProviderContract
 	}
+
 	if key := m.OutputCountMultiplierParameter; key != "" {
 		multiplier, ok := body[key].(float64)
-		if !ok || multiplier < 1 || math.Trunc(multiplier) != multiplier || multiplier > float64(cap/n) {
+		if !ok || multiplier < 1 || math.Trunc(multiplier) != multiplier ||
+			multiplier > float64(maxOutputs/n) {
 			return result, ErrProviderContract
 		}
+
 		result.MaximumOutputs = n * int(multiplier)
 	}
+
 	if key := m.InputImagesParameter; key != "" {
 		refs, ok := body[key].([]any)
 		if !ok || len(refs) == 0 {
 			return result, ErrProviderContract
 		}
+
 		for _, ref := range refs {
 			s, ok := ref.(string)
 			if !ok || strings.TrimSpace(s) == "" {
 				return result, ErrProviderContract
 			}
 		}
+
 		result.InputCount = int64(len(refs))
 		if m.MaxInputImages != nil && result.InputCount > *m.MaxInputImages {
 			return result, ErrProviderContract
 		}
 	}
-	if m.MaxCombinedImages != nil && result.InputCount+int64(result.MaximumOutputs) > *m.MaxCombinedImages {
+
+	if m.MaxCombinedImages != nil &&
+		result.InputCount+int64(result.MaximumOutputs) > *m.MaxCombinedImages {
 		return result, ErrProviderContract
 	}
+
 	result.Explicit = true
+
 	return result, nil
 }

@@ -25,7 +25,7 @@ type ImageTaskExecutor interface{ ImageAdapterName() string }
 // enters the polling/settlement worker; this interface has no resubmission method.
 type SyncImageTaskAdapter interface {
 	ImageTaskExecutor
-	GenerateImage(context.Context, *meta.Meta, []byte, []byte) (ImageTaskResult, error)
+	GenerateImage(ctx context.Context, m *meta.Meta, body, frozen []byte) (ImageTaskResult, error)
 }
 
 // ImageTaskAdapter normalizes provider queue protocols; the durable worker is model agnostic.

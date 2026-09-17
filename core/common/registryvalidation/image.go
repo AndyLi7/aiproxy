@@ -108,6 +108,7 @@ func ValidateImage(contract []byte, publicID string, body []byte) ([]byte, *Vali
 		if entry.ProviderVersion != nil {
 			break
 		}
+
 		if first {
 			fixed = provider.Fixed
 			first = false

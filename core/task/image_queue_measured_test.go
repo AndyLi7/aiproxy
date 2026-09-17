@@ -1,3 +1,4 @@
+//nolint:testpackage
 package task
 
 import (
@@ -64,10 +65,12 @@ func TestImageQueueMeasuredSettlementPersistsAndReplays(t *testing.T) {
 			outputs := make([]model.ImageOutput, 0, len(tc.urls))
 			for _, u := range tc.urls {
 				w, h := int64(10), int64(20)
+
 				img := model.ImageOutput{URL: u, Width: &w, Height: &h}
 				if tc.missing {
 					img.Width = nil
 				}
+
 				outputs = append(outputs, img)
 			}
 
@@ -81,9 +84,15 @@ func TestImageQueueMeasuredSettlementPersistsAndReplays(t *testing.T) {
 					if strings.HasSuffix(r.URL.Path, "/status") {
 						body = map[string]string{"status": "COMPLETED"}
 						if tc.staleFailed {
-							if err := model.SetImageTaskResult("count", "completed", outputs, nil); err != nil {
+							if err := model.SetImageTaskResult(
+								"count",
+								"completed",
+								outputs,
+								nil,
+							); err != nil {
 								t.Errorf("save competing result: %v", err)
 							}
+
 							body = map[string]string{"status": "FAILED"}
 						}
 					}
@@ -109,10 +118,31 @@ func TestImageQueueMeasuredSettlementPersistsAndReplays(t *testing.T) {
 			}
 			inputs := int64(2)
 			limit := int64(100)
-			info.UsageContext.ImageUsage = &model.ImageUsage{Version: 1, State: "incomplete", Scenario: "generation", InputCount: &inputs, Outputs: []model.ImageUsageOutput{}}
-			if !tc.legacy {
-				info.Price.ImageBilling = &model.ImageBillingPolicy{Version: 1, Scenario: "generation", Input: &model.ImageBillingInput{ChargeBasis: "per_output", FirstNFree: 1, AmountMicros: 50000, UnitQuantity: 1}, OutputPixelTiers: []model.ImageBillingTier{{MaxPixels: &limit, AmountMicros: 100000, UnitQuantity: 1}, {AmountMicros: 200000, UnitQuantity: 1}}}
+
+			info.UsageContext.ImageUsage = &model.ImageUsage{
+				Version:    1,
+				State:      "incomplete",
+				Scenario:   "generation",
+				InputCount: &inputs,
+				Outputs:    []model.ImageUsageOutput{},
 			}
+			if !tc.legacy {
+				info.Price.ImageBilling = &model.ImageBillingPolicy{
+					Version:  1,
+					Scenario: "generation",
+					Input: &model.ImageBillingInput{
+						ChargeBasis:  "per_output",
+						FirstNFree:   1,
+						AmountMicros: 50000,
+						UnitQuantity: 1,
+					},
+					OutputPixelTiers: []model.ImageBillingTier{
+						{MaxPixels: &limit, AmountMicros: 100000, UnitQuantity: 1},
+						{AmountMicros: 200000, UnitQuantity: 1},
+					},
+				}
+			}
+
 			_, _, err = model.ReserveImageTask(
 				&model.ImageTask{
 					ID:             "count",
@@ -153,10 +183,12 @@ func TestImageQueueMeasuredSettlementPersistsAndReplays(t *testing.T) {
 			claimed, err := claimAsyncUsage(&final)
 			require.NoError(t, err)
 			require.False(t, claimed)
+
 			expectedPolls := 2
 			if tc.staleFailed {
 				expectedPolls = 1
 			}
+
 			require.Equal(t, expectedPolls, polls, "settlement replay uses stored result")
 
 			if tc.billed == 0 {
@@ -164,12 +196,15 @@ func TestImageQueueMeasuredSettlementPersistsAndReplays(t *testing.T) {
 					require.Equal(t, "completed", saved.Status)
 					require.Equal(t, model.AsyncUsageStatusMeasurementPending, final.Status)
 					require.NotNil(t, final.Amount.ImageBillingResult)
+
 					var entry model.Log
 					require.NoError(t, db.First(&entry, final.LogID).Error)
 					require.Equal(t, "pending", entry.Amount.ImageBillingResult.State)
 					require.Len(t, entry.UsageContext.ImageUsage.Outputs, 1)
+
 					return
 				}
+
 				require.Equal(t, "failed", saved.Status)
 				require.Empty(t, saved.Data)
 				require.Zero(t, consumer.attempts)

@@ -152,17 +152,19 @@ func (p *ImageBillingPolicy) UnmarshalJSON(data []byte) error {
 	}
 
 	if v, ok := obj["input"]; ok {
-
 		var inputFields map[string]json.RawMessage
 		if json.Unmarshal(v, &inputFields) != nil {
 			return errors.New("invalid input billing")
 		}
+
 		if basis, exists := inputFields["chargeBasis"]; exists {
 			var value string
-			if json.Unmarshal(basis, &value) != nil || (value != "per_request" && value != "per_output") {
+			if json.Unmarshal(basis, &value) != nil ||
+				(value != "per_request" && value != "per_output") {
 				return errors.New("invalid input charge basis")
 			}
 		}
+
 		if _, err = strictImageObject(
 			v,
 			[]string{"firstNFree", "amountMicros", "unitQuantity", "chargeBasis"},
@@ -223,9 +225,11 @@ func (p *ImageBillingPolicy) Validate() error {
 	}
 
 	if p.Input != nil {
-		if p.Input.ChargeBasis != "" && p.Input.ChargeBasis != "per_request" && p.Input.ChargeBasis != "per_output" {
+		if p.Input.ChargeBasis != "" && p.Input.ChargeBasis != "per_request" &&
+			p.Input.ChargeBasis != "per_output" {
 			return errors.New("invalid input charge basis")
 		}
+
 		if !imageInteger(p.Input.FirstNFree, 0, ImageBillingMaxSafeInteger) {
 			return errors.New("invalid allowance")
 		}
@@ -506,8 +510,10 @@ func EvaluateImageBilling(
 			if n > 0 && q > ImageBillingMaxSafeInteger/n {
 				return ImageBillingResult{}, errors.New("image billing quantity overflow")
 			}
+
 			q *= n
 		}
+
 		if err := add(
 			"input",
 			nil,

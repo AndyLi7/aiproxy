@@ -269,22 +269,30 @@ func GetGroupMinimumBalance() float64 {
 }
 
 func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
-	traceStage := BeginRequestTraceStage(c, requesttrace.StageBalanceCheck, requesttrace.Attributes{})
+	traceStage := BeginRequestTraceStage(
+		c,
+		requesttrace.StageBalanceCheck,
+		requesttrace.Attributes{},
+	)
 	defer func() {
 		status := requesttrace.StatusError
 		if ok {
 			status = requesttrace.StatusSuccess
 		}
+
 		traceStage.Finish(status)
 	}()
+
 	startedAt := time.Now()
 	defer func() {
 		outcome := "success"
+
 		errorType := ""
 		if !ok {
 			outcome = "error"
 			errorType = "wallet_check_rejected"
 		}
+
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_stage_finished",
 			RequestID:  GetRequestID(c),
@@ -297,6 +305,7 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 			ErrorType:  errorType,
 		})
 	}()
+
 	gbc, err := GetGroupBalanceConsumer(c, group)
 	if err != nil {
 		if errors.Is(err, balance.ErrNoRealNameUsedAmountLimit) {
@@ -489,7 +498,13 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(Mode, mode)
 
 	if config.GetDisableServe() {
-		AbortOperationally(c, model.FailureStageRouting, http.StatusServiceUnavailable, "service is under maintenance")
+		AbortOperationally(
+			c,
+			model.FailureStageRouting,
+			http.StatusServiceUnavailable,
+			"service is under maintenance",
+		)
+
 		return
 	}
 
@@ -501,13 +516,20 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	if !checkGroupBalance(c, group) {
 		return
 	}
+
 	routeStartedAt := time.Now()
-	traceStage := BeginRequestTraceStage(c, requesttrace.StageModelResolution, requesttrace.Attributes{})
+	traceStage := BeginRequestTraceStage(
+		c,
+		requesttrace.StageModelResolution,
+		requesttrace.Attributes{},
+	)
+
 	routeStageLogged := false
 	defer func() {
 		if routeStageLogged {
 			return
 		}
+
 		traceStage.Finish(requesttrace.StatusError)
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_stage_finished",
@@ -522,94 +544,51 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		})
 	}()
 
-	requestModel, err := getRequestModel(c, mode, group.ID, token.ID)
-	if err != nil {
-		var validationErr *publicVideoRequestValidationError
-		if errors.As(err, &validationErr) {
-			AbortPublicVideoRequestError(
-				c,
-				model.FailureStageValidation,
-				http.StatusBadRequest,
-				validationErr.code,
-				validationErr.message,
-				validationErr.param,
-				validationErr.value,
-				validationErr.allowedValues,
-				validationErr.expected,
-			)
-			return
-		}
-		// Stored-mode routes (videos, video jobs, responses, native task
-		// lookups) resolve the model by reading a store row keyed on the id in
-		// the path. A missing row means the caller asked about something that
-		// does not exist, or whose retention window lapsed — that is a 404 the
-		// caller can act on, not a 500. Everything else is a real backend
-		// failure and must stay a 500, so an outage is never quietly downgraded
-		// into "unknown id".
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			AbortOperationally(
-				c,
-				model.FailureStageModel,
-				http.StatusNotFound,
-				"The requested resource does not exist or is no longer available.",
-			)
-
-			return
-		}
-
-		AbortLogWithMessage(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-		)
-
+	requestModel, valid := resolveRequestModel(c, mode, group.ID, token.ID)
+	if !valid {
 		return
 	}
 
-	if requestModel == "" {
-		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
-			AbortPublicVideoRequestError(
-				c,
-				model.FailureStageValidation,
-				http.StatusBadRequest,
-				"missing_parameter",
-				"model is required and must be a non-empty string",
-				"model",
-				nil,
-				nil,
-				"non-empty string",
-			)
-			return
-		}
-		AbortOperationally(c, model.FailureStageValidation, http.StatusBadRequest, "no model provided")
-		return
-	}
+	var err error
 
 	channelHeader := c.Request.Header.Get("Aiproxy-Channel")
 	adminChannelBypass := config.EnableAdminBypassChannelModelCheck &&
 		group.Status == model.GroupStatusInternal && channelHeader != ""
 	publicModel := requestModel
 	routingModel := resolveImageCapability(c, mode, requestModel)
+
 	resolvedLocal := false
 	if isCapabilityCreateMode(mode) {
-		resolution, resolveErr := resolveCapabilityRequest(c, token, GetModelCaches(c).EnabledModelConfigsMap, requestModel)
+		resolution, resolveErr := resolveCapabilityRequest(
+			c,
+			token,
+			GetModelCaches(c).EnabledModelConfigsMap,
+			requestModel,
+		)
 		if resolveErr == nil {
 			publicModel, routingModel = resolution.PublicModel, resolution.InternalModel
 			c.Set(RequestedModel, resolution.RequestedModel)
 			c.Set(PublicModel, resolution.PublicModel)
 			c.Set(PublicCapabilityModel, resolution.PublicCapabilityModel)
 			c.Set(ResolvedCapability, resolution.Capability)
+
 			if isVideosCreateMode(mode) {
-				setVideoCapabilityContext(c, publicModel, routingModel, model.ModelCapability(resolution.Capability))
+				setVideoCapabilityContext(
+					c,
+					publicModel,
+					routingModel,
+					model.ModelCapability(resolution.Capability),
+				)
 			}
+
 			resolvedLocal = true
 		}
 	}
+
 	if !resolvedLocal && IsPublicVideoRequest(c.Request.URL.Path, mode) {
 		publicModel, routingModel, err = resolveVideoCapability(c, mode, requestModel)
 		if err != nil {
-			var validationErr *publicVideoRequestValidationError
-			if errors.As(err, &validationErr) {
+			if validationErr, ok := errors.AsType[*publicVideoRequestValidationError](err); ok {
 				AbortPublicVideoRequestError(
 					c,
 					model.FailureStageValidation,
@@ -621,53 +600,29 @@ func distribute(c *gin.Context, mode mode.Mode) {
 					validationErr.allowedValues,
 					validationErr.expected,
 				)
+
 				return
 			}
+
 			AbortLogWithMessage(c, http.StatusInternalServerError, err.Error())
+
 			return
 		}
 	}
+
 	SetLogModelFields(log.Data, publicModel)
+
 	capability := GetResolvedCapability(c)
 	if capability == "" {
-		capability = string(GetVideoCapability(c))
+		capability = GetVideoCapability(c)
 	}
+
 	SetLogCapabilityField(log.Data, capability)
 
 	findModel := token.FindModel(routingModel)
 
 	if findModel == "" && !adminChannelBypass {
-		if IsPublicVideoRequest(c.Request.URL.Path, mode) {
-			if GetVideoCapability(c) != "" {
-				abortUnsupportedPublicVideoCapability(
-					c,
-					mode,
-					publicModel,
-					GetVideoCapability(c),
-					token,
-					GetModelCaches(c),
-				)
-				return
-			}
-			abortUnsupportedPublicVideoModel(
-				c,
-				mode,
-				publicModel,
-				token,
-				GetModelCaches(c),
-			)
-			return
-		}
-		AbortOperationally(
-			c,
-			model.FailureStageModel,
-			http.StatusNotFound,
-			fmt.Sprintf(
-				"The model `%s` does not exist or you do not have access to it.",
-				requestModel,
-			),
-		)
-
+		abortUnavailableRequestModel(c, mode, publicModel, requestModel, token)
 		return
 	}
 
@@ -696,8 +651,13 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 		return
 	}
+
 	if _, capability, capabilityRoute := model.ParseModelCapabilityKey(findModel); capabilityRoute {
-		if err := model.ValidateModelCapabilityConfig(mc.Config, publicModel, capability); err != nil {
+		if err := model.ValidateModelCapabilityConfig(
+			mc.Config,
+			publicModel,
+			capability,
+		); err != nil {
 			log.Errorf("reject invalid model capability config for %s: %v", publicModel, err)
 			AbortOperationally(
 				c,
@@ -705,6 +665,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 				http.StatusServiceUnavailable,
 				"the selected model capability is temporarily unavailable",
 			)
+
 			return
 		}
 	}
@@ -716,21 +677,16 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(RoutingModel, findModel)
 	c.Set(ModelConfig, mc)
 
-	if !CheckRelayMode(mode, mc.Type) {
-		AbortOperationally(
-			c,
-			model.FailureStageModel,
-			http.StatusNotFound,
-			fmt.Sprintf(
-				"The model `%s` does not exist on this endpoint.",
-				publicModel,
-			),
-		)
-
+	if !validateEffectiveRelayModel(c, mode, mc, publicModel) {
 		return
 	}
 
-	if validationErr := validateImageRegistryRequest(c, mode, requestModel, mc.Config); validationErr != nil {
+	if validationErr := validateImageRegistryRequest(
+		c,
+		mode,
+		requestModel,
+		mc.Config,
+	); validationErr != nil {
 		AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
 		return
 	}
@@ -806,6 +762,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 		return
 	}
+
 	common.LogLatencyEvent(c, common.LatencyEvent{
 		Event:      "aiproxy_stage_finished",
 		RequestID:  GetRequestID(c),
@@ -817,7 +774,9 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		Path:       c.Request.URL.Path,
 		Model:      publicModel,
 	})
+
 	routeStageLogged = true
+
 	traceStage.Finish(requesttrace.StatusSuccess)
 
 	clearRequestBodyNode(c)
@@ -838,19 +797,26 @@ func abortUnsupportedPublicVideoCapability(
 		if !ok || !strings.EqualFold(candidateModel, publicModel) {
 			return true
 		}
+
 		mc, ok := caches.EnabledModelConfigsMap[candidate]
 		if ok && CheckRelayMode(requestMode, mc.Type) {
 			allowedValues = append(allowedValues, string(candidateCapability))
 		}
+
 		return true
 	})
 	slices.Sort(allowedValues)
 	allowedValues = slices.Compact(allowedValues)
 
-	message := fmt.Sprintf("unsupported video capability `%s` for model `%s`", capability, publicModel)
+	message := fmt.Sprintf(
+		"unsupported video capability `%s` for model `%s`",
+		capability,
+		publicModel,
+	)
 	if len(allowedValues) != 0 {
 		message += ", allowed values: " + strings.Join(allowedValues, ", ")
 	}
+
 	AbortPublicVideoRequestError(
 		c,
 		model.FailureStageModel,
@@ -877,6 +843,7 @@ func abortUnsupportedPublicVideoModel(
 		if ok && CheckRelayMode(requestMode, mc.Type) {
 			allowedValues = append(allowedValues, publicVideoModelID(candidate))
 		}
+
 		return true
 	})
 	slices.Sort(allowedValues)
@@ -886,6 +853,7 @@ func abortUnsupportedPublicVideoModel(
 	if len(allowedValues) != 0 {
 		message += ", allowed values: " + strings.Join(allowedValues, ", ")
 	}
+
 	AbortPublicVideoRequestError(
 		c,
 		model.FailureStageModel,
@@ -960,6 +928,7 @@ func GetRequestMetadata(c *gin.Context) map[string]string {
 	if metadata == nil {
 		metadata = make(map[string]string, 4)
 	}
+
 	for _, key := range []string{
 		"requested_model",
 		"public_model",
@@ -968,21 +937,27 @@ func GetRequestMetadata(c *gin.Context) map[string]string {
 	} {
 		delete(metadata, key)
 	}
+
 	if requestedModel := GetRequestedModel(c); requestedModel != "" {
 		metadata["requested_model"] = requestedModel
 	}
+
 	if publicModel := GetPublicModel(c); publicModel != "" {
 		metadata["public_model"] = publicModel
 	}
+
 	if publicCapabilityModel := GetPublicCapabilityModel(c); publicCapabilityModel != "" {
 		metadata["public_capability_model"] = publicCapabilityModel
 	}
+
 	if capability := GetResolvedCapability(c); capability != "" {
 		metadata["resolved_capability"] = capability
 	}
+
 	if len(metadata) == 0 {
 		return nil
 	}
+
 	return metadata
 }
 
@@ -1090,12 +1065,14 @@ func capabilityRequestFields(c *gin.Context) (map[string]any, error) {
 		if err := common.ParseMultipartFormWithLimit(c.Request); err != nil {
 			return nil, err
 		}
+
 		fields := make(map[string]any, len(c.Request.MultipartForm.Value))
 		for name, values := range c.Request.MultipartForm.Value {
 			if len(values) != 0 {
 				fields[name] = values[0]
 			}
 		}
+
 		return fields, nil
 	}
 
@@ -1103,14 +1080,17 @@ func capabilityRequestFields(c *gin.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	raw, err := node.Raw()
 	if err != nil {
 		return nil, err
 	}
+
 	fields := make(map[string]any)
 	if err := sonic.UnmarshalString(raw, &fields); err != nil {
 		return nil, err
 	}
+
 	return fields, nil
 }
 
@@ -1124,6 +1104,7 @@ func resolveCapabilityRequest(
 	if err != nil {
 		return model.CapabilityResolution{}, err
 	}
+
 	entitled := make([]model.ModelConfig, 0)
 	token.Range(func(modelName string) bool {
 		if config, ok := configs[modelName]; ok {
@@ -1131,6 +1112,7 @@ func resolveCapabilityRequest(
 		}
 		return true
 	})
+
 	return model.ResolveCapabilityModel(requested, fields, entitled)
 }
 
@@ -1430,6 +1412,7 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 
 		c.Set(VideoID, videoID)
 		c.Set(ChannelID, store.ChannelID)
+
 		return store.Model, nil
 	}
 
@@ -1463,6 +1446,7 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 			expected: "valid JSON object",
 		}
 	}
+
 	if node.TypeSafe() != ast.V_OBJECT {
 		return "", &publicVideoRequestValidationError{
 			code:     "invalid_parameter",
@@ -1474,6 +1458,7 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 	}
 
 	modelNode := node.Get("model")
+
 	requestModel := ""
 	if modelNode != nil && modelNode.Exists() && modelNode.TypeSafe() != ast.V_NULL {
 		if modelNode.TypeSafe() != ast.V_STRING {
@@ -1485,6 +1470,7 @@ func getVideosCreateRequestModel(c *gin.Context, group string, tokenID int) (str
 				expected: "non-empty string",
 			}
 		}
+
 		requestModel, err = modelNode.String()
 		if err != nil {
 			return "", &publicVideoRequestValidationError{
@@ -1792,4 +1778,160 @@ func GetRequestMetadataFromJSON(body []byte) (map[string]string, error) {
 	}
 
 	return getMetadataFromNode(&node)
+}
+
+func resolveRequestModel(
+	c *gin.Context,
+	requestMode mode.Mode,
+	groupID string,
+	tokenID int,
+) (string, bool) {
+	requestModel, err := getRequestModel(c, requestMode, groupID, tokenID)
+	if err != nil {
+		if validationErr, ok := errors.AsType[*publicVideoRequestValidationError](err); ok {
+			AbortPublicVideoRequestError(
+				c,
+				model.FailureStageValidation,
+				http.StatusBadRequest,
+				validationErr.code,
+				validationErr.message,
+				validationErr.param,
+				validationErr.value,
+				validationErr.allowedValues,
+				validationErr.expected,
+			)
+
+			return "", false
+		}
+		// Stored-mode routes (videos, video jobs, responses, native task
+		// lookups) resolve the model by reading a store row keyed on the id in
+		// the path. A missing row means the caller asked about something that
+		// does not exist, or whose retention window lapsed — that is a 404 the
+		// caller can act on, not a 500. Everything else is a real backend
+		// failure and must stay a 500, so an outage is never quietly downgraded
+		// into "unknown id".
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			AbortOperationally(
+				c,
+				model.FailureStageModel,
+				http.StatusNotFound,
+				"The requested resource does not exist or is no longer available.",
+			)
+
+			return "", false
+		}
+
+		AbortLogWithMessage(
+			c,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+
+		return "", false
+	}
+
+	if requestModel == "" {
+		if IsPublicVideoRequest(c.Request.URL.Path, requestMode) {
+			AbortPublicVideoRequestError(
+				c,
+				model.FailureStageValidation,
+				http.StatusBadRequest,
+				"missing_parameter",
+				"model is required and must be a non-empty string",
+				"model",
+				nil,
+				nil,
+				"non-empty string",
+			)
+
+			return "", false
+		}
+
+		AbortOperationally(
+			c,
+			model.FailureStageValidation,
+			http.StatusBadRequest,
+			"no model provided",
+		)
+
+		return "", false
+	}
+
+	return requestModel, true
+}
+
+func abortUnavailableRequestModel(
+	c *gin.Context,
+	requestMode mode.Mode,
+	publicModel, requestModel string,
+	token model.TokenCache,
+) {
+	if IsPublicVideoRequest(c.Request.URL.Path, requestMode) {
+		if GetVideoCapability(c) != "" {
+			abortUnsupportedPublicVideoCapability(
+				c,
+				requestMode,
+				publicModel,
+				GetVideoCapability(c),
+				token,
+				GetModelCaches(c),
+			)
+
+			return
+		}
+
+		abortUnsupportedPublicVideoModel(
+			c,
+			requestMode,
+			publicModel,
+			token,
+			GetModelCaches(c),
+		)
+
+		return
+	}
+
+	AbortOperationally(
+		c,
+		model.FailureStageModel,
+		http.StatusNotFound,
+		fmt.Sprintf(
+			"The model `%s` does not exist or you do not have access to it.",
+			requestModel,
+		),
+	)
+}
+
+func validateEffectiveRelayModel(
+	c *gin.Context,
+	requestMode mode.Mode,
+	mc model.ModelConfig,
+	publicModel string,
+) bool {
+	if err := mc.ValidateImageBillingMode(); err != nil {
+		AbortOperationally(
+			c,
+			model.FailureStageModel,
+			http.StatusServiceUnavailable,
+			"the selected model pricing is temporarily unavailable",
+		)
+
+		return false
+	}
+
+	if !CheckRelayMode(requestMode, mc.Type) {
+		AbortOperationally(
+			c,
+			model.FailureStageModel,
+			http.StatusNotFound,
+			fmt.Sprintf(
+				"The model `%s` does not exist on this endpoint.",
+				publicModel,
+			),
+		)
+
+		return false
+	}
+
+	return true
 }

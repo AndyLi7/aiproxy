@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,7 +30,9 @@ func resolveVideoCapability(
 				expected: "public model ID",
 			}
 		}
+
 		setVideoCapabilityContext(c, publicModel, requestModel, capability)
+
 		return publicModel, requestModel, nil
 	}
 
@@ -45,19 +48,33 @@ func resolveVideoCapability(
 		if embedded.Valid() {
 			explicit, err := getInitialVideoCapability(c)
 			if err != nil {
-				validation, missing := err.(*publicVideoRequestValidationError)
+				validation := &publicVideoRequestValidationError{}
+
+				missing := errors.As(err, &validation)
 				if !missing || validation.code != "missing_capability" {
 					return "", "", err
 				}
 			} else if explicit != embedded {
-				return "", "", &publicVideoRequestValidationError{code: "invalid_parameter", message: "capability does not match model ID", param: "capability"}
+				return "", "", &publicVideoRequestValidationError{
+					code:    "invalid_parameter",
+					message: "capability does not match model ID",
+					param:   "capability",
+				}
 			}
+
 			publicModel = requestModel[:slash]
+
 			route, err := model.BuildModelCapabilityKey(publicModel, embedded)
 			if err != nil {
-				return "", "", &publicVideoRequestValidationError{code: "invalid_parameter", message: "invalid public model ID", param: "model"}
+				return "", "", &publicVideoRequestValidationError{
+					code:    "invalid_parameter",
+					message: "invalid public model ID",
+					param:   "model",
+				}
 			}
+
 			setVideoCapabilityContext(c, publicModel, route, embedded)
+
 			return publicModel, route, nil
 		}
 	}
@@ -79,16 +96,20 @@ func resolveVideoCapability(
 	}
 
 	setVideoCapabilityContext(c, publicModel, routingModel, capability)
+
 	return publicModel, routingModel, nil
 }
 
 func getInitialVideoCapability(c *gin.Context) (model.ModelCapability, error) {
-	var rawCapability string
-	var err error
+	var (
+		rawCapability string
+		err           error
+	)
 	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
 		rawCapability, err = getLimitedMultipartFormValue(c.Request, "capability")
 	} else {
 		var node *ast.Node
+
 		node, err = getRequestBodyNode(c)
 		if err == nil {
 			if node.TypeSafe() != ast.V_OBJECT {
@@ -100,6 +121,7 @@ func getInitialVideoCapability(c *gin.Context) (model.ModelCapability, error) {
 					expected: "JSON object",
 				}
 			}
+
 			rawCapability, err = getStringFieldFromNode(
 				node,
 				"capability",
@@ -107,6 +129,7 @@ func getInitialVideoCapability(c *gin.Context) (model.ModelCapability, error) {
 			)
 		}
 	}
+
 	if err != nil {
 		return "", &publicVideoRequestValidationError{
 			code:     "invalid_parameter",

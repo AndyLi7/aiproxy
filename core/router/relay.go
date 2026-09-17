@@ -17,19 +17,30 @@ func SetRelayRouter(router *gin.Engine) {
 	)
 
 	v1betaRouter := router.Group("/v1beta")
-	v1betaRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
+	v1betaRouter.Use(
+		middleware.OperationalLogMiddleware(),
+		middleware.IPBlock,
+		middleware.TokenAuth,
+	)
 
 	aliRouter := router.Group("/api/v1")
 	aliRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
 
 	doubaoRouter := router.Group("/api/v3")
-	doubaoRouter.Use(middleware.OperationalLogMiddleware(), middleware.IPBlock, middleware.TokenAuth)
+	doubaoRouter.Use(
+		middleware.OperationalLogMiddleware(),
+		middleware.IPBlock,
+		middleware.TokenAuth,
+	)
 
 	modelsRouter := v1Router.Group("/models")
 	{
 		modelsRouter.GET("", controller.ListModels)
 		modelsRouter.GET("/:model", controller.RetrieveModel)
 	}
+
+	v1Router.POST("/images/tasks", controller.ImageTasks()...)
+	v1Router.GET("/images/tasks/:id", controller.GetImageTask)
 
 	// provider-native video APIs
 	{

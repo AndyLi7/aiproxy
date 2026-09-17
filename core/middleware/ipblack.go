@@ -13,8 +13,14 @@ func IPBlock(c *gin.Context) {
 
 	isBlock := ipblack.GetIPIsBlockAnyWay(c.Request.Context(), ip)
 	if isBlock {
-		AbortOperationally(c, model.FailureStageRateLimit, http.StatusForbidden, "please try again later")
+		AbortOperationally(
+			c,
+			model.FailureStageRateLimit,
+			http.StatusForbidden,
+			"please try again later",
+		)
 		c.Abort()
+
 		return
 	}
 

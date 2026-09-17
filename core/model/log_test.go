@@ -19,6 +19,7 @@ func TestPublicLogIdentityProjectsCapabilityMetadata(t *testing.T) {
 	if modelName != "bytedance/seedance-1-0-pro" {
 		t.Fatalf("model = %q, want public base model", modelName)
 	}
+
 	if capability != "image-to-video" {
 		t.Fatalf("capability = %q, want image-to-video", capability)
 	}
@@ -33,10 +34,12 @@ func TestPublicLogIdentityLeavesOrdinaryModelsUntouched(t *testing.T) {
 
 func closeTestSQLite(t *testing.T, db *gorm.DB) {
 	t.Helper()
+
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatalf("get sqlite handle: %v", err)
 	}
+
 	t.Cleanup(func() { _ = sqlDB.Close() })
 }
 
@@ -122,6 +125,7 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	underlying, err := db.DB()
 	if err != nil {
 		t.Fatalf("get sqlite db: %v", err)
@@ -131,6 +135,7 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = prevLogDB
+
 		if err := underlying.Close(); err != nil {
 			t.Fatalf("close sqlite db: %v", err)
 		}
@@ -191,8 +196,13 @@ func TestRecordConsumeLogPersistsWebSearchCount(t *testing.T) {
 	if got.Usage.WebSearchCount != 1 {
 		t.Fatalf("expected web_search_count=1, got %d", got.Usage.WebSearchCount)
 	}
+
 	if got.Model != "gpt-5.4" || got.Capability != "image-to-video" {
-		t.Fatalf("expected public model and capability, got model=%q capability=%q", got.Model, got.Capability)
+		t.Fatalf(
+			"expected public model and capability, got model=%q capability=%q",
+			got.Model,
+			got.Capability,
+		)
 	}
 }
 
@@ -201,6 +211,7 @@ func TestRecordConsumeLogLoadsNullWebSearchCountAsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	closeTestSQLite(t, db)
 
 	if err := db.AutoMigrate(&model.Log{}, &model.RequestDetail{}); err != nil {
@@ -241,6 +252,7 @@ func TestCleanupFinishedAsyncUsagesKeepsPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
@@ -298,6 +310,7 @@ func TestGetPendingAsyncUsagesOrdersByUpdatedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
@@ -359,6 +372,7 @@ func TestGetPendingAsyncUsagesSkipsFutureNextPollAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
@@ -404,6 +418,7 @@ func TestTryClaimAsyncUsageInfoIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB
@@ -472,6 +487,7 @@ func TestRenewAsyncUsageClaimRequiresToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	closeTestSQLite(t, db)
 
 	prevLogDB := model.LogDB

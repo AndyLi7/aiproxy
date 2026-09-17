@@ -19,7 +19,7 @@ const (
 // Sink persists one trace span. Write must honor ctx cancellation and must not
 // retain or mutate span after returning.
 type Sink interface {
-	Write(context.Context, Span) error
+	Write(ctx context.Context, span Span) error
 }
 
 type WriterOptions struct {
@@ -70,10 +70,12 @@ func NewWriter(sink Sink, options WriterOptions) *Writer {
 	} else if queueSize > maxWriterQueueSize {
 		queueSize = maxWriterQueueSize
 	}
+
 	writeTimeout := options.WriteTimeout
 	if writeTimeout <= 0 {
 		writeTimeout = defaultWriterWriteTimeout
 	}
+
 	maxAttempts := options.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = defaultWriterMaxAttempts
@@ -95,8 +97,10 @@ func NewWriter(sink Sink, options WriterOptions) *Writer {
 	}
 
 	workerCtx, cancel := context.WithCancel(context.Background())
+
 	w.cancel = cancel
 	go w.run(workerCtx)
+
 	return w
 }
 
@@ -105,18 +109,22 @@ func (w *Writer) Submit(span Span) bool {
 	if w == nil {
 		return false
 	}
+
 	if Validate(span) != nil {
 		w.rejected.Add(1)
 		return false
 	}
+
 	span = cloneSpan(span)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	if w.closed {
 		w.rejected.Add(1)
 		return false
 	}
+
 	select {
 	case w.queue <- span:
 		w.accepted.Add(1)
@@ -131,6 +139,7 @@ func (w *Writer) Stats() WriterStats {
 	if w == nil {
 		return WriterStats{}
 	}
+
 	return WriterStats{
 		Accepted:    w.accepted.Load(),
 		Persisted:   w.persisted.Load(),
@@ -148,6 +157,7 @@ func (w *Writer) Close(ctx context.Context) error {
 	if w == nil {
 		return nil
 	}
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -157,6 +167,7 @@ func (w *Writer) Close(ctx context.Context) error {
 		w.closed = true
 		close(w.queue)
 	}
+
 	done := w.done
 	cancel := w.cancel
 	w.mu.Unlock()
@@ -181,6 +192,7 @@ func (w *Writer) Close(ctx context.Context) error {
 func (w *Writer) run(ctx context.Context) {
 	defer close(w.done)
 	defer w.cancel()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -190,26 +202,32 @@ func (w *Writer) run(ctx context.Context) {
 			if !ok {
 				return
 			}
+
 			if ctx.Err() != nil {
 				w.dropped.Add(1)
 				w.dropQueued()
 				return
 			}
+
 			w.persist(ctx, span)
 		}
 	}
 }
 
 func (w *Writer) persist(ctx context.Context, span Span) {
-	for attempt := 0; attempt < w.maxAttempts; attempt++ {
+	for attempt := range w.maxAttempts {
 		writeCtx, cancel := context.WithTimeout(ctx, w.writeTimeout)
 		err := w.sink.Write(writeCtx, span)
+
 		cancel()
+
 		if err == nil {
 			w.persisted.Add(1)
 			return
 		}
+
 		w.writeErrors.Add(1)
+
 		if ctx.Err() != nil || attempt+1 == w.maxAttempts {
 			w.dropped.Add(1)
 			return
@@ -233,6 +251,7 @@ func (w *Writer) dropQueued() {
 			if !ok {
 				return
 			}
+
 			w.dropped.Add(1)
 		default:
 			return
@@ -250,6 +269,7 @@ func cloneSpan(span Span) Span {
 	span.Attributes.Height = clonePointer(span.Attributes.Height)
 	span.Attributes.Seconds = clonePointer(span.Attributes.Seconds)
 	span.Attributes.GenerateAudio = clonePointer(span.Attributes.GenerateAudio)
+
 	return span
 }
 
@@ -257,6 +277,8 @@ func clonePointer[T any](value *T) *T {
 	if value == nil {
 		return nil
 	}
+
 	cloned := *value
+
 	return &cloned
 }

@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,8 +20,8 @@ func captureOperationalLogs(t *testing.T) *[]*model.Log {
 	original := recordOperationalLog
 	logs := make([]*model.Log, 0, 1)
 	recordOperationalLog = func(entry *model.Log) error {
-		copy := *entry
-		logs = append(logs, &copy)
+		recordCopy := *entry
+		logs = append(logs, &recordCopy)
 		return nil
 	}
 	t.Cleanup(func() {
@@ -32,6 +33,7 @@ func captureOperationalLogs(t *testing.T) *[]*model.Log {
 
 func TestOperationalLogMiddlewareRecordsRejectedRequestOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	logs := captureOperationalLogs(t)
 
 	router := gin.New()
@@ -46,35 +48,47 @@ func TestOperationalLogMiddlewareRecordsRejectedRequestOnce(t *testing.T) {
 		c.JSON(http.StatusPaymentRequired, gin.H{"error": "rejected"})
 	})
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"prompt":"private prompt"}`))
+	request := httptest.NewRequestWithContext(context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		strings.NewReader(`{"prompt":"private prompt"}`),
+	)
 	request.Header.Set(OperationalLogSourceHeader, model.RequestSourcePlayground)
 	request.Header.Set("Authorization", "Bearer top-secret")
+
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
 	if len(*logs) != 1 {
 		t.Fatalf("recorded %d logs, want 1", len(*logs))
 	}
+
 	entry := (*logs)[0]
 	if entry.RequestID != "req_rejected_123" {
 		t.Fatalf("request ID = %q, want req_rejected_123", entry.RequestID)
 	}
+
 	if entry.RequestSource != model.RequestSourcePlayground {
 		t.Fatalf("request source = %q, want playground", entry.RequestSource)
 	}
+
 	if entry.FailureStage != model.FailureStageBalance {
 		t.Fatalf("failure stage = %q, want balance", entry.FailureStage)
 	}
+
 	if entry.ErrorCode != "insufficient_balance" {
 		t.Fatalf("error code = %q, want insufficient_balance", entry.ErrorCode)
 	}
-	if strings.Contains(entry.SafeError, "top-secret") || strings.Contains(string(entry.Content), "private prompt") {
+
+	if strings.Contains(entry.SafeError, "top-secret") ||
+		strings.Contains(string(entry.Content), "private prompt") {
 		t.Fatalf("operational log leaked a credential or request body: %+v", entry)
 	}
 }
 
 func TestOperationalLogUsesPublicCapabilityIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	logs := captureOperationalLogs(t)
 
 	router := gin.New()
@@ -92,23 +106,27 @@ func TestOperationalLogUsesPublicCapabilityIdentity(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(
 		response,
-		httptest.NewRequest(http.MethodPost, "/v1/videos", nil),
+		httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/videos", nil),
 	)
 
 	if len(*logs) != 1 {
 		t.Fatalf("recorded %d logs, want 1", len(*logs))
 	}
+
 	entry := (*logs)[0]
 	if entry.Model != "bytedance/seedance-1-0-pro" {
 		t.Fatalf("model = %q, want public base model", entry.Model)
 	}
+
 	if entry.Capability != "image-to-video" {
 		t.Fatalf("capability = %q, want image-to-video", entry.Capability)
 	}
+
 	if entry.Metadata["requested_model"] != "bytedance/seedance-1-0-pro" ||
 		entry.Metadata["public_capability_model"] != "bytedance/seedance-1-0-pro/image-to-video" {
 		t.Fatalf("metadata = %#v, want public request identity", entry.Metadata)
 	}
+
 	for _, value := range entry.Metadata {
 		if strings.Contains(value, "::") {
 			t.Fatalf("metadata leaked internal route: %#v", entry.Metadata)
@@ -118,6 +136,7 @@ func TestOperationalLogUsesPublicCapabilityIdentity(t *testing.T) {
 
 func TestOperationalLogMiddlewareDoesNotDuplicateNormalResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	logs := captureOperationalLogs(t)
 
 	router := gin.New()
@@ -128,7 +147,11 @@ func TestOperationalLogMiddlewareDoesNotDuplicateNormalResult(t *testing.T) {
 	})
 
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/test", nil))
+	router.ServeHTTP(
+		response,
+		httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/test", nil),
+	)
+
 	if len(*logs) != 0 {
 		t.Fatalf("fallback recorded %d duplicate logs, want 0", len(*logs))
 	}
@@ -136,6 +159,7 @@ func TestOperationalLogMiddlewareDoesNotDuplicateNormalResult(t *testing.T) {
 
 func TestOperationalLogMiddlewareDefaultsSourceToAPI(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	logs := captureOperationalLogs(t)
 
 	router := gin.New()
@@ -146,7 +170,11 @@ func TestOperationalLogMiddlewareDefaultsSourceToAPI(t *testing.T) {
 	})
 
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/test", nil))
+	router.ServeHTTP(
+		response,
+		httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/test", nil),
+	)
+
 	if len(*logs) != 1 || (*logs)[0].RequestSource != model.RequestSourceAPI {
 		t.Fatalf("logs = %+v, want one API-source log", *logs)
 	}
@@ -154,9 +182,15 @@ func TestOperationalLogMiddlewareDefaultsSourceToAPI(t *testing.T) {
 
 func TestOperationalFieldsRejectSpoofedAdminDemoSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 	c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourceAdminDemo)
 	c.Set(Group, model.GroupCache{ID: "customer-group", Status: model.GroupStatusEnabled})
 
@@ -167,9 +201,15 @@ func TestOperationalFieldsRejectSpoofedAdminDemoSource(t *testing.T) {
 
 func TestOperationalFieldsAllowAdminDemoSourceForInternalGroup(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 	c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourceAdminDemo)
 	c.Set(Group, model.GroupCache{ID: "tp_admin_demo", Status: model.GroupStatusInternal})
 
@@ -180,9 +220,15 @@ func TestOperationalFieldsAllowAdminDemoSourceForInternalGroup(t *testing.T) {
 
 func TestNewMetaByContextCarriesOperationalSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 	c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourcePlayground)
 	c.Set(Group, model.GroupCache{ID: "group-1"})
 	c.Set(Token, model.TokenCache{ID: 2, Name: "playground"})
@@ -221,7 +267,12 @@ func TestAdminDemoSourceRequiresAnInternalGroup(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Request = httptest.NewRequestWithContext(
+				context.Background(),
+				http.MethodPost,
+				"/v1/videos",
+				nil,
+			)
 			c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourceAdminDemo)
 			c.Set(Group, test.group)
 
@@ -237,6 +288,7 @@ func TestMaskOperationalIPRemovesHostBits(t *testing.T) {
 	if got := maskOperationalIP("203.0.113.91"); got != "203.0.113.0" {
 		t.Fatalf("masked IPv4 = %q, want 203.0.113.0", got)
 	}
+
 	if got := maskOperationalIP("2001:db8:1234:5678:abcd::1"); got != "2001:db8:1234:5678::" {
 		t.Fatalf("masked IPv6 = %q, want 2001:db8:1234:5678::", got)
 	}

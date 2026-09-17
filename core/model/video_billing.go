@@ -32,6 +32,7 @@ func VerifiedDoubaoVideoBillableDimensions(
 	if err != nil || requestedWidth <= 0 || requestedWidth > maxVideoBillingDimension {
 		return 0, 0, false
 	}
+
 	requestedHeight, err := strconv.Atoi(strings.TrimSpace(parts[1]))
 	if err != nil || requestedHeight <= 0 || requestedHeight > maxVideoBillingDimension {
 		return 0, 0, false
@@ -40,6 +41,7 @@ func VerifiedDoubaoVideoBillableDimensions(
 	width = alignVideoBillingDimension(requestedWidth)
 	height = alignVideoBillingDimension(requestedHeight)
 	frames := int64(24*seconds + 1)
+
 	numerator := int64(width) * int64(height) * frames
 	if numerator%1024 != 0 || outputTokens != numerator/1024 {
 		return 0, 0, false

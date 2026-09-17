@@ -61,6 +61,7 @@ func NewLog(l *logrus.Logger) gin.HandlerFunc {
 		param.Path = path
 
 		outcome := "success"
+
 		errorType := ""
 		if c.Request.Context().Err() != nil {
 			outcome = "cancelled"
@@ -69,6 +70,7 @@ func NewLog(l *logrus.Logger) gin.HandlerFunc {
 			outcome = "error"
 			errorType = "http_error"
 		}
+
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_request_finished",
 			RequestID:  GetRequestID(c),

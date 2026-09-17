@@ -50,11 +50,15 @@ func (a *Adaptor) FetchAsyncUsage(
 	switch strings.ToLower(response.Status) {
 	case "succeeded":
 		metadata := doubaoVideoAsyncMetadataFromStore(request.Store, info)
-		if metadata.ReferenceTaskType != "" && response.Usage.CompletionTokens <= 0 && response.Usage.TotalTokens <= 0 {
+		if metadata.ReferenceTaskType != "" && response.Usage.CompletionTokens <= 0 &&
+			response.Usage.TotalTokens <= 0 {
 			// Existing scheduler retries non-final errors and retains the request ID.
 			// Never settle auto-duration tasks from a guessed/zero token quantity.
-			return coremodel.Usage{}, coremodel.UsageContext{}, false, errors.New("reference video actual usage is not available yet")
+			return coremodel.Usage{}, coremodel.UsageContext{}, false, errors.New(
+				"reference video actual usage is not available yet",
+			)
 		}
+
 		usageContext := doubaoVideoAsyncUsageContext(response, request.Store, info)
 		if mode.Mode(info.Mode) == mode.DoubaoVideo {
 			usageContext = doubaoNativeVideoUsageContextFromContext(usageContext).

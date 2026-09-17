@@ -33,45 +33,59 @@ func Validate(span Span) error {
 	if span.Version != Version {
 		return fmt.Errorf("requesttrace: unsupported version %d", span.Version)
 	}
+
 	if !validRandomID(span.TraceID) {
-		return fmt.Errorf("requesttrace: invalid trace ID")
+		return errors.New("requesttrace: invalid trace ID")
 	}
+
 	if !validRandomID(span.SpanID) {
-		return fmt.Errorf("requesttrace: invalid span ID")
+		return errors.New("requesttrace: invalid span ID")
 	}
+
 	if span.ParentSpanID != "" && !validRandomID(span.ParentSpanID) {
-		return fmt.Errorf("requesttrace: invalid parent span ID")
+		return errors.New("requesttrace: invalid parent span ID")
 	}
+
 	if err := validateRequiredString("request ID", span.RequestID, maxRequestIDBytes); err != nil {
 		return err
 	}
+
 	if err := validateOptionalString("group ID", span.GroupID, maxGroupIDBytes); err != nil {
 		return err
 	}
+
 	if !validService(span.Service) {
 		return fmt.Errorf("requesttrace: invalid service %q", span.Service)
 	}
+
 	if !validStage(span.Stage) {
 		return fmt.Errorf("requesttrace: invalid stage %q", span.Stage)
 	}
+
 	if !validStatus(span.Status) {
 		return fmt.Errorf("requesttrace: invalid status %q", span.Status)
 	}
+
 	if span.StartedAt.IsZero() || !isUTC(span.StartedAt) {
-		return fmt.Errorf("requesttrace: started_at must be a non-zero UTC timestamp")
+		return errors.New("requesttrace: started_at must be a non-zero UTC timestamp")
 	}
+
 	if span.EndedAt != nil && (span.EndedAt.IsZero() || !isUTC(*span.EndedAt)) {
-		return fmt.Errorf("requesttrace: ended_at must be a non-zero UTC timestamp")
+		return errors.New("requesttrace: ended_at must be a non-zero UTC timestamp")
 	}
+
 	if span.Revision <= 0 {
-		return fmt.Errorf("requesttrace: revision must be positive")
+		return errors.New("requesttrace: revision must be positive")
 	}
+
 	if err := validateLifecycle(span); err != nil {
 		return err
 	}
+
 	if err := validateAttributes(span.Attributes); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -83,12 +97,14 @@ func validateLifecycle(span Span) error {
 		}
 	default:
 		if span.EndedAt == nil || span.DurationMS == nil {
-			return fmt.Errorf("requesttrace: completed span requires end time and duration")
+			return errors.New("requesttrace: completed span requires end time and duration")
 		}
+
 		if math.IsNaN(*span.DurationMS) || math.IsInf(*span.DurationMS, 0) || *span.DurationMS < 0 {
-			return fmt.Errorf("requesttrace: duration must be finite and non-negative")
+			return errors.New("requesttrace: duration must be finite and non-negative")
 		}
 	}
+
 	return nil
 }
 
@@ -97,9 +113,11 @@ func validateAttributes(attributes Attributes) error {
 	if err != nil {
 		return fmt.Errorf("requesttrace: encode attributes: %w", err)
 	}
+
 	if len(encoded) > maxAttributesBytes {
 		return errAttributesTooLarge
 	}
+
 	for _, field := range []struct {
 		name  string
 		value string
@@ -114,12 +132,15 @@ func validateAttributes(attributes Attributes) error {
 			return err
 		}
 	}
+
 	if attributes.ErrorCode != "" && !errorCodePattern.MatchString(attributes.ErrorCode) {
-		return fmt.Errorf("requesttrace: error code must be lowercase snake_case")
+		return errors.New("requesttrace: error code must be lowercase snake_case")
 	}
+
 	if attributes.AspectRatio != "" && !aspectRatioPattern.MatchString(attributes.AspectRatio) {
-		return fmt.Errorf("requesttrace: aspect ratio must be adaptive or a numeric colon ratio")
+		return errors.New("requesttrace: aspect ratio must be adaptive or a numeric colon ratio")
 	}
+
 	for _, field := range []struct {
 		name  string
 		value *int
@@ -133,12 +154,17 @@ func validateAttributes(attributes Attributes) error {
 			return fmt.Errorf("requesttrace: %s must be non-negative", field.name)
 		}
 	}
-	if attributes.HTTPStatus != nil && (*attributes.HTTPStatus < 100 || *attributes.HTTPStatus > 599) {
-		return fmt.Errorf("requesttrace: HTTP status must be between 100 and 599")
+
+	if attributes.HTTPStatus != nil &&
+		(*attributes.HTTPStatus < 100 || *attributes.HTTPStatus > 599) {
+		return errors.New("requesttrace: HTTP status must be between 100 and 599")
 	}
-	if attributes.Seconds != nil && (math.IsNaN(*attributes.Seconds) || math.IsInf(*attributes.Seconds, 0) || *attributes.Seconds < 0) {
-		return fmt.Errorf("requesttrace: seconds must be finite and non-negative")
+
+	if attributes.Seconds != nil &&
+		(math.IsNaN(*attributes.Seconds) || math.IsInf(*attributes.Seconds, 0) || *attributes.Seconds < 0) {
+		return errors.New("requesttrace: seconds must be finite and non-negative")
 	}
+
 	return nil
 }
 
@@ -146,15 +172,18 @@ func validRandomID(value string) bool {
 	if len(value) != 32 {
 		return false
 	}
+
 	decoded := make([]byte, 16)
 	if _, err := hex.Decode(decoded, []byte(value)); err != nil {
 		return false
 	}
+
 	for _, char := range value {
 		if char >= 'A' && char <= 'F' {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -169,14 +198,17 @@ func validateOptionalString(name, value string, limit int) error {
 	if !utf8.ValidString(value) {
 		return fmt.Errorf("requesttrace: %s is not valid UTF-8", name)
 	}
+
 	if len(value) > limit {
 		return fmt.Errorf("requesttrace: %s exceeds %d bytes", name, limit)
 	}
+
 	for _, char := range value {
 		if unicode.IsControl(char) {
 			return fmt.Errorf("requesttrace: %s contains a control character", name)
 		}
 	}
+
 	return nil
 }
 

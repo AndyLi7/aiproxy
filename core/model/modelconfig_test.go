@@ -264,6 +264,7 @@ func TestGetModelConfigLoadsFastJSONFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+
 	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
@@ -341,6 +342,7 @@ func setupModelConfigCacheDeleteTest(t *testing.T, modelNames []string) {
 
 	prevDB := model.DB
 	prevUsingSQLite := common.UsingSQLite
+
 	testDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "model-config-cache.db"))
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
@@ -348,14 +350,17 @@ func setupModelConfigCacheDeleteTest(t *testing.T, modelNames []string) {
 
 	model.DB = testDB
 	common.UsingSQLite = true
+
 	sqlDB, err := testDB.DB()
 	if err != nil {
 		t.Fatalf("failed to get sqlite handle: %v", err)
 	}
+
 	t.Cleanup(func() {
 		_ = sqlDB.Close()
 		model.DB = prevDB
 		common.UsingSQLite = prevUsingSQLite
+
 		if prevDB != nil {
 			_ = model.InitModelConfigAndChannelCache()
 		}
@@ -364,6 +369,7 @@ func setupModelConfigCacheDeleteTest(t *testing.T, modelNames []string) {
 	if err := testDB.AutoMigrate(&model.ModelConfig{}, &model.Channel{}); err != nil {
 		t.Fatalf("failed to migrate model cache fixtures: %v", err)
 	}
+
 	for _, name := range modelNames {
 		if err := testDB.Create(&model.ModelConfig{
 			Model: name,
@@ -372,6 +378,7 @@ func setupModelConfigCacheDeleteTest(t *testing.T, modelNames []string) {
 			t.Fatalf("failed to create model config %q: %v", name, err)
 		}
 	}
+
 	if err := testDB.Create(&model.Channel{
 		Name:   "cache-delete-test",
 		Status: model.ChannelStatusEnabled,
@@ -380,6 +387,7 @@ func setupModelConfigCacheDeleteTest(t *testing.T, modelNames []string) {
 	}).Error; err != nil {
 		t.Fatalf("failed to create channel fixture: %v", err)
 	}
+
 	if err := model.InitModelConfigAndChannelCache(); err != nil {
 		t.Fatalf("failed to initialize model cache: %v", err)
 	}
@@ -391,12 +399,14 @@ func enabledModelConfigCacheContains(modelName string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 func TestDeleteModelConfigRefreshesEnabledModelCache(t *testing.T) {
 	const modelName = "cache-delete-single"
 	setupModelConfigCacheDeleteTest(t, []string{modelName})
+
 	if !enabledModelConfigCacheContains(modelName) {
 		t.Fatal("expected fixture in enabled model cache before deletion")
 	}
@@ -413,6 +423,7 @@ func TestDeleteModelConfigRefreshesEnabledModelCache(t *testing.T) {
 func TestUpdateChannelStatusRefreshesEnabledModelCache(t *testing.T) {
 	const modelName = "cache-channel-status"
 	setupModelConfigCacheDeleteTest(t, []string{modelName})
+
 	if !enabledModelConfigCacheContains(modelName) {
 		t.Fatal("expected fixture in enabled model cache before disabling channel")
 	}
@@ -421,9 +432,11 @@ func TestUpdateChannelStatusRefreshesEnabledModelCache(t *testing.T) {
 	if err := model.DB.Where("name = ?", "cache-delete-test").First(&channel).Error; err != nil {
 		t.Fatalf("failed to load channel fixture: %v", err)
 	}
+
 	if err := model.UpdateChannelStatusByID(channel.ID, model.ChannelStatusDisabled); err != nil {
 		t.Fatalf("failed to disable channel: %v", err)
 	}
+
 	if enabledModelConfigCacheContains(modelName) {
 		t.Fatal("expected disabling a channel to refresh the enabled model cache")
 	}
@@ -462,6 +475,7 @@ func TestUpdateGroupModelConfigClearsMaxImageGenerationCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+
 	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
@@ -522,6 +536,7 @@ func TestUpdateGroupModelConfigsClearsMaxImageGenerationCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+
 	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
@@ -586,6 +601,7 @@ func TestUpdateGroupModelConfigClearsMaxVideoGenerationSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+
 	closeTestSQLite(t, testDB)
 
 	model.DB = testDB
@@ -646,6 +662,7 @@ func TestUpdateGroupModelConfigClearsMaxVideoGenerationCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
+
 	closeTestSQLite(t, testDB)
 
 	model.DB = testDB

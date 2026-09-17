@@ -3,7 +3,7 @@ package requesttrace
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"time"
 )
@@ -68,11 +68,14 @@ type Attributes struct {
 
 func (a *Attributes) UnmarshalJSON(data []byte) error {
 	type wire Attributes
+
 	var decoded wire
 	if err := unmarshalStrict(data, &decoded); err != nil {
 		return err
 	}
+
 	*a = Attributes(decoded)
+
 	return nil
 }
 
@@ -97,26 +100,32 @@ type Span struct {
 
 func (s *Span) UnmarshalJSON(data []byte) error {
 	type wire Span
+
 	var decoded wire
 	if err := unmarshalStrict(data, &decoded); err != nil {
 		return err
 	}
+
 	*s = Span(decoded)
+
 	return nil
 }
 
 func unmarshalStrict(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
+
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("requesttrace: trailing JSON value")
+			return errors.New("requesttrace: trailing JSON value")
 		}
 		return err
 	}
+
 	return nil
 }

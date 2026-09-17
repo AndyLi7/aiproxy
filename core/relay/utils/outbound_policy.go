@@ -83,6 +83,7 @@ func isPublicOutboundAddress(address netip.Addr) bool {
 	if !address.IsValid() || address.Zone() != "" {
 		return false
 	}
+
 	if address.Is4In6() {
 		return false
 	}
@@ -91,6 +92,7 @@ func isPublicOutboundAddress(address netip.Addr) bool {
 	if !address.IsGlobalUnicast() {
 		return false
 	}
+
 	if address.Is6() && !globalIPv6UnicastPrefix.Contains(address) {
 		return false
 	}
@@ -115,6 +117,7 @@ func publicOnlyDialContext(
 		}
 
 		host = strings.Trim(host, "[]")
+
 		addresses := make([]netip.Addr, 0, 1)
 		if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
 			addresses = append(addresses, literal)
@@ -145,6 +148,7 @@ func publicOnlyDialContext(
 				ipv4Addresses = append(ipv4Addresses, resolved)
 			}
 		}
+
 		if len(ipv4Addresses) == 0 {
 			return nil, fmt.Errorf(
 				"public-only outbound host %q has no public IPv4 address",
@@ -153,15 +157,17 @@ func publicOnlyDialContext(
 		}
 
 		var lastErr error
+
 		if network == "tcp6" {
 			return nil, errors.New("public-only outbound policy does not dial IPv6")
 		}
-		for _, resolved := range ipv4Addresses {
 
+		for _, resolved := range ipv4Addresses {
 			conn, dialErr := dial(ctx, network, net.JoinHostPort(resolved.String(), port))
 			if dialErr == nil {
 				return conn, nil
 			}
+
 			lastErr = dialErr
 		}
 
@@ -194,12 +200,15 @@ func validatePublicOnlyURL(req *http.Request) error {
 	if req == nil || req.URL == nil || req.URL.Hostname() == "" {
 		return errors.New("public-only outbound target is invalid")
 	}
+
 	if !strings.EqualFold(req.URL.Scheme, "https") {
 		return errors.New("public-only outbound policy requires HTTPS")
 	}
+
 	if req.URL.User != nil {
 		return errors.New("public-only outbound target must not include credentials")
 	}
+
 	return nil
 }
 
@@ -207,6 +216,7 @@ func publicOnlyRedirectPolicy(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
+
 	if err := validatePublicOnlyURL(req); err != nil {
 		return err
 	}

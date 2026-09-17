@@ -20,6 +20,8 @@ const (
 	AsyncUsageStatusPending
 	AsyncUsageStatusCompleted
 	AsyncUsageStatusFailed
+	// Immutable synchronous response lacks billable evidence; never poll upstream.
+	AsyncUsageStatusMeasurementPending
 )
 
 const (
@@ -30,34 +32,37 @@ const (
 var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
-	ID                          int              `gorm:"primaryKey"              json:"id"`
-	RequestID                   string           `gorm:"type:varchar(128);index" json:"request_id"`
-	RequestAt                   time.Time        `                               json:"request_at"`
-	Mode                        int              `gorm:"index"                   json:"mode"`
-	Model                       string           `gorm:"size:128"                json:"model"`
-	Capability                  string           `gorm:"size:64;index"           json:"capability,omitempty"`
-	ChannelID                   int              `gorm:"index"                   json:"channel_id"`
-	BaseURL                     string           `gorm:"type:text"               json:"base_url,omitempty"`
-	GroupID                     string           `gorm:"size:64;index"           json:"group_id"`
-	TokenID                     int              `gorm:"index"                   json:"token_id"`
-	TokenName                   string           `gorm:"size:128"                json:"token_name,omitempty"`
-	PricingCurrency             string           `gorm:"size:16"                 json:"pricing_currency,omitempty"`
-	PricingVersion              string           `gorm:"size:128"                json:"pricing_version,omitempty"`
-	Price                       Price            `gorm:"embedded"                json:"price"`
-	UpstreamID                  string           `gorm:"type:varchar(256);index" json:"upstream_id"`
-	Status                      AsyncUsageStatus `gorm:"index;default:1"         json:"status"`
-	Usage                       Usage            `gorm:"embedded"                json:"usage"`
-	UsageContext                UsageContext     `gorm:"embedded"                json:"usage_context,omitempty"`
-	DisableResolutionFuzzyMatch bool             `                               json:"disable_resolution_fuzzy_match,omitempty"`
-	Amount                      Amount           `gorm:"embedded"                json:"amount,omitempty"`
-	Error                       string           `gorm:"type:text"               json:"error,omitempty"`
-	RetryCount                  int              `                               json:"retry_count"`
-	BalanceConsumeAttempted     bool             `                               json:"balance_consume_attempted"`
-	BalanceConsumed             bool             `                               json:"balance_consumed"`
-	ProcessingToken             string           `gorm:"size:64;index"           json:"-"`
-	NextPollAt                  time.Time        `gorm:"index"                   json:"next_poll_at"`
-	CreatedAt                   time.Time        `                               json:"created_at"`
-	UpdatedAt                   time.Time        `                               json:"updated_at"`
+	MeasuredImage               bool             `json:"measured_image,omitempty"`
+	ID                          int              `json:"id"                                       gorm:"primaryKey"`
+	RequestID                   string           `json:"request_id"                               gorm:"type:varchar(128);index"`
+	RequestAt                   time.Time        `json:"request_at"`
+	Mode                        int              `json:"mode"                                     gorm:"index"`
+	Model                       string           `json:"model"                                    gorm:"size:128"`
+	Capability                  string           `json:"capability,omitempty"                     gorm:"size:64;index"`
+	ChannelID                   int              `json:"channel_id"                               gorm:"index"`
+	BaseURL                     string           `json:"base_url,omitempty"                       gorm:"type:text"`
+	GroupID                     string           `json:"group_id"                                 gorm:"size:64;index"`
+	TokenID                     int              `json:"token_id"                                 gorm:"index"`
+	TokenName                   string           `json:"token_name,omitempty"                     gorm:"size:128"`
+	PricingCurrency             string           `json:"pricing_currency,omitempty"               gorm:"size:16"`
+	PricingVersion              string           `json:"pricing_version,omitempty"                gorm:"size:128"`
+	Price                       Price            `json:"price"                                    gorm:"embedded"`
+	UpstreamID                  string           `json:"upstream_id"                              gorm:"type:varchar(256);index"`
+	Status                      AsyncUsageStatus `json:"status"                                   gorm:"index;default:1"`
+	Usage                       Usage            `json:"usage"                                    gorm:"embedded"`
+	UsageContext                UsageContext     `json:"usage_context,omitempty"                  gorm:"embedded"`
+	DisableResolutionFuzzyMatch bool             `json:"disable_resolution_fuzzy_match,omitempty"`
+	Amount                      Amount           `json:"amount,omitempty"                         gorm:"embedded"`
+	Error                       string           `json:"error,omitempty"                          gorm:"type:text"`
+	RetryCount                  int              `json:"retry_count"`
+	BalanceConsumeAttempted     bool             `json:"balance_consume_attempted"`
+	BalanceConsumed             bool             `json:"balance_consumed"`
+	ProcessingToken             string           `json:"-"                                        gorm:"size:64;index"`
+	NextPollAt                  time.Time        `json:"next_poll_at"                             gorm:"index"`
+	CreatedAt                   time.Time        `json:"created_at"`
+	UpdatedAt                   time.Time        `json:"updated_at"`
+	LogID                       int              `json:"-"`
+	ImageTaskID                 string           `json:"-"                                        gorm:"size:128;index"`
 }
 
 func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
@@ -69,6 +74,7 @@ func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
 		if !capability.Valid() && info.Capability != "reference-to-video" {
 			return fmt.Errorf("invalid async usage capability %q", info.Capability)
 		}
+
 		if strings.Contains(info.Model, modelCapabilityKeySeparator) {
 			return errors.New("async usage model must be a public model ID")
 		}
@@ -99,6 +105,7 @@ func FindCompletedAsyncUsageByUpstreamID(
 	}
 
 	var info AsyncUsageInfo
+
 	err := LogDB.
 		Where("group_id = ?", groupID).
 		Where("token_id = ?", tokenID).
@@ -109,6 +116,7 @@ func FindCompletedAsyncUsageByUpstreamID(
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +253,7 @@ func PrepareClaimedAsyncUsageSettlement(
 		UsageContext: usageContext,
 		Amount:       amount,
 	}
+
 	updates, err := asyncUsageUpdateValues(
 		updatesModel,
 		"Usage",
@@ -421,9 +430,16 @@ func UpdateLogUsageByRequestID(
 	amount Amount,
 	currency string,
 	pricingVersion string,
+	logIDs ...int,
 ) error {
 	var logEntry Log
-	if err := LogDB.Where("request_id = ?", requestID).First(&logEntry).Error; err != nil {
+
+	query := LogDB.Where("request_id = ?", requestID)
+	if len(logIDs) > 0 && logIDs[0] > 0 {
+		query = query.Where("id = ?", logIDs[0])
+	}
+
+	if err := query.First(&logEntry).Error; err != nil {
 		return err
 	}
 
@@ -461,18 +477,20 @@ func UpdateLogAsyncUsageStatusByRequestID(
 	return nil
 }
 
-func UpdateLogAsyncUsageFailedByRequestID(requestID, message string) error {
+func UpdateLogAsyncUsageFailedByRequestID(requestID, message string, logIDs ...int) error {
 	if requestID == "" {
 		return nil
 	}
 
-	tx := LogDB.
-		Model(&Log{}).
-		Where("request_id = ?", requestID).
-		Updates(map[string]any{
-			"async_usage_status": AsyncUsageStatusFailed,
-			"content":            message,
-		})
+	query := LogDB.Model(&Log{}).Where("request_id = ?", requestID)
+	if len(logIDs) > 0 {
+		query = query.Where("id = ?", logIDs[0])
+	}
+
+	tx := query.Updates(
+		map[string]any{"async_usage_status": AsyncUsageStatusFailed, "content": message},
+	)
+
 	if tx.Error != nil {
 		return tx.Error
 	}

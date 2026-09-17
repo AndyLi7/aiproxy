@@ -223,6 +223,7 @@ func TestPublicOnlyDialResolvesOnceAndDialsValidatedIP(t *testing.T) {
 	dial := publicOnlyDialContext(
 		func(_ context.Context, network, host string) ([]netip.Addr, error) {
 			lookupCount++
+
 			require.Equal(t, "ip", network)
 			require.Equal(t, "provider.example", host)
 
@@ -230,6 +231,7 @@ func TestPublicOnlyDialResolvesOnceAndDialsValidatedIP(t *testing.T) {
 		},
 		func(_ context.Context, network, address string) (net.Conn, error) {
 			dialCount++
+
 			require.Equal(t, "tcp", network)
 			require.Equal(t, "93.184.216.34:443", address)
 
@@ -263,7 +265,11 @@ func TestPublicOnlyRedirectRejectsHTTPSDowngrade(t *testing.T) {
 		nil,
 	)
 	require.NoError(t, err)
-	require.ErrorContains(t, publicOnlyRedirectPolicy(downgrade, []*http.Request{previous}), "requires HTTPS")
+	require.ErrorContains(
+		t,
+		publicOnlyRedirectPolicy(downgrade, []*http.Request{previous}),
+		"requires HTTPS",
+	)
 
 	secure, err := http.NewRequestWithContext(
 		t.Context(),

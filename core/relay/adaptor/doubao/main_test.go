@@ -1213,9 +1213,11 @@ func TestAdaptorConvertRequestVideosMapsSemanticDimensions(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("failed to unmarshal converted body %s: %v", string(body), err)
 	}
+
 	if payload["resolution"] != "720p" {
 		t.Fatalf("expected resolution 720p, got %#v", payload["resolution"])
 	}
+
 	if payload["ratio"] != "9:16" {
 		t.Fatalf("expected ratio 9:16, got %#v", payload["ratio"])
 	}
@@ -1717,16 +1719,20 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 	gin.SetMode(gin.TestMode)
 
 	previousLogDB := coremodel.LogDB
+
 	db, err := coremodel.OpenSQLite(filepath.Join(t.TempDir(), "video-status-billing.db"))
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
+
 	if err := db.AutoMigrate(&coremodel.AsyncUsageInfo{}); err != nil {
 		t.Fatalf("migrate async usage: %v", err)
 	}
+
 	coremodel.LogDB = db
 	t.Cleanup(func() {
 		coremodel.LogDB = previousLogDB
+
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()
@@ -1794,17 +1800,21 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 	if err := json.Unmarshal(recorder.Body.Bytes(), &video); err != nil {
 		t.Fatalf("unmarshal video response %s: %v", recorder.Body.String(), err)
 	}
+
 	if video.Cost == nil || *video.Cost != 0.043981 {
 		t.Fatalf("expected settled retail cost, got %#v", video.Cost)
 	}
+
 	if video.Usage == nil || video.Usage.TotalTokens != 19845 {
 		t.Fatalf("expected settled usage, got %#v", video.Usage)
 	}
+
 	if video.Usage.BillableSize != "864x480" ||
 		video.Usage.BillableWidth != 864 ||
 		video.Usage.BillableHeight != 480 {
 		t.Fatalf("expected verified billable dimensions, got %#v", video.Usage)
 	}
+
 	if video.Currency != "USD" || video.PricingVersion != "retail-v1" {
 		t.Fatalf("expected explicit retail pricing metadata, got %#v", video)
 	}
@@ -1812,6 +1822,7 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 	foreignRecorder := httptest.NewRecorder()
 	foreignCtx, _ := gin.CreateTestContext(foreignRecorder)
 	m.Token.ID = 8
+
 	foreignResp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     make(http.Header),
@@ -1821,7 +1832,12 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 			"content":{"video_url":"https://example.com/video.mp4"}
 		}`)),
 	}
-	if _, adaptorErr := (&Adaptor{}).DoResponse(m, store, foreignCtx, foreignResp); adaptorErr != nil {
+	if _, adaptorErr := (&Adaptor{}).DoResponse(
+		m,
+		store,
+		foreignCtx,
+		foreignResp,
+	); adaptorErr != nil {
 		t.Fatalf("foreign DoResponse returned error: %v", adaptorErr)
 	}
 
@@ -1836,6 +1852,7 @@ func TestAdaptorDoResponseCompletedVideoStatusIncludesSettledUsageAndCost(t *tes
 			err,
 		)
 	}
+
 	if foreignVideo.Cost != nil || foreignVideo.Usage != nil {
 		t.Fatalf("must not expose another token's settlement, got %#v", foreignVideo)
 	}
@@ -1925,6 +1942,7 @@ func TestAdaptorDoResponseVideoContentDownloadsGeneratedVideo(t *testing.T) {
 			if recorder.Header().Get("Content-Type") != "video/mp4" {
 				t.Fatalf("expected video/mp4, got %s", recorder.Header().Get("Content-Type"))
 			}
+
 			if recorder.Header().Get("Accept-Ranges") != "bytes" {
 				t.Fatalf(
 					"expected Accept-Ranges bytes, got %q",
@@ -1942,15 +1960,18 @@ func TestAdaptorDoResponseVideoContentDownloadsGeneratedVideo(t *testing.T) {
 func TestAdaptorDoResponseVideoContentSynthesizesRangeWhenSourceIgnoresIt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	videoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Range"); got != "bytes=2-4" {
-			t.Errorf("expected Range bytes=2-4, got %q", got)
-		}
-		w.Header().Set("Content-Type", "video/mp4")
-		w.Header().Set("Content-Length", "8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte{0, 1, 2, 3, 4, 5, 6, 7})
-	}))
+	videoServer := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Range"); got != "bytes=2-4" {
+				t.Errorf("expected Range bytes=2-4, got %q", got)
+			}
+
+			w.Header().Set("Content-Type", "video/mp4")
+			w.Header().Set("Content-Length", "8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte{0, 1, 2, 3, 4, 5, 6, 7})
+		}),
+	)
 	defer videoServer.Close()
 
 	recorder := httptest.NewRecorder()
@@ -1984,21 +2005,27 @@ func TestAdaptorDoResponseVideoContentSynthesizesRangeWhenSourceIgnoresIt(t *tes
 	if relayErr != nil {
 		t.Fatalf("DoResponse returned error: %v", relayErr)
 	}
+
 	if result.UpstreamID != "video-123" {
 		t.Fatalf("unexpected upstream id: %q", result.UpstreamID)
 	}
+
 	if recorder.Code != http.StatusPartialContent {
 		t.Fatalf("expected status 206, got %d", recorder.Code)
 	}
+
 	if got := recorder.Header().Get("Content-Range"); got != "bytes 2-4/8" {
 		t.Fatalf("expected Content-Range bytes 2-4/8, got %q", got)
 	}
+
 	if got := recorder.Header().Get("Accept-Ranges"); got != "bytes" {
 		t.Fatalf("expected Accept-Ranges bytes, got %q", got)
 	}
+
 	if got := recorder.Header().Get("Content-Length"); got != "3" {
 		t.Fatalf("expected Content-Length 3, got %q", got)
 	}
+
 	if got := recorder.Body.Bytes(); !bytes.Equal(got, []byte{2, 3, 4}) {
 		t.Fatalf("unexpected body: %v", got)
 	}

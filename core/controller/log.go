@@ -28,6 +28,7 @@ func parseExcludedModes(c *gin.Context) ([]int, error) {
 	}
 
 	modes := make([]int, 0, len(parts))
+
 	seen := make(map[int]struct{}, len(parts))
 	for _, part := range parts {
 		value, err := strconv.ParseInt(strings.TrimSpace(part), 10, 32)
@@ -39,6 +40,7 @@ func parseExcludedModes(c *gin.Context) ([]int, error) {
 		if _, exists := seen[mode]; exists {
 			return nil, errors.New("duplicate excluded mode")
 		}
+
 		seen[mode] = struct{}{}
 		modes = append(modes, mode)
 	}
@@ -52,8 +54,12 @@ func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, erro
 		Source: strings.TrimSpace(c.Query("request_source")),
 	}
 	if !filter.Status.Valid() {
-		return model.OperationalLogFilter{}, fmt.Errorf("invalid operational status %q", filter.Status)
+		return model.OperationalLogFilter{}, fmt.Errorf(
+			"invalid operational status %q",
+			filter.Status,
+		)
 	}
+
 	if !model.ValidRequestSource(filter.Source) {
 		return model.OperationalLogFilter{}, fmt.Errorf("invalid request source %q", filter.Source)
 	}
@@ -63,11 +69,12 @@ func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, erro
 		return filter, nil
 	}
 
-	for _, rawChannelID := range strings.Split(rawChannels, ",") {
+	for rawChannelID := range strings.SplitSeq(rawChannels, ",") {
 		channelID, err := strconv.Atoi(strings.TrimSpace(rawChannelID))
 		if err != nil || channelID <= 0 {
 			return model.OperationalLogFilter{}, fmt.Errorf("invalid channel ID %q", rawChannelID)
 		}
+
 		filter.ChannelIDs = append(filter.ChannelIDs, channelID)
 	}
 
@@ -137,6 +144,7 @@ func GetLogs(c *gin.Context) {
 	page, perPage := utils.ParsePageParams(c)
 	startTime, endTime := utils.ParseTimeRange(c, 0)
 	params := parseCommonParams(c)
+
 	operationalFilter, err := parseOperationalLogFilter(c)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
@@ -205,11 +213,13 @@ func GetGroupLogs(c *gin.Context) {
 	page, perPage := utils.ParsePageParams(c)
 	startTime, endTime := utils.ParseTimeRange(c, 0)
 	params := parseCommonParams(c)
+
 	excludedModes, err := parseExcludedModes(c)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid exclude_modes parameter")
 		return
 	}
+
 	result, err := model.GetGroupLogs(
 		group,
 		startTime,
@@ -271,6 +281,7 @@ func SearchLogs(c *gin.Context) {
 	page, perPage := utils.ParsePageParams(c)
 	startTime, endTime := utils.ParseTimeRange(c, 0)
 	params := parseCommonParams(c)
+
 	operationalFilter, err := parseOperationalLogFilter(c)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())

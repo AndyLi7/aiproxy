@@ -275,7 +275,9 @@ const (
 var (
 	errAsyncUsageMetricsPending    = errors.New("async usage metrics pending")
 	errAsyncUsageSettlementPending = errors.New("async usage settlement pending")
-	errAsyncUsageManualSettlement  = errors.New("async usage requires manual settlement reconciliation")
+	errAsyncUsageManualSettlement  = errors.New(
+		"async usage requires manual settlement reconciliation",
+	)
 	markAsyncUsageBalanceAttempted = model.MarkAsyncUsageBalanceConsumeAttempted
 	markAsyncUsageBalanceConsumed  = model.MarkAsyncUsageBalanceConsumed
 	completeClaimedAsyncUsageInfo  = model.CompleteClaimedAsyncUsageInfo
@@ -312,6 +314,11 @@ func AsyncUsagePollTask(ctx context.Context) {
 }
 
 func processAsyncUsages(ctx context.Context) bool {
+	// An interrupted submit cannot safely be replayed. Keep its reservation.
+	if err := model.RecoverStaleImageSubmissions(time.Now()); err != nil {
+		log.WithError(err).Warn("recover interrupted image submissions")
+	}
+
 	infos, err := model.GetPendingAsyncUsages(asyncUsageBatchSize)
 	if err != nil {
 		notify.ErrorThrottle(
@@ -413,6 +420,34 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	ctx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
 	defer stopRenew()
 
+	if info.MeasuredImage {
+		result := info.Amount.ImageBillingResult
+		if info.Status != model.AsyncUsageStatusPending {
+			return
+		}
+
+		if result == nil || result.State == "pending" {
+			if err := model.ParkMeasuredImageUsage(info); err != nil {
+				log.Errorf("park measured image usage: %v", err)
+			}
+			return
+		}
+
+		if result.State == "failed" {
+			markAsyncUsageFailed(info, "image operation failed")
+			return
+		}
+
+		completePolledAsyncUsage(ctx, info, info.Usage, info.UsageContext)
+
+		return
+	}
+
+	if info.ImageTaskID != "" {
+		processOneImageUsage(ctx, info)
+		return
+	}
+
 	log.Debugf(
 		"async usage poll: start id=%d request_id=%s upstream_id=%s mode=%d model=%s channel_id=%d retry=%d next_poll_at=%s",
 		info.ID,
@@ -424,6 +459,7 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		info.RetryCount,
 		info.NextPollAt.Format(time.RFC3339),
 	)
+
 	if info.Amount.UsedAmount > 0 {
 		completePolledAsyncUsage(ctx, info, info.Usage, info.UsageContext)
 
@@ -491,6 +527,7 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		Store:   controller.AdaptorStore,
 	})
 	finishTracePoll(completed, err)
+
 	if err != nil {
 		if completed {
 			log.Debugf(
@@ -542,6 +579,7 @@ func completePolledAsyncUsage(
 
 			return
 		}
+
 		if errors.Is(err, errAsyncUsageMetricsPending) {
 			log.Debugf(
 				"async usage poll: metrics_pending id=%d request_id=%s upstream_id=%s",
@@ -552,6 +590,7 @@ func completePolledAsyncUsage(
 
 			return
 		}
+
 		if errors.Is(err, errAsyncUsageSettlementPending) {
 			log.Debugf(
 				"async usage poll: settlement_pending id=%d request_id=%s upstream_id=%s err=%v",
@@ -564,6 +603,7 @@ func completePolledAsyncUsage(
 
 			return
 		}
+
 		if errors.Is(err, errAsyncUsageManualSettlement) {
 			log.Errorf(
 				"async usage poll: manual settlement reconciliation required id=%d request_id=%s upstream_id=%s err=%v",
@@ -624,6 +664,7 @@ func startAsyncUsageClaimRenewalAtInterval(
 ) (context.Context, func()) {
 	workCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+
 	var stopOnce sync.Once
 
 	go func() {
@@ -696,7 +737,12 @@ func completeAsyncUsage(
 	usageContext = usageContext.WithFallback(info.UsageContext)
 
 	price := info.Price
-	settlementPrepared := info.Amount.UsedAmount > 0
+
+	settlementPrepared := info.Amount.UsedAmount > 0 || info.MeasuredImage
+	if !measuredImageSettlementReady(info) {
+		return errAsyncUsageMetricsPending
+	}
+
 	amount := info.Amount
 	if settlementPrepared {
 		usage = info.Usage
@@ -713,6 +759,7 @@ func completeAsyncUsage(
 			},
 		)
 	}
+
 	selectedPrice := price.SelectConditionalPriceWithOptions(
 		usage,
 		usageContext,
@@ -721,13 +768,15 @@ func completeAsyncUsage(
 			RequestAt:                   info.RequestAt,
 		},
 	)
-	if asyncUsageNeedsMetrics(selectedPrice, usage, amount) {
+	if !info.MeasuredImage && asyncUsageNeedsMetrics(selectedPrice, usage, amount) {
 		touchAsyncUsagePollCursor(info)
 
 		return errAsyncUsageMetricsPending
 	}
+
 	selectedPrice.ConditionalPrices = nil
 	nonReplaySafeDebitAttempted := false
+
 	if amount.UsedAmount > 0 && !settlementPrepared {
 		if err := model.PrepareClaimedAsyncUsageSettlement(
 			info,
@@ -737,11 +786,15 @@ func completeAsyncUsage(
 		); err != nil {
 			return fmt.Errorf("prepare async usage settlement: %w", err)
 		}
+
 		info.Usage = usage
 		info.UsageContext = usageContext
 		info.Amount = amount
 	}
 
+	if requiresAccountingLog(info) && info.LogID == 0 {
+		return errors.New("image task accounting log is missing")
+	}
 	// Persist the finalized usage before notifying an external balance provider.
 	// The provider callback may immediately calculate its own settlement from this
 	// log, so charging first exposes an incomplete usage snapshot and leaves that
@@ -754,8 +807,9 @@ func completeAsyncUsage(
 		amount,
 		info.PricingCurrency,
 		info.PricingVersion,
+		info.LogID,
 	); err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if requiresAccountingLog(info) || !errors.Is(err, gorm.ErrRecordNotFound) {
 			notify.ErrorThrottle(
 				"asyncUsageUpdateLog",
 				time.Minute*5,
@@ -771,24 +825,28 @@ func completeAsyncUsage(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		charged, replaySafe, err := consumeAsyncUsageGroupBalance(ctx, info, amount.UsedAmount)
+
 		nonReplaySafeDebitAttempted = charged && !replaySafe
 		if err != nil {
 			if errors.Is(err, errAsyncUsageManualSettlement) {
 				return err
 			}
+
 			if !charged {
 				return fmt.Errorf(
-					"%w: consume async usage balance before charge: %v",
+					"%w: consume async usage balance before charge: %s",
 					errAsyncUsageSettlementPending,
-					err,
+					err.Error(),
 				)
 			}
+
 			if replaySafe {
 				return fmt.Errorf(
-					"%w: confirm idempotent async usage debit: %v",
+					"%w: confirm idempotent async usage debit: %s",
 					errAsyncUsageSettlementPending,
-					err,
+					err.Error(),
 				)
 			}
 
@@ -812,11 +870,12 @@ func completeAsyncUsage(
 			if err := markAsyncUsageBalanceConsumed(info); err != nil {
 				if replaySafe {
 					return fmt.Errorf(
-						"%w: persist consumed balance: %v",
+						"%w: persist consumed balance: %s",
 						errAsyncUsageSettlementPending,
-						err,
+						err.Error(),
 					)
 				}
+
 				notify.ErrorThrottle(
 					"asyncUsageMarkBalanceConsumed",
 					time.Minute*5,
@@ -845,9 +904,9 @@ func completeAsyncUsage(
 	if err != nil {
 		if nonReplaySafeDebitAttempted {
 			return fmt.Errorf(
-				"%w: non-replay-safe debit succeeded but completion marker failed: %v",
+				"%w: non-replay-safe debit succeeded but completion marker failed: %s",
 				errAsyncUsageManualSettlement,
-				err,
+				err.Error(),
 			)
 		}
 
@@ -890,6 +949,7 @@ func asyncUsageNeedsMetrics(
 	if price.PerRequestPrice > 0 {
 		return false
 	}
+
 	if amount.UsedAmount > 0 {
 		return price.VideoInputPrice > 0 && usage.VideoInputTokens <= 0 ||
 			price.OutputPrice > 0 && usage.OutputTokens <= 0
@@ -1020,12 +1080,14 @@ func consumeAsyncUsageGroupBalance(
 	if replayable, ok := consumer.(balance.ReplaySafePostGroupConsumer); ok {
 		replaySafe = replayable.CanReplayPostGroupConsume(ctx)
 	}
+
 	if !replaySafe && info.BalanceConsumeAttempted {
 		return false, false, fmt.Errorf(
 			"%w: non-replay-safe debit was already attempted",
 			errAsyncUsageManualSettlement,
 		)
 	}
+
 	if !replaySafe && info.ID != 0 && info.ProcessingToken != "" {
 		if err := markAsyncUsageBalanceAttempted(info); err != nil {
 			return false, false, fmt.Errorf(
@@ -1033,6 +1095,7 @@ func consumeAsyncUsageGroupBalance(
 				err,
 			)
 		}
+
 		info.BalanceConsumeAttempted = true
 	}
 
@@ -1087,8 +1150,13 @@ func markAsyncUsageFailed(info *model.AsyncUsageInfo, errMsg string) {
 		return
 	}
 
+	var logIDs []int
+	if info.MeasuredImage {
+		logIDs = []int{info.LogID}
+	}
+
 	if err := model.IgnoreNotFound(
-		model.UpdateLogAsyncUsageFailedByRequestID(info.RequestID, errMsg),
+		model.UpdateLogAsyncUsageFailedByRequestID(info.RequestID, errMsg, logIDs...),
 	); err != nil {
 		notify.ErrorThrottle(
 			"asyncUsageUpdateLogStatus",
@@ -1145,4 +1213,13 @@ func checkRedisHealth() {
 
 	// Clear error state if ping succeeds
 	oncall.Clear(KeyRedisConnection)
+}
+
+func measuredImageSettlementReady(info *model.AsyncUsageInfo) bool {
+	return !info.MeasuredImage ||
+		(info.Amount.ImageBillingResult != nil && info.Amount.ImageBillingResult.State == "complete")
+}
+
+func requiresAccountingLog(info *model.AsyncUsageInfo) bool {
+	return info.ImageTaskID != "" || info.MeasuredImage
 }

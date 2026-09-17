@@ -72,6 +72,7 @@ func modelConfigPositiveInt(config map[ModelConfigKey]any, key ModelConfigKey) (
 	if !ok {
 		return 0, false
 	}
+
 	switch typed := value.(type) {
 	case int:
 		return typed, typed > 0
@@ -86,13 +87,16 @@ func modelConfigPositiveInt(config map[ModelConfigKey]any, key ModelConfigKey) (
 
 func decodeCapabilityConfigValue[T any](value any) (T, bool) {
 	var result T
+
 	raw, err := sonic.Marshal(value)
 	if err != nil {
 		return result, false
 	}
+
 	if err := sonic.Unmarshal(raw, &result); err != nil {
 		return result, false
 	}
+
 	return result, true
 }
 
@@ -101,30 +105,39 @@ func CapabilityRoutingMetadataFromConfig(config ModelConfig) (CapabilityRoutingM
 	if !ok {
 		return CapabilityRoutingMetadata{}, false
 	}
+
 	publicModel, ok := modelConfigString(config.Config, ModelConfigPublicModelKey)
 	if !ok {
 		return CapabilityRoutingMetadata{}, false
 	}
-	publicCapabilityModel, ok := modelConfigString(config.Config, ModelConfigPublicCapabilityModelKey)
+
+	publicCapabilityModel, ok := modelConfigString(
+		config.Config,
+		ModelConfigPublicCapabilityModelKey,
+	)
 	if !ok {
 		return CapabilityRoutingMetadata{}, false
 	}
+
 	capability, ok := modelConfigString(config.Config, ModelConfigCapabilityKey)
 	if !ok {
 		return CapabilityRoutingMetadata{}, false
 	}
+
 	schema, ok := decodeCapabilityConfigValue[capabilityObjectSchema](
 		config.Config[ModelConfigParameterSchemaKey],
 	)
 	if !ok || schema.Type != "object" || schema.Properties == nil {
 		return CapabilityRoutingMetadata{}, false
 	}
+
 	defaults, ok := decodeCapabilityConfigValue[map[string]any](
 		config.Config[ModelConfigDefaultParametersKey],
 	)
 	if !ok {
 		return CapabilityRoutingMetadata{}, false
 	}
+
 	if publicCapabilityModel != publicModel+"/"+capability {
 		return CapabilityRoutingMetadata{}, false
 	}
@@ -143,6 +156,7 @@ func capabilityPrimitiveMatches(value any, expected string) bool {
 	if value == nil {
 		return false
 	}
+
 	switch expected {
 	case "string":
 		_, ok := value.(string)
@@ -180,16 +194,20 @@ func capabilityEnumMatches(value any, allowed []any) bool {
 	if len(allowed) == 0 {
 		return true
 	}
+
 	for _, candidate := range allowed {
 		if reflect.DeepEqual(candidate, value) {
 			return true
 		}
+
 		candidateNumber, candidateIsNumber := candidate.(float64)
+
 		valueNumber, valueIsNumber := value.(float64)
 		if candidateIsNumber && valueIsNumber && candidateNumber == valueNumber {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -200,41 +218,50 @@ func capabilityParameterMatches(value any, schema capabilityParameterSchema) boo
 				return true
 			}
 		}
+
 		return false
 	}
+
 	if !capabilityEnumMatches(value, schema.Enum) {
 		return false
 	}
+
 	switch schema.Type {
 	case "object":
 		fields, ok := value.(map[string]any)
 		if !ok {
 			return false
 		}
+
 		for _, required := range schema.Required {
 			child, described := schema.Properties[required]
+
 			field, exists := fields[required]
 			if !exists || !described || !capabilityParameterMatches(field, child) {
 				return false
 			}
 		}
+
 		for name, field := range fields {
 			child, described := schema.Properties[name]
 			if described && !capabilityParameterMatches(field, child) {
 				return false
 			}
 		}
+
 		return true
 	case "array":
 		items, ok := value.([]any)
 		if !ok || schema.Items == nil {
 			return false
 		}
+
 		for _, item := range items {
 			if !capabilityParameterMatches(item, *schema.Items) {
 				return false
 			}
 		}
+
 		return true
 	default:
 		return capabilityPrimitiveMatches(value, schema.Type)
@@ -244,6 +271,7 @@ func capabilityParameterMatches(value any, schema capabilityParameterSchema) boo
 func capabilitySchemaMatches(schema capabilityObjectSchema, fields map[string]any) bool {
 	for _, required := range schema.Required {
 		value, exists := fields[required]
+
 		parameter, described := schema.Properties[required]
 		if !exists || !described || !capabilityParameterMatches(value, parameter) {
 			return false
@@ -255,10 +283,12 @@ func capabilitySchemaMatches(schema capabilityObjectSchema, fields map[string]an
 		if !exists {
 			continue
 		}
+
 		if !capabilityParameterMatches(value, parameter) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -274,11 +304,14 @@ func capabilityCandidates(configs []ModelConfig) []capabilityCandidate {
 		if !ok {
 			continue
 		}
+
 		candidates = append(candidates, capabilityCandidate{config: config, metadata: metadata})
 	}
+
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].metadata.PublicCapabilityModel < candidates[j].metadata.PublicCapabilityModel
 	})
+
 	return candidates
 }
 
@@ -298,17 +331,20 @@ func ResolveCapabilityModel(
 	configs []ModelConfig,
 ) (CapabilityResolution, error) {
 	requested = strings.TrimSpace(requested)
+
 	candidates := capabilityCandidates(configs)
 	for _, candidate := range candidates {
 		if candidate.metadata.PublicCapabilityModel != requested {
 			continue
 		}
+
 		if !capabilitySchemaMatches(candidate.metadata.ParameterSchema, fields) {
 			return CapabilityResolution{}, &CapabilityRoutingError{
 				Code:    CapabilityParameterMismatch,
 				Message: "request parameters do not match the selected capability",
 			}
 		}
+
 		return resolutionFromCandidate(requested, candidate), nil
 	}
 
@@ -318,6 +354,7 @@ func ResolveCapabilityModel(
 			baseCandidates = append(baseCandidates, candidate)
 		}
 	}
+
 	if len(baseCandidates) == 0 {
 		return CapabilityResolution{}, &CapabilityRoutingError{
 			Code:    CapabilityModelNotFound,
@@ -326,31 +363,36 @@ func ResolveCapabilityModel(
 	}
 
 	matched := make([]capabilityCandidate, 0, len(baseCandidates))
+
 	bestSpecificity := -1
 	for _, candidate := range baseCandidates {
 		if !capabilitySchemaMatches(candidate.metadata.ParameterSchema, fields) {
 			continue
 		}
+
 		specificity := len(candidate.metadata.ParameterSchema.Required)
 		switch {
 		case specificity > bestSpecificity:
-			matched = []capabilityCandidate{candidate}
+			matched = append(matched[:0], candidate)
 			bestSpecificity = specificity
 		case specificity == bestSpecificity:
 			matched = append(matched, candidate)
 		}
 	}
+
 	if len(matched) == 0 {
 		return CapabilityResolution{}, &CapabilityRoutingError{
 			Code:    CapabilityNotMatched,
 			Message: "request parameters do not match any available capability",
 		}
 	}
+
 	if len(matched) > 1 {
 		return CapabilityResolution{}, &CapabilityRoutingError{
 			Code:    CapabilityAmbiguous,
 			Message: "request matches multiple capabilities; use a full capability model id",
 		}
 	}
+
 	return resolutionFromCandidate(requested, matched[0]), nil
 }

@@ -50,6 +50,10 @@ func TestFetchVideoContentAppliesChannelPublicOnlyPolicy(t *testing.T) {
 	}, 0, "", coremodel.ModelConfig{})
 	response, err := fetchDoubaoVideoContent(t.Context(), m, server.URL)
 
+	if response != nil {
+		require.NoError(t, response.Body.Close())
+	}
+
 	require.Nil(t, response)
 	require.ErrorContains(t, err, "non-public address")
 }

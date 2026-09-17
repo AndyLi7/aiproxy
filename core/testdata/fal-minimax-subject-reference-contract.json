@@ -1,0 +1,172 @@
+{
+  "entry_id": "minimax/image-01/subject-reference",
+  "contract_hash": "sha256:63347e4c36a69ec4d3dbc3f28ad215781dab12c4eedeea66d0de40d42e27a10b",
+  "contract": {
+    "entry_id": "minimax/image-01/subject-reference",
+    "validation_version": 1,
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "aspect_ratio": {
+          "default": "1:1",
+          "type": "string",
+          "enum": [
+            "1:1",
+            "16:9",
+            "4:3",
+            "3:2",
+            "2:3",
+            "3:4",
+            "9:16",
+            "21:9"
+          ]
+        },
+        "n": {
+          "default": 1,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "prompt_optimizer": {
+          "default": false,
+          "type": "boolean"
+        },
+        "image_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "prompt",
+        "aspect_ratio",
+        "n",
+        "prompt_optimizer",
+        "image_url"
+      ],
+      "additionalProperties": false
+    },
+    "parameter_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500,
+          "title": "Prompt",
+          "uiControl": "textarea"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "1:1",
+            "16:9",
+            "4:3",
+            "3:2",
+            "2:3",
+            "3:4",
+            "9:16",
+            "21:9"
+          ],
+          "title": "Aspect ratio",
+          "uiControl": "select"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9,
+          "title": "Number of images",
+          "description": "Generate 1–9 images per request; billed by the number of returned images."
+        },
+        "prompt_optimizer": {
+          "type": "boolean",
+          "title": "Optimize prompt"
+        },
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "title": "Subject reference",
+          "description": "One human face reference. The API accepts a public image URL or Base64 data URI; the platform uploader accepts PNG, JPEG and WebP up to 10 MB.",
+          "uiControl": "image"
+        }
+      },
+      "required": [
+        "prompt",
+        "image_url"
+      ],
+      "additionalProperties": false
+    },
+    "default_parameters": {
+      "aspect_ratio": "1:1",
+      "n": 1,
+      "prompt_optimizer": false
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "data": {
+          "minItems": 1,
+          "maxItems": 9,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "pattern": "^https:\\/\\/"
+              },
+              "content_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "providers": {
+      "fal": {
+        "adapter": "fal-image",
+        "parameterMapping": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio",
+          "n": "num_images",
+          "prompt_optimizer": "prompt_optimizer",
+          "image_url": "image_url"
+        },
+        "allowedPassthroughParameters": [],
+        "billingBasis": {
+          "metric": "image",
+          "dimensions": [],
+          "minimumBillableUnits": 1,
+          "rounding": "none"
+        },
+        "source": {
+          "url": "https://fal.ai/models/fal-ai/minimax/image-01/subject-reference/api",
+          "verifiedAt": "2026-09-17",
+          "verifiedBy": "platform-engineering"
+        }
+      }
+    },
+    "execution": {
+      "mode": "async",
+      "output": "image",
+      "endpoint": "/v1/images/tasks",
+      "statusEndpoint": "/v1/images/tasks/{id}",
+      "supportsCancellation": false
+    }
+  }
+}

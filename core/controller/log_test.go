@@ -2,6 +2,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,7 @@ func TestParseExcludedModesAcceptsBoundedPositiveIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse excluded modes: %v", err)
 	}
+
 	if !reflect.DeepEqual(got, []int{37, 41}) {
 		t.Fatalf("excluded modes = %v, want [37 41]", got)
 	}
@@ -64,13 +66,19 @@ func TestGetGroupLogsRejectsInvalidExcludeModes(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "group", Value: "group-a"}}
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/log/group-a?exclude_modes=0", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/api/log/group-a?exclude_modes=0",
+		nil,
+	)
 
 	GetGroupLogs(c)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
+
 	if !strings.Contains(w.Body.String(), "invalid exclude_modes parameter") {
 		t.Fatalf("body = %q, want safe invalid parameter message", w.Body.String())
 	}
@@ -83,24 +91,52 @@ func TestGetGroupLogsExcludesModesFromRowsAndTotal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	previousLogDB := model.LogDB
 	model.LogDB = database
 	t.Cleanup(func() {
 		model.LogDB = previousLogDB
+
 		sqlDB, sqlErr := database.DB()
 		if sqlErr == nil {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := database.AutoMigrate(&model.Log{}, &model.RequestDetail{}, &model.GroupSummary{}); err != nil {
+
+	if err := database.AutoMigrate(
+		&model.Log{},
+		&model.RequestDetail{},
+		&model.GroupSummary{},
+	); err != nil {
 		t.Fatalf("migrate log database: %v", err)
 	}
 
 	createdAt := time.Unix(1_787_083_200, 0)
+
 	logs := []model.Log{
-		{GroupID: "group-a", RequestID: "req-create", Model: "seedance", Mode: 22, Code: 200, CreatedAt: createdAt},
-		{GroupID: "group-a", RequestID: "req-poll", Mode: 37, Code: 500, CreatedAt: createdAt.Add(time.Second)},
-		{GroupID: "group-b", RequestID: "req-other-tenant", Model: "seedance", Mode: 22, Code: 200, CreatedAt: createdAt.Add(2 * time.Second)},
+		{
+			GroupID:   "group-a",
+			RequestID: "req-create",
+			Model:     "seedance",
+			Mode:      22,
+			Code:      200,
+			CreatedAt: createdAt,
+		},
+		{
+			GroupID:   "group-a",
+			RequestID: "req-poll",
+			Mode:      37,
+			Code:      500,
+			CreatedAt: createdAt.Add(time.Second),
+		},
+		{
+			GroupID:   "group-b",
+			RequestID: "req-other-tenant",
+			Model:     "seedance",
+			Mode:      22,
+			Code:      200,
+			CreatedAt: createdAt.Add(2 * time.Second),
+		},
 	}
 	if err := database.Create(&logs).Error; err != nil {
 		t.Fatalf("seed logs: %v", err)
@@ -109,7 +145,8 @@ func TestGetGroupLogsExcludesModesFromRowsAndTotal(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "group", Value: "group-a"}}
-	c.Request = httptest.NewRequest(
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
 		http.MethodGet,
 		"/api/log/group-a?page=1&per_page=20&exclude_modes=37&start_timestamp=1787083199&end_timestamp=1787083203",
 		nil,
@@ -120,6 +157,7 @@ func TestGetGroupLogsExcludesModesFromRowsAndTotal(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
 	}
+
 	var payload struct {
 		Success bool `json:"success"`
 		Data    struct {
@@ -132,9 +170,11 @@ func TestGetGroupLogsExcludesModesFromRowsAndTotal(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
+
 	if !payload.Success || payload.Data.Total != 1 {
 		t.Fatalf("response = %s, want one filtered row", w.Body.String())
 	}
+
 	if len(payload.Data.Logs) != 1 || payload.Data.Logs[0].RequestID != "req-create" {
 		t.Fatalf("response = %s, want only req-create", w.Body.String())
 	}
@@ -179,18 +219,23 @@ func TestParseOperationalLogFilterAcceptsStatusAndChannels(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = &http.Request{URL: &url.URL{RawQuery: "status=rejected&channels=10,12&request_source=admin_demo"}}
+	c.Request = &http.Request{
+		URL: &url.URL{RawQuery: "status=rejected&channels=10,12&request_source=admin_demo"},
+	}
 
 	filter, err := parseOperationalLogFilter(c)
 	if err != nil {
 		t.Fatalf("parse operational filter: %v", err)
 	}
+
 	if filter.Status != model.OperationalStatusRejected {
 		t.Fatalf("status = %q, want %q", filter.Status, model.OperationalStatusRejected)
 	}
+
 	if len(filter.ChannelIDs) != 2 || filter.ChannelIDs[0] != 10 || filter.ChannelIDs[1] != 12 {
 		t.Fatalf("channel IDs = %v, want [10 12]", filter.ChannelIDs)
 	}
+
 	if filter.Source != model.RequestSourceAdminDemo {
 		t.Fatalf("source = %q, want %q", filter.Source, model.RequestSourceAdminDemo)
 	}
@@ -207,6 +252,7 @@ func TestParseOperationalLogFilterAcceptsAdminDemoSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse operational filter: %v", err)
 	}
+
 	if filter.Source != model.RequestSourceAdminDemo {
 		t.Fatalf("source = %q, want %q", filter.Source, model.RequestSourceAdminDemo)
 	}

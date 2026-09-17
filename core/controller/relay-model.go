@@ -21,10 +21,12 @@ func publicModelsForToken(
 		if id == "" {
 			return
 		}
+
 		key := strings.ToLower(id)
 		if _, exists := models[key]; exists {
 			return
 		}
+
 		models[key] = &OpenAIModels{
 			ID:         id,
 			Object:     "model",
@@ -41,12 +43,15 @@ func publicModelsForToken(
 		if !ok {
 			return true
 		}
+
 		if metadata, capability := model.CapabilityRoutingMetadataFromConfig(mc); capability {
 			add(metadata.PublicModel, mc.Owner)
 			add(metadata.PublicCapabilityModel, mc.Owner)
 			return true
 		}
+
 		add(modelName, mc.Owner)
+
 		return true
 	})
 
@@ -54,9 +59,11 @@ func publicModelsForToken(
 	for _, entry := range models {
 		result = append(result, entry)
 	}
+
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].ID < result[j].ID
 	})
+
 	return result
 }
 
@@ -94,6 +101,7 @@ func RetrieveModel(c *gin.Context) {
 	token := middleware.GetToken(c)
 	modelName := c.Param("model")
 	enabledModelConfigsMap := middleware.GetModelCaches(c).EnabledModelConfigsMap
+
 	var found *OpenAIModels
 	for _, candidate := range publicModelsForToken(token, enabledModelConfigsMap) {
 		if strings.EqualFold(candidate.ID, modelName) {
@@ -101,6 +109,7 @@ func RetrieveModel(c *gin.Context) {
 			break
 		}
 	}
+
 	if found == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": &relaymodel.OpenAIError{

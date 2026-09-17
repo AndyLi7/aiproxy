@@ -28,6 +28,7 @@ func (c ModelConfig) RetailPricingMetadata() (currency, version string, ok bool)
 	currency, currencyOK := currencyValue.(string)
 	version, versionOK := versionValue.(string)
 	currency = strings.ToUpper(strings.TrimSpace(currency))
+
 	version = strings.TrimSpace(version)
 	if !currencyOK || !versionOK || currency == "" || version == "" {
 		return "", "", false

@@ -227,14 +227,21 @@ func RelayHelper(
 	handel RelayHandler,
 ) (result *controller.HandleResult, retry bool) {
 	attempt := middleware.NextRequestTraceAttempt(c)
-	handle := middleware.BeginRequestTraceStage(c, requesttrace.StageUpstreamAttempt, requestTraceAttemptAttributes(meta, attempt))
+
+	handle := middleware.BeginRequestTraceStage(
+		c,
+		requesttrace.StageUpstreamAttempt,
+		requestTraceAttemptAttributes(meta, attempt),
+	)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			handle.Finish(requesttrace.StatusError)
 			panic(recovered)
 		}
+
 		handle.Finish(requestTraceResultStatus(c.Request.Context(), result))
 	}()
+
 	result = handel(c, meta)
 	if result.Error == nil {
 		return result, false
@@ -267,9 +274,11 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.ValidateRequest != nil {
 		if err := validateRelayRequest(c, mc, relayController.ValidateRequest); err != nil {
 			statusCode := http.StatusInternalServerError
+
 			errorCode := ""
 			if requestParamErr, ok := errors.AsType[*controller.RequestParamError](err); ok {
 				statusCode = requestParamErr.StatusCode
+
 				errorCode = requestParamErr.Code
 				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
 					middleware.AbortPublicVideoRequestError(
@@ -283,6 +292,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 						requestParamErr.AllowedValues,
 						requestParamErr.Expected,
 					)
+
 					return
 				}
 			}
@@ -300,6 +310,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 	// Get initial channel
 	channelStartedAt := time.Now()
+
 	initialChannel, err := getInitialChannelWithTrace(c, routingModel, mode)
 	if err != nil || initialChannel == nil || initialChannel.channel == nil {
 		common.LogLatencyEvent(c, common.LatencyEvent{
@@ -322,6 +333,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 		return
 	}
+
 	common.LogLatencyEvent(c, common.LatencyEvent{
 		Event:      "aiproxy_stage_finished",
 		RequestID:  middleware.GetRequestID(c),
@@ -407,6 +419,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
+
 	upstreamErrorType := ""
 	if c.Request.Context().Err() != nil {
 		upstreamOutcome = "cancelled"
@@ -417,6 +430,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		upstreamStatus = result.Error.StatusCode()
 		upstreamErrorType = "upstream_error"
 	}
+
 	common.LogLatencyEvent(c, common.LatencyEvent{
 		Event:      "aiproxy_stage_finished",
 		RequestID:  middleware.GetRequestID(c),
@@ -484,7 +498,9 @@ func recordResult(
 		failureFields.ResolvedCapability = fields.ResolvedCapability
 		fields = failureFields
 	}
+
 	meta.OperationalFields = fields
+
 	middleware.MarkOperationalLogRecorded(c)
 
 	code := http.StatusOK
@@ -513,8 +529,37 @@ func recordResult(
 		)
 	}
 
-	gbc := middleware.GetGroupBalanceConsumerFromContext(c)
 	usageContext := result.UsageContext.WithFallback(meta.RequestUsageContext)
+
+	selected := price.SelectConditionalPriceWithOptions(
+		result.Usage,
+		usageContext,
+		model.PriceSelectionOptions{
+			DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+			RequestAt:                   meta.RequestAt,
+		},
+	)
+	if selected.ImageBilling != nil ||
+		(price.HasImageBilling() && len(selected.ConditionalPrices) != 0) {
+		recordMeasuredImageResult(
+			c,
+			meta,
+			price,
+			result,
+			usageContext,
+			code,
+			content,
+			retryTimes,
+			downstreamResult,
+			metadata,
+			firstByteAt,
+			detail,
+		)
+
+		return
+	}
+
+	gbc := middleware.GetGroupBalanceConsumerFromContext(c)
 
 	amount := consume.CalculateAmountWithOptions(
 		code,
@@ -594,6 +639,7 @@ func saveAsyncUsageInfo(
 		log.Errorf("failed to save async usage info: %v", err)
 		return
 	}
+
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
 }
 
@@ -1040,4 +1086,165 @@ func ErrorWithRequestID(c *gin.Context, relayErr adaptor.Error) {
 	}
 
 	c.JSON(relayErr.StatusCode(), &node)
+}
+
+// Synchronous measured images share the durable worker, but never its upstream
+// polling path. Failed attempts are audit-only and cannot debit the customer.
+func recordMeasuredImageResult(
+	c *gin.Context,
+	meta *meta.Meta,
+	price model.Price,
+	result *controller.HandleResult,
+	usageContext model.UsageContext,
+	code int,
+	content string,
+	retryTimes int,
+	downstreamResult bool,
+	metadata map[string]string,
+	firstByteAt time.Time,
+	detail *model.RequestDetail,
+) {
+	if code == http.StatusTooManyRequests || config.GetLogDetailStorageHours() < 0 ||
+		config.GetLogStorageHours() < 0 {
+		detail = nil
+	}
+
+	selected := price.SelectConditionalPriceWithOptions(
+		result.Usage,
+		usageContext,
+		model.PriceSelectionOptions{
+			DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+			RequestAt:                   meta.RequestAt,
+		},
+	)
+
+	amount := model.Amount{
+		ImageBillingResult: &model.ImageBillingResult{
+			State:  "pending",
+			Reason: "missing_selected_policy",
+		},
+	}
+	if selected.ImageBilling != nil {
+		selected.ConditionalPrices = nil
+		if !downstreamResult ||
+			(result.Error != nil && (usageContext.ImageUsage == nil || usageContext.ImageUsage.State != "incomplete")) {
+			usageContext.ImageUsage = &model.ImageUsage{
+				Version:  1,
+				State:    "failed",
+				Scenario: selected.ImageBilling.Scenario,
+			}
+		} else if usageContext.ImageUsage == nil {
+			usageContext.ImageUsage = &model.ImageUsage{
+				Version:  1,
+				State:    "incomplete",
+				Scenario: selected.ImageBilling.Scenario,
+				Outputs:  []model.ImageUsageOutput{},
+			}
+		}
+
+		billingCode := code
+		// A truncated upstream response is missing evidence, not a free success.
+		if downstreamResult && usageContext.ImageUsage.State == "incomplete" {
+			billingCode = http.StatusOK
+		}
+
+		amount = consume.CalculateMeasuredImageAmount(
+			billingCode,
+			usageContext.ImageUsage,
+			selected,
+		)
+	}
+
+	currency, version, _ := meta.ModelConfig.RetailPricingMetadata()
+	info := &model.AsyncUsageInfo{
+		RequestID:                   meta.RequestID,
+		RequestAt:                   meta.RequestAt,
+		Mode:                        int(meta.Mode),
+		Model:                       meta.OriginModel,
+		Capability:                  meta.VideoCapability,
+		ChannelID:                   meta.Channel.ID,
+		GroupID:                     meta.Group.ID,
+		TokenID:                     meta.Token.ID,
+		TokenName:                   meta.Token.Name,
+		PricingCurrency:             currency,
+		PricingVersion:              version,
+		Price:                       selected,
+		UpstreamID:                  result.UpstreamID,
+		Usage:                       result.Usage,
+		UsageContext:                usageContext,
+		Amount:                      amount,
+		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+	}
+	fields := meta.OperationalFields
+	entry := &model.Log{
+		RequestDetail: detail,
+		RequestID: model.EmptyNullString(
+			meta.RequestID,
+		),
+		RequestAt:  meta.RequestAt,
+		RetryAt:    meta.RetryAt,
+		GroupID:    meta.Group.ID,
+		TokenID:    meta.Token.ID,
+		TokenName:  meta.Token.Name,
+		Model:      meta.OriginModel,
+		Capability: meta.VideoCapability,
+		ChannelID:  meta.Channel.ID,
+		Mode: int(
+			meta.Mode,
+		),
+		Code:           code,
+		Endpoint:       model.EmptyNullString(meta.Endpoint),
+		IP:             model.EmptyNullString(c.ClientIP()),
+		RetryTimes:     model.ZeroNullInt64(retryTimes),
+		Currency:       currency,
+		PricingVersion: version,
+		UpstreamID:     model.EmptyNullString(result.UpstreamID),
+		Content:        model.EmptyNullString(content),
+		User: model.EmptyNullString(
+			meta.User,
+		),
+		Metadata:       metadata,
+		PromptCacheKey: model.EmptyNullString(meta.PromptCacheKey),
+		RequestSource:  fields.RequestSource,
+		FailureStage:   fields.FailureStage,
+		ErrorCode:      fields.ErrorCode,
+		SafeError:      fields.SafeError,
+	}
+
+	entry.Model, entry.Capability = model.PublicLogIdentity(
+		entry.Model,
+		fields.PublicModel,
+		fields.ResolvedCapability,
+	)
+	if !firstByteAt.IsZero() {
+		entry.TTFBMilliseconds = model.ZeroNullInt64(firstByteAt.Sub(meta.RequestAt).Milliseconds())
+	}
+
+	if err := model.CreateMeasuredImageSettlement(entry, info); err != nil {
+		log.Errorf(
+			"persist measured image settlement failed, request_id=%s: %v",
+			meta.RequestID,
+			err,
+		)
+
+		return
+	}
+
+	// Request counters are recorded once here. A positive outbox adds usage and
+	// amount on settlement; terminal zero/failure/pending evidence has no debit worker.
+	summaryUsage := result.Usage
+	if info.Status == model.AsyncUsageStatusPending {
+		summaryUsage = model.Usage{}
+	}
+
+	consume.Summary(
+		code,
+		firstByteAt,
+		meta,
+		summaryUsage,
+		usageContext,
+		model.Price{},
+		downstreamResult,
+	)
+	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
 }

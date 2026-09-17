@@ -390,8 +390,10 @@ func convertDoubaoVideosRequest(meta *meta.Meta, req *http.Request) (adaptor.Con
 		if err != nil {
 			return adaptor.ConvertResult{}, convertRequestError(meta, err.Error())
 		}
+
 		return convertDoubaoVideoRequest(meta, request)
 	}
+
 	request, err := parseDoubaoVideosRequest(req)
 	if err != nil {
 		return adaptor.ConvertResult{}, convertRequestError(meta, err.Error())
@@ -1177,7 +1179,8 @@ func VideosStatusHandler(
 			usage := relaymodel.VideoUsage{Usage: settled.Usage}
 			// Legacy dimension inference is not a verified formula for references
 			// or fractional-duration editing. Keep their actual token usage only.
-			if doubaoVideoMetadataFromMeta(meta).ReferenceTaskType == "" && video.Seconds == float64(int(video.Seconds)) {
+			if doubaoVideoMetadataFromMeta(meta).ReferenceTaskType == "" &&
+				video.Seconds == float64(int(video.Seconds)) {
 				width, height, ok := coremodel.VerifiedDoubaoVideoBillableDimensions(
 					video.Size,
 					int(video.Seconds),
@@ -1189,6 +1192,7 @@ func VideosStatusHandler(
 					usage.BillableHeight = height
 				}
 			}
+
 			video.Usage = &usage
 			if settled.PricingCurrency != "" && settled.PricingVersion != "" {
 				cost := settled.Amount.UsedAmount
@@ -1257,6 +1261,7 @@ func fetchDoubaoVideoContentHandler(
 			http.StatusInternalServerError,
 		)
 	}
+
 	videoResp, err := fetchDoubaoVideoContentWithRetry(
 		c.Request.Context(),
 		meta,
@@ -1279,6 +1284,7 @@ func fetchDoubaoVideoContentHandler(
 		status := http.StatusBadGateway
 		if isRetryableDoubaoVideoContentStatus(videoResp.StatusCode) {
 			c.Header("Retry-After", "2")
+
 			status = http.StatusServiceUnavailable
 		}
 
@@ -1290,6 +1296,7 @@ func fetchDoubaoVideoContentHandler(
 
 	responseStatus := videoResp.StatusCode
 	copyStart := int64(0)
+
 	copyLength := int64(-1)
 	if responseStatus == http.StatusOK && c.GetHeader("Range") != "" {
 		contentLength, parseErr := strconv.ParseInt(
@@ -1322,6 +1329,7 @@ func fetchDoubaoVideoContentHandler(
 	// when the storage origin does not advertise range support, this relay can
 	// serve byte ranges itself, so tell media clients that seeking is available.
 	c.Writer.Header().Set("Accept-Ranges", "bytes")
+
 	for _, header := range []string{
 		"Content-Length",
 		"Content-Range",
@@ -1332,10 +1340,13 @@ func fetchDoubaoVideoContentHandler(
 			c.Writer.Header().Set(header, value)
 		}
 	}
+
 	c.Writer.WriteHeader(responseStatus)
+
 	if copyStart > 0 {
 		_, _ = io.CopyN(io.Discard, videoResp.Body, copyStart)
 	}
+
 	if copyLength >= 0 {
 		_, _ = io.CopyN(c.Writer, videoResp.Body, copyLength)
 	} else {
@@ -1354,6 +1365,7 @@ func resolveDoubaoVideoByteRange(value string, size int64) (int64, int64, bool) 
 	if strings.Contains(spec, ",") {
 		return 0, 0, false
 	}
+
 	parts := strings.SplitN(spec, "-", 2)
 	if len(parts) != 2 {
 		return 0, 0, false
@@ -1364,9 +1376,11 @@ func resolveDoubaoVideoByteRange(value string, size int64) (int64, int64, bool) 
 		if err != nil || suffix <= 0 {
 			return 0, 0, false
 		}
+
 		if suffix > size {
 			suffix = size
 		}
+
 		return size - suffix, size - 1, true
 	}
 
@@ -1374,6 +1388,7 @@ func resolveDoubaoVideoByteRange(value string, size int64) (int64, int64, bool) 
 	if err != nil || start < 0 || start >= size {
 		return 0, 0, false
 	}
+
 	if parts[1] == "" {
 		return start, size - 1, true
 	}
@@ -1382,9 +1397,11 @@ func resolveDoubaoVideoByteRange(value string, size int64) (int64, int64, bool) 
 	if err != nil || end < start {
 		return 0, 0, false
 	}
+
 	if end >= size {
 		end = size - 1
 	}
+
 	return start, end, true
 }
 
@@ -1458,10 +1475,12 @@ func buildDoubaoVideo(
 	now := time.Now().Unix()
 	metadata := doubaoVideoMetadataFromMeta(meta)
 	resolution, ratio := doubaoVideoResolutionAndRatio(response, metadata)
+
 	generateAudio := metadata.OutputAudio
 	if generateAudio == nil {
 		generateAudio = response.GenerateAudio
 	}
+
 	video := relaymodel.Video{
 		ID:            id,
 		Object:        relaymodel.VideoObject,
@@ -1492,6 +1511,7 @@ func buildDoubaoVideo(
 	if seconds <= 0 {
 		seconds = float64(max(metadata.Duration, 0))
 	}
+
 	return doubaoPublicVideo{Video: video, Seconds: seconds}
 }
 
@@ -1550,6 +1570,7 @@ func doubaoVideoSubmitUsageContext(
 	response *relaymodel.DoubaoVideoTaskResponse,
 ) coremodel.UsageContext {
 	usageContext := doubaoVideoUsageContext(response)
+
 	requestContext := doubaoVideoRequestUsageContext(meta)
 	if requestContext.OutputAudio != nil {
 		usageContext.OutputAudio = requestContext.OutputAudio
@@ -1603,6 +1624,7 @@ func fetchDoubaoVideoContentWithRange(
 	if err != nil {
 		return nil, err
 	}
+
 	if rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
@@ -1649,9 +1671,11 @@ func fetchDoubaoVideoContentWithRetry(
 			!isRetryableDoubaoVideoContentStatus(response.StatusCode) {
 			return response, nil
 		}
+
 		if err == nil && response != nil && attempt >= len(delays) {
 			return response, nil
 		}
+
 		if err != nil {
 			lastErr = err
 		} else if response != nil {
@@ -1841,6 +1865,7 @@ func (metadata doubaoVideoStoreMetadata) WithFallback(
 	if metadata.ReferenceTaskType == "" {
 		metadata.ReferenceTaskType = fallback.ReferenceTaskType
 	}
+
 	if metadata.Prompt == "" {
 		metadata.Prompt = fallback.Prompt
 	}
@@ -1909,6 +1934,7 @@ func effectiveDoubaoVideoOutputAudio(meta *meta.Meta, requested *bool) *bool {
 	if requested != nil {
 		return requested
 	}
+
 	if meta == nil {
 		return new(true)
 	}
@@ -1922,11 +1948,13 @@ func effectiveDoubaoVideoOutputAudio(meta *meta.Meta, requested *bool) *bool {
 	if audioMode == "none" {
 		return new(false)
 	}
+
 	if audioMode == "optional" {
 		defaultEnabled, ok := audio["defaultEnabled"].(bool)
 		if !ok {
 			return new(false)
 		}
+
 		return new(defaultEnabled)
 	}
 

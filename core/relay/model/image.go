@@ -22,6 +22,8 @@ type ImageRequest struct {
 }
 
 type ImageData struct {
+	Size          string `json:"size,omitempty"`
+	ZIndex        *int64 `json:"z_index,omitempty"`
 	URL           string `json:"url,omitempty"`
 	B64Json       string `json:"b64_json,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty"`

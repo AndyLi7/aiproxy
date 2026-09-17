@@ -4,6 +4,7 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,9 +66,9 @@ func TestVideoCapabilityContractFixture(t *testing.T) {
 	require.Equal(t, []string{"text-to-video", "image-to-video"}, fixture.Capabilities)
 
 	for _, route := range fixture.ValidRoutes {
-		route := route
 		t.Run(route.Capability, func(t *testing.T) {
 			t.Parallel()
+
 			capability := model.ModelCapability(route.Capability)
 			routingModel, err := model.BuildModelCapabilityKey(route.PublicModel, capability)
 			require.NoError(t, err)
@@ -87,26 +88,29 @@ func TestVideoCapabilityContractFixture(t *testing.T) {
 	}
 
 	for _, requestCase := range fixture.InvalidRequests {
-		requestCase := requestCase
 		t.Run(requestCase.ErrorCode, func(t *testing.T) {
 			t.Parallel()
+
 			body := map[string]any{"model": requestCase.PublicModel}
 			if requestCase.Capability != nil {
 				body["capability"] = *requestCase.Capability
 			}
+
 			raw, err := json.Marshal(body)
 			require.NoError(t, err)
 			req := httptest.NewRequestWithContext(
 				t.Context(), http.MethodPost, "/v1/videos", bytes.NewReader(raw),
 			)
 			req.Header.Set("Content-Type", "application/json")
+
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 			ctx.Request = req
 
 			_, _, err = resolveVideoCapability(
 				ctx, mode.Videos, requestCase.PublicModel,
 			)
-			validationErr, ok := err.(*publicVideoRequestValidationError)
+			validationErr := &publicVideoRequestValidationError{}
+			ok := errors.As(err, &validationErr)
 			require.True(t, ok)
 			require.Equal(t, requestCase.ErrorCode, validationErr.code)
 		})

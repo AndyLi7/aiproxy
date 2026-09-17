@@ -75,19 +75,27 @@ func AdminAuth(c *gin.Context) {
 }
 
 func TokenAuth(c *gin.Context) {
-	authTrace := BeginRequestTraceStage(c, requesttrace.StageAuthentication, requesttrace.Attributes{})
+	authTrace := BeginRequestTraceStage(
+		c,
+		requesttrace.StageAuthentication,
+		requesttrace.Attributes{},
+	)
+
 	authTraceFinished := false
 	defer func() {
 		if !authTraceFinished {
 			authTrace.Finish(requesttrace.StatusError)
 		}
 	}()
+
 	startedAt := time.Now()
+
 	stageLogged := false
 	defer func() {
 		if stageLogged {
 			return
 		}
+
 		common.LogLatencyEvent(c, common.LatencyEvent{
 			Event:      "aiproxy_stage_finished",
 			RequestID:  GetRequestID(c),
@@ -100,6 +108,7 @@ func TokenAuth(c *gin.Context) {
 			ErrorType:  "authentication_rejected",
 		})
 	}()
+
 	log := common.GetLogger(c)
 
 	key := c.Request.Header.Get("Authorization")
@@ -186,6 +195,7 @@ func TokenAuth(c *gin.Context) {
 
 		group = *groupCache
 	}
+
 	BindRequestTraceGroup(c, group.ID)
 
 	c.Header("Group", group.ID)
@@ -193,7 +203,13 @@ func TokenAuth(c *gin.Context) {
 	SetLogGroupFields(log.Data, group)
 
 	if group.Status != model.GroupStatusEnabled && group.Status != model.GroupStatusInternal {
-		AbortOperationally(c, model.FailureStageEntitlement, http.StatusForbidden, "group is disabled")
+		AbortOperationally(
+			c,
+			model.FailureStageEntitlement,
+			http.StatusForbidden,
+			"group is disabled",
+		)
+
 		return
 	}
 
@@ -213,8 +229,11 @@ func TokenAuth(c *gin.Context) {
 		Method:     c.Request.Method,
 		Path:       c.Request.URL.Path,
 	})
+
 	stageLogged = true
+
 	authTrace.Finish(requesttrace.StatusSuccess)
+
 	authTraceFinished = true
 
 	c.Next()

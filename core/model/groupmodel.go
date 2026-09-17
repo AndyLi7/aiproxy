@@ -72,7 +72,7 @@ type GroupModelConfig struct {
 	SummaryClaudeLongContext         bool `json:"summary_claude_long_context"`
 }
 
-func (g *GroupModelConfig) BeforeSave(_ *gorm.DB) (err error) {
+func (g *GroupModelConfig) BeforeSave(tx *gorm.DB) (err error) {
 	if g.Model == "" {
 		return errors.New("model is required")
 	}
@@ -86,6 +86,25 @@ func (g *GroupModelConfig) BeforeSave(_ *gorm.DB) (err error) {
 
 	if err := g.Price.ValidateConditionalPrices(); err != nil {
 		return err
+	}
+
+	if g.OverridePrice && g.Price.HasImageBilling() {
+		if tx == nil {
+			return errors.New("cannot validate measured group price without its target model")
+		}
+
+		var target ModelConfig
+		if err := tx.Session(&gorm.Session{NewDB: true}).
+			Where("model = ?", g.Model).
+			First(&target).
+			Error; err != nil {
+			return fmt.Errorf("resolve measured group price model: %w", err)
+		}
+
+		target.Price = g.Price
+		if err := target.ValidateImageBillingMode(); err != nil {
+			return err
+		}
 	}
 
 	return nil

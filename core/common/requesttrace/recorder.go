@@ -32,12 +32,15 @@ func NewRecorder(requestID string, emit func(Span) bool) *Recorder {
 		recorder.disabled = true
 		return recorder
 	}
+
 	traceID, err := newRandomID()
 	if err != nil {
 		recorder.disabled = true
 		return recorder
 	}
+
 	recorder.traceID = traceID
+
 	return recorder
 }
 
@@ -45,8 +48,10 @@ func (r *Recorder) TraceID() string {
 	if r == nil {
 		return ""
 	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	return r.traceID
 }
 
@@ -54,8 +59,10 @@ func (r *Recorder) Truncated() bool {
 	if r == nil {
 		return false
 	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	return r.truncated
 }
 
@@ -63,6 +70,7 @@ func (r *Recorder) markTruncated() {
 	if r == nil {
 		return
 	}
+
 	r.mu.Lock()
 	r.truncated = true
 	r.mu.Unlock()
@@ -79,24 +87,30 @@ func (r *Recorder) BeginWithAttributes(stage Stage, parentID string, attrs Attri
 	if r == nil {
 		return disabledHandle()
 	}
+
 	started := time.Now()
 	attrs = cloneAttributes(attrs)
+
 	r.mu.Lock()
-	if r.disabled || !validStage(stage) || validateAttributes(attrs) != nil || (parentID != "" && !r.ownsSpan(parentID)) {
+	if r.disabled || !validStage(stage) || validateAttributes(attrs) != nil ||
+		(parentID != "" && !r.ownsSpan(parentID)) {
 		r.mu.Unlock()
 		return disabledHandle()
 	}
+
 	if r.spanCount >= maxSpansPerRecorder {
 		r.truncated = true
 		r.mu.Unlock()
 		return disabledHandle()
 	}
+
 	spanID, err := newRandomID()
 	if err != nil {
 		r.disabled = true
 		r.mu.Unlock()
 		return disabledHandle()
 	}
+
 	r.spanCount++
 	r.spanIDs[spanID] = struct{}{}
 	span := Span{
@@ -118,6 +132,7 @@ func (r *Recorder) BeginWithAttributes(stage Stage, parentID string, attrs Attri
 	if !emit(span) {
 		r.markTruncated()
 	}
+
 	return &Handle{recorder: r, span: span, started: started}
 }
 
@@ -127,30 +142,37 @@ func cloneAttributes(attrs Attributes) Attributes {
 		value := *attrs.ChannelID
 		cloned.ChannelID = &value
 	}
+
 	if attrs.Attempt != nil {
 		value := *attrs.Attempt
 		cloned.Attempt = &value
 	}
+
 	if attrs.HTTPStatus != nil {
 		value := *attrs.HTTPStatus
 		cloned.HTTPStatus = &value
 	}
+
 	if attrs.Width != nil {
 		value := *attrs.Width
 		cloned.Width = &value
 	}
+
 	if attrs.Height != nil {
 		value := *attrs.Height
 		cloned.Height = &value
 	}
+
 	if attrs.Seconds != nil {
 		value := *attrs.Seconds
 		cloned.Seconds = &value
 	}
+
 	if attrs.GenerateAudio != nil {
 		value := *attrs.GenerateAudio
 		cloned.GenerateAudio = &value
 	}
+
 	return cloned
 }
 
@@ -187,11 +209,13 @@ func (h *Handle) Finish(status Status) bool {
 	if h == nil || h.recorder == nil || status == StatusRunning || !validStatus(status) {
 		return false
 	}
+
 	accepted := false
 	h.once.Do(func() {
 		finished := h.span
 		finished.Status = status
 		finished.Revision = 2
+
 		finished.Truncated = h.recorder.currentTruncated()
 		if status != StatusUnknown {
 			ended := time.Now()
@@ -200,14 +224,17 @@ func (h *Handle) Finish(status Status) bool {
 			finished.EndedAt = &endedUTC
 			finished.DurationMS = &duration
 		}
+
 		if Validate(finished) != nil {
 			return
 		}
+
 		accepted = h.recorder.emit(finished)
 		if !accepted {
 			h.recorder.markTruncated()
 		}
 	})
+
 	return accepted
 }
 
@@ -216,5 +243,6 @@ func newRandomID() (string, error) {
 	if _, err := io.ReadFull(rand.Reader, buffer); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(buffer), nil
 }

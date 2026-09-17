@@ -11,15 +11,18 @@ import (
 	"github.com/labring/aiproxy/core/trace"
 )
 
-const requestTraceSessionKey = "request_trace_session"
-const requestTraceEnvelopeKey = "request_trace_envelope"
-const requestTracePendingOwnerKey = "request_trace_pending_owner"
+const (
+	requestTraceSessionKey      = "request_trace_session"
+	requestTraceEnvelopeKey     = "request_trace_envelope"
+	requestTracePendingOwnerKey = "request_trace_pending_owner"
+)
 
 func RequestTraceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Service credentials must never be forwarded to an upstream provider.
 		wire := c.GetHeader("X-Platform-Trace")
 		c.Request.Header.Del("X-Platform-Trace")
+
 		if !isRequestTraceRoute(c.Request.Method, c.Request.URL.Path) {
 			c.Next()
 			return
@@ -30,7 +33,9 @@ func RequestTraceMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+
 		c.Set(requestTraceSessionKey, session)
+
 		if len(wire) <= 2048 {
 			c.Set(requestTraceEnvelopeKey, wire)
 		}
@@ -41,12 +46,15 @@ func RequestTraceMiddleware() gin.HandlerFunc {
 					session.BindGroup(owner)
 				}
 			}
+
 			if recovered := recover(); recovered != nil {
 				session.Finish(requesttrace.StatusError)
 				panic(recovered)
 			}
+
 			session.Finish(requestTraceOutcome(c))
 		}()
+
 		c.Next()
 	}
 }
@@ -55,37 +63,50 @@ func BindRequestTraceGroup(c *gin.Context, groupID string) bool {
 	if c == nil {
 		return false
 	}
+
 	if c.Request == nil {
 		return requestTraceSession(c).BindGroup(groupID)
 	}
+
 	if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodDelete {
 		// The distributor will resolve task ownership before flushing identity.
 		c.Set(requestTracePendingOwnerKey, groupID)
 		c.Set(requestTraceEnvelopeKey, "")
 		return requestTraceSession(c) != nil
 	}
+
 	wire, _ := c.Get(requestTraceEnvelopeKey)
 	c.Set(requestTraceEnvelopeKey, "")
+
 	envelope, _ := wire.(string)
-	return trace.Current().BindRequest(c.Request.Context(), requestTraceSession(c), envelope, requesttrace.TrustedRequest{
-		GroupID: groupID, RequestID: GetRequestID(c), Method: c.Request.Method, Path: c.Request.URL.Path,
-	})
+
+	return trace.Current().
+		BindRequest(c.Request.Context(), requestTraceSession(c), envelope, requesttrace.TrustedRequest{
+			GroupID:   groupID,
+			RequestID: GetRequestID(c),
+			Method:    c.Request.Method,
+			Path:      c.Request.URL.Path,
+		})
 }
 
 func BindRequestTraceTask(c *gin.Context, group string, tokenID, channelID int, taskID string) {
 	if c == nil || c.Request == nil {
 		return
 	}
+
 	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodDelete {
 		return
 	}
-	trace.Current().BindTask(c.Request.Context(), requestTraceSession(c), group, tokenID, channelID, taskID)
+
+	trace.Current().
+		BindTask(c.Request.Context(), requestTraceSession(c), group, tokenID, channelID, taskID)
 }
 
 func SaveRequestTraceTask(c *gin.Context, asyncID int, group string) {
 	if c == nil || c.Request == nil {
 		return
 	}
+
 	trace.Current().SaveTask(c.Request.Context(), requestTraceSession(c), asyncID, group)
 }
 
@@ -105,8 +126,10 @@ func requestTraceSession(c *gin.Context) *requesttrace.Session {
 	if c == nil {
 		return nil
 	}
+
 	session, _ := c.Get(requestTraceSessionKey)
 	value, _ := session.(*requesttrace.Session)
+
 	return value
 }
 
@@ -116,9 +139,11 @@ func requestTraceOutcome(c *gin.Context) requesttrace.Status {
 	} else if err != nil {
 		return requesttrace.StatusCancelled
 	}
+
 	if c.Writer.Status() >= http.StatusBadRequest {
 		return requesttrace.StatusError
 	}
+
 	return requesttrace.StatusSuccess
 }
 

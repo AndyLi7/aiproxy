@@ -85,7 +85,10 @@ func TestVideosStatusHandlerEchoesPublicIDNotUpstreamID(t *testing.T) {
 	// upstream one. Read it under the wrong key and the prompt silently
 	// disappears from every status response.
 	if video.Prompt != "A stored prompt" {
-		t.Fatalf("expected stored metadata resolved under the public id, got prompt %q", video.Prompt)
+		t.Fatalf(
+			"expected stored metadata resolved under the public id, got prompt %q",
+			video.Prompt,
+		)
 	}
 
 	if result.UpstreamID != publicID {

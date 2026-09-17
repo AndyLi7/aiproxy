@@ -23,6 +23,6 @@ type StatusData struct {
 func GetStatus(c *gin.Context) {
 	middleware.SuccessResponse(c, &StatusData{
 		StartTime: common.StartTime,
-		Features:  []string{model.AdminDemoFeature},
+		Features:  []string{model.AdminDemoFeature, "image_billing_v1"},
 	})
 }

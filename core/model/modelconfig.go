@@ -54,7 +54,7 @@ type ModelConfig struct {
 	retryTimesOverridden        bool                      `gorm:"-"                             json:"-"                                        yaml:"-"`
 }
 
-func (c *ModelConfig) BeforeSave(_ *gorm.DB) (err error) {
+func (c *ModelConfig) BeforeSave(tx *gorm.DB) (err error) {
 	if c.Model == "" {
 		return errors.New("model is required")
 	}
@@ -65,6 +65,14 @@ func (c *ModelConfig) BeforeSave(_ *gorm.DB) (err error) {
 			"retry_budget must be between 0 and %d seconds",
 			config.MaxRetryBudgetSeconds,
 		)
+	}
+
+	if err := c.ValidateImageBillingMode(); err != nil {
+		return err
+	}
+
+	if err := c.validateMeasuredGroupOverrides(tx); err != nil {
+		return err
 	}
 
 	if err := c.Price.ValidateConditionalPrices(); err != nil {
@@ -471,4 +479,38 @@ func DeleteModelConfigsByModels(models []string) (err error) {
 			Delete(&ModelConfig{}).
 			Error
 	})
+}
+
+func (c ModelConfig) ValidateImageBillingMode() error {
+	if c.Price.HasImageBilling() && c.Type != mode.ImagesGenerations && c.Type != mode.ImagesEdits {
+		return errors.New("image_billing requires an image model")
+	}
+	return nil
+}
+
+// A model type change must not strand an active measured group override.
+func (c ModelConfig) validateMeasuredGroupOverrides(tx *gorm.DB) error {
+	if tx == nil || c.Type == mode.ImagesGenerations || c.Type == mode.ImagesEdits {
+		return nil
+	}
+
+	query := tx.Session(&gorm.Session{NewDB: true})
+	if !query.Migrator().HasTable(&GroupModelConfig{}) {
+		return nil
+	}
+
+	var overrides []GroupModelConfig
+	if err := query.Where("model = ? AND override_price = ?", c.Model, true).
+		Find(&overrides).
+		Error; err != nil {
+		return err
+	}
+
+	for _, override := range overrides {
+		if override.Price.HasImageBilling() {
+			return errors.New("model type conflicts with an active measured image group override")
+		}
+	}
+
+	return nil
 }

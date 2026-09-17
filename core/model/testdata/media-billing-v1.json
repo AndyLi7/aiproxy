@@ -1,0 +1,2229 @@
+[
+  {
+    "name": "input-0",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 300000,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "input-1",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 1,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 300000,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "input-2",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 320000,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "boundary-plus-one",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610001,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 600000,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "mixed",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        },
+        {
+          "index": 1,
+          "width": 2610001,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 900000,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "failed",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "failed",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 0,
+    "state": "failed",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "zero-output-no-input-bill",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 10,
+      "outputs": []
+    },
+    "amountMicros": 0,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "incomplete",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "incomplete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing-input",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "count-mismatch",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ],
+      "generated_count": 2
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "duplicate",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        },
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing-width",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "scenario-mismatch",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "layer_decomposition",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unknown-usage",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ],
+      "surprise": 1
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": null,
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unsafe-pixels",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 100000000,
+          "height": 100000000
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "grouped-half-up",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 1
+        },
+        {
+          "index": 1,
+          "width": 1,
+          "height": 1
+        },
+        {
+          "index": 2,
+          "width": 1,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 11,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "zero-price",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 0,
+        "amountMicros": 0,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": null,
+          "amountMicros": 0,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": 0,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "layers",
+    "policy": {
+      "version": 1,
+      "scenario": "layer_decomposition",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "layer_decomposition",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 1,
+          "z_index": 0
+        },
+        {
+          "index": 1,
+          "width": 1,
+          "height": 1,
+          "z_index": 1
+        }
+      ]
+    },
+    "amountMicros": 600000,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing-base",
+    "policy": {
+      "version": 1,
+      "scenario": "layer_decomposition",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "layer_decomposition",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 1,
+          "width": 1,
+          "height": 1,
+          "z_index": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "duplicate-layer",
+    "policy": {
+      "version": 1,
+      "scenario": "layer_decomposition",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "layer_decomposition",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 1,
+          "z_index": 0
+        },
+        {
+          "index": 1,
+          "width": 1,
+          "height": 1,
+          "z_index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "version",
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unknown",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ],
+      "extra": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "negative",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": -1,
+        "amountMicros": 1,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing-open",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "duplicate-threshold",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unsafe-amount",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 0,
+        "amountMicros": 9007199254740992,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "empty-tiers",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": []
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "total-overflow",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 1
+        },
+        {
+          "index": 1,
+          "width": 1,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 9007199254740991,
+      "unitQuantity": 1
+    }
+  },
+  {
+    "name": "failed-no-measurements",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "failed"
+    },
+    "amountMicros": 0,
+    "state": "failed",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "flat-no-size",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": 4,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "separate-retail-allowance",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 0,
+        "amountMicros": 40000,
+        "unitQuantity": 1
+      }
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "input_count": 2,
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": 80004,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing-amount",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 0,
+        "unitQuantity": 1
+      }
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "zero-unit",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 0,
+        "unitQuantity": 0,
+        "amountMicros": 1
+      }
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unknown-input-key",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 0,
+        "unitQuantity": 1,
+        "amountMicros": 1,
+        "extra": 1
+      }
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unknown-scenario",
+    "policy": {
+      "version": 1,
+      "scenario": "other"
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "too-many-tiers",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "outputPixelTiers": [
+        {
+          "maxPixels": 1,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 2,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 3,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 4,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 5,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 6,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 7,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 8,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 9,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 10,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 11,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 12,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 13,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 14,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 15,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 16,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 17,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 18,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 19,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 20,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 21,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 22,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 23,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 24,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 25,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 26,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 27,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 28,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 29,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 30,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 31,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 32,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 33,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 34,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 35,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 36,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 37,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 38,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 39,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 40,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 41,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 42,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 43,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 44,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 45,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 46,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 47,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 48,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 49,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 50,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 51,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 52,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 53,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 54,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 55,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 56,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 57,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 58,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 59,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 60,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 61,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 62,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 63,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": 64,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 1,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 2610000,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "missing-index",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "width": 1,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "unknown-output-key",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 1,
+          "url": "not-a-measurement"
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "zero-dimension",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 0,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "null-dimension",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": null,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "fractional-dimension",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 20000,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2610000,
+          "amountMicros": 300000,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 600000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 0,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1.5,
+          "height": 1
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "pending",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 7,
+      "unitQuantity": 2
+    }
+  },
+  {
+    "name": "default-missing-amount",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "unitQuantity": 1
+    }
+  },
+  {
+    "name": "default-null-amount",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": null,
+      "unitQuantity": 1
+    }
+  },
+  {
+    "name": "default-unknown-key",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 10,
+      "unitQuantity": 1,
+      "typo": 2
+    }
+  },
+  {
+    "name": "default-missing-unit",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 10
+    }
+  },
+  {
+    "name": "default-null-unit",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 10,
+      "unitQuantity": null
+    }
+  },
+  {
+    "name": "default-negative-amount",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": -1,
+      "unitQuantity": 1
+    }
+  },
+  {
+    "name": "default-zero-unit",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": null,
+    "state": "complete",
+    "invalid": true,
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 0
+    }
+  },
+  {
+    "name": "default-explicit-zero",
+    "policy": {
+      "version": 1,
+      "scenario": "generation"
+    },
+    "usage": {
+      "version": 1,
+      "scenario": "generation",
+      "state": "complete",
+      "outputs": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    "amountMicros": 0,
+    "state": "complete",
+    "invalid": false,
+    "defaultRate": {
+      "amountMicros": 0,
+      "unitQuantity": 1
+    }
+  }
+]

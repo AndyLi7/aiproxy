@@ -213,6 +213,11 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
+	if price.HasImageBilling() {
+		imageTaskHTTPError(c, 400, "measured_image_billing_not_supported_by_queue_adapter")
+		return
+	}
+
 	currency, version, pricingOK := mc.RetailPricingMetadata()
 	if !pricingOK {
 		imageTaskHTTPError(c, 503, "pricing_metadata_unavailable")

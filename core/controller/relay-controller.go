@@ -529,8 +529,37 @@ func recordResult(
 		)
 	}
 
-	gbc := middleware.GetGroupBalanceConsumerFromContext(c)
 	usageContext := result.UsageContext.WithFallback(meta.RequestUsageContext)
+
+	selected := price.SelectConditionalPriceWithOptions(
+		result.Usage,
+		usageContext,
+		model.PriceSelectionOptions{
+			DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+			RequestAt:                   meta.RequestAt,
+		},
+	)
+	if selected.ImageBilling != nil ||
+		(price.HasImageBilling() && len(selected.ConditionalPrices) != 0) {
+		recordMeasuredImageResult(
+			c,
+			meta,
+			price,
+			result,
+			usageContext,
+			code,
+			content,
+			retryTimes,
+			downstreamResult,
+			metadata,
+			firstByteAt,
+			detail,
+		)
+
+		return
+	}
+
+	gbc := middleware.GetGroupBalanceConsumerFromContext(c)
 
 	amount := consume.CalculateAmountWithOptions(
 		code,
@@ -1057,4 +1086,165 @@ func ErrorWithRequestID(c *gin.Context, relayErr adaptor.Error) {
 	}
 
 	c.JSON(relayErr.StatusCode(), &node)
+}
+
+// Synchronous measured images share the durable worker, but never its upstream
+// polling path. Failed attempts are audit-only and cannot debit the customer.
+func recordMeasuredImageResult(
+	c *gin.Context,
+	meta *meta.Meta,
+	price model.Price,
+	result *controller.HandleResult,
+	usageContext model.UsageContext,
+	code int,
+	content string,
+	retryTimes int,
+	downstreamResult bool,
+	metadata map[string]string,
+	firstByteAt time.Time,
+	detail *model.RequestDetail,
+) {
+	if code == http.StatusTooManyRequests || config.GetLogDetailStorageHours() < 0 ||
+		config.GetLogStorageHours() < 0 {
+		detail = nil
+	}
+
+	selected := price.SelectConditionalPriceWithOptions(
+		result.Usage,
+		usageContext,
+		model.PriceSelectionOptions{
+			DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+			RequestAt:                   meta.RequestAt,
+		},
+	)
+
+	amount := model.Amount{
+		ImageBillingResult: &model.ImageBillingResult{
+			State:  "pending",
+			Reason: "missing_selected_policy",
+		},
+	}
+	if selected.ImageBilling != nil {
+		selected.ConditionalPrices = nil
+		if !downstreamResult ||
+			(result.Error != nil && (usageContext.ImageUsage == nil || usageContext.ImageUsage.State != "incomplete")) {
+			usageContext.ImageUsage = &model.ImageUsage{
+				Version:  1,
+				State:    "failed",
+				Scenario: selected.ImageBilling.Scenario,
+			}
+		} else if usageContext.ImageUsage == nil {
+			usageContext.ImageUsage = &model.ImageUsage{
+				Version:  1,
+				State:    "incomplete",
+				Scenario: selected.ImageBilling.Scenario,
+				Outputs:  []model.ImageUsageOutput{},
+			}
+		}
+
+		billingCode := code
+		// A truncated upstream response is missing evidence, not a free success.
+		if downstreamResult && usageContext.ImageUsage.State == "incomplete" {
+			billingCode = http.StatusOK
+		}
+
+		amount = consume.CalculateMeasuredImageAmount(
+			billingCode,
+			usageContext.ImageUsage,
+			selected,
+		)
+	}
+
+	currency, version, _ := meta.ModelConfig.RetailPricingMetadata()
+	info := &model.AsyncUsageInfo{
+		RequestID:                   meta.RequestID,
+		RequestAt:                   meta.RequestAt,
+		Mode:                        int(meta.Mode),
+		Model:                       meta.OriginModel,
+		Capability:                  meta.VideoCapability,
+		ChannelID:                   meta.Channel.ID,
+		GroupID:                     meta.Group.ID,
+		TokenID:                     meta.Token.ID,
+		TokenName:                   meta.Token.Name,
+		PricingCurrency:             currency,
+		PricingVersion:              version,
+		Price:                       selected,
+		UpstreamID:                  result.UpstreamID,
+		Usage:                       result.Usage,
+		UsageContext:                usageContext,
+		Amount:                      amount,
+		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
+	}
+	fields := meta.OperationalFields
+	entry := &model.Log{
+		RequestDetail: detail,
+		RequestID: model.EmptyNullString(
+			meta.RequestID,
+		),
+		RequestAt:  meta.RequestAt,
+		RetryAt:    meta.RetryAt,
+		GroupID:    meta.Group.ID,
+		TokenID:    meta.Token.ID,
+		TokenName:  meta.Token.Name,
+		Model:      meta.OriginModel,
+		Capability: meta.VideoCapability,
+		ChannelID:  meta.Channel.ID,
+		Mode: int(
+			meta.Mode,
+		),
+		Code:           code,
+		Endpoint:       model.EmptyNullString(meta.Endpoint),
+		IP:             model.EmptyNullString(c.ClientIP()),
+		RetryTimes:     model.ZeroNullInt64(retryTimes),
+		Currency:       currency,
+		PricingVersion: version,
+		UpstreamID:     model.EmptyNullString(result.UpstreamID),
+		Content:        model.EmptyNullString(content),
+		User: model.EmptyNullString(
+			meta.User,
+		),
+		Metadata:       metadata,
+		PromptCacheKey: model.EmptyNullString(meta.PromptCacheKey),
+		RequestSource:  fields.RequestSource,
+		FailureStage:   fields.FailureStage,
+		ErrorCode:      fields.ErrorCode,
+		SafeError:      fields.SafeError,
+	}
+
+	entry.Model, entry.Capability = model.PublicLogIdentity(
+		entry.Model,
+		fields.PublicModel,
+		fields.ResolvedCapability,
+	)
+	if !firstByteAt.IsZero() {
+		entry.TTFBMilliseconds = model.ZeroNullInt64(firstByteAt.Sub(meta.RequestAt).Milliseconds())
+	}
+
+	if err := model.CreateMeasuredImageSettlement(entry, info); err != nil {
+		log.Errorf(
+			"persist measured image settlement failed, request_id=%s: %v",
+			meta.RequestID,
+			err,
+		)
+
+		return
+	}
+
+	// Request counters are recorded once here. A positive outbox adds usage and
+	// amount on settlement; terminal zero/failure/pending evidence has no debit worker.
+	summaryUsage := result.Usage
+	if info.Status == model.AsyncUsageStatusPending {
+		summaryUsage = model.Usage{}
+	}
+
+	consume.Summary(
+		code,
+		firstByteAt,
+		meta,
+		summaryUsage,
+		usageContext,
+		model.Price{},
+		downstreamResult,
+	)
+	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
 }

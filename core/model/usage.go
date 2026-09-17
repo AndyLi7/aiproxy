@@ -37,7 +37,8 @@ type ConditionalPrice struct {
 }
 
 type Price struct {
-	PerRequestPrice ZeroNullFloat64 `json:"per_request_price,omitempty"`
+	ImageBilling    *ImageBillingPolicy `gorm:"serializer:fastjson;type:text" json:"image_billing,omitempty"`
+	PerRequestPrice ZeroNullFloat64     `                                     json:"per_request_price,omitempty"`
 
 	InputPrice     ZeroNullFloat64 `json:"input_price,omitempty"`
 	InputPriceUnit ZeroNullInt64   `json:"input_price_unit,omitempty"`
@@ -524,6 +525,10 @@ func validateDailyTimeCondition(condition PriceCondition, index int) error {
 }
 
 func (p *Price) ValidateConditionalPrices() error {
+	if err := p.validateImageBillingBranches(); err != nil {
+		return err
+	}
+
 	if len(p.ConditionalPrices) == 0 {
 		return nil
 	}
@@ -582,7 +587,10 @@ func (p *Price) ValidateConditionalPrices() error {
 		// selection keeps the first match when specificity ties.
 		for j := i + 1; j < len(p.ConditionalPrices); j++ {
 			otherCondition := p.ConditionalPrices[j].Condition
-			if priceConditionsHaveDifferentSpecificity(condition, otherCondition) {
+
+			mixedImagePolicy := (conditionalPrice.Price.ImageBilling != nil) != (p.ConditionalPrices[j].Price.ImageBilling != nil)
+			if !mixedImagePolicy &&
+				priceConditionsHaveDifferentSpecificity(condition, otherCondition) {
 				continue
 			}
 
@@ -903,15 +911,16 @@ func (u *Usage) Add(other Usage) {
 }
 
 type UsageContext struct {
-	Resolution       string `gorm:"size:32"        json:"resolution,omitempty"`
-	NativeResolution string `gorm:"size:32"        json:"native_resolution,omitempty"`
-	Seconds          int    `gorm:"column:seconds" json:"seconds,omitempty"`
-	Quality          string `gorm:"size:32"        json:"quality,omitempty"`
-	ServiceTier      string `gorm:"size:32"        json:"service_tier,omitempty"`
-	VideoSeconds     int64  `                      json:"video_seconds,omitempty"`
-	InputMedia       *bool  `                      json:"input_media,omitempty"`
-	InputVideo       *bool  `                      json:"input_video,omitempty"`
-	OutputAudio      *bool  `                      json:"output_audio,omitempty"`
+	ImageUsage       *ImageUsage `gorm:"serializer:fastjson;type:text" json:"image_usage,omitempty"`
+	Resolution       string      `gorm:"size:32"                       json:"resolution,omitempty"`
+	NativeResolution string      `gorm:"size:32"                       json:"native_resolution,omitempty"`
+	Seconds          int         `gorm:"column:seconds"                json:"seconds,omitempty"`
+	Quality          string      `gorm:"size:32"                       json:"quality,omitempty"`
+	ServiceTier      string      `gorm:"size:32"                       json:"service_tier,omitempty"`
+	VideoSeconds     int64       `                                     json:"video_seconds,omitempty"`
+	InputMedia       *bool       `                                     json:"input_media,omitempty"`
+	InputVideo       *bool       `                                     json:"input_video,omitempty"`
+	OutputAudio      *bool       `                                     json:"output_audio,omitempty"`
 }
 
 func (c UsageContext) PriceConditionMatches(condition PriceCondition) bool {
@@ -1033,17 +1042,18 @@ func (c UsageContext) protocolResolutionExactlyMatches(condition PriceCondition)
 }
 
 type Amount struct {
-	InputAmount         float64 `json:"input_amount,omitempty"`
-	ImageInputAmount    float64 `json:"image_input_amount,omitempty"`
-	AudioInputAmount    float64 `json:"audio_input_amount,omitempty"`
-	VideoInputAmount    float64 `json:"video_input_amount,omitempty"`
-	OutputAmount        float64 `json:"output_amount,omitempty"`
-	ImageOutputAmount   float64 `json:"image_output_amount,omitempty"`
-	AudioOutputAmount   float64 `json:"audio_output_amount,omitempty"`
-	CachedAmount        float64 `json:"cached_amount,omitempty"`
-	CacheCreationAmount float64 `json:"cache_creation_amount,omitempty"`
-	WebSearchAmount     float64 `json:"web_search_amount,omitempty"`
-	UsedAmount          float64 `json:"used_amount,omitempty"`
+	ImageBillingResult  *ImageBillingResult `gorm:"serializer:fastjson;type:text" json:"image_billing_result,omitempty"`
+	InputAmount         float64             `                                     json:"input_amount,omitempty"`
+	ImageInputAmount    float64             `                                     json:"image_input_amount,omitempty"`
+	AudioInputAmount    float64             `                                     json:"audio_input_amount,omitempty"`
+	VideoInputAmount    float64             `                                     json:"video_input_amount,omitempty"`
+	OutputAmount        float64             `                                     json:"output_amount,omitempty"`
+	ImageOutputAmount   float64             `                                     json:"image_output_amount,omitempty"`
+	AudioOutputAmount   float64             `                                     json:"audio_output_amount,omitempty"`
+	CachedAmount        float64             `                                     json:"cached_amount,omitempty"`
+	CacheCreationAmount float64             `                                     json:"cache_creation_amount,omitempty"`
+	WebSearchAmount     float64             `                                     json:"web_search_amount,omitempty"`
+	UsedAmount          float64             `                                     json:"used_amount,omitempty"`
 }
 
 func (a *Amount) Add(other Amount) {
@@ -1080,4 +1090,57 @@ func (a *Amount) Add(other Amount) {
 	a.UsedAmount = decimal.NewFromFloat(a.UsedAmount).
 		Add(decimal.NewFromFloat(other.UsedAmount)).
 		InexactFloat64()
+}
+
+func (p *Price) validateImageBillingBranches() error {
+	if len(p.ConditionalPrices) > ImageBillingMaxRules {
+		return errors.New("too many conditional prices")
+	}
+
+	if err := p.validateImageBillingPrice(); err != nil {
+		return err
+	}
+
+	for _, branch := range p.ConditionalPrices {
+		if len(branch.Price.ConditionalPrices) != 0 {
+			return errors.New("nested conditional prices are unsupported")
+		}
+
+		if err := branch.Price.validateImageBillingPrice(); err != nil {
+			return err
+		}
+
+		if (p.ImageBilling != nil && branch.Price.ImageBilling == nil) ||
+			(p.ImageBilling == nil && p.hasLegacyImageRate() && branch.Price.ImageBilling != nil) {
+			return errors.New("overlapping legacy and measured image prices")
+		}
+	}
+
+	return nil
+}
+
+// ImageBillingFallbackRate converts the legacy enclosing rate to exact micro-units.
+func (p Price) ImageBillingFallbackRate() (ImageBillingRate, error) {
+	value, unit := float64(p.OutputPrice), int64(p.OutputPriceUnit)
+	if p.ImageOutputPrice != 0 {
+		value, unit = float64(p.ImageOutputPrice), int64(p.ImageOutputPriceUnit)
+	}
+
+	if unit == 0 {
+		unit = 1
+	}
+
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return ImageBillingRate{}, errors.New("invalid image fallback rate")
+	}
+
+	micros := decimal.NewFromFloat(value).Mul(decimal.NewFromInt(1000000))
+	if !micros.Equal(micros.Truncate(0)) || micros.IsNegative() ||
+		micros.GreaterThan(decimal.NewFromInt(ImageBillingMaxSafeInteger)) {
+		return ImageBillingRate{}, errors.New("image rate must be safe integer micro-units")
+	}
+
+	rate := ImageBillingRate{AmountMicros: micros.IntPart(), UnitQuantity: unit}
+
+	return rate, rate.Validate()
 }

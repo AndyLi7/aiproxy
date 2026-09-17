@@ -252,6 +252,10 @@ func CalculateAmountDetailWithOptions(
 ) model.Amount {
 	modelPrice = modelPrice.SelectConditionalPriceWithOptions(usage, usageContext, options)
 
+	if modelPrice.ImageBilling != nil {
+		return CalculateMeasuredImageAmount(code, usageContext.ImageUsage, modelPrice)
+	}
+
 	if modelPrice.PerRequestPrice != 0 {
 		if code != http.StatusOK {
 			return model.Amount{}
@@ -437,4 +441,49 @@ func processGroupConsume(
 	}
 
 	return consumedAmount
+}
+
+// CalculateMeasuredImageAmount never falls back to token or image-count pricing.
+func CalculateMeasuredImageAmount(
+	code int,
+	usage *model.ImageUsage,
+	price model.Price,
+) model.Amount {
+	if code != http.StatusOK {
+		usage = &model.ImageUsage{
+			Version:  1,
+			State:    "failed",
+			Scenario: price.ImageBilling.Scenario,
+		}
+	}
+
+	result := model.ImageBillingResult{
+		State:  "pending",
+		Reason: "invalid_rate",
+		Lines:  []model.ImageBillingLine{},
+	}
+
+	rate, rateErr := price.ImageBillingFallbackRate()
+	if rateErr == nil {
+		evaluated, err := model.EvaluateImageBilling(price.ImageBilling, usage, rate)
+		if err == nil {
+			result = evaluated
+		} else {
+			result.Reason = "invalid_billing"
+		}
+	}
+
+	amount := model.Amount{ImageBillingResult: &result}
+	if result.State == "complete" && result.AmountMicros != nil {
+		amount.UsedAmount = float64(*result.AmountMicros) / 1000000
+		for _, line := range result.Lines {
+			if line.Kind == "input" {
+				amount.ImageInputAmount += float64(line.AmountMicros) / 1000000
+			} else {
+				amount.ImageOutputAmount += float64(line.AmountMicros) / 1000000
+			}
+		}
+	}
+
+	return amount
 }

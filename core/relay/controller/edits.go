@@ -70,6 +70,7 @@ func GetImagesEditsRequestPrice(c *gin.Context, mc model.ModelConfig) (model.Pri
 	}
 
 	return model.Price{
+		ImageBilling:         mc.Price.ImageBilling,
 		PerRequestPrice:      mc.Price.PerRequestPrice,
 		InputPrice:           mc.Price.InputPrice,
 		InputPriceUnit:       mc.Price.InputPriceUnit,

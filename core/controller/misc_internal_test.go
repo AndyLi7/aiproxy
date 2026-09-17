@@ -34,5 +34,9 @@ func TestStatusAdvertisesAdminDemoV1(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.True(t, payload.Success)
 	require.NotZero(t, payload.Data.StartTime)
-	require.Equal(t, []string{"token_platform.admin_demo.v1"}, payload.Data.Features)
+	require.Equal(
+		t,
+		[]string{"token_platform.admin_demo.v1", "image_billing_v1"},
+		payload.Data.Features,
+	)
 }

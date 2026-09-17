@@ -677,17 +677,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	c.Set(RoutingModel, findModel)
 	c.Set(ModelConfig, mc)
 
-	if !CheckRelayMode(mode, mc.Type) {
-		AbortOperationally(
-			c,
-			model.FailureStageModel,
-			http.StatusNotFound,
-			fmt.Sprintf(
-				"The model `%s` does not exist on this endpoint.",
-				publicModel,
-			),
-		)
-
+	if !validateEffectiveRelayModel(c, mode, mc, publicModel) {
 		return
 	}
 
@@ -1910,4 +1900,38 @@ func abortUnavailableRequestModel(
 			requestModel,
 		),
 	)
+}
+
+func validateEffectiveRelayModel(
+	c *gin.Context,
+	requestMode mode.Mode,
+	mc model.ModelConfig,
+	publicModel string,
+) bool {
+	if err := mc.ValidateImageBillingMode(); err != nil {
+		AbortOperationally(
+			c,
+			model.FailureStageModel,
+			http.StatusServiceUnavailable,
+			"the selected model pricing is temporarily unavailable",
+		)
+
+		return false
+	}
+
+	if !CheckRelayMode(requestMode, mc.Type) {
+		AbortOperationally(
+			c,
+			model.FailureStageModel,
+			http.StatusNotFound,
+			fmt.Sprintf(
+				"The model `%s` does not exist on this endpoint.",
+				publicModel,
+			),
+		)
+
+		return false
+	}
+
+	return true
 }

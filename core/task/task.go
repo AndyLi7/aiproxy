@@ -420,6 +420,29 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	ctx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
 	defer stopRenew()
 
+	if info.MeasuredImage {
+		result := info.Amount.ImageBillingResult
+		if info.Status != model.AsyncUsageStatusPending {
+			return
+		}
+
+		if result == nil || result.State == "pending" {
+			if err := model.ParkMeasuredImageUsage(info); err != nil {
+				log.Errorf("park measured image usage: %v", err)
+			}
+			return
+		}
+
+		if result.State == "failed" {
+			markAsyncUsageFailed(info, "image operation failed")
+			return
+		}
+
+		completePolledAsyncUsage(ctx, info, info.Usage, info.UsageContext)
+
+		return
+	}
+
 	if info.ImageTaskID != "" {
 		processOneImageUsage(ctx, info)
 		return
@@ -714,7 +737,11 @@ func completeAsyncUsage(
 	usageContext = usageContext.WithFallback(info.UsageContext)
 
 	price := info.Price
-	settlementPrepared := info.Amount.UsedAmount > 0
+
+	settlementPrepared := info.Amount.UsedAmount > 0 || info.MeasuredImage
+	if !measuredImageSettlementReady(info) {
+		return errAsyncUsageMetricsPending
+	}
 
 	amount := info.Amount
 	if settlementPrepared {
@@ -741,7 +768,7 @@ func completeAsyncUsage(
 			RequestAt:                   info.RequestAt,
 		},
 	)
-	if asyncUsageNeedsMetrics(selectedPrice, usage, amount) {
+	if !info.MeasuredImage && asyncUsageNeedsMetrics(selectedPrice, usage, amount) {
 		touchAsyncUsagePollCursor(info)
 
 		return errAsyncUsageMetricsPending
@@ -765,7 +792,7 @@ func completeAsyncUsage(
 		info.Amount = amount
 	}
 
-	if info.ImageTaskID != "" && info.LogID == 0 {
+	if requiresAccountingLog(info) && info.LogID == 0 {
 		return errors.New("image task accounting log is missing")
 	}
 	// Persist the finalized usage before notifying an external balance provider.
@@ -782,7 +809,7 @@ func completeAsyncUsage(
 		info.PricingVersion,
 		info.LogID,
 	); err != nil {
-		if info.ImageTaskID != "" || !errors.Is(err, gorm.ErrRecordNotFound) {
+		if requiresAccountingLog(info) || !errors.Is(err, gorm.ErrRecordNotFound) {
 			notify.ErrorThrottle(
 				"asyncUsageUpdateLog",
 				time.Minute*5,
@@ -1123,8 +1150,13 @@ func markAsyncUsageFailed(info *model.AsyncUsageInfo, errMsg string) {
 		return
 	}
 
+	var logIDs []int
+	if info.MeasuredImage {
+		logIDs = []int{info.LogID}
+	}
+
 	if err := model.IgnoreNotFound(
-		model.UpdateLogAsyncUsageFailedByRequestID(info.RequestID, errMsg),
+		model.UpdateLogAsyncUsageFailedByRequestID(info.RequestID, errMsg, logIDs...),
 	); err != nil {
 		notify.ErrorThrottle(
 			"asyncUsageUpdateLogStatus",
@@ -1181,4 +1213,13 @@ func checkRedisHealth() {
 
 	// Clear error state if ping succeeds
 	oncall.Clear(KeyRedisConnection)
+}
+
+func measuredImageSettlementReady(info *model.AsyncUsageInfo) bool {
+	return !info.MeasuredImage ||
+		(info.Amount.ImageBillingResult != nil && info.Amount.ImageBillingResult.State == "complete")
+}
+
+func requiresAccountingLog(info *model.AsyncUsageInfo) bool {
+	return info.ImageTaskID != "" || info.MeasuredImage
 }

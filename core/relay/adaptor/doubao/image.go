@@ -2,6 +2,7 @@ package doubao
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -20,6 +21,8 @@ import (
 	relayutils "github.com/labring/aiproxy/core/relay/utils"
 )
 
+const metaDoubaoImageScenario = "doubao_image_scenario"
+
 const metaDoubaoImageResponseFormat = "doubao_image_response_format"
 
 const doubaoImageStreamEventPartialSucceeded = "image_generation.partial_succeeded"
@@ -32,6 +35,7 @@ type doubaoImageResponse struct {
 }
 
 type doubaoImageData struct {
+	ZIndex        *int64                  `json:"z_index,omitempty"`
 	URL           string                  `json:"url,omitempty"`
 	B64JSON       string                  `json:"b64_json,omitempty"`
 	RevisedPrompt string                  `json:"revised_prompt,omitempty"`
@@ -40,6 +44,8 @@ type doubaoImageData struct {
 }
 
 type doubaoImageUsage struct {
+	InputImages     *int64 `json:"input_images,omitempty"`
+	generatedCount  *int64
 	GeneratedImages int64                `json:"generated_images,omitempty"`
 	OutputTokens    int64                `json:"output_tokens,omitempty"`
 	TotalTokens     int64                `json:"total_tokens,omitempty"`
@@ -74,6 +80,37 @@ func ConvertImageRequest(meta *meta.Meta, req *http.Request) (adaptor.ConvertRes
 	}
 
 	meta.Set(metaDoubaoImageResponseFormat, responseFormat)
+
+	scenario := "generation"
+
+	layer := node.Get("layer_decomposition")
+	if layer != nil && layer.Exists() {
+		enabled, err := layer.Bool()
+		if err != nil {
+			return adaptor.ConvertResult{}, errors.New("layer_decomposition must be a boolean")
+		}
+
+		if enabled {
+			scenario = "layer_decomposition"
+		}
+	}
+
+	meta.Set(metaDoubaoImageScenario, scenario)
+
+	stream := node.Get("stream")
+	if stream != nil && stream.Exists() {
+		enabled, err := stream.Bool()
+		if err != nil {
+			return adaptor.ConvertResult{}, err
+		}
+
+		if enabled &&
+			(scenario == "layer_decomposition" || strings.Contains(strings.ToLower(meta.ActualModel), "5-0-pro") || strings.Contains(strings.ToLower(meta.ActualModel), "5.0-pro") || meta.ModelConfig.Price.HasImageBilling()) {
+			return adaptor.ConvertResult{}, errors.New(
+				"measured image billing and Seedream Pro do not support streaming",
+			)
+		}
+	}
 
 	if err := normalizeDoubaoImageRequest(&node, meta.ActualModel); err != nil {
 		return adaptor.ConvertResult{}, err
@@ -162,11 +199,26 @@ func ImageHandler(
 
 	var response doubaoImageResponse
 	if err := common.UnmarshalResponse(resp, &response); err != nil {
-		return adaptor.DoResponseResult{}, relaymodel.WrapperOpenAIError(
-			err,
-			"unmarshal_response_body_failed",
-			http.StatusInternalServerError,
-		)
+		scenario := meta.GetString(metaDoubaoImageScenario)
+		if scenario == "" {
+			scenario = "generation"
+		}
+
+		return adaptor.DoResponseResult{
+				UsageContext: coremodel.UsageContext{
+					ImageUsage: &coremodel.ImageUsage{
+						Version:  1,
+						State:    "incomplete",
+						Scenario: scenario,
+						Outputs:  []coremodel.ImageUsageOutput{},
+					},
+				},
+			},
+			relaymodel.WrapperOpenAIError(
+				err,
+				"unmarshal_response_body_failed",
+				http.StatusInternalServerError,
+			)
 	}
 
 	if response.Error != nil && response.Error.Message != "" {
@@ -178,6 +230,27 @@ func ImageHandler(
 
 	usage := doubaoImageUsageToModelUsage(response.Usage, response.Data, 0)
 	usageContext := doubaoImageUsageContext(response.Data).WithFallback(meta.RequestUsageContext)
+
+	scenario := meta.GetString(metaDoubaoImageScenario)
+	if scenario == "" {
+		scenario = "generation"
+	}
+
+	measuredUsage := measureDoubaoImages(response, scenario)
+	if meta.ModelConfig.Price.HasImageBilling() {
+		usageContext.ImageUsage = measuredUsage
+	}
+
+	if measuredUsage.State == "failed" && scenario == "layer_decomposition" {
+		return adaptor.DoResponseResult{
+				UsageContext: usageContext,
+			},
+			relaymodel.WrapperOpenAIError(
+				errors.New("layer decomposition failed"),
+				"layer_decomposition_failed",
+				http.StatusBadGateway,
+			)
+	}
 
 	if meta.GetString(metaDoubaoImageResponseFormat) == "b64_json" {
 		for _, data := range response.Data {
@@ -198,7 +271,11 @@ func ImageHandler(
 		}
 	}
 
-	openAIResponse := doubaoImageResponseToOpenAI(response, usage)
+	openAIResponse := doubaoImageResponseToOpenAI(
+		response,
+		usage,
+		meta.ModelConfig.Price.HasImageBilling() || scenario == "layer_decomposition",
+	)
 
 	data, err := sonic.Marshal(&openAIResponse)
 	if err != nil {
@@ -223,6 +300,7 @@ func ImageHandler(
 func doubaoImageResponseToOpenAI(
 	response doubaoImageResponse,
 	usage coremodel.Usage,
+	preserveMeasurements ...bool,
 ) relaymodel.ImageResponse {
 	data := make([]*relaymodel.ImageData, 0, len(response.Data))
 	for _, item := range response.Data {
@@ -230,11 +308,17 @@ func doubaoImageResponseToOpenAI(
 			continue
 		}
 
-		data = append(data, &relaymodel.ImageData{
+		converted := &relaymodel.ImageData{
 			URL:           item.URL,
 			B64Json:       item.B64JSON,
 			RevisedPrompt: item.RevisedPrompt,
-		})
+		}
+		if len(preserveMeasurements) > 0 && preserveMeasurements[0] {
+			converted.Size = item.Size
+			converted.ZIndex = item.ZIndex
+		}
+
+		data = append(data, converted)
 	}
 
 	return relaymodel.ImageResponse{
@@ -461,4 +545,99 @@ func normalizeDoubaoImageRequestSize(size string) string {
 	size = strings.ReplaceAll(size, "*", "x")
 
 	return size
+}
+
+// Presence must be retained: an omitted count is not an explicit zero.
+func (u *doubaoImageUsage) UnmarshalJSON(data []byte) error {
+	type plain doubaoImageUsage
+
+	var v plain
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+
+	var counts struct {
+		Generated *int64 `json:"generated_images"`
+	}
+	if err := json.Unmarshal(data, &counts); err != nil {
+		return err
+	}
+
+	*u = doubaoImageUsage(v)
+	u.generatedCount = counts.Generated
+
+	return nil
+}
+
+// Measurements come only from the final upstream body, never the request or URLs.
+func measureDoubaoImages(response doubaoImageResponse, scenario string) *coremodel.ImageUsage {
+	usage := &coremodel.ImageUsage{Version: 1, Scenario: scenario, State: "complete"}
+	if response.Error != nil {
+		usage.State = "failed"
+		return usage
+	}
+
+	usage.Outputs = make(
+		[]coremodel.ImageUsageOutput,
+		0,
+		min(len(response.Data), coremodel.ImageBillingMaxOutputs),
+	)
+	if response.Data == nil || len(response.Data) > coremodel.ImageBillingMaxOutputs {
+		usage.State = "incomplete"
+	}
+
+	if response.Usage != nil {
+		usage.InputCount = response.Usage.InputImages
+		usage.GeneratedCount = response.Usage.generatedCount
+	}
+
+	for i, item := range response.Data {
+		if i >= coremodel.ImageBillingMaxOutputs {
+			break
+		}
+
+		if item != nil && item.Error != nil {
+			if scenario == "layer_decomposition" {
+				usage.State = "failed"
+				usage.Outputs = nil
+				return usage
+			}
+
+			continue
+		}
+
+		if item == nil || (item.URL == "" && item.B64JSON == "") {
+			usage.State = "incomplete"
+			continue
+		}
+
+		output := coremodel.ImageUsageOutput{Index: int64(i), ZIndex: item.ZIndex}
+
+		parts := strings.Split(normalizeDoubaoImageSize(item.Size), "x")
+		if len(parts) == 2 {
+			w, ew := strconv.ParseInt(parts[0], 10, 64)
+
+			h, eh := strconv.ParseInt(parts[1], 10, 64)
+			if ew == nil && eh == nil && w > 0 && h > 0 &&
+				w <= coremodel.ImageBillingMaxDimension &&
+				h <= coremodel.ImageBillingMaxDimension {
+				output.Width = &w
+				output.Height = &h
+			}
+		}
+
+		usage.Outputs = append(usage.Outputs, output)
+	}
+
+	// Supplier cost and retail evaluate the same evidence independently. A free
+	// retail input rate cannot waive the provider's nonempty-result measurement.
+	if len(usage.Outputs) > 0 && usage.InputCount == nil {
+		usage.State = "incomplete"
+	}
+
+	if err := usage.Validate(true); err != nil {
+		usage.State = "incomplete"
+	}
+
+	return usage
 }

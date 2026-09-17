@@ -56,16 +56,21 @@ func ValidateImage(contract []byte, publicID string, body []byte) ([]byte, *Vali
 	}
 
 	var entry struct {
-		ID        string         `json:"entry_id"`
-		Version   int            `json:"validation_version"`
-		Schema    map[string]any `json:"input_schema"`
-		Providers map[string]struct {
+		ID              string          `json:"entry_id"`
+		Version         int             `json:"validation_version"`
+		ProviderVersion json.RawMessage `json:"provider_contract_version"`
+		Schema          map[string]any  `json:"input_schema"`
+		Providers       map[string]struct {
 			Fixed map[string]any `json:"fixedParameters"`
 		} `json:"providers"`
 	}
 	if json.Unmarshal(contract, &entry) != nil || publicID == "" || entry.ID != publicID ||
 		entry.Version != 1 ||
 		entry.Schema == nil {
+		return nil, unavailable
+	}
+
+	if entry.ProviderVersion != nil && string(entry.ProviderVersion) != "1" {
 		return nil, unavailable
 	}
 
@@ -100,6 +105,9 @@ func ValidateImage(contract []byte, publicID string, body []byte) ([]byte, *Vali
 
 	first := true
 	for _, provider := range entry.Providers {
+		if entry.ProviderVersion != nil {
+			break
+		}
 		if first {
 			fixed = provider.Fixed
 			first = false

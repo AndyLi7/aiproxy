@@ -84,7 +84,7 @@ type imageTaskProvider struct {
 func selectImageTaskAdapter(
 	c *gin.Context,
 	providers map[string]imageTaskProvider,
-) (*model.Channel, adaptor.ImageTaskAdapter) {
+) (*model.Channel, adaptor.ImageTaskExecutor) {
 	selected, err := getInitialChannel(c, middleware.GetRoutingModel(c), mode.ImagesGenerations)
 	if err != nil || selected == nil || selected.channel == nil {
 		imageTaskHTTPError(c, 503, "channel_unavailable")
@@ -97,7 +97,7 @@ func selectImageTaskAdapter(
 		return nil, nil
 	}
 
-	imageAdapter, ok := a.(adaptor.ImageTaskAdapter)
+	imageAdapter, ok := a.(adaptor.ImageTaskExecutor)
 	if !ok {
 		imageTaskHTTPError(c, 400, "unsupported_image_adapter")
 		return nil, nil
@@ -195,11 +195,19 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
-	mappedBody, mappingErr := adaptor.MapImageProviderInput(
-		mc.Config,
-		imageAdapter.ImageAdapterName(),
-		body,
-	)
+	contract := imageProviderContract(c)
+	var mappedBody []byte
+	var mappingErr error
+	var selectedBinding registryvalidation.ProviderBinding
+	if registryvalidation.HasProviderContracts(contract) {
+		mappedBody, selectedBinding, mappingErr = mapChannelProviderInput(contract, channel, middleware.GetRoutingModel(c), body)
+	} else {
+		if _, sync := imageAdapter.(adaptor.SyncImageTaskAdapter); sync {
+			imageTaskHTTPError(c, 503, "provider_binding_required")
+			return
+		}
+		mappedBody, mappingErr = adaptor.MapImageProviderInput(mc.Config, imageAdapter.ImageAdapterName(), body)
+	}
 	if mappingErr != nil {
 		imageTaskHTTPError(c, 503, "provider_mapping_unavailable")
 		return
@@ -213,7 +221,7 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
-	if price.HasImageBilling() {
+	if price.HasImageBilling() && (imageAdapter.ImageAdapterName() != "fal-image" || price.ImageBilling == nil || len(price.ConditionalPrices) != 0) {
 		imageTaskHTTPError(c, 400, "measured_image_billing_not_supported_by_queue_adapter")
 		return
 	}
@@ -238,12 +246,20 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
+	metering, err := registryvalidation.ResolveImageMetering(contract, selectedBinding, mappedBody, input.N, model.ImageBillingMaxOutputs, price.HasImageBilling())
+	if err != nil {
+		imageTaskHTTPError(c, 400, "invalid_image_metering")
+		return
+	}
+	if metering.Explicit {
+		requestUsage.Context.ImageUsage = &model.ImageUsage{Version: 1, State: "incomplete", Scenario: "generation", InputCount: &metering.InputCount, Outputs: []model.ImageUsageOutput{}}
+	}
 	requestAt := time.Now()
 	// Queue image contracts expose a validated image count, so the known output
 	// charge can be checked before any paid work is reserved or submitted.
 	requiredBalance := math.Max(consume.CalculateAmountWithOptions(
 		http.StatusOK,
-		model.Usage{ImageOutputTokens: model.ZeroNullInt64(input.N)},
+		model.Usage{ImageOutputTokens: model.ZeroNullInt64(metering.MaximumOutputs)},
 		requestUsage.Context,
 		price,
 		model.PriceSelectionOptions{
@@ -251,6 +267,15 @@ func submitImageTask(c *gin.Context) {
 			RequestAt:                   requestAt,
 		},
 	), middleware.GetGroupMinimumBalance())
+
+	if price.HasImageBilling() {
+		maximum, err := model.QueueImageMaximumAmount(price, metering.MaximumOutputs, metering.InputCount)
+		if err != nil {
+			imageTaskHTTPError(c, 400, "invalid_image_price")
+			return
+		}
+		requiredBalance = math.Max(maximum, middleware.GetGroupMinimumBalance())
+	}
 
 	balanceConsumer := middleware.GetGroupBalanceConsumerFromContext(c)
 	if balanceConsumer == nil || balanceConsumer.CheckBalance == nil {
@@ -289,6 +314,15 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
+	if registryvalidation.HasProviderContracts(rawWrapper.Contract) {
+		frozen, freezeErr := registryvalidation.FreezeProviderBinding(rawWrapper.Contract, selectedBinding)
+		if freezeErr != nil {
+			imageTaskHTTPError(c, 503, "invalid_provider_binding")
+			return
+		}
+		rawWrapper.Contract = frozen
+	}
+
 	task, created, err := model.ReserveImageTask(
 		&model.ImageTask{
 			ID:                 id,
@@ -301,7 +335,7 @@ func submitImageTask(c *gin.Context) {
 			UpstreamModel:      mt.ActualModel,
 			ChannelType:        mt.Channel.Type,
 			KeyFingerprint:     model.ImageChannelKeyFingerprint(mt.Channel.Key),
-			ExpectedImages:     input.N,
+			ExpectedImages:     metering.MaximumOutputs,
 		},
 		info,
 		middleware.OperationalFieldsFromContext(c),
@@ -327,7 +361,7 @@ func submitImageTask(c *gin.Context) {
 func dispatchReservedImageTask(
 	c *gin.Context,
 	task *model.ImageTask,
-	imageAdapter adaptor.ImageTaskAdapter,
+	imageAdapter adaptor.ImageTaskExecutor,
 	mt *meta.Meta,
 	mappedBody []byte,
 ) {
@@ -335,7 +369,16 @@ func dispatchReservedImageTask(
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 50*time.Second)
 	defer cancel()
 
-	upstream, err := imageAdapter.SubmitImage(ctx, mt, mappedBody)
+	if syncAdapter, ok := imageAdapter.(adaptor.SyncImageTaskAdapter); ok {
+		dispatchSyncImageTask(c, ctx, task, syncAdapter, mt, mappedBody)
+		return
+	}
+	queueAdapter, ok := imageAdapter.(adaptor.ImageTaskAdapter)
+	if !ok {
+		imageTaskHTTPError(c, 503, "unsupported_image_adapter")
+		return
+	}
+	upstream, err := queueAdapter.SubmitImage(ctx, mt, mappedBody)
 	if err != nil {
 		status := "submission_unknown"
 
@@ -452,4 +495,42 @@ func replayImageTask(c *gin.Context) {
 
 	c.JSON(202, task)
 	c.Abort()
+}
+
+func dispatchSyncImageTask(c *gin.Context, ctx context.Context, task *model.ImageTask, a adaptor.SyncImageTaskAdapter, mt *meta.Meta, body []byte) {
+	result, err := a.GenerateImage(ctx, mt, body, []byte(task.ValidationContract))
+	if err != nil {
+		status := "submission_unknown"
+		var taskError *model.ImageTaskError
+		if errors.Is(err, adaptor.ErrImageSubmissionRejected) {
+			status = "failed"
+			taskError = &model.ImageTaskError{Code: "submission_rejected", Message: "Upstream rejected image submission"}
+		}
+		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
+			imageTaskHTTPError(c, 503, "task_store_unavailable")
+			return
+		}
+		task.Status = status
+		task.Error = taskError
+		c.JSON(202, task)
+		return
+	}
+	if result.Status != "completed" || len(result.Data) == 0 || (task.ExpectedImages > 0 && len(result.Data) > task.ExpectedImages) {
+		taskError := &model.ImageTaskError{Code: "invalid_result", Message: "Image generation failed"}
+		if model.SetImageTaskResult(task.ID, "failed", nil, taskError) != nil {
+			imageTaskHTTPError(c, 503, "task_store_unavailable")
+			return
+		}
+		task.Status = "failed"
+		task.Error = taskError
+		c.JSON(202, task)
+		return
+	}
+	if model.CompleteSyncImageTask(task.ID, result.Data) != nil {
+		imageTaskHTTPError(c, 503, "task_store_unavailable")
+		return
+	}
+	task.Status = "completed"
+	task.Data = result.Data
+	c.JSON(202, task)
 }

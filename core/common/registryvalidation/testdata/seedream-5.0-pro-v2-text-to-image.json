@@ -1,0 +1,507 @@
+{
+  "provider_contract_version": 1,
+  "entry_id": "bytedance/seedream-5.0-pro-v2/text-to-image",
+  "validation_version": 1,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "image_size": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9",
+              "auto_1K",
+              "auto_2K"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 2048
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 2048
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "png"
+        ]
+      }
+    },
+    "required": [
+      "prompt",
+      "n",
+      "image_size",
+      "output_format"
+    ],
+    "additionalProperties": false
+  },
+  "parameter_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "title": "Prompt",
+        "uiControl": "textarea"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6,
+        "title": "Generations"
+      },
+      "image_size": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9",
+              "auto_1K",
+              "auto_2K"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 2048
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 2048
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "title": "Image size",
+        "uiControl": "select"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "png"
+        ],
+        "title": "Image format",
+        "uiControl": "select"
+      }
+    },
+    "required": [
+      "prompt",
+      "n",
+      "image_size",
+      "output_format"
+    ],
+    "additionalProperties": false
+  },
+  "default_parameters": {},
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "images": {
+        "minItems": 1,
+        "maxItems": 6,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "content_type": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "file_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "file_size": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "additionalProperties": {}
+  },
+  "providers": {
+    "fal": {
+      "adapter": "fal-image",
+      "parameterMapping": {
+        "prompt": "prompt",
+        "n": "num_images",
+        "image_size": "image_size",
+        "output_format": "output_format"
+      },
+      "allowedPassthroughParameters": [],
+      "fixedParameters": {
+        "sync_mode": false,
+        "enable_safety_checker": true
+      },
+      "billingBasis": {
+        "metric": "image",
+        "dimensions": [
+          "output_pixels"
+        ],
+        "minimumBillableUnits": 1,
+        "rounding": "none",
+        "sourceUrl": "https://fal.ai/models/bytedance/seedream/v5/pro/text-to-image",
+        "verifiedAt": "2026-09-17"
+      },
+      "source": {
+        "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance/seedream/v5/pro/text-to-image",
+        "verifiedAt": "2026-09-17",
+        "verifiedBy": "platform-engineering"
+      },
+      "upstream": {
+        "metering": {
+          "version": 1
+        },
+        "id": "fal:bytedance/seedream/v5/pro/text-to-image",
+        "revision": "2026-09-17",
+        "endpoint": "bytedance/seedream/v5/pro/text-to-image",
+        "execution": {
+          "mode": "async",
+          "resultEndpoint": "bytedance/seedream/v5/pro/text-to-image/requests/{request_id}",
+          "statusEndpoint": "bytedance/seedream/v5/pro/text-to-image/requests/{request_id}/status",
+          "supportsCancellation": true
+        },
+        "acceptedInputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "image_size": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "square_hd",
+                    "square",
+                    "portrait_4_3",
+                    "portrait_16_9",
+                    "landscape_4_3",
+                    "landscape_16_9",
+                    "auto_1K",
+                    "auto_2K"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 2048
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 2048
+                    }
+                  },
+                  "required": [
+                    "width",
+                    "height"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "jpeg",
+                "png"
+              ]
+            }
+          },
+          "required": [
+            "prompt",
+            "n",
+            "image_size",
+            "output_format"
+          ],
+          "additionalProperties": false
+        },
+        "inputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "num_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "image_size": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "square_hd",
+                    "square",
+                    "portrait_4_3",
+                    "portrait_16_9",
+                    "landscape_4_3",
+                    "landscape_16_9",
+                    "auto_1K",
+                    "auto_2K"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 2048
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 2048
+                    }
+                  },
+                  "required": [
+                    "width",
+                    "height"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "sync_mode": {
+              "type": "boolean",
+              "const": false
+            },
+            "enable_safety_checker": {
+              "type": "boolean",
+              "const": true
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "jpeg",
+                "png"
+              ]
+            }
+          },
+          "required": [
+            "prompt",
+            "num_images",
+            "image_size",
+            "sync_mode",
+            "enable_safety_checker",
+            "output_format"
+          ],
+          "additionalProperties": false
+        },
+        "outputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "images": {
+              "minItems": 1,
+              "maxItems": 6,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content_type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "file_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "file_size": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "width": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "height": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": [
+            "images"
+          ],
+          "additionalProperties": {}
+        },
+        "contractHash": "sha256:f4e01abbd9e0a509f4ea9fc4f78ed8726e8144c4820b0ee71e308672c6a446de"
+      }
+    }
+  },
+  "execution": {
+    "mode": "async",
+    "endpoint": "/v1/images/tasks",
+    "statusEndpoint": "/v1/images/tasks/{task_id}",
+    "output": "image",
+    "supportsCancellation": false
+  }
+}

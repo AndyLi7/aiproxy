@@ -181,3 +181,26 @@ func TestInterruptedImageSubmissionStaysReserved(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, created)
 }
+
+func TestCompleteSyncImageTaskActivatesAccountingAtomically(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+	task, created, err := model.ReserveImageTask(&model.ImageTask{ID: "sync", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "x"}, &model.AsyncUsageInfo{RequestID: "sync"})
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NoError(t, model.CompleteSyncImageTask(task.ID, []model.ImageOutput{{URL: "https://example.com/a.png"}}))
+	got, err := model.GetImageTask(task.ID, "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, "completed", got.Status)
+	var info model.AsyncUsageInfo
+	require.NoError(t, db.First(&info).Error)
+	require.Equal(t, model.AsyncUsageStatusPending, info.Status)
+	require.Error(t, model.CompleteSyncImageTask(task.ID, []model.ImageOutput{{URL: "https://example.com/b.png"}}))
+	got, err = model.GetImageTask(task.ID, "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.com/a.png", got.Data[0].URL)
+}

@@ -68,3 +68,37 @@ func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {
 			Error
 	})
 }
+
+// PrepareClaimedImageTaskMeasurement freezes both the outbox and audit evidence
+// under the accounting lease. The next worker can settle without polling again.
+func PrepareClaimedImageTaskMeasurement(info *AsyncUsageInfo, usage Usage, usageContext UsageContext, amount Amount) error {
+	if info == nil || info.ProcessingToken == "" || info.LogID == 0 || amount.ImageBillingResult == nil {
+		return errors.New("missing image task measurement log")
+	}
+	update := &AsyncUsageInfo{Usage: usage, UsageContext: usageContext, Amount: amount, MeasuredImage: true}
+	values, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount", "MeasuredImage")
+	if err != nil {
+		return err
+	}
+	return LogDB.Transaction(func(tx *gorm.DB) error {
+		row := tx.Model(&AsyncUsageInfo{}).Where("id = ? AND processing_token = ? AND status = ?", info.ID, info.ProcessingToken, AsyncUsageStatusPending).Updates(values)
+		if row.Error != nil {
+			return row.Error
+		}
+		if row.RowsAffected != 1 {
+			return errors.New("image measurement claim lost")
+		}
+		logValues, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount")
+		if err != nil {
+			return err
+		}
+		row = tx.Model(&Log{}).Where("id = ?", info.LogID).Updates(logValues)
+		if row.Error != nil {
+			return row.Error
+		}
+		if row.RowsAffected != 1 {
+			return errors.New("image measurement log missing")
+		}
+		return nil
+	})
+}

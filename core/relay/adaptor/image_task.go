@@ -19,6 +19,15 @@ type ImageTaskResult struct {
 	Error  *model.ImageTaskError
 }
 
+type ImageTaskExecutor interface{ ImageAdapterName() string }
+
+// SyncImageTaskAdapter runs once after durable reservation. Only the saved result
+// enters the polling/settlement worker; this interface has no resubmission method.
+type SyncImageTaskAdapter interface {
+	ImageTaskExecutor
+	GenerateImage(context.Context, *meta.Meta, []byte, []byte) (ImageTaskResult, error)
+}
+
 // ImageTaskAdapter normalizes provider queue protocols; the durable worker is model agnostic.
 type ImageTaskAdapter interface {
 	ImageAdapterName() string

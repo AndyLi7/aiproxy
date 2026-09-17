@@ -14,6 +14,8 @@ import (
 var ErrImageTaskConflict = errors.New("request id already belongs to a different image request")
 
 type ImageOutput struct {
+	Width       *int64 `json:"width,omitempty"`
+	Height      *int64 `json:"height,omitempty"`
 	URL         string `json:"url"`
 	ContentType string `json:"content_type,omitempty"`
 }
@@ -281,4 +283,34 @@ func RecoverStaleImageSubmissions(now time.Time) error {
 		Where("status = ? AND updated_at < ?", "submitting", now.Add(-2*time.Minute)).
 		Update("status", "submission_unknown").
 		Error
+}
+
+// CompleteSyncImageTask commits the result and activates its accounting outbox
+// together. A crash before this commit leaves the reservation unknown; it must
+// never cause a second upstream submission.
+func CompleteSyncImageTask(id string, data []ImageOutput) error {
+	if len(data) == 0 {
+		return errors.New("empty synchronous image result")
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return LogDB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&ImageTask{}).Where("id = ? AND status = ?", id, "submitting").Updates(map[string]any{"status": "completed", "data": string(encoded), "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("image reservation already resolved")
+		}
+		usage := tx.Model(&AsyncUsageInfo{}).Where("image_task_id = ? AND status = ?", id, AsyncUsageStatusNone).Updates(map[string]any{"status": AsyncUsageStatusPending, "next_poll_at": time.Now()})
+		if usage.Error != nil {
+			return usage.Error
+		}
+		if usage.RowsAffected != 1 {
+			return errors.New("image accounting reservation missing")
+		}
+		return nil
+	})
 }

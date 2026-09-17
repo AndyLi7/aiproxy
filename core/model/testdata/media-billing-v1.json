@@ -2225,5 +2225,456 @@
       "amountMicros": 0,
       "unitQuantity": 1
     }
+  },
+  {
+    "name": "input cost per actual output",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": "per_output"
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 153000
+  },
+  {
+    "name": "input cost remains once per request",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": "per_request"
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 144000
+  },
+  {
+    "name": "input cost legacy default",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 144000
+  },
+  {
+    "name": "input charge basis unknown rejected",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": "per_requested_output"
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 153000,
+    "invalid": true
+  },
+  {
+    "name": "null input charge basis rejected",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": null
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 153000,
+    "invalid": true
+  },
+  {
+    "name": "empty input charge basis rejected",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": ""
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 153000,
+    "invalid": true
+  },
+  {
+    "name": "per output missing dimensions stays pending",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": "per_output"
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 3,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "pending",
+    "amountMicros": null
+  },
+  {
+    "name": "per output missing input count stays pending",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": "per_output"
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "pending",
+    "amountMicros": null
+  },
+  {
+    "name": "per output quantity overflow rejected",
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "input": {
+        "firstNFree": 1,
+        "amountMicros": 4500,
+        "unitQuantity": 1,
+        "chargeBasis": "per_output"
+      },
+      "outputPixelTiers": [
+        {
+          "maxPixels": 2359296,
+          "amountMicros": 67500,
+          "unitQuantity": 1
+        },
+        {
+          "maxPixels": null,
+          "amountMicros": 135000,
+          "unitQuantity": 1
+        }
+      ]
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "input_count": 9007199254740991,
+      "generated_count": 2,
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1536,
+          "height": 1536
+        },
+        {
+          "index": 1,
+          "width": 1536,
+          "height": 1536
+        }
+      ]
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "state": "complete",
+    "amountMicros": 153000,
+    "invalid": true
   }
 ]

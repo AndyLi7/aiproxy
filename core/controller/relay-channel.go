@@ -302,6 +302,7 @@ func getChannelWithFallback(
 	preferChannelIDs []int,
 	errorRates map[int64]float64,
 	ignoreChannelIDs map[int64]struct{},
+	eligible ...func(*model.Channel) bool,
 ) (*initialChannel, error) {
 	migratedChannels, err := getAvailableChannels(
 		cache,
@@ -311,6 +312,15 @@ func getChannelWithFallback(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, accept := range eligible {
+		if accept != nil {
+			migratedChannels = slices.DeleteFunc(migratedChannels, func(ch *model.Channel) bool { return !accept(ch) })
+		}
+	}
+	if len(migratedChannels) == 0 {
+		return nil, ErrChannelsNotFound
 	}
 
 	initial := &initialChannel{
@@ -447,6 +457,7 @@ type initialChannel struct {
 
 func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialChannel, error) {
 	log := common.GetLogger(c)
+	eligible := imageProviderPredicate(c, modelName, m)
 
 	group := middleware.GetGroup(c)
 	availableSet := group.GetAvailableSets()
@@ -466,6 +477,10 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 			return nil, err
 		}
 
+		if eligible != nil && !eligible(channel) {
+			return nil, ErrChannelsNotFound
+		}
+
 		log.Data["designated_channel"] = "true"
 
 		return &initialChannel{channel: channel, designatedChannel: true}, nil
@@ -483,6 +498,9 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 	}
 
 	if channel != nil {
+		if eligible != nil && !eligible(channel) {
+			return nil, ErrChannelsNotFound
+		}
 		return &initialChannel{channel: channel, designatedChannel: true}, nil
 	}
 
@@ -524,6 +542,7 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 		preferChannelIDs,
 		errorRates,
 		ignoreChannelIDs,
+		eligible,
 	)
 }
 

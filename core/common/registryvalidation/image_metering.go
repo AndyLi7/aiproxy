@@ -25,6 +25,7 @@ type ImageMeteringEvidence struct {
 	Explicit       bool
 }
 
+//nolint:gocyclo // This is one auditable validation pass for the provider metering contract.
 func ResolveImageMetering(raw []byte, binding ProviderBinding, mapped []byte, n, cap int, required bool) (ImageMeteringEvidence, error) {
 	result := ImageMeteringEvidence{MaximumOutputs: n}
 	var native map[string]any

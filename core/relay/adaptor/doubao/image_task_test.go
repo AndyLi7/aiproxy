@@ -51,12 +51,13 @@ func TestSyncImageBridgeRejectsRedirectAndInvalidResult(t *testing.T) {
 			defer s.Close()
 			got, err := (&Adaptor{}).GenerateImage(t.Context(), &meta.Meta{ActualModel: "seedream-test", Channel: meta.ChannelMeta{BaseURL: s.URL}}, []byte(`{"stream":false,"response_format":"url"}`), syncContract())
 			require.Equal(t, 1, calls)
-			if tc.failed {
+			switch {
+			case tc.failed:
 				require.NoError(t, err)
 				require.Equal(t, "failed", got.Status)
-			} else if tc.rejected {
+			case tc.rejected:
 				require.ErrorIs(t, err, adaptor.ErrImageSubmissionRejected)
-			} else {
+			default:
 				require.Error(t, err)
 				require.NotErrorIs(t, err, adaptor.ErrImageSubmissionRejected)
 			}

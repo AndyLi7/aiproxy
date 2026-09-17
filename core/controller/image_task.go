@@ -118,6 +118,7 @@ func selectImageTaskAdapter(
 	return selected.channel, imageAdapter
 }
 
+//nolint:gocyclo // Admission combines authentication, contract, pricing and idempotency gates.
 func submitImageTask(c *gin.Context) {
 	id := c.GetHeader("X-Request-Id")
 	if !imageRequestID.MatchString(id) {

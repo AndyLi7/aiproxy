@@ -415,6 +415,8 @@ func (u *ImageUsage) Validate(requirePixels bool) error {
 
 // EvaluateImageBilling returns a detached snapshot: it never retains policy or usage pointers/slices.
 // Callers must persist the result and usage before settlement. Pending is not zero-priced success.
+//
+//nolint:gocyclo // Billing states and tier selection are kept in one auditable calculation.
 func EvaluateImageBilling(
 	policy *ImageBillingPolicy,
 	usage *ImageUsage,

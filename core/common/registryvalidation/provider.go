@@ -102,6 +102,8 @@ func schemaAccepts(schema map[string]any, value any) error {
 
 // MapBoundProviderInput never applies provider defaults, drops parameters or changes canonical values.
 // Supports fal queue and the explicitly configured Ark synchronous task bridge.
+//
+//nolint:gocyclo // Provider compatibility and mapping checks stay together as an auditable boundary.
 func MapBoundProviderInput(raw []byte, b ProviderBinding, adapter, endpoint, execution string, body []byte) ([]byte, error) {
 	p, err := bound(raw, b)
 	if err != nil {

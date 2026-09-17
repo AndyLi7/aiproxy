@@ -3,14 +3,15 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"net/http/httptest"
+	"os"
+	"testing"
+
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
-	"net/http/httptest"
-	"os"
-	"testing"
 )
 
 func TestVersionedImageForcedChannelCannotBypassCompatibility(t *testing.T) {

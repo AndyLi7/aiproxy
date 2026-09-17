@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/labring/aiproxy/core/relay/adaptor"
-	"github.com/labring/aiproxy/core/relay/meta"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +16,8 @@ import (
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/adaptor"
+	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/stretchr/testify/require"
 )
 
@@ -352,11 +352,12 @@ func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 			require.Equal(t, 1, a.calls)
 			var info model.AsyncUsageInfo
 			require.NoError(t, db.First(&info).Error)
-			if tc.status == "completed" {
+			switch tc.status {
+			case "completed":
 				require.Equal(t, model.AsyncUsageStatusPending, info.Status)
-			} else if tc.status == "submission_unknown" {
+			case "submission_unknown":
 				require.Equal(t, model.AsyncUsageStatusNone, info.Status)
-			} else {
+			default:
 				require.Equal(t, model.AsyncUsageStatusFailed, info.Status)
 			}
 		})

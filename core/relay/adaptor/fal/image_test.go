@@ -304,9 +304,15 @@ func TestFrozenFullQueuePaths(t *testing.T) {
 	require.NoError(t, err)
 	var c map[string]any
 	require.NoError(t, json.Unmarshal(raw, &c))
-	s := c["providers"].(map[string]any)["small"].(map[string]any)["upstream"].(map[string]any)
+	providers, ok := c["providers"].(map[string]any)
+	require.True(t, ok)
+	small, ok := providers["small"].(map[string]any)
+	require.True(t, ok)
+	s, ok := small["upstream"].(map[string]any)
+	require.True(t, ok)
 	s["endpoint"] = "bytedance/seedream/v5/pro/edit"
-	e := s["execution"].(map[string]any)
+	e, ok := s["execution"].(map[string]any)
+	require.True(t, ok)
 	e["statusEndpoint"] = "bytedance/seedream/v5/pro/edit/requests/{request_id}/status"
 	e["resultEndpoint"] = "bytedance/seedream/v5/pro/edit/requests/{request_id}"
 	e["supportsCancellation"] = true

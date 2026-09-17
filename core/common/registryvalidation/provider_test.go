@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func mustMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected object, got %T", value)
+	}
+	return result
+}
+
 func providerFixture() []byte {
 	raw, err := os.ReadFile("testdata/provider.json")
 	if err != nil {
@@ -23,7 +41,9 @@ func TestVersionedPublicNormalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	var value map[string]any
-	_ = json.Unmarshal(body, &value)
+	if err := json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
 	if value["n"] != float64(1) || value["sync_mode"] != nil {
 		t.Fatalf("unexpected %s", body)
 	}
@@ -81,20 +101,22 @@ func TestInvalidSchemaAndFrozenSizeFailBeforeSubmission(t *testing.T) {
 	if err := json.Unmarshal(providerFixture(), &c); err != nil {
 		t.Fatal(err)
 	}
-	providers := c["providers"].(map[string]any)
-	upstream := providers["small"].(map[string]any)["upstream"].(map[string]any)
+	providers := mustMap(t, c["providers"])
+	upstream := mustMap(t, mustMap(t, providers["small"])["upstream"])
 	upstream["outputJsonSchema"] = map[string]any{"$ref": "https://example.com/remote.json"}
-	bad, _ := json.Marshal(c)
+	bad := mustJSON(t, c)
 	if _, err := MapBoundProviderInput(bad, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(`{"model":"image","prompt":"hi","n":1}`)); err == nil {
 		t.Fatal("external output schema accepted")
 	}
 	raw := providerFixture()
 	var padded map[string]any
-	_ = json.Unmarshal(raw, &padded)
+	if err := json.Unmarshal(raw, &padded); err != nil {
+		t.Fatal(err)
+	}
 	padded["padding"] = ""
-	base, _ := json.Marshal(padded)
+	base := mustJSON(t, padded)
 	padded["padding"] = strings.Repeat("x", 256*1024-len(base))
-	raw, _ = json.Marshal(padded)
+	raw = mustJSON(t, padded)
 	if len(raw) != 256*1024 {
 		t.Fatal("invalid size fixture")
 	}
@@ -105,21 +127,23 @@ func TestInvalidSchemaAndFrozenSizeFailBeforeSubmission(t *testing.T) {
 
 func TestSyncProviderRequiresExplicitNativeExecutionFlags(t *testing.T) {
 	var c map[string]any
-	_ = json.Unmarshal(providerFixture(), &c)
-	p := c["providers"].(map[string]any)["small"].(map[string]any)
+	if err := json.Unmarshal(providerFixture(), &c); err != nil {
+		t.Fatal(err)
+	}
+	p := mustMap(t, mustMap(t, c["providers"])["small"])
 	p["adapter"] = "volcengine-ark-image"
-	s := p["upstream"].(map[string]any)
+	s := mustMap(t, p["upstream"])
 	s["endpoint"] = "seedream-test"
 	s["execution"] = map[string]any{"mode": "sync"}
 	p["fixedParameters"] = map[string]any{"stream": false, "response_format": "url"}
 	s["inputJsonSchema"] = map[string]any{"type": "object", "additionalProperties": true}
-	raw, _ := json.Marshal(c)
+	raw := mustJSON(t, c)
 	_, err := MapBoundProviderInput(raw, fixtureBinding(), "volcengine-ark-image", "seedream-test", "sync", []byte(`{"prompt":"x","n":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p["fixedParameters"] = map[string]any{"stream": true, "response_format": "url"}
-	raw, _ = json.Marshal(c)
+	raw = mustJSON(t, c)
 	if _, err = MapBoundProviderInput(raw, fixtureBinding(), "volcengine-ark-image", "seedream-test", "sync", []byte(`{"prompt":"x","n":1}`)); err == nil {
 		t.Fatal("stream enabled")
 	}
@@ -130,15 +154,15 @@ func TestFalFullProtocolMappingAndFrozenPathIsolation(t *testing.T) {
 	if err := json.Unmarshal(providerFixture(), &c); err != nil {
 		t.Fatal(err)
 	}
-	s := c["providers"].(map[string]any)["small"].(map[string]any)["upstream"].(map[string]any)
+	s := mustMap(t, mustMap(t, mustMap(t, c["providers"])["small"])["upstream"])
 	endpoint := "bytedance/seedream/v5/pro/edit"
 	s["endpoint"] = endpoint
-	e := s["execution"].(map[string]any)
+	e := mustMap(t, s["execution"])
 	e["supportsCancellation"] = true
 	root := endpoint + "/requests/{request_id}"
 	e["resultEndpoint"] = root
 	e["statusEndpoint"] = root + "/status"
-	raw, _ := json.Marshal(c)
+	raw := mustJSON(t, c)
 	if _, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", endpoint, "async", []byte(`{"model":"image","prompt":"hi","n":1}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -158,11 +182,14 @@ func TestFalFullProtocolMappingAndFrozenPathIsolation(t *testing.T) {
 	for _, bad := range []string{"https://evil.example/requests/{request_id}", "other/model/requests/{request_id}", endpoint + "/../requests/{request_id}", root + "?token=secret"} {
 		e["resultEndpoint"] = bad
 		e["statusEndpoint"] = bad + "/status"
-		raw, _ = json.Marshal(c)
+		raw = mustJSON(t, c)
 		if _, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", endpoint, "async", []byte(`{"model":"image","prompt":"hi","n":1}`)); err == nil {
 			t.Fatal("unsafe submission contract accepted")
 		}
-		frozen, _ := FreezeProviderBinding(raw, fixtureBinding())
+		frozen, err := FreezeProviderBinding(raw, fixtureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, _, err := FrozenFalQueuePaths(frozen, endpoint, "abc"); err == nil {
 			t.Fatal("unsafe polling contract accepted")
 		}

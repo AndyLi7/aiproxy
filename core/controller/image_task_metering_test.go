@@ -3,16 +3,26 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/gin-gonic/gin"
-	"github.com/labring/aiproxy/core/middleware"
-	"github.com/labring/aiproxy/core/model"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/middleware"
+	"github.com/labring/aiproxy/core/model"
+	"github.com/stretchr/testify/require"
 )
+
+func imageMeteringMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected object, got %T", value)
+	}
+	return result
+}
 
 func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 	for _, tc := range []struct {
@@ -32,16 +42,16 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 			var contract map[string]any
 			require.NoError(t, json.Unmarshal(raw, &contract))
 			contract["execution"] = map[string]any{"mode": "async", "output": "image"}
-			provider := contract["providers"].(map[string]any)["small"].(map[string]any)
-			upstream := provider["upstream"].(map[string]any)
+			provider := imageMeteringMap(t, imageMeteringMap(t, contract["providers"])["small"])
+			upstream := imageMeteringMap(t, provider["upstream"])
 			upstream["metering"] = map[string]any{"version": tc.version, "inputImagesParameter": "image_urls", "maxInputImages": 3, "outputCountMultiplierParameter": "max_images", "maxCombinedImages": 8}
 			if tc.undeclared {
-				metering := upstream["metering"].(map[string]any)
+				metering := imageMeteringMap(t, upstream["metering"])
 				delete(metering, "inputImagesParameter")
 				delete(metering, "maxInputImages")
 			}
-			for _, schema := range []map[string]any{contract["input_schema"].(map[string]any), upstream["acceptedInputJsonSchema"].(map[string]any), upstream["inputJsonSchema"].(map[string]any)} {
-				properties := schema["properties"].(map[string]any)
+			for _, schema := range []map[string]any{imageMeteringMap(t, contract["input_schema"]), imageMeteringMap(t, upstream["acceptedInputJsonSchema"]), imageMeteringMap(t, upstream["inputJsonSchema"])} {
+				properties := imageMeteringMap(t, schema["properties"])
 				properties["image_urls"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": 3}
 				properties["max_images"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 3}
 			}

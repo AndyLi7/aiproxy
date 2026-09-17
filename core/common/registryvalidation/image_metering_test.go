@@ -28,12 +28,16 @@ func TestImageMeteringBounds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var raw map[string]any
-			_ = json.Unmarshal(providerFixture(), &raw)
-			upstream := raw["providers"].(map[string]any)["small"].(map[string]any)["upstream"].(map[string]any)
+			if err := json.Unmarshal(providerFixture(), &raw); err != nil {
+				t.Fatal(err)
+			}
+			upstream := mustMap(t, mustMap(t, mustMap(t, raw["providers"])["small"])["upstream"])
 			var meta any
-			_ = json.Unmarshal([]byte(tc.meta), &meta)
+			if err := json.Unmarshal([]byte(tc.meta), &meta); err != nil {
+				t.Fatal(err)
+			}
 			upstream["metering"] = meta
-			encoded, _ := json.Marshal(raw)
+			encoded := mustJSON(t, raw)
 			got, err := ResolveImageMetering(encoded, fixtureBinding(), []byte(tc.body), tc.n, 1024, true)
 			if (err != nil) != tc.bad {
 				t.Fatalf("err=%v", err)
@@ -57,7 +61,9 @@ func TestImageMeteringRejectsUndeclaredReferences(t *testing.T) {
 		for _, declared := range []bool{false, true} {
 			t.Run(key+fmt.Sprint(declared), func(t *testing.T) {
 				var raw map[string]any
-				_ = json.Unmarshal(providerFixture(), &raw)
+				if err := json.Unmarshal(providerFixture(), &raw); err != nil {
+					t.Fatal(err)
+				}
 				metadata := map[string]any{"version": 1}
 				body := map[string]any{"num_images": 1, key: "https://cdn.example/reference"}
 				if strings.HasSuffix(key, "urls") {
@@ -67,9 +73,9 @@ func TestImageMeteringRejectsUndeclaredReferences(t *testing.T) {
 					metadata["inputImagesParameter"] = "declared_refs"
 					body["declared_refs"] = []string{"https://cdn.example/declared"}
 				}
-				raw["providers"].(map[string]any)["small"].(map[string]any)["upstream"].(map[string]any)["metering"] = metadata
-				contract, _ := json.Marshal(raw)
-				mapped, _ := json.Marshal(body)
+				mustMap(t, mustMap(t, mustMap(t, raw["providers"])["small"])["upstream"])["metering"] = metadata
+				contract := mustJSON(t, raw)
+				mapped := mustJSON(t, body)
 				if _, err := ResolveImageMetering(contract, fixtureBinding(), mapped, 1, 1024, true); err == nil {
 					t.Fatal("undeclared reference accepted")
 				}
@@ -77,9 +83,11 @@ func TestImageMeteringRejectsUndeclaredReferences(t *testing.T) {
 		}
 	}
 	var raw map[string]any
-	_ = json.Unmarshal(providerFixture(), &raw)
-	raw["providers"].(map[string]any)["small"].(map[string]any)["upstream"].(map[string]any)["metering"] = map[string]any{"version": 1}
-	contract, _ := json.Marshal(raw)
+	if err := json.Unmarshal(providerFixture(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	mustMap(t, mustMap(t, mustMap(t, raw["providers"])["small"])["upstream"])["metering"] = map[string]any{"version": 1}
+	contract := mustJSON(t, raw)
 	evidence, err := ResolveImageMetering(contract, fixtureBinding(), []byte(`{"num_images":1,"prompt":"text only"}`), 1, 1024, true)
 	if err != nil || evidence.InputCount != 0 {
 		t.Fatalf("text-only request rejected: %+v %v", evidence, err)

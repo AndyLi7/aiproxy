@@ -180,7 +180,11 @@ func FreezeProviderBinding(raw []byte, b ProviderBinding) ([]byte, error) {
 	if json.Unmarshal(raw, &obj) != nil {
 		return nil, ErrProviderContract
 	}
-	obj["selected_provider_binding"], _ = json.Marshal(b)
+	binding, err := json.Marshal(b)
+	if err != nil {
+		return nil, ErrProviderContract
+	}
+	obj["selected_provider_binding"] = binding
 	frozen, err := json.Marshal(obj)
 	if err != nil || len(frozen) > 256*1024 {
 		return nil, ErrProviderContract

@@ -95,14 +95,17 @@ func BuildOperationalFields(
 	if !failureStage.Valid() {
 		failureStage = FailureStageNone
 	}
+
 	errorCode := ""
 	if len(errorCodes) > 0 {
 		errorCode = errorCodes[0]
 	}
+
 	errorCode = normalizeOperationalErrorCode(errorCode, failureStage)
 
 	safeError = bearerCredentialPattern.ReplaceAllString(safeError, "[REDACTED]")
 	safeError = strings.Join(strings.Fields(safeError), " ")
+
 	runes := []rune(safeError)
 	if len(runes) > maxSafeErrorRunes {
 		safeError = string(runes[:maxSafeErrorRunes])
@@ -187,9 +190,11 @@ func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.D
 	if filter.Source != "" {
 		tx = tx.Where("request_source = ?", filter.Source)
 	}
+
 	if len(filter.ChannelIDs) > 0 {
 		tx = tx.Where("channel_id IN ?", filter.ChannelIDs)
 	}
+
 	if len(filter.ExcludedModes) > 0 {
 		tx = tx.Where("mode IS NULL OR mode NOT IN ?", filter.ExcludedModes)
 	}

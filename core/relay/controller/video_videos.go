@@ -90,6 +90,7 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 		}
 
 		secondsValue, secondsProvided := c.GetPostForm("seconds")
+
 		seconds, err := parseOptionalPositiveInt(secondsValue, "seconds")
 		if err != nil {
 			return videosRequestUsageParams{}, err
@@ -99,10 +100,13 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 		if err != nil {
 			return videosRequestUsageParams{}, err
 		}
+
 		size := strings.TrimSpace(c.PostForm("size"))
 		resolution := strings.TrimSpace(c.PostForm("resolution"))
+
 		aspectRatio := strings.TrimSpace(c.PostForm("aspect_ratio"))
-		if c.Request.URL.Path == "/v1/videos" && size == "" && resolution == "" && aspectRatio == "" {
+		if c.Request.URL.Path == "/v1/videos" && size == "" && resolution == "" &&
+			aspectRatio == "" {
 			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
 				videoMissingParameterCode,
 				"provide either size or resolution with aspect_ratio",
@@ -130,6 +134,7 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 			"body", nil, nil, "valid JSON object",
 		)
 	}
+
 	if node.TypeSafe() != ast.V_OBJECT {
 		return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
@@ -137,6 +142,7 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 			"body", videoJSONTypeName(node.TypeSafe()), nil, "JSON object",
 		)
 	}
+
 	if c.Request.URL.Path == "/v1/videos" {
 		promptNode := node.Get("prompt")
 		if promptNode == nil || !promptNode.Exists() || promptNode.TypeSafe() == ast.V_NULL {
@@ -146,6 +152,7 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 				"prompt", nil, nil, "non-empty string",
 			)
 		}
+
 		if promptNode.TypeSafe() != ast.V_STRING {
 			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
 				videoInvalidParameterCode,
@@ -153,6 +160,7 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 				"prompt", videoNodeValue(promptNode), nil, "non-empty string",
 			)
 		}
+
 		prompt, promptErr := promptNode.String()
 		if promptErr != nil || strings.TrimSpace(prompt) == "" {
 			return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
@@ -177,14 +185,21 @@ func getVideosRequestUsageParams(c *gin.Context) (videosRequestUsageParams, erro
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
+
 	resolution, err := optionalEnumStringValueFromNode(&node, "resolution", "resolution string")
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
-	aspectRatio, err := optionalEnumStringValueFromNode(&node, "aspect_ratio", "aspect ratio string")
+
+	aspectRatio, err := optionalEnumStringValueFromNode(
+		&node,
+		"aspect_ratio",
+		"aspect ratio string",
+	)
 	if err != nil {
 		return videosRequestUsageParams{}, err
 	}
+
 	if c.Request.URL.Path == "/v1/videos" && strings.TrimSpace(size) == "" &&
 		strings.TrimSpace(resolution) == "" && strings.TrimSpace(aspectRatio) == "" {
 		return videosRequestUsageParams{}, NewDetailedBadRequestParamError(
@@ -210,6 +225,7 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 	if err := validateVideoCapabilityInput(params, mc.Config); err != nil {
 		return err
 	}
+
 	if err := validateVideoDimensionSelection(params, mc); err != nil {
 		return err
 	}
@@ -220,6 +236,7 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 
 	fuzzy := !mc.DisableResolutionFuzzyMatch
 	supportedSizes, hasExactSizes := exactVideoSizesFromCapabilities(mc.Config)
+
 	size := strings.ToLower(strings.TrimSpace(params.size))
 	if size != "" && !dimensionResolutionValue(size) {
 		allowedValues := supportedSizes
@@ -229,6 +246,7 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 				allowedValues = strings.Split(options, ", ")
 			}
 		}
+
 		message := fmt.Sprintf("invalid video size `%s`: expected <width>x<height>", size)
 		if len(allowedValues) != 0 {
 			message = fmt.Sprintf(
@@ -237,20 +255,26 @@ func validateVideosRequestUsageParams(params videosRequestUsageParams, mc model.
 				strings.Join(allowedValues, ", "),
 			)
 		}
+
 		return NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
 			message,
 			"size", size, allowedValues, "<width>x<height> string",
 		)
 	}
+
 	if hasExactSizes {
 		if len(supportedSizes) == 0 && size != "" {
 			return NewDetailedBadRequestParamError(
 				videoUnsupportedByModelCode,
 				"fixed video sizes are not supported by this model; use resolution with aspect_ratio",
-				"size", size, nil, "resolution with aspect_ratio",
+				"size",
+				size,
+				nil,
+				"resolution with aspect_ratio",
 			)
 		}
+
 		if size := strings.ToLower(strings.TrimSpace(params.size)); size != "" &&
 			!slices.Contains(supportedSizes, size) {
 			return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
@@ -306,10 +330,12 @@ func multipartVideoImageInputProvided(c *gin.Context) bool {
 		if strings.TrimSpace(c.PostForm(key)) != "" {
 			return true
 		}
+
 		if c.Request.MultipartForm != nil && len(c.Request.MultipartForm.File[key]) != 0 {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -319,14 +345,17 @@ func videoImageInputProvided(node *ast.Node) bool {
 		if field == nil || !field.Exists() || field.TypeSafe() == ast.V_NULL {
 			continue
 		}
+
 		if field.TypeSafe() != ast.V_STRING {
 			return true
 		}
+
 		value, err := field.String()
 		if err != nil || strings.TrimSpace(value) != "" {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -342,6 +371,7 @@ func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.M
 			"size", size, nil, "either size or resolution with aspect_ratio",
 		)
 	}
+
 	if resolution == "" && aspectRatio != "" {
 		return NewDetailedBadRequestParamError(
 			videoMissingParameterCode,
@@ -349,6 +379,7 @@ func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.M
 			"resolution", nil, nil, "resolution string",
 		)
 	}
+
 	if resolution != "" && aspectRatio == "" {
 		return NewDetailedBadRequestParamError(
 			videoMissingParameterCode,
@@ -356,6 +387,7 @@ func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.M
 			"aspect_ratio", nil, nil, "aspect ratio string",
 		)
 	}
+
 	if resolution == "" {
 		return nil
 	}
@@ -367,6 +399,7 @@ func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.M
 	if !resolutionsOK || len(allowedResolutions) == 0 {
 		allowedResolutions = mc.AllowedResolutions
 	}
+
 	allowedResolutions = normalizedVideoCapabilityValues(allowedResolutions, true)
 	if len(allowedResolutions) != 0 && !slices.Contains(allowedResolutions, resolution) {
 		return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
@@ -380,8 +413,10 @@ func validateVideoDimensionSelection(params videosRequestUsageParams, mc model.M
 		mc.Config,
 		model.ModelConfigKey("aspectRatios"),
 	)
+
 	allowedAspectRatios = normalizedVideoCapabilityValues(allowedAspectRatios, false)
-	if ratiosOK && len(allowedAspectRatios) != 0 && !slices.Contains(allowedAspectRatios, aspectRatio) {
+	if ratiosOK && len(allowedAspectRatios) != 0 &&
+		!slices.Contains(allowedAspectRatios, aspectRatio) {
 		return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
 			"unsupported video aspect_ratio `%s`, allowed values: %s",
 			aspectRatio,
@@ -399,10 +434,12 @@ func normalizedVideoCapabilityValues(values []string, lower bool) []string {
 		if lower {
 			value = strings.ToLower(value)
 		}
+
 		if value != "" && !slices.Contains(result, value) {
 			result = append(result, value)
 		}
 	}
+
 	return result
 }
 
@@ -416,6 +453,7 @@ func validateVideosRequestDurationAndAudio(
 			for i, duration := range supportedDurations {
 				allowed[i] = strconv.Itoa(duration)
 			}
+
 			return NewDetailedBadRequestParamError(videoUnsupportedByModelCode, fmt.Sprintf(
 				"unsupported video duration `%d`, allowed values: %s",
 				params.seconds,
@@ -437,10 +475,12 @@ func parseOptionalBool(c *gin.Context, name string) (*bool, error) {
 	if !ok || strings.TrimSpace(value) == "" {
 		return nil, nil
 	}
+
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return nil, NewBadRequestParamError(fmt.Sprintf("invalid %s: must be a boolean", name))
 	}
+
 	return &parsed, nil
 }
 
@@ -449,24 +489,28 @@ func strictOptionalBoolValueFromNode(node *ast.Node, name string) (*bool, error)
 	if valueNode == nil || !valueNode.Exists() {
 		return nil, nil
 	}
+
 	if valueNode.TypeSafe() == ast.V_NULL {
 		return nil, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a boolean", name),
+			name+" must be a boolean",
 			name, nil, []string{"true", "false"}, "boolean",
 		)
 	}
+
 	if valueNode.TypeSafe() != ast.V_TRUE && valueNode.TypeSafe() != ast.V_FALSE {
 		return nil, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a boolean", name),
+			name+" must be a boolean",
 			name, videoNodeValue(valueNode), []string{"true", "false"}, "boolean",
 		)
 	}
+
 	value, err := valueNode.Bool()
 	if err != nil {
 		return nil, NewBadRequestParamError(fmt.Sprintf("invalid %s: must be a boolean", name))
 	}
+
 	return &value, nil
 }
 
@@ -475,36 +519,41 @@ func strictOptionalPositiveIntValueFromNode(node *ast.Node, name string) (int, b
 	if valueNode == nil || !valueNode.Exists() {
 		return 0, false, nil
 	}
+
 	if valueNode.TypeSafe() == ast.V_NULL {
 		return 0, true, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a positive integer", name),
+			name+" must be a positive integer",
 			name, nil, nil, "positive integer",
 		)
 	}
+
 	if valueNode.TypeSafe() != ast.V_NUMBER {
 		return 0, true, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a positive integer", name),
+			name+" must be a positive integer",
 			name, videoNodeValue(valueNode), nil, "positive integer",
 		)
 	}
+
 	raw, err := valueNode.Raw()
 	if err != nil {
 		return 0, true, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a positive integer", name),
+			name+" must be a positive integer",
 			name, videoNodeValue(valueNode), nil, "positive integer",
 		)
 	}
+
 	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 0)
 	if err != nil || value <= 0 {
 		return 0, true, NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a positive integer", name),
+			name+" must be a positive integer",
 			name, videoNodeValue(valueNode), nil, "positive integer",
 		)
 	}
+
 	return int(value), true, nil
 }
 
@@ -514,25 +563,29 @@ func optionalStringValueFromNode(node *ast.Node, names ...string) (string, error
 		if valueNode == nil || !valueNode.Exists() {
 			continue
 		}
+
 		if valueNode.TypeSafe() != ast.V_STRING {
 			return "", NewDetailedBadRequestParamError(
 				videoInvalidParameterCode,
-				fmt.Sprintf("%s must be a string in <width>x<height> format", name),
+				name+" must be a string in <width>x<height> format",
 				name, videoNodeValue(valueNode), nil, "<width>x<height> string",
 			)
 		}
+
 		value, err := valueNode.String()
 		if err != nil {
 			return "", NewDetailedBadRequestParamError(
 				videoInvalidParameterCode,
-				fmt.Sprintf("%s must be a string in <width>x<height> format", name),
+				name+" must be a string in <width>x<height> format",
 				name, nil, nil, "<width>x<height> string",
 			)
 		}
+
 		if strings.TrimSpace(value) != "" {
 			return value, nil
 		}
 	}
+
 	return "", nil
 }
 
@@ -541,21 +594,24 @@ func optionalEnumStringValueFromNode(node *ast.Node, name, expected string) (str
 	if valueNode == nil || !valueNode.Exists() {
 		return "", nil
 	}
+
 	if valueNode.TypeSafe() != ast.V_STRING {
 		return "", NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a string", name),
+			name+" must be a string",
 			name, videoNodeValue(valueNode), nil, expected,
 		)
 	}
+
 	value, err := valueNode.String()
 	if err != nil {
 		return "", NewDetailedBadRequestParamError(
 			videoInvalidParameterCode,
-			fmt.Sprintf("%s must be a string", name),
+			name+" must be a string",
 			name, nil, nil, expected,
 		)
 	}
+
 	return strings.TrimSpace(value), nil
 }
 
@@ -563,9 +619,11 @@ func videoNodeValue(node *ast.Node) any {
 	if node == nil || !node.Exists() || node.TypeSafe() == ast.V_NULL {
 		return nil
 	}
+
 	if raw, err := node.Raw(); err == nil {
 		return raw
 	}
+
 	return videoJSONTypeName(node.TypeSafe())
 }
 
@@ -600,6 +658,7 @@ func exactVideoSizesFromCapabilities(config map[model.ModelConfigKey]any) ([]str
 		config,
 		model.ModelConfigKey("resolutions"),
 	)
+
 	aspectRatios, aspectRatiosOK := model.GetModelConfigStringSlice(
 		config,
 		model.ModelConfigKey("aspectRatios"),
@@ -614,14 +673,17 @@ func exactVideoSizesFromCapabilities(config map[model.ModelConfigKey]any) ([]str
 		if !ok {
 			continue
 		}
+
 		parts := strings.Split(landscape, "x")
 		if len(parts) != 2 {
 			continue
 		}
+
 		height, err := strconv.Atoi(parts[1])
 		if err != nil || height <= 0 {
 			continue
 		}
+
 		for _, aspectRatio := range aspectRatios {
 			var size string
 			switch strings.TrimSpace(aspectRatio) {
@@ -640,11 +702,13 @@ func exactVideoSizesFromCapabilities(config map[model.ModelConfigKey]any) ([]str
 			default:
 				continue
 			}
+
 			if !slices.Contains(result, size) {
 				result = append(result, size)
 			}
 		}
 	}
+
 	return result, true
 }
 
@@ -653,6 +717,7 @@ func exactVideoDurationsFromCapabilities(config map[model.ModelConfigKey]any) ([
 	if !ok {
 		return nil, false
 	}
+
 	values, ok := value.([]any)
 	if !ok {
 		if durations, ok := value.([]int); ok && len(durations) != 0 {
@@ -660,6 +725,7 @@ func exactVideoDurationsFromCapabilities(config map[model.ModelConfigKey]any) ([
 		}
 		return nil, false
 	}
+
 	result := make([]int, 0, len(values))
 	for _, raw := range values {
 		var duration int
@@ -676,11 +742,14 @@ func exactVideoDurationsFromCapabilities(config map[model.ModelConfigKey]any) ([
 		default:
 			return nil, false
 		}
+
 		if duration <= 0 {
 			return nil, false
 		}
+
 		result = append(result, duration)
 	}
+
 	return result, len(result) != 0
 }
 
@@ -691,10 +760,12 @@ func validateGenerateAudioCapability(
 	if requested == nil {
 		return nil
 	}
+
 	audio, ok := config[model.ModelConfigKey("audio")].(map[string]any)
 	if !ok {
 		return nil
 	}
+
 	mode, _ := audio["mode"].(string)
 	switch mode {
 	case "none":
@@ -714,5 +785,6 @@ func validateGenerateAudioCapability(
 			)
 		}
 	}
+
 	return nil
 }

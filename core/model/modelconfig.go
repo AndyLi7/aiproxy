@@ -454,6 +454,7 @@ func DeleteModelConfig(model string) (err error) {
 	}()
 
 	result := DB.Where("model = ?", model).Delete(&ModelConfig{})
+
 	return result.Error
 }
 

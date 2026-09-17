@@ -55,7 +55,7 @@ jobs:
       - name: Run Linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
           working-directory: core
           args: --color=always --path-mode=abs
 
@@ -109,7 +109,7 @@ jobs:
       - name: Run Linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
           working-directory: mcp-servers
           args: --color=always --path-mode=abs
 
@@ -146,7 +146,7 @@ jobs:
       - name: Run Linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
           working-directory: openapi-mcp
           args: --color=always --path-mode=abs
 

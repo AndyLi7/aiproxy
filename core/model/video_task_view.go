@@ -56,10 +56,12 @@ func ListGroupVideoTasks(group string, page, perPage int) (GroupVideoTaskPage, e
 	if group == "" || len(group) > 64 {
 		return GroupVideoTaskPage{}, errors.New("invalid group")
 	}
+
 	if page <= 0 || page > MaxGroupVideoTaskPage ||
 		perPage <= 0 || perPage > MaxGroupVideoTaskPageSize {
 		return GroupVideoTaskPage{}, errors.New("invalid pagination")
 	}
+
 	if LogDB == nil || DB == nil {
 		return GroupVideoTaskPage{}, errors.New("database is not initialized")
 	}
@@ -88,14 +90,17 @@ func ListGroupVideoTasks(group string, page, perPage int) (GroupVideoTaskPage, e
 	}
 
 	channelIDs := make([]int, 0, len(infos))
+
 	seenChannelIDs := make(map[int]struct{}, len(infos))
 	for i := range infos {
 		if infos[i].ChannelID == 0 {
 			continue
 		}
+
 		if _, ok := seenChannelIDs[infos[i].ChannelID]; ok {
 			continue
 		}
+
 		seenChannelIDs[infos[i].ChannelID] = struct{}{}
 		channelIDs = append(channelIDs, infos[i].ChannelID)
 	}
@@ -104,6 +109,7 @@ func ListGroupVideoTasks(group string, page, perPage int) (GroupVideoTaskPage, e
 	if err != nil {
 		return GroupVideoTaskPage{}, err
 	}
+
 	providers := make(map[int]string, len(channels))
 	for _, channel := range channels {
 		providers[channel.ID] = channel.Type.String()
@@ -121,9 +127,11 @@ func FindGroupVideoTaskByRequestID(group, requestID string) (*GroupVideoTaskView
 	if group == "" || len(group) > 64 {
 		return nil, errors.New("invalid group")
 	}
+
 	if requestID == "" || len(requestID) > 128 {
 		return nil, errors.New("invalid request id")
 	}
+
 	if LogDB == nil || DB == nil {
 		return nil, errors.New("database is not initialized")
 	}
@@ -142,11 +150,14 @@ func FindGroupVideoTaskByRequestID(group, requestID string) (*GroupVideoTaskView
 	if err != nil {
 		return nil, err
 	}
+
 	provider := ""
 	if len(channels) > 0 {
 		provider = channels[0].Type.String()
 	}
+
 	view := groupVideoTaskView(info, provider)
+
 	return &view, nil
 }
 
@@ -173,6 +184,7 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 		amount := info.Amount.UsedAmount
 		view.Amount = &amount
 	}
+
 	if info.Status == AsyncUsageStatusCompleted && provider == ChannelTypeDoubao.String() {
 		width, height, ok := VerifiedDoubaoVideoBillableDimensions(
 			info.UsageContext.Resolution,
@@ -185,10 +197,12 @@ func groupVideoTaskView(info AsyncUsageInfo, provider string) GroupVideoTaskView
 			view.Params.BillableHeight = height
 		}
 	}
+
 	if info.Status == AsyncUsageStatusCompleted || info.Status == AsyncUsageStatusFailed {
 		completedAt := info.UpdatedAt
 		view.CompletedAt = &completedAt
 	}
+
 	return view
 }
 

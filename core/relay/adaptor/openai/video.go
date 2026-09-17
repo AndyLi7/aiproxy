@@ -72,6 +72,7 @@ func convertOpenAIVideoRequest(
 	if err != nil {
 		return adaptor.ConvertResult{}, err
 	}
+
 	_, _ = node.Unset("capability")
 
 	jsonData, err := sonic.Marshal(&node)
@@ -133,6 +134,7 @@ func withoutVideoCapability(values map[string][]string) map[string][]string {
 			filtered[key] = value
 		}
 	}
+
 	return filtered
 }
 

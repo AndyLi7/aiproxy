@@ -63,6 +63,7 @@ func GetGroupVideoTasks(c *gin.Context) {
 //	@Router			/api/video_tasks/{group}/by-request/{request_id} [get]
 func GetGroupVideoTaskByRequestID(c *gin.Context) {
 	group := c.Param("group")
+
 	requestID := c.Param("request_id")
 	if group == "" || len(group) > 64 || requestID == "" || len(requestID) > 128 {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid parameter")
@@ -75,7 +76,9 @@ func GetGroupVideoTaskByRequestID(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusNotFound, "video task not found")
 			return
 		}
+
 		middleware.ErrorResponse(c, http.StatusInternalServerError, "failed to find video task")
+
 		return
 	}
 
@@ -85,23 +88,29 @@ func GetGroupVideoTaskByRequestID(c *gin.Context) {
 func groupVideoTaskPagination(c *gin.Context) (page, perPage int, ok bool) {
 	page = defaultGroupVideoTaskPage
 	perPage = defaultGroupVideoTaskPageSize
+
 	if raw := c.Query("page"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			return 0, 0, false
 		}
+
 		page = parsed
 	}
+
 	if raw := c.Query("per_page"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			return 0, 0, false
 		}
+
 		perPage = parsed
 	}
+
 	if page <= 0 || page > model.MaxGroupVideoTaskPage ||
 		perPage <= 0 || perPage > model.MaxGroupVideoTaskPageSize {
 		return 0, 0, false
 	}
+
 	return page, perPage, true
 }

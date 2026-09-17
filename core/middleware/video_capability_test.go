@@ -3,6 +3,8 @@ package middleware
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +27,7 @@ func TestResolveInitialVideoCapabilityJSON(t *testing.T) {
 		bytes.NewBufferString(`{"model":"bytedance/seedance-2.0","capability":"image-to-video"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
+
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = request
 
@@ -45,7 +48,13 @@ func TestResolvePlatformExactVideoCapability(t *testing.T) {
 		t.Run(capability, func(t *testing.T) {
 			id := "bytedance/seedance-1.0-pro/" + capability
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"`+id+`","prompt":"test","resolution":"480p","aspect_ratio":"16:9","seconds":5,"generate_audio":false}`))
+			ctx.Request = httptest.NewRequestWithContext(context.Background(),
+				http.MethodPost,
+				"/v1/videos",
+				bytes.NewBufferString(
+					`{"model":"`+id+`","prompt":"test","resolution":"480p","aspect_ratio":"16:9","seconds":5,"generate_audio":false}`,
+				),
+			)
 			ctx.Request.Header.Set("Content-Type", "application/json")
 			public, route, err := resolveVideoCapability(ctx, mode.Videos, id)
 			require.NoError(t, err)
@@ -58,9 +67,19 @@ func TestResolvePlatformExactVideoCapability(t *testing.T) {
 
 func TestResolveExactVideoCapabilityRejectsConflictingField(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"bytedance/seedance-1.0-pro/text-to-video","capability":"image-to-video"}`))
+	ctx.Request = httptest.NewRequestWithContext(context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		bytes.NewBufferString(
+			`{"model":"bytedance/seedance-1.0-pro/text-to-video","capability":"image-to-video"}`,
+		),
+	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
-	_, _, err := resolveVideoCapability(ctx, mode.Videos, "bytedance/seedance-1.0-pro/text-to-video")
+	_, _, err := resolveVideoCapability(
+		ctx,
+		mode.Videos,
+		"bytedance/seedance-1.0-pro/text-to-video",
+	)
 	require.Error(t, err)
 }
 
@@ -69,6 +88,7 @@ func TestResolveInitialVideoCapabilityMultipart(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	var body bytes.Buffer
+
 	writer := multipart.NewWriter(&body)
 	require.NoError(t, writer.WriteField("model", "bytedance/seedance-2.0"))
 	require.NoError(t, writer.WriteField("capability", "text-to-video"))
@@ -76,6 +96,7 @@ func TestResolveInitialVideoCapabilityMultipart(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/videos", &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
+
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = request
 
@@ -110,11 +131,13 @@ func TestResolveInitialVideoCapabilityReturnsPublicErrors(t *testing.T) {
 				bytes.NewBufferString(tc.body),
 			)
 			request.Header.Set("Content-Type", "application/json")
+
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 			ctx.Request = request
 
 			_, _, err := resolveVideoCapability(ctx, mode.Videos, "bytedance/seedance-2.0")
-			validationErr, ok := err.(*publicVideoRequestValidationError)
+			validationErr := &publicVideoRequestValidationError{}
+			ok := errors.As(err, &validationErr)
 			require.True(t, ok)
 			require.Equal(t, tc.code, validationErr.code)
 			require.Equal(t, "capability", validationErr.param)
@@ -131,13 +154,15 @@ func TestResolveInitialVideoCapabilityRejectsInternalRouteKey(t *testing.T) {
 		bytes.NewBufferString(`{"model":"bytedance/seedance-2.0::text-to-video"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
+
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = request
 
 	_, _, err := resolveVideoCapability(
 		ctx, mode.Videos, "bytedance/seedance-2.0::text-to-video",
 	)
-	validationErr, ok := err.(*publicVideoRequestValidationError)
+	validationErr := &publicVideoRequestValidationError{}
+	ok := errors.As(err, &validationErr)
 	require.True(t, ok)
 	require.Equal(t, "invalid_parameter", validationErr.code)
 	require.Equal(t, "model", validationErr.param)
@@ -148,7 +173,12 @@ func TestResolveStoredVideoCapabilityDoesNotRequireRequestField(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/videos/video-1", nil)
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/v1/videos/video-1",
+		nil,
+	)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = request
 

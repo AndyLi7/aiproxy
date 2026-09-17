@@ -228,6 +228,7 @@ func TestVideoRemixUsesStoredCapabilityRoute(t *testing.T) {
 			bytes.NewBufferString(`{"prompt":"remix it"}`),
 		)
 		req.Header.Set("Content-Type", "application/json")
+
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		ctx.Request = req
 		ctx.Params = gin.Params{{Key: "video_id", Value: "video-remix-1"}}
@@ -250,6 +251,7 @@ func TestCapabilityRoutingResolvesEntitledPublicVideoModels(t *testing.T) {
 		for _, name := range required {
 			properties[name] = map[string]any{"type": "string"}
 		}
+
 		return coremodel.ModelConfig{
 			Model: internal,
 			Config: map[coremodel.ModelConfigKey]any{
@@ -268,8 +270,12 @@ func TestCapabilityRoutingResolvesEntitledPublicVideoModels(t *testing.T) {
 		}
 	}
 	configs := map[string]coremodel.ModelConfig{
-		textInternal:  modelConfig(textInternal, "text-to-video", []string{"prompt"}),
-		imageInternal: modelConfig(imageInternal, "image-to-video", []string{"prompt", "first_frame_url"}),
+		textInternal: modelConfig(textInternal, "text-to-video", []string{"prompt"}),
+		imageInternal: modelConfig(
+			imageInternal,
+			"image-to-video",
+			[]string{"prompt", "first_frame_url"},
+		),
 	}
 	token := coremodel.TokenCache{Models: []string{textInternal, imageInternal}}
 	token.SetAvailableSets([]string{coremodel.ChannelDefaultSet})
@@ -306,6 +312,7 @@ func TestCapabilityRoutingResolvesEntitledPublicVideoModels(t *testing.T) {
 				bytes.NewBufferString(test.body),
 			)
 			req.Header.Set("Content-Type", "application/json")
+
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 			ctx.Request = req
 

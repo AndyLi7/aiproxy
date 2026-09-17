@@ -903,15 +903,15 @@ func (u *Usage) Add(other Usage) {
 }
 
 type UsageContext struct {
-	Resolution       string `gorm:"size:32" json:"resolution,omitempty"`
-	NativeResolution string `gorm:"size:32" json:"native_resolution,omitempty"`
+	Resolution       string `gorm:"size:32"        json:"resolution,omitempty"`
+	NativeResolution string `gorm:"size:32"        json:"native_resolution,omitempty"`
 	Seconds          int    `gorm:"column:seconds" json:"seconds,omitempty"`
-	Quality          string `gorm:"size:32" json:"quality,omitempty"`
-	ServiceTier      string `gorm:"size:32" json:"service_tier,omitempty"`
-	VideoSeconds     int64  `               json:"video_seconds,omitempty"`
-	InputMedia       *bool  `               json:"input_media,omitempty"`
-	InputVideo       *bool  `               json:"input_video,omitempty"`
-	OutputAudio      *bool  `               json:"output_audio,omitempty"`
+	Quality          string `gorm:"size:32"        json:"quality,omitempty"`
+	ServiceTier      string `gorm:"size:32"        json:"service_tier,omitempty"`
+	VideoSeconds     int64  `                      json:"video_seconds,omitempty"`
+	InputMedia       *bool  `                      json:"input_media,omitempty"`
+	InputVideo       *bool  `                      json:"input_video,omitempty"`
+	OutputAudio      *bool  `                      json:"output_audio,omitempty"`
 }
 
 func (c UsageContext) PriceConditionMatches(condition PriceCondition) bool {

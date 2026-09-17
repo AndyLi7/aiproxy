@@ -71,6 +71,7 @@ func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
 		if !capability.Valid() && info.Capability != "reference-to-video" {
 			return fmt.Errorf("invalid async usage capability %q", info.Capability)
 		}
+
 		if strings.Contains(info.Model, modelCapabilityKeySeparator) {
 			return errors.New("async usage model must be a public model ID")
 		}
@@ -101,6 +102,7 @@ func FindCompletedAsyncUsageByUpstreamID(
 	}
 
 	var info AsyncUsageInfo
+
 	err := LogDB.
 		Where("group_id = ?", groupID).
 		Where("token_id = ?", tokenID).
@@ -111,6 +113,7 @@ func FindCompletedAsyncUsageByUpstreamID(
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +250,7 @@ func PrepareClaimedAsyncUsageSettlement(
 		UsageContext: usageContext,
 		Amount:       amount,
 	}
+
 	updates, err := asyncUsageUpdateValues(
 		updatesModel,
 		"Usage",

@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,13 +28,20 @@ func TestIsPublicVideoRequestRecognizesPathsAndVideoModes(t *testing.T) {
 
 func TestAbortWithMessageSanitizesVideoAuthenticationBeforeModeSelection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 
 	AbortWithMessage(c, http.StatusUnauthorized, "database lookup exposed private-key")
 
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+
 	var body relaymodel.OpenAIErrorResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, "The API key is missing or invalid.", body.Error.Message)
@@ -44,9 +52,15 @@ func TestAbortWithMessageSanitizesVideoAuthenticationBeforeModeSelection(t *test
 
 func TestAbortPublicVideoRequestErrorIncludesActionableFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 
 	AbortPublicVideoRequestError(
 		c,
@@ -61,6 +75,7 @@ func TestAbortPublicVideoRequestErrorIncludesActionableFields(t *testing.T) {
 	)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+
 	var body relaymodel.OpenAIErrorResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, "unsupported_by_model", body.Error.Code)
@@ -72,9 +87,15 @@ func TestAbortPublicVideoRequestErrorIncludesActionableFields(t *testing.T) {
 
 func TestAbortUnsupportedPublicVideoModelListsOnlyAccessibleVideoModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 
 	token := model.TokenCache{}
 	token.SetAvailableSets([]string{"default"})
@@ -84,6 +105,7 @@ func TestAbortUnsupportedPublicVideoModelListsOnlyAccessibleVideoModels(t *testi
 			"openai/gpt-5",
 		},
 	})
+
 	caches := &model.ModelCaches{
 		EnabledModelConfigsMap: map[string]model.ModelConfig{
 			"bytedance/seedance-1.0-pro": {
@@ -106,6 +128,7 @@ func TestAbortUnsupportedPublicVideoModelListsOnlyAccessibleVideoModels(t *testi
 	)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+
 	var body relaymodel.OpenAIErrorResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, "unsupported_by_model", body.Error.Code)

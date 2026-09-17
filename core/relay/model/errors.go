@@ -62,6 +62,7 @@ func PublicVideoRequestError(
 	if len(allowedValues) != 0 {
 		allowedValuesPointer = &allowedValues
 	}
+
 	return NewOpenAIError(statusCode, OpenAIError{
 		Code:          code,
 		Message:       message,

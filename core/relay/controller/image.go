@@ -167,11 +167,13 @@ func validateSupportedImageResolution(resolution string, mc model.ModelConfig) e
 				}
 			}
 		}
+
 		for _, allowed := range tiers {
 			if strings.EqualFold(strings.TrimSpace(allowed), tier) {
 				if len(mc.AllowedResolutions) == 0 {
 					return nil
 				}
+
 				for _, limit := range mc.AllowedResolutions {
 					if strings.EqualFold(strings.TrimSpace(limit), tier) {
 						return nil
@@ -180,6 +182,7 @@ func validateSupportedImageResolution(resolution string, mc model.ModelConfig) e
 			}
 		}
 	}
+
 	fuzzy := !mc.DisableResolutionFuzzyMatch
 	if err := validateOpenAIImageResolutionFormat(
 		resolution,

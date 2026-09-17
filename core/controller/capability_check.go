@@ -18,31 +18,46 @@ func CheckCapabilityResolution(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid model")
 		return
 	}
+
 	cache := model.LoadModelCaches()
 	if cache == nil || cache.ModelConfig == nil {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "routing cache unavailable")
 		return
 	}
-	route, capability := model.ResolveImageCapabilityRoute(publicID, func(key string) (map[model.ModelConfigKey]any, bool) {
-		config, ok := cache.ModelConfig.GetModelConfig(key)
-		return config.Config, ok
-	})
+
+	route, capability := model.ResolveImageCapabilityRoute(
+		publicID,
+		func(key string) (map[model.ModelConfigKey]any, bool) {
+			config, ok := cache.ModelConfig.GetModelConfig(key)
+			return config.Config, ok
+		},
+	)
 	if index := strings.LastIndex(publicID, "/"); capability == "" && index > 0 {
-		parent, cap := publicID[:index], model.ModelCapability(publicID[index+1:])
-		if cap.Valid() {
-			candidate, _ := model.BuildModelCapabilityKey(parent, cap)
-			if config, ok := cache.ModelConfig.GetModelConfig(candidate); ok && model.ValidateModelCapabilityConfig(config.Config, parent, cap) == nil {
-				route, capability = candidate, string(cap)
+		parent, parsedCapability := publicID[:index], model.ModelCapability(publicID[index+1:])
+		if parsedCapability.Valid() {
+			candidate, _ := model.BuildModelCapabilityKey(parent, parsedCapability)
+			if config, ok := cache.ModelConfig.GetModelConfig(
+				candidate,
+			); ok &&
+				model.ValidateModelCapabilityConfig(
+					config.Config,
+					parent,
+					parsedCapability,
+				) == nil {
+				route, capability = candidate, string(parsedCapability)
 			}
 		}
 	}
+
 	_, registered := cache.ModelConfig.GetModelConfig(route)
+
 	channels := map[int]bool{}
 	for _, routes := range cache.EnabledModel2ChannelsBySet {
 		for _, channel := range routes[route] {
 			channels[channel.ID] = true
 		}
 	}
+
 	middleware.SuccessResponse(c, gin.H{
 		"public_id": publicID, "routing_model": route, "capability": capability,
 		"registered": registered, "mapped": capability != "", "enabled_channels": len(channels),

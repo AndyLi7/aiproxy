@@ -102,10 +102,12 @@ func PublicLogIdentity(
 	capability string,
 ) (string, string) {
 	publicModel = strings.TrimSpace(publicModel)
+
 	capability = strings.TrimSpace(capability)
 	if publicModel == "" || capability == "" {
 		return modelName, ""
 	}
+
 	return publicModel, capability
 }
 
@@ -417,6 +419,7 @@ func RecordConsumeLog(
 	if len(upstreamID) > maxUpstreamIDLength {
 		upstreamID = upstreamID[:maxUpstreamIDLength]
 	}
+
 	if operationalFields.PublicModel != "" || operationalFields.ResolvedCapability != "" {
 		modelName, capability = PublicLogIdentity(
 			modelName,

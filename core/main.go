@@ -30,7 +30,10 @@ func init() {
 	flag.IntVar(&pprofPort, "pprof-port", 15000, "pport http server port")
 }
 
-func startRequestTraceRuntime(ctx context.Context, options requesttraceruntime.Options) *requesttraceruntime.Runtime {
+func startRequestTraceRuntime(
+	ctx context.Context,
+	options requesttraceruntime.Options,
+) *requesttraceruntime.Runtime {
 	return requesttraceruntime.Start(ctx, model.LogDB, options)
 }
 
@@ -69,14 +72,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	traceKeys, traceKeyErr := requesttraceruntime.ParseTrustedKeys(env.String("REQUEST_TRACE_SERVICE_KEYS", ""))
+	traceKeys, traceKeyErr := requesttraceruntime.ParseTrustedKeys(
+		env.String("REQUEST_TRACE_SERVICE_KEYS", ""),
+	)
 	if traceKeyErr != nil {
 		log.Warn("request_trace_service_keys_unavailable")
 	}
+
 	traceRuntime := startRequestTraceRuntime(ctx, requesttraceruntime.Options{
 		Enabled:     env.Bool("REQUEST_TRACE_ENABLED", false),
 		TrustedKeys: traceKeys,
 	})
+
 	restoreTraceRuntime := requesttraceruntime.Install(traceRuntime)
 	defer restoreTraceRuntime()
 
@@ -158,6 +165,7 @@ func main() {
 
 	traceCloseCtx, traceCloseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer traceCloseCancel()
+
 	if err := traceRuntime.Close(traceCloseCtx); err != nil {
 		log.Error("request_trace_shutdown_failed")
 	}

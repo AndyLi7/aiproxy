@@ -47,10 +47,12 @@ func operationalLogRecorded(c *gin.Context) bool {
 func OperationalFieldsFromContext(c *gin.Context) model.OperationalFields {
 	stage, _ := c.Get(operationalFailureStageKey)
 	failureStage, _ := stage.(model.FailureStage)
+
 	requestSource := c.GetHeader(OperationalLogSourceHeader)
 	if requestSource == model.RequestSourceAdminDemo && !isInternalGroupContext(c) {
 		requestSource = model.RequestSourceAPI
 	}
+
 	fields := model.BuildOperationalFields(
 		requestSource,
 		failureStage,
@@ -61,6 +63,7 @@ func OperationalFieldsFromContext(c *gin.Context) model.OperationalFields {
 	fields.PublicModel = GetPublicModel(c)
 	fields.PublicCapabilityModel = GetPublicCapabilityModel(c)
 	fields.ResolvedCapability = GetResolvedCapability(c)
+
 	return fields
 }
 
@@ -69,6 +72,7 @@ func isInternalGroupContext(c *gin.Context) bool {
 	if !ok {
 		return false
 	}
+
 	switch group := value.(type) {
 	case model.GroupCache:
 		return group.Status == model.GroupStatusInternal
@@ -82,6 +86,7 @@ func isInternalGroupContext(c *gin.Context) bool {
 func OperationalLogMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
+
 		if c.Writer.Status() < http.StatusBadRequest || operationalLogRecorded(c) {
 			return
 		}
@@ -94,10 +99,12 @@ func OperationalLogMiddleware() gin.HandlerFunc {
 
 func recordRejectedGatewayLog(c *gin.Context) error {
 	now := time.Now()
+
 	requestAt := GetRequestAt(c)
 	if requestAt.IsZero() {
 		requestAt = now
 	}
+
 	fields := OperationalFieldsFromContext(c)
 	metadata := GetRequestMetadata(c)
 	modelName, capability := model.PublicLogIdentity(
@@ -107,14 +114,16 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 	)
 
 	entry := &model.Log{
-		RequestID:     model.EmptyNullString(GetRequestID(c)),
-		RequestAt:     requestAt,
-		CreatedAt:     now,
-		Code:          c.Writer.Status(),
-		Mode:          int(GetMode(c)),
-		IP:            model.EmptyNullString(maskOperationalIP(c.ClientIP())),
-		ChannelID:     GetChannelID(c),
-		Endpoint:      model.EmptyNullString(truncateOperationalText(c.Request.Method+" "+c.Request.URL.Path, 64)),
+		RequestID: model.EmptyNullString(GetRequestID(c)),
+		RequestAt: requestAt,
+		CreatedAt: now,
+		Code:      c.Writer.Status(),
+		Mode:      int(GetMode(c)),
+		IP:        model.EmptyNullString(maskOperationalIP(c.ClientIP())),
+		ChannelID: GetChannelID(c),
+		Endpoint: model.EmptyNullString(
+			truncateOperationalText(c.Request.Method+" "+c.Request.URL.Path, 64),
+		),
 		Model:         modelName,
 		Capability:    capability,
 		User:          model.EmptyNullString(GetRequestUser(c)),
@@ -135,6 +144,7 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 			entry.TokenName = token.Name
 		}
 	}
+
 	if value, ok := c.Get(Group); ok {
 		if group, ok := value.(model.GroupCache); ok {
 			entry.GroupID = group.ID
@@ -149,6 +159,7 @@ func truncateOperationalText(value string, limit int) string {
 	if len(runes) <= limit {
 		return value
 	}
+
 	return string(runes[:limit])
 }
 
@@ -157,6 +168,7 @@ func maskOperationalIP(value string) string {
 	if ip == nil {
 		return ""
 	}
+
 	if ipv4 := ip.To4(); ipv4 != nil {
 		return net.IPv4(ipv4[0], ipv4[1], ipv4[2], 0).String()
 	}
@@ -165,5 +177,6 @@ func maskOperationalIP(value string) string {
 	for index := 8; index < len(ipv6); index++ {
 		ipv6[index] = 0
 	}
+
 	return ipv6.String()
 }

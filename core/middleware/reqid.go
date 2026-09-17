@@ -16,7 +16,7 @@ func GenRequestID(t time.Time) string {
 }
 
 const (
-	RequestIDHeader = "X-Request-Id"
+	RequestIDHeader = "X-Request-ID"
 )
 
 func SetRequestID(c *gin.Context, id string) {
@@ -32,9 +32,11 @@ func GetRequestID(c *gin.Context) string {
 
 func RequestIDMiddleware(c *gin.Context) {
 	now := GetRequestAt(c)
+
 	id := c.GetHeader(RequestIDHeader)
 	if !safeRequestID.MatchString(id) {
 		id = GenRequestID(now)
 	}
+
 	SetRequestID(c, id)
 }

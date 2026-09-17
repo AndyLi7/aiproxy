@@ -37,26 +37,33 @@ func FormatLatencyEvent(event LatencyEvent) (string, error) {
 	if event.Stage != "" {
 		payload["stage"] = event.Stage
 	}
+
 	if event.Status != 0 {
 		payload["status"] = event.Status
 	}
+
 	if event.Method != "" {
 		payload["method"] = event.Method
 	}
+
 	if event.Path != "" {
 		payload["path"] = event.Path
 	}
+
 	if event.Model != "" {
 		payload["model"] = event.Model
 	}
+
 	if event.ChannelID != 0 {
 		payload["channel_id"] = event.ChannelID
 	}
+
 	if event.ErrorType != "" {
 		payload["error_type"] = event.ErrorType
 	}
 
 	encoded, err := json.Marshal(payload)
+
 	return string(encoded), err
 }
 
@@ -65,12 +72,15 @@ func WriteLatencyEvent(writer io.Writer, event LatencyEvent) error {
 	if err != nil {
 		return err
 	}
+
 	_, err = io.WriteString(writer, line+"\n")
+
 	return err
 }
 
 func LogLatencyEvent(c *gin.Context, event LatencyEvent) {
 	latencyOutputMu.Lock()
 	defer latencyOutputMu.Unlock()
+
 	_ = WriteLatencyEvent(GetLogger(c).Logger.Out, event)
 }

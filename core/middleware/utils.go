@@ -152,6 +152,7 @@ func setDefaultFailureStage(c *gin.Context, safeError string) {
 	if _, authenticated := c.Get(Token); !authenticated {
 		stage = model.FailureStageAuth
 	}
+
 	SetFailureStage(c, stage, safeError)
 }
 

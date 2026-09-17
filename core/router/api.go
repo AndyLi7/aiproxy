@@ -190,7 +190,10 @@ func SetAPIRouter(router *gin.Engine) {
 		videoTasksRoute := apiRouter.Group("/video_tasks")
 		{
 			videoTasksRoute.GET("/:group", controller.GetGroupVideoTasks)
-			videoTasksRoute.GET("/:group/by-request/:request_id", controller.GetGroupVideoTaskByRequestID)
+			videoTasksRoute.GET(
+				"/:group/by-request/:request_id",
+				controller.GetGroupVideoTaskByRequestID,
+			)
 		}
 
 		apiRouter.GET("/capability_resolution", controller.CheckCapabilityResolution)

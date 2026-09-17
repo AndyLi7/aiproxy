@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ func BuildModelCapabilityKey(modelName string, capability ModelCapability) (stri
 	if modelName == "" || strings.Contains(modelName, modelCapabilityKeySeparator) {
 		return "", fmt.Errorf("invalid public model %q", modelName)
 	}
+
 	if !capability.Valid() || strings.Contains(string(capability), modelCapabilityKeySeparator) {
 		return "", fmt.Errorf("unsupported model capability %q", capability)
 	}
@@ -63,17 +65,17 @@ func ValidateModelCapabilityConfig(
 		config[ModelConfigKey("capability_contract_version")],
 	)
 	if !ok || version != ModelCapabilityContractVersion {
-		return fmt.Errorf("unsupported model capability contract version")
+		return errors.New("unsupported model capability contract version")
 	}
 
 	configuredModel, ok := config[ModelConfigKey("public_model")].(string)
 	if !ok || configuredModel != publicModel {
-		return fmt.Errorf("model capability public model does not match route key")
+		return errors.New("model capability public model does not match route key")
 	}
 
 	configuredCapability, ok := config[ModelConfigKey("capability")].(string)
 	if !ok || ModelCapability(configuredCapability) != capability || !capability.Valid() {
-		return fmt.Errorf("model capability does not match route key")
+		return errors.New("model capability does not match route key")
 	}
 
 	return nil

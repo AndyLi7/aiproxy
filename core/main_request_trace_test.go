@@ -19,6 +19,7 @@ import (
 
 func TestRequestTraceStartupPersistsToLogDatabaseUsedByAdminEndpoints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	primaryDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "primary.db"))
 	require.NoError(t, err)
 	logDB, err := model.OpenSQLite(filepath.Join(t.TempDir(), "log.db"))
@@ -27,15 +28,20 @@ func TestRequestTraceStartupPersistsToLogDatabaseUsedByAdminEndpoints(t *testing
 	require.NoError(t, err)
 	logSQL, err := logDB.DB()
 	require.NoError(t, err)
+
 	oldPrimary, oldLog := model.DB, model.LogDB
 	model.DB, model.LogDB = primaryDB, logDB
 	t.Cleanup(func() {
 		model.DB, model.LogDB = oldPrimary, oldLog
+
 		require.NoError(t, primarySQL.Close())
 		require.NoError(t, logSQL.Close())
 	})
 
-	runtime := startRequestTraceRuntime(context.Background(), requesttraceruntime.Options{Enabled: true})
+	runtime := startRequestTraceRuntime(
+		context.Background(),
+		requesttraceruntime.Options{Enabled: true},
+	)
 	runtimeClosed := false
 	t.Cleanup(func() {
 		if !runtimeClosed {
@@ -47,13 +53,16 @@ func TestRequestTraceStartupPersistsToLogDatabaseUsedByAdminEndpoints(t *testing
 	require.True(t, session.BindGroup("startup-group"))
 	require.True(t, session.Finish(requesttrace.StatusSuccess))
 	traceID := session.TraceID()
+
 	require.NoError(t, runtime.Close(context.Background()))
+
 	runtimeClosed = true
 
 	require.False(t, primaryDB.Migrator().HasTable(&model.RequestTraceSpan{}))
 	require.False(t, primaryDB.Migrator().HasTable(&model.RequestTraceHead{}))
 	require.True(t, logDB.Migrator().HasTable(&model.RequestTraceSpan{}))
 	require.True(t, logDB.Migrator().HasTable(&model.RequestTraceHead{}))
+
 	for _, table := range []any{&model.RequestTraceSpan{}, &model.RequestTraceHead{}} {
 		var count int64
 		require.NoError(t, logDB.Model(table).Count(&count).Error)
@@ -63,15 +72,18 @@ func TestRequestTraceStartupPersistsToLogDatabaseUsedByAdminEndpoints(t *testing
 	engine := gin.New()
 	engine.GET("/trace/:group/by-request/:request_id", controller.GetRequestTracesByRequest)
 	engine.GET("/trace/:group/:trace_id", controller.GetRequestTrace)
+
 	for _, path := range []string{
 		fmt.Sprintf("/trace/startup-group/%s?service=aiproxy", traceID),
 		"/trace/startup-group/by-request/startup-request",
 	} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer admin")
+
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
 		var payload struct {
 			Success bool `json:"success"`
 			Data    struct {

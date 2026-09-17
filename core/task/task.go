@@ -275,7 +275,9 @@ const (
 var (
 	errAsyncUsageMetricsPending    = errors.New("async usage metrics pending")
 	errAsyncUsageSettlementPending = errors.New("async usage settlement pending")
-	errAsyncUsageManualSettlement  = errors.New("async usage requires manual settlement reconciliation")
+	errAsyncUsageManualSettlement  = errors.New(
+		"async usage requires manual settlement reconciliation",
+	)
 	markAsyncUsageBalanceAttempted = model.MarkAsyncUsageBalanceConsumeAttempted
 	markAsyncUsageBalanceConsumed  = model.MarkAsyncUsageBalanceConsumed
 	completeClaimedAsyncUsageInfo  = model.CompleteClaimedAsyncUsageInfo
@@ -316,6 +318,7 @@ func processAsyncUsages(ctx context.Context) bool {
 	if err := model.RecoverStaleImageSubmissions(time.Now()); err != nil {
 		log.WithError(err).Warn("recover interrupted image submissions")
 	}
+
 	infos, err := model.GetPendingAsyncUsages(asyncUsageBatchSize)
 	if err != nil {
 		notify.ErrorThrottle(
@@ -433,6 +436,7 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		info.RetryCount,
 		info.NextPollAt.Format(time.RFC3339),
 	)
+
 	if info.Amount.UsedAmount > 0 {
 		completePolledAsyncUsage(ctx, info, info.Usage, info.UsageContext)
 
@@ -500,6 +504,7 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		Store:   controller.AdaptorStore,
 	})
 	finishTracePoll(completed, err)
+
 	if err != nil {
 		if completed {
 			log.Debugf(
@@ -551,6 +556,7 @@ func completePolledAsyncUsage(
 
 			return
 		}
+
 		if errors.Is(err, errAsyncUsageMetricsPending) {
 			log.Debugf(
 				"async usage poll: metrics_pending id=%d request_id=%s upstream_id=%s",
@@ -561,6 +567,7 @@ func completePolledAsyncUsage(
 
 			return
 		}
+
 		if errors.Is(err, errAsyncUsageSettlementPending) {
 			log.Debugf(
 				"async usage poll: settlement_pending id=%d request_id=%s upstream_id=%s err=%v",
@@ -573,6 +580,7 @@ func completePolledAsyncUsage(
 
 			return
 		}
+
 		if errors.Is(err, errAsyncUsageManualSettlement) {
 			log.Errorf(
 				"async usage poll: manual settlement reconciliation required id=%d request_id=%s upstream_id=%s err=%v",
@@ -633,6 +641,7 @@ func startAsyncUsageClaimRenewalAtInterval(
 ) (context.Context, func()) {
 	workCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+
 	var stopOnce sync.Once
 
 	go func() {
@@ -706,6 +715,7 @@ func completeAsyncUsage(
 
 	price := info.Price
 	settlementPrepared := info.Amount.UsedAmount > 0
+
 	amount := info.Amount
 	if settlementPrepared {
 		usage = info.Usage
@@ -722,6 +732,7 @@ func completeAsyncUsage(
 			},
 		)
 	}
+
 	selectedPrice := price.SelectConditionalPriceWithOptions(
 		usage,
 		usageContext,
@@ -735,8 +746,10 @@ func completeAsyncUsage(
 
 		return errAsyncUsageMetricsPending
 	}
+
 	selectedPrice.ConditionalPrices = nil
 	nonReplaySafeDebitAttempted := false
+
 	if amount.UsedAmount > 0 && !settlementPrepared {
 		if err := model.PrepareClaimedAsyncUsageSettlement(
 			info,
@@ -746,6 +759,7 @@ func completeAsyncUsage(
 		); err != nil {
 			return fmt.Errorf("prepare async usage settlement: %w", err)
 		}
+
 		info.Usage = usage
 		info.UsageContext = usageContext
 		info.Amount = amount
@@ -784,24 +798,28 @@ func completeAsyncUsage(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		charged, replaySafe, err := consumeAsyncUsageGroupBalance(ctx, info, amount.UsedAmount)
+
 		nonReplaySafeDebitAttempted = charged && !replaySafe
 		if err != nil {
 			if errors.Is(err, errAsyncUsageManualSettlement) {
 				return err
 			}
+
 			if !charged {
 				return fmt.Errorf(
-					"%w: consume async usage balance before charge: %v",
+					"%w: consume async usage balance before charge: %s",
 					errAsyncUsageSettlementPending,
-					err,
+					err.Error(),
 				)
 			}
+
 			if replaySafe {
 				return fmt.Errorf(
-					"%w: confirm idempotent async usage debit: %v",
+					"%w: confirm idempotent async usage debit: %s",
 					errAsyncUsageSettlementPending,
-					err,
+					err.Error(),
 				)
 			}
 
@@ -825,11 +843,12 @@ func completeAsyncUsage(
 			if err := markAsyncUsageBalanceConsumed(info); err != nil {
 				if replaySafe {
 					return fmt.Errorf(
-						"%w: persist consumed balance: %v",
+						"%w: persist consumed balance: %s",
 						errAsyncUsageSettlementPending,
-						err,
+						err.Error(),
 					)
 				}
+
 				notify.ErrorThrottle(
 					"asyncUsageMarkBalanceConsumed",
 					time.Minute*5,
@@ -858,9 +877,9 @@ func completeAsyncUsage(
 	if err != nil {
 		if nonReplaySafeDebitAttempted {
 			return fmt.Errorf(
-				"%w: non-replay-safe debit succeeded but completion marker failed: %v",
+				"%w: non-replay-safe debit succeeded but completion marker failed: %s",
 				errAsyncUsageManualSettlement,
-				err,
+				err.Error(),
 			)
 		}
 
@@ -903,6 +922,7 @@ func asyncUsageNeedsMetrics(
 	if price.PerRequestPrice > 0 {
 		return false
 	}
+
 	if amount.UsedAmount > 0 {
 		return price.VideoInputPrice > 0 && usage.VideoInputTokens <= 0 ||
 			price.OutputPrice > 0 && usage.OutputTokens <= 0
@@ -1033,12 +1053,14 @@ func consumeAsyncUsageGroupBalance(
 	if replayable, ok := consumer.(balance.ReplaySafePostGroupConsumer); ok {
 		replaySafe = replayable.CanReplayPostGroupConsume(ctx)
 	}
+
 	if !replaySafe && info.BalanceConsumeAttempted {
 		return false, false, fmt.Errorf(
 			"%w: non-replay-safe debit was already attempted",
 			errAsyncUsageManualSettlement,
 		)
 	}
+
 	if !replaySafe && info.ID != 0 && info.ProcessingToken != "" {
 		if err := markAsyncUsageBalanceAttempted(info); err != nil {
 			return false, false, fmt.Errorf(
@@ -1046,6 +1068,7 @@ func consumeAsyncUsageGroupBalance(
 				err,
 			)
 		}
+
 		info.BalanceConsumeAttempted = true
 	}
 

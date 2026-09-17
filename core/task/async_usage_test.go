@@ -57,6 +57,7 @@ func (c *replaySafeAmbiguousAsyncUsageConsumer) PostGroupConsume(
 ) (float64, error) {
 	c.attempts++
 	c.amounts = append(c.amounts, amount)
+
 	requestID := balance.RequestIDFromContext(ctx)
 	if c.charges[requestID] == 0 {
 		c.charges[requestID] = 1
@@ -396,10 +397,12 @@ func TestCompleteAsyncUsageDoesNotReplaySuccessfulNonIdempotentDebitWhenMarkerWr
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = oldLogDB
+
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -459,7 +462,7 @@ func TestCompleteAsyncUsageDoesNotReplaySuccessfulNonIdempotentDebitWhenMarkerWr
 		model.UsageContext,
 		model.Amount,
 	) (bool, error) {
-		return false, errors.New("completion marker unavailable")
+		return false, errors.Join(errors.New("completion marker unavailable"), context.Canceled)
 	}
 	t.Cleanup(func() { completeClaimedAsyncUsageInfo = oldComplete })
 
@@ -484,6 +487,8 @@ func TestCompleteAsyncUsageDoesNotReplaySuccessfulNonIdempotentDebitWhenMarkerWr
 		TotalTokens:  4,
 	}, model.UsageContext{})
 	require.ErrorIs(t, err, errAsyncUsageManualSettlement)
+	require.NotErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, context.Canceled.Error())
 	require.Equal(t, 2, consumer.attempts)
 
 	var parkedReloaded model.AsyncUsageInfo
@@ -521,7 +526,7 @@ func TestCompleteAsyncUsageRetriesPreChargeBalanceError(t *testing.T) {
 
 	oldBalance := balance.Default
 	balance.Default = preChargeFailingAsyncUsageBalance{
-		err: errors.New("balance lookup unavailable"),
+		err: errors.Join(errors.New("balance lookup unavailable"), context.Canceled),
 	}
 	t.Cleanup(func() {
 		balance.Default = oldBalance
@@ -554,6 +559,9 @@ func TestCompleteAsyncUsageRetriesPreChargeBalanceError(t *testing.T) {
 		TotalTokens: 10,
 	}, model.UsageContext{})
 	require.ErrorContains(t, err, "consume async usage balance before charge")
+	require.ErrorIs(t, err, errAsyncUsageSettlementPending)
+	require.NotErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, context.Canceled.Error())
 	require.Equal(t, model.AsyncUsageStatusPending, info.Status)
 	require.False(t, info.BalanceConsumed)
 
@@ -575,10 +583,12 @@ func TestCompleteAsyncUsageKeepsUsagePricedSuccessPendingUntilMetricsArrive(t *t
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = oldLogDB
+
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -643,10 +653,12 @@ func TestCompleteAsyncUsageKeepsPartiallyReportedVideoUsagePending(t *testing.T)
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = oldLogDB
+
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -689,10 +701,12 @@ func TestCompleteAsyncUsageReplaysAmbiguousIdempotentDebitExactlyOnce(t *testing
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = oldLogDB
+
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -727,6 +741,7 @@ func TestCompleteAsyncUsageReplaysAmbiguousIdempotentDebitExactlyOnce(t *testing
 		ProcessingToken: "claim-token",
 	}
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+
 	usage := model.Usage{OutputTokens: 4, TotalTokens: 4}
 
 	err = completeAsyncUsage(t.Context(), info, usage, model.UsageContext{})
@@ -736,6 +751,7 @@ func TestCompleteAsyncUsageReplaysAmbiguousIdempotentDebitExactlyOnce(t *testing
 	require.False(t, info.BalanceConsumed)
 	require.Equal(t, 1, consumer.charges[requestID])
 	require.Equal(t, 2.0, info.Amount.UsedAmount)
+
 	var prepared model.AsyncUsageInfo
 	require.NoError(t, db.First(&prepared, info.ID).Error)
 	require.Equal(t, int64(4), int64(prepared.Usage.OutputTokens))
@@ -987,10 +1003,12 @@ func TestScheduleAsyncUsageSettlementRetryDoesNotFailSuccessfulJobAtRetryLimit(t
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = oldLogDB
+
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -1004,6 +1022,7 @@ func TestScheduleAsyncUsageSettlementRetryDoesNotFailSuccessfulJobAtRetryLimit(t
 	require.NoError(t, db.Create(info).Error)
 
 	beforeRetry := time.Now()
+
 	scheduleAsyncUsageSettlementRetry(info)
 
 	require.Equal(t, asyncUsageMaxRetry-1, info.RetryCount)
@@ -1031,10 +1050,12 @@ func TestAsyncUsageClaimRenewalCancelsWorkOnLostClaim(t *testing.T) {
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() {
 		model.LogDB = oldLogDB
+
 		require.NoError(t, sqlDB.Close())
 	})
 

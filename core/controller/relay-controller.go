@@ -227,14 +227,21 @@ func RelayHelper(
 	handel RelayHandler,
 ) (result *controller.HandleResult, retry bool) {
 	attempt := middleware.NextRequestTraceAttempt(c)
-	handle := middleware.BeginRequestTraceStage(c, requesttrace.StageUpstreamAttempt, requestTraceAttemptAttributes(meta, attempt))
+
+	handle := middleware.BeginRequestTraceStage(
+		c,
+		requesttrace.StageUpstreamAttempt,
+		requestTraceAttemptAttributes(meta, attempt),
+	)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			handle.Finish(requesttrace.StatusError)
 			panic(recovered)
 		}
+
 		handle.Finish(requestTraceResultStatus(c.Request.Context(), result))
 	}()
+
 	result = handel(c, meta)
 	if result.Error == nil {
 		return result, false
@@ -267,9 +274,11 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if relayController.ValidateRequest != nil {
 		if err := validateRelayRequest(c, mc, relayController.ValidateRequest); err != nil {
 			statusCode := http.StatusInternalServerError
+
 			errorCode := ""
 			if requestParamErr, ok := errors.AsType[*controller.RequestParamError](err); ok {
 				statusCode = requestParamErr.StatusCode
+
 				errorCode = requestParamErr.Code
 				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
 					middleware.AbortPublicVideoRequestError(
@@ -283,6 +292,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 						requestParamErr.AllowedValues,
 						requestParamErr.Expected,
 					)
+
 					return
 				}
 			}
@@ -300,6 +310,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 	// Get initial channel
 	channelStartedAt := time.Now()
+
 	initialChannel, err := getInitialChannelWithTrace(c, routingModel, mode)
 	if err != nil || initialChannel == nil || initialChannel.channel == nil {
 		common.LogLatencyEvent(c, common.LatencyEvent{
@@ -322,6 +333,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 		return
 	}
+
 	common.LogLatencyEvent(c, common.LatencyEvent{
 		Event:      "aiproxy_stage_finished",
 		RequestID:  middleware.GetRequestID(c),
@@ -407,6 +419,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
+
 	upstreamErrorType := ""
 	if c.Request.Context().Err() != nil {
 		upstreamOutcome = "cancelled"
@@ -417,6 +430,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		upstreamStatus = result.Error.StatusCode()
 		upstreamErrorType = "upstream_error"
 	}
+
 	common.LogLatencyEvent(c, common.LatencyEvent{
 		Event:      "aiproxy_stage_finished",
 		RequestID:  middleware.GetRequestID(c),
@@ -484,7 +498,9 @@ func recordResult(
 		failureFields.ResolvedCapability = fields.ResolvedCapability
 		fields = failureFields
 	}
+
 	meta.OperationalFields = fields
+
 	middleware.MarkOperationalLogRecorded(c)
 
 	code := http.StatusOK
@@ -594,6 +610,7 @@ func saveAsyncUsageInfo(
 		log.Errorf("failed to save async usage info: %v", err)
 		return
 	}
+
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
 }
 

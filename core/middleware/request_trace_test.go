@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -51,26 +52,36 @@ func TestRequestTraceMiddlewareAcceptsOnlySupportedB1Routes(t *testing.T) {
 
 func TestRequestTraceMiddlewarePersistsRootErrorAndRethrowsPanic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "panic-trace.db"))
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
 	runtime := trace.Start(context.Background(), db, trace.Options{Enabled: true})
 	restore := trace.Install(runtime)
 	t.Cleanup(restore)
 
 	var recovered any
+
 	engine := gin.New()
 	engine.Use(RequestIDMiddleware, func(c *gin.Context) {
 		defer func() { recovered = recover() }()
+
 		c.Next()
 	}, RequestTraceMiddleware())
 	engine.POST("/v1/images/generations", func(c *gin.Context) {
 		require.True(t, BindRequestTraceGroup(c, "panic-group"))
 		panic("panic-sentinel")
 	})
-	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/images/generations",
+		nil,
+	)
 	request.Header.Set(RequestIDHeader, "panic-request")
 	engine.ServeHTTP(httptest.NewRecorder(), request)
 	require.Equal(t, "panic-sentinel", recovered)
@@ -86,6 +97,7 @@ func TestRequestTraceMiddlewarePersistsRootErrorAndRethrowsPanic(t *testing.T) {
 
 func TestRequestTraceHelpersBindTrustedGroupAndCreateStages(t *testing.T) {
 	var spans []requesttrace.Span
+
 	session := requesttrace.NewSession("request-id", func(span requesttrace.Span) bool {
 		spans = append(spans, span)
 		return true
@@ -103,6 +115,7 @@ func TestRequestTraceHelpersBindTrustedGroupAndCreateStages(t *testing.T) {
 	require.True(t, session.Finish(requesttrace.StatusSuccess))
 
 	require.Len(t, spans, 4)
+
 	for _, span := range spans {
 		require.Equal(t, "server-group", span.GroupID)
 	}
@@ -125,7 +138,7 @@ func TestRequestTraceOutcomeDistinguishesHTTPAndContextFailures(t *testing.T) {
 			ctx := context.Background()
 			if tt.err != nil {
 				var cancel context.CancelFunc
-				if tt.err == context.DeadlineExceeded {
+				if errors.Is(tt.err, context.DeadlineExceeded) {
 					ctx, cancel = context.WithDeadline(ctx, time.Unix(1, 0))
 				} else {
 					ctx, cancel = context.WithCancel(ctx)
@@ -133,6 +146,7 @@ func TestRequestTraceOutcomeDistinguishesHTTPAndContextFailures(t *testing.T) {
 				}
 				defer cancel()
 			}
+
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
@@ -145,64 +159,99 @@ func TestRequestTraceOutcomeDistinguishesHTTPAndContextFailures(t *testing.T) {
 func TestRequestTraceDisabledHelpersAreNilSafe(t *testing.T) {
 	restore := trace.Install(nil)
 	t.Cleanup(restore)
+
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/images/generations",
+		nil,
+	)
 	RequestTraceMiddleware()(c)
 	require.False(t, BindRequestTraceGroup(c, "group"))
-	require.Empty(t, BeginRequestTraceStage(c, requesttrace.StageAuthentication, requesttrace.Attributes{}).SpanID())
+	require.Empty(
+		t,
+		BeginRequestTraceStage(
+			c,
+			requesttrace.StageAuthentication,
+			requesttrace.Attributes{},
+		).SpanID(),
+	)
 	require.Zero(t, NextRequestTraceAttempt(c))
 }
 
 func TestTokenAuthTracesFailureWithoutTrustingExternalOwnership(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	var spans []requesttrace.Span
+
 	session := requesttrace.NewSession("request-auth-failure", func(span requesttrace.Span) bool {
 		spans = append(spans, span)
 		return true
 	})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/images/generations",
+		nil,
+	)
 	c.Request.Header.Set("Group", "attacker-group")
-	c.Request.Header.Set("X-Group-ID", "attacker-group")
+	c.Request.Header.Set("X-Group-Id", "attacker-group")
 	c.Set(requestTraceSessionKey, session)
 
 	TokenAuth(c)
 	require.True(t, session.Finish(requesttrace.StatusError))
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Len(t, spans, 4)
+
 	for _, span := range spans {
 		require.Empty(t, span.GroupID)
 		require.Empty(t, span.Attributes)
 	}
+
 	require.Equal(t, requesttrace.StageAuthentication, spans[2].Stage)
 	require.Equal(t, requesttrace.StatusError, spans[3].Status)
 }
 
 func TestTokenAuthBindsResolvedGroupBeforeDisabledGroupRejection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
 	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
-	const key = "trace-auth-key"
-	const groupID = "trusted-group"
+
+	const (
+		key     = "trace-auth-key"
+		groupID = "trusted-group"
+	)
 	require.NoError(t, model.CacheSetToken(&model.TokenCache{
 		ID: 7, Key: key, Group: groupID, Status: model.TokenStatusEnabled,
 	}))
-	require.NoError(t, model.CacheSetGroup(&model.GroupCache{ID: groupID, Status: model.GroupStatusDisabled}))
+	require.NoError(
+		t,
+		model.CacheSetGroup(&model.GroupCache{ID: groupID, Status: model.GroupStatusDisabled}),
+	)
 	t.Cleanup(func() {
 		require.NoError(t, model.CacheDeleteToken(key))
 		require.NoError(t, model.CacheDeleteGroup(groupID))
 	})
 
 	var spans []requesttrace.Span
+
 	session := requesttrace.NewSession("request-auth-group", func(span requesttrace.Span) bool {
 		spans = append(spans, span)
 		return true
 	})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/images/generations",
+		nil,
+	)
 	c.Request.Header.Set("Authorization", "Bearer "+key)
 	c.Request.Header.Set("Group", "attacker-group")
 	c.Set(requestTraceSessionKey, session)
@@ -211,25 +260,30 @@ func TestTokenAuthBindsResolvedGroupBeforeDisabledGroupRejection(t *testing.T) {
 	require.True(t, session.Finish(requesttrace.StatusError))
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Len(t, spans, 4)
+
 	for _, span := range spans {
 		require.Equal(t, groupID, span.GroupID)
 		require.Empty(t, span.Attributes)
 	}
+
 	require.Equal(t, requesttrace.StageAuthentication, spans[2].Stage)
 	require.Equal(t, requesttrace.StatusError, spans[3].Status)
 }
 
 func TestDistributeTracesBalanceAndFailedModelResolutionWithEmptyAttributes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	var spans []requesttrace.Span
+
 	session := requesttrace.NewSession("request-distribute", func(span requesttrace.Span) bool {
 		spans = append(spans, span)
 		return true
 	})
 	require.True(t, session.BindGroup("group-routing"))
+
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(
+	c.Request = httptest.NewRequestWithContext(context.Background(),
 		http.MethodPost,
 		"/v1/images/generations",
 		strings.NewReader(`{}`),
@@ -249,6 +303,7 @@ func TestDistributeTracesBalanceAndFailedModelResolutionWithEmptyAttributes(t *t
 			completed[span.Stage] = span
 		}
 	}
+
 	require.Equal(t, requesttrace.StatusSuccess, completed[requesttrace.StageBalanceCheck].Status)
 	require.Equal(t, requesttrace.StatusError, completed[requesttrace.StageModelResolution].Status)
 	require.Empty(t, completed[requesttrace.StageBalanceCheck].Attributes)

@@ -26,9 +26,15 @@ import (
 
 func TestErrorWithRequestIDSanitizesPublicVideoError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/v1/videos",
+		nil,
+	)
 	middleware.SetRequestID(c, "public-request-id")
 
 	ErrorWithRequestID(c, relaymodel.WrapperErrorWithMessage(
@@ -39,6 +45,7 @@ func TestErrorWithRequestIDSanitizesPublicVideoError(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, "public-request-id", recorder.Header().Get(middleware.RequestIDHeader))
+
 	var body relaymodel.OpenAIErrorResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, "The request could not be completed.", body.Error.Message)

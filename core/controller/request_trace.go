@@ -57,6 +57,7 @@ func GetRequestTrace(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid trace query")
 		return
 	}
+
 	if model.LogDB == nil {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
 		return
@@ -67,8 +68,10 @@ func GetRequestTrace(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
 		return
 	}
+
 	projected := projectTracePage(page)
-	summary, summaryErr := model.NewTraceStore(model.LogDB).TaskTraceSummary(c.Request.Context(), query.GroupID, query.TraceID, time.Now())
+	summary, summaryErr := model.NewTraceStore(model.LogDB).
+		TaskTraceSummary(c.Request.Context(), query.GroupID, query.TraceID, time.Now())
 	projected.TaskSummary = summary
 	projected.TaskSummaryUnavailable = summaryErr != nil
 	middleware.SuccessResponse(c, projected)
@@ -79,20 +82,24 @@ func GetRequestTracesByRequest(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
 	query, ok := parseTraceRequestQuery(c)
 	if !ok {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid trace request query")
 		return
 	}
+
 	if model.LogDB == nil {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
 		return
 	}
+
 	page, err := model.NewTraceStore(model.LogDB).FindRequests(c.Request.Context(), query)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "trace_unavailable")
 		return
 	}
+
 	middleware.SuccessResponse(c, page)
 }
 
@@ -101,30 +108,41 @@ func parseTraceRequestQuery(c *gin.Context) (model.TraceRequestQuery, bool) {
 	if !validTraceGroup(groupID) || !validTraceRequestID(requestID) {
 		return model.TraceRequestQuery{}, false
 	}
+
 	after := c.Query("after")
 	if after != "" && !validTraceID(after) {
 		return model.TraceRequestQuery{}, false
 	}
+
 	limit := defaultRequestTraceLimit
 	if raw, present := c.GetQuery("limit"); present {
 		parsed, err := strconv.ParseUint(raw, 10, 8)
 		if err != nil || parsed < 1 || parsed > 100 {
 			return model.TraceRequestQuery{}, false
 		}
+
 		limit = int(parsed)
 	}
-	return model.TraceRequestQuery{GroupID: groupID, RequestID: requestID, AfterSpanID: after, Limit: limit}, true
+
+	return model.TraceRequestQuery{
+		GroupID:     groupID,
+		RequestID:   requestID,
+		AfterSpanID: after,
+		Limit:       limit,
+	}, true
 }
 
 func validTraceRequestID(value string) bool {
 	if value == "" || len(value) > 128 {
 		return false
 	}
+
 	for _, r := range value {
 		if unicode.IsControl(r) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -150,16 +168,27 @@ func GetTraceHealth(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
 	health := trace.Current().Health()
 	middleware.SuccessResponse(c, safeTraceHealth{
-		CorrelationFailures: health.CorrelationFailures,
-		Enabled:             health.Enabled, Ready: health.Ready, CleanupErrors: health.CleanupErrors, InitializationFailed: health.InitializationFailed,
-		Writer: safeTraceWriterHealth{Accepted: health.Writer.Accepted, Persisted: health.Writer.Persisted, Rejected: health.Writer.Rejected, Dropped: health.Writer.Dropped, WriteErrors: health.Writer.WriteErrors},
+		CorrelationFailures:  health.CorrelationFailures,
+		Enabled:              health.Enabled,
+		Ready:                health.Ready,
+		CleanupErrors:        health.CleanupErrors,
+		InitializationFailed: health.InitializationFailed,
+		Writer: safeTraceWriterHealth{
+			Accepted:    health.Writer.Accepted,
+			Persisted:   health.Writer.Persisted,
+			Rejected:    health.Writer.Rejected,
+			Dropped:     health.Writer.Dropped,
+			WriteErrors: health.Writer.WriteErrors,
+		},
 	})
 }
 
 func parseTraceQuery(c *gin.Context) (model.TraceQuery, bool) {
 	groupID := c.Param("group")
+
 	traceID := c.Param("trace_id")
 	if !validTraceGroup(groupID) || !validTraceID(traceID) {
 		return model.TraceQuery{}, false
@@ -181,6 +210,7 @@ func parseTraceQuery(c *gin.Context) (model.TraceQuery, bool) {
 		if err != nil || parsedLimit < 1 || parsedLimit > 100 {
 			return model.TraceQuery{}, false
 		}
+
 		limit = int(parsedLimit)
 	}
 
@@ -193,11 +223,13 @@ func validTraceGroup(groupID string) bool {
 	if groupID == "" || len(groupID) > 64 {
 		return false
 	}
+
 	for _, r := range groupID {
 		if unicode.IsControl(r) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -205,25 +237,45 @@ func validTraceID(value string) bool {
 	if len(value) != 32 {
 		return false
 	}
+
 	for _, r := range value {
-		if !(r >= '0' && r <= '9') && !(r >= 'a' && r <= 'f') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			return false
 		}
 	}
+
 	return true
 }
 
 func projectTracePage(page model.TracePage) safeTracePage {
 	projected := safeTracePage{
-		Items: make([]safeTraceSpan, 0, len(page.Items)), NextCursor: page.NextCursor, Truncated: page.Truncated,
+		Items: make(
+			[]safeTraceSpan,
+			0,
+			len(page.Items),
+		),
+		NextCursor: page.NextCursor,
+		Truncated:  page.Truncated,
 	}
 	for _, span := range page.Items {
 		projected.Items = append(projected.Items, safeTraceSpan{
-			Version: span.Version, TraceID: span.TraceID, SpanID: span.SpanID, ParentSpanID: span.ParentSpanID,
-			RequestID: span.RequestID, GroupID: span.GroupID, Service: span.Service, Stage: span.Stage,
-			Status: span.Status, StartedAt: span.StartedAt, EndedAt: span.EndedAt, DurationMS: span.DurationMS,
-			Revision: span.Revision, Truncated: span.Truncated, Attributes: span.Attributes,
+			Version:      span.Version,
+			TraceID:      span.TraceID,
+			SpanID:       span.SpanID,
+			ParentSpanID: span.ParentSpanID,
+			RequestID:    span.RequestID,
+			GroupID:      span.GroupID,
+			Service:      span.Service,
+			Stage:        span.Stage,
+			Status:       span.Status,
+			StartedAt:    span.StartedAt,
+			EndedAt:      span.EndedAt,
+			DurationMS:   span.DurationMS,
+			Revision:     span.Revision,
+			Truncated:    span.Truncated,
+			Attributes:   span.Attributes,
 		})
 	}
+
 	return projected
 }

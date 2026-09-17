@@ -34,21 +34,6 @@ func validateVideoGenerationCount(count, maxCount int) error {
 	)
 }
 
-func validateOpenAIVideoSizeFormat(size string, supported []string, fuzzy bool) error {
-	size = strings.ToLower(strings.TrimSpace(size))
-	if size == "" || dimensionResolutionValue(size) {
-		return nil
-	}
-
-	return NewBadRequestParamError(
-		fmt.Sprintf(
-			"invalid video size `%s`, supported resolutions: %s",
-			size,
-			openAIVideoSupportedResolutionOptions(supported, fuzzy),
-		),
-	)
-}
-
 func validateSupportedVideoResolution(
 	resolution string,
 	mc model.ModelConfig,

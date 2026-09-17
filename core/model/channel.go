@@ -572,6 +572,7 @@ func UpdateChannelStatusByID(id, status int) (err error) {
 	result := DB.Model(&Channel{}).
 		Where("id = ?", id).
 		Update("status", status)
+
 	return HandleUpdateResult(result, ErrChannelNotFound)
 }
 

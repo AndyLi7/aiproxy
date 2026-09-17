@@ -34,6 +34,7 @@ func TestAddChannelReturnsSanitizedCreatedChannelID(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
+
 	model.DB = testDB
 	model.LogDB = nil
 	common.UsingSQLite = true
@@ -43,19 +44,28 @@ func TestAddChannelReturnsSanitizedCreatedChannelID(t *testing.T) {
 		model.LogDB = previousLogDB
 		common.UsingSQLite = previousUsingSQLite
 		config.DisableModelConfig = previousDisableModelConfig
+
 		require.NoError(t, sqlDB.Close())
 	})
 	require.NoError(t, testDB.AutoMigrate(&model.Channel{}, &model.ModelConfig{}))
 
-	body := []byte(`{"name":"created-channel","key":"test-key","base_url":"https://example.invalid","proxy_url":"https://proxy.invalid","type":1,"status":1}`)
+	body := []byte(
+		`{"name":"created-channel","key":"test-key","base_url":"https://example.invalid","proxy_url":"https://proxy.invalid","type":1,"status":1}`,
+	)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/", bytes.NewReader(body))
+	ctx.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/api/channel/",
+		bytes.NewReader(body),
+	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	AddChannel(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
+
 	var response struct {
 		Success bool           `json:"success"`
 		Data    map[string]any `json:"data"`
@@ -81,6 +91,7 @@ func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
+
 	model.DB = testDB
 	model.LogDB = nil
 	common.UsingSQLite = true
@@ -90,6 +101,7 @@ func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
 		model.LogDB = previousLogDB
 		common.UsingSQLite = previousUsingSQLite
 		config.DisableModelConfig = previousDisableModelConfig
+
 		require.NoError(t, sqlDB.Close())
 	})
 	require.NoError(t, testDB.AutoMigrate(&model.Channel{}, &model.ModelConfig{}))
@@ -100,12 +112,18 @@ func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
 	]`)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channels/", bytes.NewReader(body))
+	ctx.Request = httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/api/channels/",
+		bytes.NewReader(body),
+	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	AddChannels(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
+
 	var response struct {
 		Success bool             `json:"success"`
 		Data    []map[string]any `json:"data"`
@@ -113,6 +131,7 @@ func TestAddChannelsReturnsSanitizedCreatedChannelIDs(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
 	require.Len(t, response.Data, 2)
+
 	for _, channel := range response.Data {
 		require.Contains(t, channel, "id")
 		require.Positive(t, channel["id"])

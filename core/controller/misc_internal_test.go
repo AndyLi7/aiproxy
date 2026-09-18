@@ -36,7 +36,16 @@ func TestStatusAdvertisesAdminDemoV1(t *testing.T) {
 	require.NotZero(t, payload.Data.StartTime)
 	require.Equal(
 		t,
-		[]string{"token_platform.admin_demo.v1", "image_billing_v1"},
+		[]string{
+			"token_platform.admin_demo.v1",
+			"image_billing_v1",
+			"image_billing_input_basis_v1",
+			"image_task_media_v1",
+			"image_task_batch_v1",
+			"registry_provider_fal_async_v1",
+			"registry_provider_fal_queue_v2",
+			"registry_provider_ark_sync_task_v1",
+		},
 		payload.Data.Features,
 	)
 }

@@ -2,7 +2,9 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,8 @@ import (
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/adaptor"
+	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/stretchr/testify/require"
 )
 
@@ -298,6 +302,108 @@ func TestImageSubmitWithCompiledRegistryFixture(t *testing.T) {
 			expected := map[int]string{200: "queued", 422: "failed", 503: "submission_unknown"}[code]
 			require.Equal(t, expected, result.Status)
 			require.Equal(t, public, result.Model)
+		})
+	}
+}
+
+type syncTaskFake struct {
+	calls  int
+	err    error
+	result adaptor.ImageTaskResult
+}
+
+func (*syncTaskFake) ImageAdapterName() string { return "volcengine-ark-image" }
+
+func (a *syncTaskFake) GenerateImage(
+	context.Context,
+	*meta.Meta,
+	[]byte,
+	[]byte,
+) (adaptor.ImageTaskResult, error) {
+	a.calls++
+	return a.result, a.err
+}
+
+func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		err          error
+		data         []model.ImageOutput
+	}{
+		{name: "success", status: "completed", data: []model.ImageOutput{{URL: "https://example.com/a"}}},
+		{name: "unknown", status: "submission_unknown", err: errors.New("timeout")},
+		{name: "rejected", status: "failed", err: adaptor.ErrImageSubmissionRejected},
+		{name: "too many outputs", status: "failed", data: []model.ImageOutput{{URL: "https://example.com/a"}, {URL: "https://example.com/b"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync-dispatch.db"))
+			require.NoError(t, err)
+			require.NoError(
+				t,
+				db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}),
+			)
+
+			old := model.LogDB
+			model.LogDB = db
+			t.Cleanup(func() { model.LogDB = old })
+
+			original := &model.ImageTask{
+				ID:             "sync-test",
+				Model:          "m",
+				GroupID:        "g",
+				TokenID:        1,
+				Fingerprint:    "f",
+				ExpectedImages: 1,
+			}
+			saved, created, err := model.ReserveImageTask(
+				original,
+				&model.AsyncUsageInfo{RequestID: original.ID},
+			)
+			require.NoError(t, err)
+			require.True(t, created)
+
+			a := &syncTaskFake{
+				err:    tc.err,
+				result: adaptor.ImageTaskResult{Status: "completed", Data: tc.data},
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"/v1/images/tasks",
+				nil,
+			)
+			dispatchSyncImageTask(c, t.Context(), saved, a, &meta.Meta{}, nil)
+
+			got, err := model.GetImageTask(original.ID, "g", 1)
+			require.NoError(t, err)
+			require.Equal(t, tc.status, got.Status)
+
+			_, created, err = model.ReserveImageTask(
+				&model.ImageTask{
+					ID:          original.ID,
+					Model:       "m",
+					GroupID:     "g",
+					TokenID:     1,
+					Fingerprint: "f",
+				},
+				&model.AsyncUsageInfo{},
+			)
+			require.NoError(t, err)
+			require.False(t, created)
+			require.Equal(t, 1, a.calls)
+
+			var info model.AsyncUsageInfo
+			require.NoError(t, db.First(&info).Error)
+
+			switch tc.status {
+			case "completed":
+				require.Equal(t, model.AsyncUsageStatusPending, info.Status)
+			case "submission_unknown":
+				require.Equal(t, model.AsyncUsageStatusNone, info.Status)
+			default:
+				require.Equal(t, model.AsyncUsageStatusFailed, info.Status)
+			}
 		})
 	}
 }

@@ -1,0 +1,96 @@
+{
+  "entry_id": "image",
+  "validation_version": 1,
+  "provider_contract_version": 1,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "n": {
+        "type": "integer",
+        "default": 1
+      },
+      "prompt": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "n",
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "providers": {
+    "small": {
+      "adapter": "fal-image",
+      "parameterMapping": {
+        "n": "num_images",
+        "prompt": "prompt"
+      },
+      "fixedParameters": {
+        "sync_mode": false
+      },
+      "upstream": {
+        "id": "small",
+        "revision": "1",
+        "contractHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "endpoint": "fal-ai/test",
+        "execution": {
+          "mode": "async",
+          "statusEndpoint": "fal-ai/test/requests/{request_id}/status",
+          "resultEndpoint": "fal-ai/test/requests/{request_id}",
+          "supportsCancellation": false
+        },
+        "acceptedInputJsonSchema": {
+          "type": "object",
+          "properties": {
+            "n": {
+              "type": "integer",
+              "maximum": 1
+            },
+            "prompt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "n",
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        "inputJsonSchema": {
+          "type": "object",
+          "properties": {
+            "num_images": {
+              "type": "integer",
+              "maximum": 1
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "sync_mode": {
+              "const": false
+            }
+          },
+          "required": [
+            "num_images",
+            "prompt",
+            "sync_mode"
+          ],
+          "additionalProperties": false
+        },
+        "outputJsonSchema": {
+          "type": "object",
+          "properties": {
+            "images": {
+              "type": "array",
+              "minItems": 1
+            }
+          },
+          "required": [
+            "images"
+          ]
+        }
+      }
+    }
+  }
+}

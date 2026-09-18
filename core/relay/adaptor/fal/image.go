@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/adaptor/openai"
@@ -49,6 +50,7 @@ func (a *Adaptor) PollImage(
 		ctx,
 		task.UpstreamModel,
 		task.UpstreamID,
+		[]byte(task.ValidationContract),
 	)
 }
 
@@ -57,7 +59,10 @@ type Client struct {
 	BaseURL, Key string
 }
 
-var segment = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var (
+	segment      = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	modelSegment = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$`)
+)
 
 func endpoint(modelName string) (string, error) {
 	parts := strings.Split(modelName, "/")
@@ -66,7 +71,7 @@ func endpoint(modelName string) (string, error) {
 	}
 
 	for _, p := range parts {
-		if !segment.MatchString(p) {
+		if !modelSegment.MatchString(p) {
 			return "", errors.New("invalid fal model")
 		}
 	}
@@ -155,7 +160,11 @@ func failed(code string) adaptor.ImageTaskResult {
 	}
 }
 
-func (c *Client) Poll(ctx context.Context, modelName, id string) (adaptor.ImageTaskResult, error) {
+func (c *Client) Poll(
+	ctx context.Context,
+	modelName, id string,
+	frozenContracts ...[]byte,
+) (adaptor.ImageTaskResult, error) {
 	root, err := endpoint(modelName)
 	if err != nil {
 		return adaptor.ImageTaskResult{}, err
@@ -166,13 +175,29 @@ func (c *Client) Poll(ctx context.Context, modelName, id string) (adaptor.ImageT
 	}
 
 	path := root + "/requests/" + id
+	statusPath := path + "/status"
+
+	if len(frozenContracts) > 1 {
+		return adaptor.ImageTaskResult{}, errors.New("multiple task contracts")
+	}
+
+	if len(frozenContracts) == 1 && registryvalidation.HasProviderContracts(frozenContracts[0]) {
+		statusPath, path, err = registryvalidation.FrozenFalQueuePaths(
+			frozenContracts[0],
+			modelName,
+			id,
+		)
+		if err != nil {
+			return failed("invalid_contract"), nil
+		}
+	}
 
 	var status struct {
 		Status string `json:"status"`
 		Error  any    `json:"error"`
 	}
 
-	_, err = c.request(ctx, http.MethodGet, path+"/status", nil, &status)
+	_, err = c.request(ctx, http.MethodGet, statusPath, nil, &status)
 	if err != nil {
 		return adaptor.ImageTaskResult{}, err
 	}
@@ -197,12 +222,24 @@ func (c *Client) Poll(ctx context.Context, modelName, id string) (adaptor.ImageT
 		Images []model.ImageOutput `json:"images"`
 	}
 
-	code, err := c.request(ctx, http.MethodGet, path, nil, &result)
+	var rawResult json.RawMessage
+
+	code, err := c.request(ctx, http.MethodGet, path, nil, &rawResult)
 	if err != nil {
 		if code == 400 || code == 422 {
 			return failed("upstream_failed"), nil
 		}
 		return adaptor.ImageTaskResult{}, err
+	}
+
+	for _, frozen := range frozenContracts {
+		if err := registryvalidation.ValidateFrozenProviderOutput(frozen, rawResult); err != nil {
+			return failed("invalid_result"), nil
+		}
+	}
+
+	if json.Unmarshal(rawResult, &result) != nil {
+		return adaptor.ImageTaskResult{}, errors.New("invalid fal result")
 	}
 
 	if len(result.Images) == 0 {

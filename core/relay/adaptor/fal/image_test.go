@@ -69,6 +69,71 @@ func TestQueueLifecycle(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+func TestDottedSeedreamFullQueuePath(t *testing.T) {
+	raw, err := os.ReadFile(
+		"../../../common/registryvalidation/testdata/seedream-4.5-v2-text-to-image.json",
+	)
+	require.NoError(t, err)
+
+	var contract struct {
+		Providers map[string]struct {
+			Upstream registryvalidation.ProviderSpec `json:"upstream"`
+		} `json:"providers"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &contract))
+	spec := contract.Providers["fal"].Upstream
+	binding := registryvalidation.ProviderBinding{
+		Provider:     "fal",
+		ID:           spec.ID,
+		Revision:     spec.Revision,
+		ContractHash: spec.ContractHash,
+	}
+	frozen, err := registryvalidation.FreezeProviderBinding(raw, binding)
+	require.NoError(t, err)
+
+	calls := []string{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "POST /fal-ai/bytedance/seedream/v4.5/text-to-image":
+			_, _ = w.Write([]byte(`{"request_id":"abc"}`))
+		case "GET /fal-ai/bytedance/seedream/v4.5/text-to-image/requests/abc/status":
+			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+		case "GET /fal-ai/bytedance/seedream/v4.5/text-to-image/requests/abc":
+			_, _ = w.Write(
+				[]byte(
+					`{"images":[{"url":"https://fal.media/out.png","width":null,"height":null}],"seed":42}`,
+				),
+			)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "secret"}
+	id, err := client.Submit(
+		t.Context(),
+		spec.Endpoint,
+		[]byte(`{"prompt":"test","num_images":1,"max_images":1}`),
+	)
+	require.NoError(t, err)
+	result, err := client.Poll(t.Context(), spec.Endpoint, id, frozen)
+	require.NoError(t, err)
+	require.Equal(t, "completed", result.Status)
+	require.Len(t, result.Data, 1)
+	require.Len(t, calls, 3)
+
+	for _, unsafe := range []string{"fal-ai/../evil", "fal-ai/v4..5/edit", "fal-ai/v4.5?key=secret"} {
+		_, err := client.Submit(t.Context(), unsafe, []byte(`{}`))
+		require.Error(t, err)
+	}
+
+	require.Len(t, calls, 3)
+}
+
 func TestRejectInvalidSuccess(t *testing.T) {
 	for _, body := range []string{`{"images":[]}`, `{"images":[{"url":"http://cdn.example/a"}]}`, `{"images":[{"url":"https://user:pass@cdn.example/a"}]}`} {
 		t.Run(body, func(t *testing.T) {
@@ -233,4 +298,87 @@ func TestSubjectReferenceMapsAndSubmitsURLOrData(t *testing.T) {
 			require.Equal(t, 1, calls)
 		})
 	}
+}
+
+func TestPollFrozenOutputContract(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatal("poll must never submit")
+		}
+
+		if r.URL.Path == "/fal-ai/test/requests/abc/status" {
+			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"images":[{"url":"https://example.com/image.png"}]}`))
+	}))
+	defer s.Close()
+
+	contract := []byte(
+		`{"provider_contract_version":1,"selected_provider_binding":{"provider":"p","id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"providers":{"p":{"adapter":"fal-image","upstream":{"id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","endpoint":"fal-ai/test","execution":{"mode":"async","statusEndpoint":"fal-ai/test/requests/{request_id}/status","resultEndpoint":"fal-ai/test/requests/{request_id}","supportsCancellation":false},"outputJsonSchema":{"type":"object","required":["usage"]}}}}}`,
+	)
+	c := fal.Client{BaseURL: s.URL}
+	result, err := c.Poll(t.Context(), "fal-ai/test", "abc", contract)
+	require.NoError(t, err)
+	require.Equal(t, "failed", result.Status)
+	require.Equal(t, "invalid_result", result.Error.Code)
+}
+
+func TestFrozenFullQueuePaths(t *testing.T) {
+	raw, err := os.ReadFile("../../../common/registryvalidation/testdata/provider.json")
+	require.NoError(t, err)
+
+	var c map[string]any
+	require.NoError(t, json.Unmarshal(raw, &c))
+	providers, ok := c["providers"].(map[string]any)
+	require.True(t, ok)
+	small, ok := providers["small"].(map[string]any)
+	require.True(t, ok)
+	s, ok := small["upstream"].(map[string]any)
+	require.True(t, ok)
+
+	s["endpoint"] = "bytedance/seedream/v5/pro/edit"
+	e, ok := s["execution"].(map[string]any)
+	require.True(t, ok)
+
+	e["statusEndpoint"] = "bytedance/seedream/v5/pro/edit/requests/{request_id}/status"
+	e["resultEndpoint"] = "bytedance/seedream/v5/pro/edit/requests/{request_id}"
+	e["supportsCancellation"] = true
+	raw, err = json.Marshal(c)
+	require.NoError(t, err)
+	frozen, err := registryvalidation.FreezeProviderBinding(
+		raw,
+		registryvalidation.ProviderBinding{
+			Provider:     "small",
+			ID:           "small",
+			Revision:     "1",
+			ContractHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+	)
+	require.NoError(t, err)
+
+	calls := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+
+		require.Equal(t, http.MethodGet, r.Method)
+
+		switch r.URL.Path {
+		case "/bytedance/seedream/v5/pro/edit/requests/abc/status":
+			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+		case "/bytedance/seedream/v5/pro/edit/requests/abc":
+			_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := fal.Client{HTTP: server.Client(), BaseURL: server.URL}
+	result, err := client.Poll(t.Context(), "bytedance/seedream/v5/pro/edit", "abc", frozen)
+	require.NoError(t, err)
+	require.Equal(t, "completed", result.Status)
+	require.Equal(t, 2, calls)
 }

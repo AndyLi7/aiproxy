@@ -1,0 +1,295 @@
+{
+  "provider_contract_version": 1,
+  "entry_id": "test/media/edit",
+  "validation_version": 1,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1
+      },
+      "n": {
+        "default": 1,
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "max_images": {
+        "default": 1,
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "image_urls": {
+        "minItems": 1,
+        "maxItems": 10,
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "prompt",
+      "n",
+      "max_images",
+      "image_urls"
+    ],
+    "additionalProperties": false
+  },
+  "parameter_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "title": "Prompt",
+        "uiControl": "textarea"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6,
+        "title": "Generations"
+      },
+      "max_images": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6,
+        "title": "Maximum per generation"
+      },
+      "image_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 10,
+        "title": "References",
+        "uiControl": "image"
+      }
+    },
+    "required": [
+      "prompt",
+      "image_urls"
+    ],
+    "additionalProperties": false
+  },
+  "default_parameters": {
+    "n": 1,
+    "max_images": 1
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "images": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "additionalProperties": false
+  },
+  "providers": {
+    "fal": {
+      "adapter": "fal-image",
+      "parameterMapping": {
+        "prompt": "prompt",
+        "n": "num_images",
+        "max_images": "max_images",
+        "image_urls": "image_urls"
+      },
+      "allowedPassthroughParameters": [],
+      "source": {
+        "url": "https://example.com/test-only",
+        "verifiedAt": "2026-09-17",
+        "verifiedBy": "test-fixture"
+      },
+      "upstream": {
+        "metering": {
+          "version": 1,
+          "inputImagesParameter": "image_urls",
+          "maxInputImages": 10,
+          "outputCountMultiplierParameter": "max_images",
+          "maxCombinedImages": 15
+        },
+        "id": "test-fal-media",
+        "revision": "1",
+        "endpoint": "bytedance/seedream/v5/pro/edit",
+        "execution": {
+          "mode": "async",
+          "statusEndpoint": "bytedance/seedream/v5/pro/edit/requests/{request_id}/status",
+          "resultEndpoint": "bytedance/seedream/v5/pro/edit/requests/{request_id}",
+          "supportsCancellation": true
+        },
+        "acceptedInputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "max_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "image_urls": {
+              "minItems": 1,
+              "maxItems": 10,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "prompt",
+            "n",
+            "max_images",
+            "image_urls"
+          ],
+          "additionalProperties": false
+        },
+        "inputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "num_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "max_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "image_urls": {
+              "minItems": 1,
+              "maxItems": 10,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "prompt",
+            "num_images",
+            "max_images",
+            "image_urls"
+          ],
+          "additionalProperties": false
+        },
+        "outputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "images": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "width": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "height": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "images"
+          ],
+          "additionalProperties": false
+        },
+        "contractHash": "sha256:18353d412c585b504aaaf387583b0a0055e6d41a083be0e4f985197841a89816"
+      }
+    }
+  },
+  "execution": {
+    "mode": "async",
+    "endpoint": "/v1/images/tasks",
+    "statusEndpoint": "/v1/images/tasks/{task_id}",
+    "output": "image",
+    "supportsCancellation": false
+  }
+}

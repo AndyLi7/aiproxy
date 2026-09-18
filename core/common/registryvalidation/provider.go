@@ -35,11 +35,12 @@ type ProviderSpec struct {
 	Output   map[string]any `json:"outputJsonSchema"`
 }
 type boundProvider struct {
-	Adapter     string            `json:"adapter"`
-	Mapping     map[string]string `json:"parameterMapping"`
-	Fixed       map[string]any    `json:"fixedParameters"`
-	Passthrough []string          `json:"allowedPassthroughParameters"`
-	Upstream    *ProviderSpec     `json:"upstream"`
+	Adapter         string            `json:"adapter"`
+	InputProjection string            `json:"inputProjection"`
+	Mapping         map[string]string `json:"parameterMapping"`
+	Fixed           map[string]any    `json:"fixedParameters"`
+	Passthrough     []string          `json:"allowedPassthroughParameters"`
+	Upstream        *ProviderSpec     `json:"upstream"`
 }
 
 var (
@@ -173,6 +174,30 @@ func MapBoundProviderInput(
 
 	if schemaAccepts(s.Accepted, input) != nil {
 		return nil, ErrProviderContract
+	}
+	if p.InputProjection != "" {
+		if p.InputProjection != "seedream45_ark_single_v1" || adapter != "volcengine-ark-image" ||
+			len(p.Mapping) != 2 || p.Mapping["prompt"] != "prompt" || p.Mapping["image_size"] != "size" ||
+			len(p.Fixed) != 2 || p.Fixed["stream"] != false || p.Fixed["response_format"] != "url" ||
+			len(p.Passthrough) != 0 || len(input) != 4 || input["n"] != float64(1) || input["max_images"] != float64(1) {
+			return nil, ErrProviderContract
+		}
+		size, ok := input["image_size"].(string)
+		if !ok || (size != "auto_2K" && size != "auto_4K") {
+			return nil, ErrProviderContract
+		}
+		prompt, ok := input["prompt"].(string)
+		if !ok || prompt == "" {
+			return nil, ErrProviderContract
+		}
+		mapped := map[string]any{
+			"prompt": prompt, "size": strings.TrimPrefix(size, "auto_"),
+			"stream": false, "response_format": "url",
+		}
+		if schemaAccepts(s.Input, mapped) != nil {
+			return nil, ErrProviderContract
+		}
+		return json.Marshal(mapped)
 	}
 
 	mapped := map[string]any{}

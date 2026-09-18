@@ -45,6 +45,7 @@ func TestStatusAdvertisesAdminDemoV1(t *testing.T) {
 			"registry_provider_fal_async_v1",
 			"registry_provider_fal_queue_v2",
 			"registry_provider_ark_sync_task_v1",
+			"seedream45_ark_single_v1",
 		},
 		payload.Data.Features,
 	)

@@ -12,8 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common/config"
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/adaptor"
 	relaycontroller "github.com/labring/aiproxy/core/relay/controller"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -58,6 +60,7 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 		cancelDuringBackoff bool
 		succeed             bool
 	}{
+		{name: "candidates exhausted once", times: 10, attemptDuration: time.Second, status: http.StatusBadGateway, wantAttempts: 3},
 		{name: "count only", times: 2, attemptDuration: time.Second, status: http.StatusBadGateway, wantAttempts: 2},
 		{name: "budget only", times: -1, budget: 3 * time.Second, attemptDuration: time.Second, status: http.StatusBadGateway, wantAttempts: 3},
 		{name: "count expires first", times: 2, budget: 10 * time.Second, attemptDuration: time.Second, status: http.StatusBadGateway, wantAttempts: 2},
@@ -118,8 +121,8 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 				}
 
 				if tt.initialBackoff {
-					state.preferChannelIDs = []int{1}
-					state.recordChannelFailure(1, time.Now())
+					state.preferChannelIDs = []int{2}
+					state.recordChannelFailure(2, time.Now())
 				}
 
 				if tt.cancelDuringBackoff {
@@ -130,12 +133,15 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 				}
 
 				attempts := 0
+				seen := map[int]bool{1: true}
 				started := time.Now()
 				retryLoop(
 					c,
 					mode.Responses,
 					state,
-					func(c *gin.Context, _ *meta.Meta) *relaycontroller.HandleResult {
+					func(c *gin.Context, m *meta.Meta) *relaycontroller.HandleResult {
+						require.False(t, seen[m.Channel.ID], "channel must never be replayed")
+						seen[m.Channel.ID] = true
 						attempts++
 
 						if !state.retryDeadline.IsZero() {
@@ -150,10 +156,10 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 						}
 
 						return &relaycontroller.HandleResult{
-							Error: relaymodel.NewOpenAIError(
+							Error: adaptor.WithFailover(relaymodel.NewOpenAIError(
 								tt.status,
 								relaymodel.OpenAIError{Message: "retry failure"},
-							),
+							), failover.Failure{Acceptance: failover.NotAccepted, Class: failover.Transient}),
 						}
 					},
 				)

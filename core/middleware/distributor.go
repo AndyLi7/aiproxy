@@ -1146,6 +1146,8 @@ func getMetadataFromNode(node *ast.Node) (map[string]string, error) {
 		return nil, fmt.Errorf("get request metadata failed: %w", err)
 	}
 
+	// Reserved server-generated audit data must never originate from the caller.
+	delete(metadata, "channel_failover_attempts")
 	return metadata, nil
 }
 

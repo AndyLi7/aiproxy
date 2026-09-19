@@ -379,7 +379,8 @@ func TestHandleRetryResultKeepsDesignatedChannelSemantics(t *testing.T) {
 			Error: relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{}),
 		},
 	}
-	assert.False(t, handleRetryResult(c, true, channel, permissionedState))
+	// Explicit channels are pinned and each candidate may be attempted only once.
+	assert.True(t, handleRetryResult(c, true, channel, permissionedState))
 
 	noPermissionState := &retryState{
 		designatedChannel: channel,

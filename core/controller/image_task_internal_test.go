@@ -407,3 +407,32 @@ func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 		})
 	}
 }
+
+func TestAdminImageTaskRequiresInternalOwnedToken(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		group model.GroupCache
+		token int
+	}{
+		{"customer spoof", model.GroupCache{ID: "customer", Status: model.GroupStatusEnabled}, 1},
+		{"internal without token", model.GroupCache{ID: "admin", Status: model.GroupStatusInternal}, 0},
+		{"internal without owner", model.GroupCache{Status: model.GroupStatusInternal}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/tasks", strings.NewReader(`{"model":"private","prompt":"hi","n":1}`))
+			c.Request.Header.Set("X-Request-ID", "admin-auth")
+			c.Request.Header.Set(middleware.OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+			c.Set(middleware.Group, tc.group)
+			c.Set(middleware.Token, model.TokenCache{ID: tc.token})
+			c.Set(middleware.ModelConfig, model.ModelConfig{Config: map[model.ModelConfigKey]any{
+				"x_token_platform_capability_contract": map[string]any{
+					"entry_id": "original", "contract": map[string]any{"execution": map[string]any{"mode": "async", "output": "image"}},
+				},
+			}})
+			submitImageTask(c)
+			require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		})
+	}
+}

@@ -27,24 +27,25 @@ type ImageTaskError struct {
 // ImageTask and its accounting outbox live in LogDB so reservation/activation are atomic.
 // These records are deliberately retained: removing them would permit paid resubmission.
 type ImageTask struct {
-	RequestModel       string          `gorm:"size:128"                  json:"-"`
-	ValidationContract string          `gorm:"type:text"                 json:"-"`
-	KeyFingerprint     string          `gorm:"size:64"                   json:"-"`
-	ChannelType        ChannelType     `                                 json:"-"`
-	ExpectedImages     int             `                                 json:"-"`
-	ID                 string          `gorm:"primaryKey;size:128"       json:"id"`
-	Model              string          `gorm:"size:128"                  json:"model"`
-	Status             string          `gorm:"size:32;index"             json:"status"`
-	Data               []ImageOutput   `gorm:"serializer:json;type:text" json:"data,omitempty"`
-	Error              *ImageTaskError `gorm:"serializer:json;type:text" json:"error,omitempty"`
-	GroupID            string          `gorm:"size:64;index"             json:"-"`
-	TokenID            int             `                                 json:"-"`
-	Fingerprint        string          `gorm:"size:64"                   json:"-"`
-	UpstreamModel      string          `gorm:"size:256"                  json:"-"`
-	UpstreamID         string          `gorm:"size:256"                  json:"-"`
-	UsageID            int             `                                 json:"-"`
-	CreatedAt          time.Time       `                                 json:"-"`
-	UpdatedAt          time.Time       `                                 json:"-"`
+	Attempts           []ImageTaskAttempt `gorm:"serializer:json;type:text" json:"-"`
+	RequestModel       string             `gorm:"size:128"                  json:"-"`
+	ValidationContract string             `gorm:"type:text"                 json:"-"`
+	KeyFingerprint     string             `gorm:"size:64"                   json:"-"`
+	ChannelType        ChannelType        `                                 json:"-"`
+	ExpectedImages     int                `                                 json:"-"`
+	ID                 string             `gorm:"primaryKey;size:128"       json:"id"`
+	Model              string             `gorm:"size:128"                  json:"model"`
+	Status             string             `gorm:"size:32;index"             json:"status"`
+	Data               []ImageOutput      `gorm:"serializer:json;type:text" json:"data,omitempty"`
+	Error              *ImageTaskError    `gorm:"serializer:json;type:text" json:"error,omitempty"`
+	GroupID            string             `gorm:"size:64;index"             json:"-"`
+	TokenID            int                `                                 json:"-"`
+	Fingerprint        string             `gorm:"size:64"                   json:"-"`
+	UpstreamModel      string             `gorm:"size:256"                  json:"-"`
+	UpstreamID         string             `gorm:"size:256"                  json:"-"`
+	UsageID            int                `                                 json:"-"`
+	CreatedAt          time.Time          `                                 json:"-"`
+	UpdatedAt          time.Time          `                                 json:"-"`
 }
 
 func GetImageTask(id, group string, token int) (*ImageTask, error) {

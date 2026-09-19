@@ -145,6 +145,14 @@ func completeImageTaskUsage(
 	info *model.AsyncUsageInfo,
 	outputs []model.ImageOutput,
 ) {
+	// Freeze the no-customer-billing decision at admission, independent of current
+	// group status, credentials, release or retail price configuration.
+	if info.InternalImageTask {
+		info.Price = model.Price{}
+		info.Amount = model.Amount{}
+		info.MeasuredImage = false
+	}
+
 	usage := model.Usage{ImageOutputTokens: model.ZeroNullInt64(len(outputs))}
 
 	usageContext := info.UsageContext

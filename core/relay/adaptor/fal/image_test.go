@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
@@ -99,8 +100,10 @@ func TestDottedSeedreamFullQueuePath(t *testing.T) {
 		case "POST /fal-ai/bytedance/seedream/v4.5/text-to-image":
 			_, _ = w.Write([]byte(`{"request_id":"abc"}`))
 		case "GET /fal-ai/bytedance/seedream/v4.5/text-to-image/requests/abc/status":
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case "GET /fal-ai/bytedance/requests/abc/status":
 			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
-		case "GET /fal-ai/bytedance/seedream/v4.5/text-to-image/requests/abc":
+		case "GET /fal-ai/bytedance/requests/abc":
 			_, _ = w.Write(
 				[]byte(
 					`{"images":[{"url":"https://fal.media/out.png","width":null,"height":null}],"seed":42}`,
@@ -124,14 +127,14 @@ func TestDottedSeedreamFullQueuePath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "completed", result.Status)
 	require.Len(t, result.Data, 1)
-	require.Len(t, calls, 3)
+	require.Len(t, calls, 4)
 
 	for _, unsafe := range []string{"fal-ai/../evil", "fal-ai/v4..5/edit", "fal-ai/v4.5?key=secret"} {
 		_, err := client.Submit(t.Context(), unsafe, []byte(`{}`))
 		require.Error(t, err)
 	}
 
-	require.Len(t, calls, 3)
+	require.Len(t, calls, 4)
 }
 
 func TestRejectInvalidSuccess(t *testing.T) {
@@ -208,7 +211,7 @@ func TestFalPollingErrorsAndNoCredentialRedirect(t *testing.T) {
 }
 
 func TestSubmissionRejectionIsDistinctFromUnknownAcceptance(t *testing.T) {
-	for _, code := range []int{400, 401, 422, 429, 500, 503} {
+	for _, code := range []int{400, 401, 408, 413, 422, 429, 451, 500, 503} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
 			s := httptest.NewServer(
 				http.HandlerFunc(
@@ -224,7 +227,18 @@ func TestSubmissionRejectionIsDistinctFromUnknownAcceptance(t *testing.T) {
 				[]byte(`{"prompt":"test","n":1}`),
 			)
 			require.Error(t, err)
-			require.Equal(t, code < 500, errors.Is(err, adaptor.ErrImageSubmissionRejected))
+			// Only explicit invalid-request statuses are terminal rejections.
+			// Authentication, throttling and server errors do not establish
+			// whether an asynchronous queue accepted work.
+			rejected := code == 400 || code == 413 || code == 422 || code == 451
+			require.Equal(t, rejected, errors.Is(err, adaptor.ErrImageSubmissionRejected))
+			failure := failover.FromError(err)
+			if rejected {
+				require.Equal(t, failover.NotAccepted, failure.Acceptance)
+				require.Equal(t, failover.InvalidRequest, failure.Class)
+			} else {
+				require.Equal(t, failover.Unknown, failure.Acceptance)
+			}
 		})
 	}
 }

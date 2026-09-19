@@ -59,6 +59,8 @@ func awsClientFromMeta(meta *meta.Meta) (*bedrockruntime.Client, error) {
 	options := bedrockruntime.Options{
 		Region:     config.Region,
 		HTTPClient: httpClient,
+		// Acceptance is unknown after an SDK error; never replay a generation internally.
+		Retryer: aws.NopRetryer{},
 	}
 
 	if config.APIKey != "" {

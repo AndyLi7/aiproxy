@@ -32,6 +32,8 @@ const (
 var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
+	// Server-owned admission snapshot; never accepted from public JSON requests.
+	InternalImageTask           bool             `json:"-"`
 	MeasuredImage               bool             `json:"measured_image,omitempty"`
 	ID                          int              `json:"id"                                       gorm:"primaryKey"`
 	RequestID                   string           `json:"request_id"                               gorm:"type:varchar(128);index"`

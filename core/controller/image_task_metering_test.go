@@ -36,10 +36,11 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 		status      int
 		undeclared  bool
 	}{
-		{"accepted", 2, 1, false, 202, false}, {"insufficient", .5, 1, false, 403, false}, {"bad metadata", 2, 2, false, 400, false}, {"conditional", 2, 1, true, 400, false}, {"undeclared references with positive input rate", 2, 1, false, 400, true}, {"text only with positive input rate", 2, 1, false, 202, true},
+		{"admin demo", 0, 1, false, 202, false}, {"accepted", 2, 1, false, 202, false}, {"insufficient", .5, 1, false, 403, false}, {"bad metadata", 2, 2, false, 400, false}, {"conditional", 2, 1, true, 400, false}, {"undeclared references with positive input rate", 2, 1, false, 400, true}, {"text only with positive input rate", 2, 1, false, 202, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			textOnly := tc.name == "text only with positive input rate"
+			adminDemo := tc.name == "admin demo"
 			raw, err := os.ReadFile("../common/registryvalidation/testdata/provider.json")
 			require.NoError(t, err)
 
@@ -103,6 +104,13 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 
 					var stored model.AsyncUsageInfo
 					require.NoError(t, db.First(&stored).Error)
+					require.Equal(t, adminDemo, stored.InternalImageTask)
+					if adminDemo {
+						require.Equal(t, model.Price{}, stored.Price)
+						var entry model.Log
+						require.NoError(t, db.First(&entry).Error)
+						require.Equal(t, model.RequestSourceAdminDemo, entry.RequestSource)
+					}
 
 					if textOnly {
 						require.Zero(t, *stored.UsageContext.ImageUsage.InputCount)
@@ -175,6 +183,9 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 				)
 				c.Request.Header.Set("Content-Type", "application/json")
 				c.Request.Header.Set("X-Request-ID", "metered-request")
+				if adminDemo {
+					c.Request.Header.Set(middleware.OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+				}
 				c.Request.Header.Set(AIProxyChannelHeader, "7")
 				c.Set(
 					middleware.Group,
@@ -209,6 +220,9 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 					&middleware.GroupBalanceConsumer{
 						Group: "g",
 						CheckBalance: func(required float64) bool {
+							if adminDemo {
+								t.Fatal("admin image task must not check customer wallet")
+							}
 							if textOnly {
 								require.InDelta(t, 1.2, required, 0.000001)
 							} else if !tc.undeclared {

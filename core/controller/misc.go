@@ -28,6 +28,8 @@ func GetStatus(c *gin.Context) {
 			"image_billing_v1",
 			"image_billing_input_basis_v1",
 			"image_task_media_v1",
+			"token_platform.admin_demo.image_task.v1",
+			"channel_failover_acceptance_v1",
 			"image_task_batch_v1",
 			"registry_provider_fal_async_v1",
 			"registry_provider_fal_queue_v2",

@@ -229,3 +229,39 @@ func TestCapabilityRoutingResolvesNestedImageGenerationParameters(t *testing.T) 
 	require.Equal(t, internalModel, resolved.InternalModel)
 	require.Equal(t, "text-to-image", resolved.Capability)
 }
+
+func TestCapabilityRoutingRejectsUnknownContractVersions(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version any
+		valid   bool
+	}{
+		{"v1 integer", 1, true},
+		{"v1 int64", int64(1), true},
+		{"v1 JSON number", float64(1), true},
+		{"unknown v2", 2, false},
+		{"unknown int64", int64(99), false},
+		{"unknown JSON number", float64(3), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := capabilityRoutingConfig("vendor/model::text-to-video", "vendor/model", "text-to-video", "prompt")
+			config.Config[ModelConfigCapabilityContractVersionKey] = test.version
+			metadata, ok := CapabilityRoutingMetadataFromConfig(config)
+			require.Equal(t, test.valid, ok)
+			if test.valid {
+				require.Equal(t, ModelCapabilityContractVersion, metadata.ContractVersion)
+			}
+			for _, requested := range []string{"vendor/model", "vendor/model/text-to-video"} {
+				resolved, err := ResolveCapabilityModel(requested, map[string]any{"prompt": "hello"}, []ModelConfig{config})
+				if test.valid {
+					require.NoError(t, err)
+					require.Equal(t, config.Model, resolved.InternalModel)
+				} else {
+					var routingErr *CapabilityRoutingError
+					require.ErrorAs(t, err, &routingErr)
+					require.Equal(t, CapabilityModelNotFound, routingErr.Code)
+				}
+			}
+		})
+	}
+}

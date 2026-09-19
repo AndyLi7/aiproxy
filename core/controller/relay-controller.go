@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/conv"
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -227,6 +229,8 @@ func RelayHelper(
 	handel RelayHandler,
 ) (result *controller.HandleResult, retry bool) {
 	attempt := middleware.NextRequestTraceAttempt(c)
+	evidence := &failover.Attempt{}
+	c.Set(failover.AttemptContextKey, evidence)
 
 	handle := middleware.BeginRequestTraceStage(
 		c,
@@ -242,12 +246,41 @@ func RelayHelper(
 		handle.Finish(requestTraceResultStatus(c.Request.Context(), result))
 	}()
 
+	startedAt := time.Now()
 	result = handel(c, meta)
-	if result.Error == nil {
-		return result, false
+	failure := evidence.Observe(failover.FromError(result.Error))
+	if result.Error == nil || result.UpstreamID != "" {
+		failure.Acceptance = failover.Accepted
 	}
+	if result.Error != nil && !monitorplugin.ShouldRetry(result.Error) {
+		failure.Class = failover.InvalidRequest
+	}
+	p := failover.Policy{MaxRetries: -1}
+	if value, ok := c.Get("failover_policy"); ok {
+		p = value.(failover.Policy)
+	}
+	retries := c.GetInt("failover_attempt_count")
+	c.Set("failover_attempt_count", retries+1)
+	decision := failover.Decide(failure, p, failover.State{Retries: retries, Pinned: c.GetBool("failover_pinned"), Written: c.Writer.Written(), Cancelled: c.Request.Context().Err() != nil}, time.Now())
+	if result.Error == nil {
+		decision = failover.Decision{Reason: "success"}
+	}
+	fields := log.Fields{"channel_id": meta.Channel.ID, "acceptance": failure.Acceptance, "failure_class": failure.Class, "evidence": failure.Evidence, "duration_ms": time.Since(startedAt).Milliseconds(), "decision": decision.Reason, "retry": decision.Retry}
+	common.GetLogger(c).WithFields(fields).Info("channel_failover_decision")
+	// Only server-created attempts are appended; client metadata cannot forge them.
+	attempts, _ := c.Get("failover_attempts")
+	records, _ := attempts.([]log.Fields)
+	records = append(records, fields)
+	c.Set("failover_attempts", records)
+	encoded, _ := json.Marshal(records)
+	metadata := middleware.GetRequestMetadata(c)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["channel_failover_attempts"] = string(encoded)
+	c.Set(middleware.RequestMetadata, metadata)
+	return result, decision.Retry
 
-	return result, monitorplugin.ShouldRetry(result.Error)
 }
 
 func NewRelay(mode mode.Mode) func(c *gin.Context) {
@@ -416,6 +449,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		config.GetRetryBudget(),
 		upstreamStartedAt,
 	)
+	c.Set("failover_policy", failover.Policy{MaxRetries: retryTimes, Deadline: retryDeadline})
+	c.Set("failover_pinned", initialChannel.designatedChannel)
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
@@ -445,6 +480,9 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		ErrorType:  upstreamErrorType,
 	})
 
+	if initialChannel.designatedChannel {
+		retry = false
+	}
 	if handleRelayResult(c, result.Error, retry, retryTimes, retryDeadline) {
 		recordResult(
 			c,
@@ -764,6 +802,9 @@ func handleRelayResult(
 		return true
 	}
 
+	if c.Writer.Written() {
+		return true
+	}
 	if !retry ||
 		retryTimes == 0 ||
 		(!retryDeadline.IsZero() && !time.Now().Before(retryDeadline)) ||
@@ -872,6 +913,12 @@ func (s *retryState) remainingRelayDelay(
 }
 
 func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayController RelayHandler) {
+	// Keep every attempted channel excluded even if the selector resets a round.
+	if state.ignoreChannelIDs == nil {
+		state.ignoreChannelIDs = make(map[int64]struct{})
+	}
+	state.ignoreChannelIDs[int64(state.meta.Channel.ID)] = struct{}{}
+
 	log := common.GetLogger(c)
 
 	// The budget limits scheduling and backoff, while in-flight requests keep their own timeout.
@@ -896,6 +943,9 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		}
 
 		if err != nil {
+			if errors.Is(err, ErrChannelsExhausted) {
+				finishFailoverDecision(c, "no_candidates")
+			}
 			if !errors.Is(err, ErrChannelsExhausted) && ctx.Err() == nil {
 				log.Errorf("prepare retry failed: %+v", err)
 			}
@@ -939,6 +989,10 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 
 		var retry bool
 
+		if state.ignoreChannelIDs == nil {
+			state.ignoreChannelIDs = make(map[int64]struct{})
+		}
+		state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
 		state.result, retry = RelayHelper(c, state.meta, relayController)
 		i++
 
@@ -958,6 +1012,17 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		}
 	}
 
+	if state.result.Error != nil {
+		switch {
+		case c.Request.Context().Err() != nil:
+			finishFailoverDecision(c, "cancelled")
+		case !state.retryDeadline.IsZero() && !time.Now().Before(state.retryDeadline):
+			finishFailoverDecision(c, "time_budget")
+		case state.retryTimes >= 0 && i >= state.retryTimes:
+			finishFailoverDecision(c, "attempt_budget")
+		}
+	}
+
 	recordResult(
 		c,
 		state.meta,
@@ -968,7 +1033,7 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		middleware.GetRequestMetadata(c),
 	)
 
-	if state.result.Error != nil {
+	if state.result.Error != nil && !c.Writer.Written() {
 		ErrorWithRequestID(c, state.result.Error)
 	}
 }
@@ -990,7 +1055,7 @@ func handleRetryResult(
 	newChannel *model.Channel,
 	state *retryState,
 ) (done bool) {
-	if ctx.Request.Context().Err() != nil {
+	if ctx.Writer.Written() || ctx.Request.Context().Err() != nil || state.designatedChannel != nil {
 		return true
 	}
 
@@ -1247,4 +1312,22 @@ func recordMeasuredImageResult(
 		downstreamResult,
 	)
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
+}
+
+// Final scheduling failures update the last attempt before its terminal log is saved.
+func finishFailoverDecision(c *gin.Context, reason string) {
+	value, _ := c.Get("failover_attempts")
+	records, _ := value.([]log.Fields)
+	if len(records) == 0 || records[len(records)-1]["retry"] != true {
+		return
+	}
+	records[len(records)-1]["decision"] = reason
+	records[len(records)-1]["retry"] = false
+	encoded, _ := json.Marshal(records)
+	metadata := middleware.GetRequestMetadata(c)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["channel_failover_attempts"] = string(encoded)
+	c.Set(middleware.RequestMetadata, metadata)
 }

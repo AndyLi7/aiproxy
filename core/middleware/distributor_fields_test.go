@@ -69,3 +69,10 @@ func TestRequestFieldExtractorsFromJSONMissingFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, metadata)
 }
+
+func TestRequestMetadataCannotForgeFailoverAttempts(t *testing.T) {
+	metadata, err := middleware.GetRequestMetadataFromJSON([]byte(`{"metadata":{"channel_failover_attempts":"[{\"decision\":\"success\"}]","team":"test"}}`))
+	require.NoError(t, err)
+	assert.NotContains(t, metadata, "channel_failover_attempts")
+	assert.Equal(t, "test", metadata["team"])
+}

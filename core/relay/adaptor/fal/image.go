@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
@@ -90,6 +91,7 @@ func (c *Client) request(
 		base = "https://queue.fal.run"
 	}
 
+	ctx, classifyTransport := failover.TraceTransport(ctx)
 	req, err := http.NewRequestWithContext(
 		ctx,
 		method,
@@ -98,6 +100,12 @@ func (c *Client) request(
 	)
 	if err != nil {
 		return 0, errors.New("invalid fal endpoint")
+	}
+
+	// Paid submissions must never be replayed implicitly by net/http, even
+	// if an idempotency header is introduced by an outbound transport later.
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		req.GetBody = nil
 	}
 
 	req.Header.Set("Authorization", "Key "+c.Key)
@@ -113,7 +121,7 @@ func (c *Client) request(
 
 	resp, err := copyClient.Do(req)
 	if err != nil {
-		return 0, errors.New("fal transport unavailable")
+		return 0, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err)}
 	}
 	defer resp.Body.Close()
 
@@ -138,7 +146,7 @@ func (c *Client) Submit(ctx context.Context, modelName string, body []byte) (str
 	}
 
 	code, err := c.request(ctx, http.MethodPost, modelName, body, &result)
-	if code >= 400 && code < 500 {
+	if code == 400 || code == 413 || code == 422 || code == 451 {
 		return "", adaptor.ErrImageSubmissionRejected
 	}
 
@@ -197,7 +205,17 @@ func (c *Client) Poll(
 		Error  any    `json:"error"`
 	}
 
-	_, err = c.request(ctx, http.MethodGet, statusPath, nil, &status)
+	statusCode, err := c.request(ctx, http.MethodGet, statusPath, nil, &status)
+	// Older fal-ai snapshots used the inference subpath for queue reads.
+	// On an explicit method rejection, query the same accepted request at the
+	// validated owner/app queue root. This never resubmits or changes channels.
+	legacyPath := root + "/requests/" + id
+	if statusCode == http.StatusMethodNotAllowed && strings.HasPrefix(modelName, "fal-ai/") &&
+		statusPath == modelName+"/requests/"+id+"/status" && path != legacyPath {
+		path = legacyPath
+		statusPath = path + "/status"
+		_, err = c.request(ctx, http.MethodGet, statusPath, nil, &status)
+	}
 	if err != nil {
 		return adaptor.ImageTaskResult{}, err
 	}

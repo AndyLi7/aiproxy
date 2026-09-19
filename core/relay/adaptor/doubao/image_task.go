@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
@@ -45,6 +46,7 @@ func (*Adaptor) GenerateImage(
 		base += "/api/v3"
 	}
 
+	ctx, classifyTransport := failover.TraceTransport(ctx)
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -53,6 +55,12 @@ func (*Adaptor) GenerateImage(
 	)
 	if err != nil {
 		return adaptor.ImageTaskResult{}, adaptor.ErrImageSubmissionRejected
+	}
+
+	// Paid submissions must never be replayed implicitly by net/http, even
+	// if an idempotency header is introduced by an outbound transport later.
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		req.GetBody = nil
 	}
 
 	req.Header.Set("Authorization", "Bearer "+m.Channel.Key)
@@ -73,11 +81,11 @@ func (*Adaptor) GenerateImage(
 
 	response, err := once.Do(req)
 	if err != nil {
-		return adaptor.ImageTaskResult{}, errors.New("synchronous image submission outcome unknown")
+		return adaptor.ImageTaskResult{}, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err)}
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode >= 400 && response.StatusCode < 500 {
+	if response.StatusCode == 400 || response.StatusCode == 413 || response.StatusCode == 422 || response.StatusCode == 451 {
 		return adaptor.ImageTaskResult{}, adaptor.ErrImageSubmissionRejected
 	}
 

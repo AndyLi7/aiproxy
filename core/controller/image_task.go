@@ -91,6 +91,8 @@ func selectImageTaskAdapter(
 		return nil, nil
 	}
 
+	c.Set("image_initial_channel", selected)
+
 	a, ok := adaptors.GetAdaptor(selected.channel.Type)
 	if !ok {
 		imageTaskHTTPError(c, 503, "adapter_unavailable")
@@ -127,7 +129,7 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	mc := middleware.GetModelConfig(c)
-	// Async endpoints require a published Registry contract and reject demo transport IDs.
+	// Async endpoints require a published Registry contract, including private demo projections.
 	var wrapper struct {
 		ID       string `json:"entry_id"`
 		Contract struct {
@@ -151,12 +153,13 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
-	if middleware.OperationalFieldsFromContext(c).RequestSource == model.RequestSourceAdminDemo {
-		imageTaskHTTPError(c, 400, "unsupported_admin_image_execution")
+	group, token := middleware.GetGroup(c), middleware.GetToken(c)
+	adminDemo := middleware.OperationalFieldsFromContext(c).RequestSource == model.RequestSourceAdminDemo
+	if c.GetHeader(middleware.OperationalLogSourceHeader) == model.RequestSourceAdminDemo &&
+		group.Status != model.GroupStatusInternal {
+		imageTaskHTTPError(c, 403, "internal_admin_token_required")
 		return
 	}
-
-	group, token := middleware.GetGroup(c), middleware.GetToken(c)
 	if token.ID == 0 || group.ID == "" {
 		imageTaskHTTPError(c, 403, "customer_token_required")
 		return
@@ -285,6 +288,12 @@ func submitImageTask(c *gin.Context) {
 		}
 	}
 
+	// Procurement costs are recorded by the application. Internal example tasks
+	// must never create a customer charge, even when a retail price is configured.
+	if adminDemo {
+		price = model.Price{}
+	}
+
 	requestAt := time.Now()
 	// Queue image contracts expose a validated image count, so the known output
 	// charge can be checked before any paid work is reserved or submitted.
@@ -313,18 +322,21 @@ func submitImageTask(c *gin.Context) {
 		requiredBalance = math.Max(maximum, middleware.GetGroupMinimumBalance())
 	}
 
-	balanceConsumer := middleware.GetGroupBalanceConsumerFromContext(c)
-	if balanceConsumer == nil || balanceConsumer.CheckBalance == nil {
-		imageTaskHTTPError(c, 503, "balance_unavailable")
-		return
-	}
+	if !adminDemo {
+		balanceConsumer := middleware.GetGroupBalanceConsumerFromContext(c)
+		if balanceConsumer == nil || balanceConsumer.CheckBalance == nil {
+			imageTaskHTTPError(c, 503, "balance_unavailable")
+			return
+		}
 
-	if !balanceConsumer.CheckBalance(requiredBalance) {
-		imageTaskHTTPError(c, 403, "group_balance_not_enough")
-		return
+		if !balanceConsumer.CheckBalance(requiredBalance) {
+			imageTaskHTTPError(c, 403, "group_balance_not_enough")
+			return
+		}
 	}
 
 	info := &model.AsyncUsageInfo{
+		InternalImageTask:           adminDemo,
 		RequestID:                   id,
 		RequestAt:                   requestAt,
 		UsageContext:                requestUsage.Context,
@@ -395,63 +407,7 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
-	dispatchReservedImageTask(c, task, imageAdapter, mt, mappedBody)
-}
-
-func dispatchReservedImageTask(
-	c *gin.Context,
-	task *model.ImageTask,
-	imageAdapter adaptor.ImageTaskExecutor,
-	mt *meta.Meta,
-	mappedBody []byte,
-) {
-	// One bounded submission; disconnects cannot cause a second paid invocation.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 50*time.Second)
-	defer cancel()
-
-	if syncAdapter, ok := imageAdapter.(adaptor.SyncImageTaskAdapter); ok {
-		dispatchSyncImageTask(c, ctx, task, syncAdapter, mt, mappedBody)
-		return
-	}
-
-	queueAdapter, ok := imageAdapter.(adaptor.ImageTaskAdapter)
-	if !ok {
-		imageTaskHTTPError(c, 503, "unsupported_image_adapter")
-		return
-	}
-
-	upstream, err := queueAdapter.SubmitImage(ctx, mt, mappedBody)
-	if err != nil {
-		status := "submission_unknown"
-
-		var taskError *model.ImageTaskError
-		if errors.Is(err, adaptor.ErrImageSubmissionRejected) {
-			status = "failed"
-			taskError = &model.ImageTaskError{
-				Code:    "submission_rejected",
-				Message: "Upstream rejected image submission",
-			}
-		}
-
-		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
-			imageTaskHTTPError(c, 503, "task_store_unavailable")
-			return
-		}
-
-		task.Status = status
-		task.Error = taskError
-		c.JSON(202, task)
-
-		return
-	}
-
-	if err = model.AcceptImageTask(task.ID, upstream); err != nil {
-		imageTaskHTTPError(c, 503, "task_store_unavailable")
-		return
-	}
-
-	task.Status = "queued"
-	c.JSON(202, task)
+	dispatchImageTaskWithFailover(c, task, imageAdapter, mt, mappedBody)
 }
 
 // Replays are authorized by token ownership and the reserved schema snapshot;
@@ -548,6 +504,10 @@ func dispatchSyncImageTask(
 	body []byte,
 ) {
 	result, err := a.GenerateImage(ctx, mt, body, []byte(task.ValidationContract))
+	finishSyncImageTask(c, task, result, err)
+}
+
+func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.ImageTaskResult, err error) {
 	if err != nil {
 		status := "submission_unknown"
 

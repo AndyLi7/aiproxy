@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/conv"
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
@@ -313,9 +314,21 @@ func doRequest(
 	store adaptor.Store,
 	req *http.Request,
 ) (*http.Response, adaptor.Error) {
+	traceCtx, classify := failover.TraceTransport(req.Context())
+	req = req.WithContext(traceCtx)
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		// Do not let Transport or 307/308 redirects replay generation bodies.
+		req.GetBody = nil
+	}
+	value, _ := c.Get(failover.AttemptContextKey)
+	evidence, _ := value.(*failover.Attempt)
+	evidence.BeginCall()
 	resp, err := a.DoRequest(meta, store, c, req)
+	if resp != nil {
+		evidence.Observe(failover.Failure{Acceptance: failover.Unknown})
+	}
 	if err != nil {
-		return nil, mapRequestError(meta, err, http.StatusInternalServerError, "request error")
+		return nil, adaptor.WithFailover(mapRequestError(meta, err, http.StatusInternalServerError, "request error"), evidence.Observe(classify(err)))
 	}
 
 	return resp, nil

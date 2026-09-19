@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
 )
@@ -40,7 +41,7 @@ type ImageTaskAdapter interface {
 	) (ImageTaskResult, error)
 }
 
-var ErrImageSubmissionRejected = errors.New("upstream rejected image submission")
+var ErrImageSubmissionRejected = &ImageSubmissionFailure{Failure: failover.Failure{Acceptance: failover.NotAccepted, Class: failover.InvalidRequest, Evidence: "invalid_submission"}}
 
 // MapImageProviderInput executes the server-owned contract, independent of model names.
 func MapImageProviderInput(

@@ -1055,7 +1055,7 @@ func consumeAsyncUsageGroupBalance(
 	info *model.AsyncUsageInfo,
 	amount float64,
 ) (bool, bool, error) {
-	if balance.Default == nil || info.GroupID == "" {
+	if info.InternalImageTask || balance.Default == nil || info.GroupID == "" {
 		return false, false, nil
 	}
 

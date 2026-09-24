@@ -809,7 +809,7 @@ func handleRelayResult(
 		retryTimes == 0 ||
 		(!retryDeadline.IsZero() && !time.Now().Before(retryDeadline)) ||
 		c.Request.Context().Err() != nil {
-		ErrorWithRequestID(c, bizErr)
+		writePublicUpstreamError(c, bizErr)
 		return true
 	}
 
@@ -1034,7 +1034,7 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 	)
 
 	if state.result.Error != nil && !c.Writer.Written() {
-		ErrorWithRequestID(c, state.result.Error)
+		writePublicUpstreamError(c, state.result.Error)
 	}
 }
 
@@ -1112,6 +1112,26 @@ func RelayNotImplemented(c *gin.Context) {
 			Code:    "api_not_implemented",
 		}),
 	)
+}
+
+// Only called after upstream execution/retry decisions; original errors remain in audit logs.
+func writePublicUpstreamError(c *gin.Context, original adaptor.Error) {
+	status := original.StatusCode()
+	message := "The service is temporarily unavailable. Please try again later."
+	code := "upstream_unavailable"
+	if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+		message = "The request could not be processed. Please check the input parameters."
+		code = "invalid_request"
+	}
+	safe := relaymodel.WrapperErrorWithMessage(middleware.GetMode(c), status, message,
+		relaymodel.WithType("api_error"), relaymodel.WithCode(code))
+	// Video envelopes already have their own public serializer. Avoid remapping
+	// upstream authentication/balance failures into customer permission errors.
+	if middleware.IsPublicVideoRequest(c.Request.URL.Path, middleware.GetMode(c)) {
+		c.JSON(status, safe)
+		return
+	}
+	ErrorWithRequestID(c, safe)
 }
 
 func ErrorWithRequestID(c *gin.Context, relayErr adaptor.Error) {

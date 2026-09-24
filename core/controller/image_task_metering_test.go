@@ -36,7 +36,7 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 		status      int
 		undeclared  bool
 	}{
-		{"admin demo", 0, 1, false, 202, false}, {"accepted", 2, 1, false, 202, false}, {"insufficient", .5, 1, false, 403, false}, {"bad metadata", 2, 2, false, 400, false}, {"conditional", 2, 1, true, 400, false}, {"undeclared references with positive input rate", 2, 1, false, 400, true}, {"text only with positive input rate", 2, 1, false, 202, true},
+		{"admin demo", 0, 1, false, 202, false}, {"accepted", 2, 1, false, 202, false}, {"insufficient", .5, 1, false, 402, false}, {"bad metadata", 2, 2, false, 400, false}, {"conditional", 2, 1, true, 400, false}, {"undeclared references with positive input rate", 2, 1, false, 400, true}, {"text only with positive input rate", 2, 1, false, 202, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			textOnly := tc.name == "text only with positive input rate"

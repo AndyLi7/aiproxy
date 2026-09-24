@@ -65,7 +65,7 @@ func SaveImageTaskAttempt(task *ImageTask, expected int, channelID int, baseURL 
 			return err
 		}
 		var entry Log
-		if err := tx.First(&entry, "request_id = ?", task.ID).Error; err != nil {
+		if err := tx.Where("id IN (?)", tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("id = ?", task.UsageID)).First(&entry).Error; err != nil {
 			return err
 		}
 		if entry.Metadata == nil {

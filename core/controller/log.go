@@ -12,6 +12,7 @@ import (
 	"github.com/labring/aiproxy/core/controller/utils"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"gorm.io/gorm"
 )
 
 const maxExcludedLogModes = 32
@@ -395,11 +396,19 @@ func SearchGroupLogs(c *gin.Context) {
 //	@Success		200		{object}	middleware.APIResponse{data=model.RequestDetail}
 //	@Router			/api/logs/detail/{log_id} [get]
 func GetLogDetail(c *gin.Context) {
-	logID, _ := strconv.Atoi(c.Param("log_id"))
+	logID, parseErr := strconv.Atoi(c.Param("log_id"))
+	if parseErr != nil || logID <= 0 {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid log ID")
+		return
+	}
 
 	log, err := model.GetLogDetail(logID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		middleware.ErrorResponse(c, http.StatusNotFound, "record not found")
+		return
+	}
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		middleware.ErrorResponse(c, http.StatusInternalServerError, "unable to read log detail")
 		return
 	}
 
@@ -424,11 +433,19 @@ func GetGroupLogDetail(c *gin.Context) {
 		return
 	}
 
-	logID, _ := strconv.Atoi(c.Param("log_id"))
+	logID, parseErr := strconv.Atoi(c.Param("log_id"))
+	if parseErr != nil || logID <= 0 {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid log ID")
+		return
+	}
 
 	log, err := model.GetGroupLogDetail(logID, group)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		middleware.ErrorResponse(c, http.StatusNotFound, "record not found")
+		return
+	}
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		middleware.ErrorResponse(c, http.StatusInternalServerError, "unable to read log detail")
 		return
 	}
 

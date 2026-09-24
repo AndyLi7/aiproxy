@@ -151,6 +151,11 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		}
 	}
 
+	if value, ok := c.Get(customerValidationDetailKey); ok {
+		if detail, ok := value.(*model.RequestDetail); ok {
+			entry.RequestDetail = detail
+		}
+	}
 	return recordOperationalLog(entry)
 }
 

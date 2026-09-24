@@ -35,6 +35,9 @@ jobs:
         with:
           go-version-file: "core/go.mod"
 
+      - name: Image API contract gate
+        run: sh core/scripts/test-image-contracts.sh
+
       - name: Go test
         working-directory: core
         run: |

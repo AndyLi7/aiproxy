@@ -2,6 +2,9 @@ package controller
 
 import (
 	"encoding/json"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
+	"github.com/labring/aiproxy/core/relay/adaptor"
+	"github.com/labring/aiproxy/core/relay/adaptors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -66,14 +69,16 @@ func mapChannelProviderInput(
 		return nil, b, err
 	}
 
-	adapter, execution := "fal-image", "async"
-	switch ch.Type {
-	case model.ChannelTypeFal:
-	case model.ChannelTypeDoubao:
-		adapter, execution = "volcengine-ark-image", "sync"
-	default:
+	rawAdapter, exists := adaptors.GetAdaptor(ch.Type)
+	executor, supported := rawAdapter.(adaptor.ImageTaskExecutor)
+	if !exists || !supported {
 		return nil, b, registryvalidation.ErrProviderContract
 	}
+	capability, supported := imagecapabilities.Lookup(executor.ImageAdapterName())
+	if !supported {
+		return nil, b, registryvalidation.ErrProviderContract
+	}
+	adapter, execution := executor.ImageAdapterName(), capability.Execution
 
 	endpoint, _ := meta.GetMappedModelName(route, ch.ModelMapping)
 	mapped, err := registryvalidation.MapBoundProviderInput(
@@ -100,6 +105,7 @@ func imageProviderPredicate(c *gin.Context, route string, m mode.Mode) func(*mod
 	}
 	// Both queue and synchronous upstreams require durable public task reservation.
 	if c.Request.URL.Path != "/v1/images/tasks" || c.Request.Method != http.MethodPost {
+		common.GetLogger(c).Warn("image channel rejected: task endpoint required")
 		return func(*model.Channel) bool { return false }
 	}
 
@@ -110,6 +116,9 @@ func imageProviderPredicate(c *gin.Context, route string, m mode.Mode) func(*mod
 
 	return func(ch *model.Channel) bool {
 		_, _, err := mapChannelProviderInput(raw, ch, route, body)
+		if err != nil {
+			common.GetLogger(c).Warnf("image channel compatibility rejected: channel=%d route=%s", ch.ID, route)
+		}
 		return err == nil
 	}
 }

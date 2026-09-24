@@ -57,6 +57,25 @@ func TestImageReservationReplayAndOwnership(t *testing.T) {
 	require.Equal(t, "provider-id", info.UpstreamID)
 }
 
+func TestImageReservationPersistsTextOnlyLogSummary(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "image-summary.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+	_, created, err := model.ReserveImageTask(
+		&model.ImageTask{ID: "summary", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "hash", RequestSummary: `{"prompt":"A quiet harbor"}`},
+		&model.AsyncUsageInfo{RequestID: "summary"},
+	)
+	require.NoError(t, err)
+	require.True(t, created)
+	var entry model.Log
+	require.NoError(t, db.Preload("RequestDetail").Where("request_id = ?", "summary").First(&entry).Error)
+	require.NotNil(t, entry.RequestDetail)
+	require.JSONEq(t, `{"prompt":"A quiet harbor"}`, entry.RequestDetail.RequestBody)
+}
+
 func TestImageReservationRollback(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "image.db"))
 	require.NoError(t, err)
@@ -221,4 +240,101 @@ func TestCompleteSyncImageTaskActivatesAccountingAtomically(t *testing.T) {
 	got, err = model.GetImageTask(task.ID, "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com/a.png", got.Data[0].URL)
+}
+
+func TestImageReservationAfterEndpointRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*model.Log)
+		allowed bool
+	}{
+		{"safe fallback", func(l *model.Log) {}, true},
+		{"other owner", func(l *model.Log) { l.TokenID = 2 }, false},
+		{"other group", func(l *model.Log) { l.GroupID = "other" }, false},
+		{"other model", func(l *model.Log) { l.Model = "other" }, false},
+		{"upstream attempted", func(l *model.Log) { l.ChannelID = 1 }, false},
+		{"upstream accepted", func(l *model.Log) { l.UpstreamID = "accepted" }, false},
+		{"charged", func(l *model.Log) { l.Amount.UsedAmount = 0.01 }, false},
+		{"timeout", func(l *model.Log) { l.Code = 504 }, false},
+		{"other validation", func(l *model.Log) { l.ErrorCode = "invalid_parameter" }, false},
+		{"uncertain stage", func(l *model.Log) { l.FailureStage = model.FailureStageUpstream }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "fallback.db"))
+			require.NoError(t, err)
+			require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+			old := model.LogDB
+			model.LogDB = db
+			t.Cleanup(func() { model.LogDB = old })
+			prior := &model.Log{RequestID: "fallback", GroupID: "g", TokenID: 1, Model: "wan", Capability: "text-to-image", Code: 400, ErrorCode: "unsupported_endpoint", FailureStage: model.FailureStageValidation, Endpoint: "POST /v1/images/generations"}
+			tc.mutate(prior)
+			require.NoError(t, db.Create(prior).Error)
+			task := &model.ImageTask{ID: "fallback", GroupID: "g", TokenID: 1, Model: "wan/text-to-image", Fingerprint: "same"}
+			_, created, err := model.ReserveImageTask(task, &model.AsyncUsageInfo{RequestID: task.ID})
+			if !tc.allowed {
+				require.ErrorIs(t, err, model.ErrImageTaskConflict)
+				var n int64
+				require.NoError(t, db.Model(&model.ImageTask{}).Count(&n).Error)
+				require.Zero(t, n)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, created)
+			_, created, err = model.ReserveImageTask(task, &model.AsyncUsageInfo{RequestID: task.ID})
+			require.NoError(t, err)
+			require.False(t, created)
+			changed := *task
+			changed.Fingerprint = "changed"
+			_, _, err = model.ReserveImageTask(&changed, &model.AsyncUsageInfo{})
+			require.ErrorIs(t, err, model.ErrImageTaskConflict)
+			var n int64
+			require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Count(&n).Error)
+			require.EqualValues(t, 1, n)
+			require.NoError(t, db.Model(&model.Log{}).Count(&n).Error)
+			require.EqualValues(t, 2, n)
+			require.NoError(t, model.AcceptImageTask(task.ID, "upstream"))
+			require.NoError(t, model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "test", Message: "test"}))
+			var preserved model.Log
+			require.NoError(t, db.First(&preserved, prior.ID).Error)
+			require.Equal(t, 400, preserved.Code)
+			require.Empty(t, preserved.UpstreamID)
+			require.Zero(t, preserved.Amount.UsedAmount)
+
+		})
+	}
+}
+
+func TestImagePhaseTimesDoNotRegressOrInventHistory(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "phases.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+	task := &model.ImageTask{ID: "phases", GroupID: "g", TokenID: 1, ArchiveRequired: true}
+	_, _, err = model.ReserveImageTask(task, &model.AsyncUsageInfo{RequestID: task.ID})
+	require.NoError(t, err)
+	require.NoError(t, model.AcceptImageTask(task.ID, "provider"))
+	require.NoError(t, model.SetImageTaskResult(task.ID, "in_progress", nil, nil))
+	var first model.ImageTask
+	require.NoError(t, db.First(&first, "id = ?", task.ID).Error)
+	require.NotNil(t, first.QueuedAt)
+	require.NotNil(t, first.RunningAt)
+	require.NoError(t, model.SetImageTaskResult(task.ID, "queued", nil, nil))
+	require.NoError(t, model.SetImageTaskResult(task.ID, "in_progress", nil, nil))
+	var next model.ImageTask
+	require.NoError(t, db.First(&next, "id = ?", task.ID).Error)
+	require.Equal(t, "in_progress", next.Status)
+	require.True(t, first.RunningAt.Equal(*next.RunningAt))
+	require.NoError(t, model.SetImageTaskResult(task.ID, "result_processing", []model.ImageOutput{{URL: "https://source/image"}}, nil))
+	require.NoError(t, model.SetImageTaskResult(task.ID, "in_progress", nil, nil))
+	require.NoError(t, db.First(&next, "id = ?", task.ID).Error)
+	require.Equal(t, "result_processing", next.Status)
+	require.Len(t, next.Data, 1)
+	require.NotNil(t, next.ResultReceivedAt)
+	require.Nil(t, next.CompletedAt)
+	legacy := &model.ImageTask{ID: "legacy", Status: "completed"}
+	require.NoError(t, db.Create(legacy).Error)
+	require.Nil(t, legacy.RunningAt)
+	require.Nil(t, legacy.ResultExpiresAt)
 }

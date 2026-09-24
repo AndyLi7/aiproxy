@@ -4,9 +4,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/controller"
 	"github.com/labring/aiproxy/core/middleware"
+	"strings"
 )
 
 func SetRelayRouter(router *gin.Engine) {
+	// Signed, read-only result URLs permit browser image loading without exposing upstream hosts.
+	router.GET("/v1/images/tasks/:id/content/:index", middleware.IPBlock, controller.GetImageTaskContent)
 	// https://platform.openai.com/docs/api-reference/introduction
 	v1Router := router.Group("/v1")
 	v1Router.Use(
@@ -76,10 +79,7 @@ func SetRelayRouter(router *gin.Engine) {
 			"/operations/*operation_id",
 			controller.GeminiOperation()...,
 		)
-		v1Router.GET(
-			"/models/:model/operations/*operation_id",
-			controller.GeminiOperation()...,
-		)
+		v1Router.GET("/models/:model/*path", modelDetailOrOperation()...)
 		v1betaRouter.POST(
 			"/models/*model",
 			controller.GeminiByPath()...,
@@ -262,4 +262,24 @@ func SetRelayRouter(router *gin.Engine) {
 		relayRouter.GET("/threads/:id/runs/:runsId/steps/:stepId", controller.RelayNotImplemented)
 		relayRouter.GET("/threads/:id/runs/:runsId/steps", controller.RelayNotImplemented)
 	}
+}
+
+// Keep native Gemini operation polling while permitting slash-containing public IDs.
+func modelDetailOrOperation() []gin.HandlerFunc {
+	return append([]gin.HandlerFunc{func(c *gin.Context) {
+		path := c.Param("path")
+		if strings.HasPrefix(path, "/operations/") {
+			c.Params = append(c.Params, gin.Param{Key: "operation_id", Value: strings.TrimPrefix(path, "/operations")})
+			c.Next()
+			return
+		}
+		id := c.Param("model") + path
+		if strings.HasSuffix(id, "/schema") {
+			id = strings.TrimSuffix(id, "/schema")
+			c.Set("model_schema_request", true)
+		}
+		c.Params = gin.Params{{Key: "model", Value: id}}
+		controller.RetrieveModel(c)
+		c.Abort()
+	}}, controller.GeminiOperation()...)
 }

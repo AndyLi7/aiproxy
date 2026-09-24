@@ -600,3 +600,32 @@ func TestBuildRequestDetailForLogDropsInvalidUTF8Bodies(t *testing.T) {
 	assert.Empty(t, detail.RequestBody)
 	assert.Empty(t, detail.ResponseBody)
 }
+
+func TestUpstreamFailurePublicBoundary(t *testing.T) {
+	for _, status := range []int{401, 402, 403, 429, 500} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		middleware.SetRequestID(c, "safe-request-id")
+		original := relaymodel.WrapperErrorWithMessage(mode.ChatCompletions, status, "fal private-key upstream balance exhausted", relaymodel.WithType("private_provider_type"))
+		handleRelayResult(c, original, false, 0, time.Time{})
+		require.NotContains(t, w.Body.String(), "private-key")
+		require.NotContains(t, w.Body.String(), "fal")
+		require.NotContains(t, w.Body.String(), "balance")
+		require.Contains(t, w.Body.String(), "temporarily unavailable")
+		require.Equal(t, status, w.Code)
+		require.Contains(t, original.Error(), "private-key")
+	}
+}
+
+func TestWrittenStreamFailureNeverStartsRetryOrAppendsJSON(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	_, _ = c.Writer.Write([]byte("data: partial\n\n"))
+	c.Writer.Flush()
+	original := w.Body.String()
+	err := relaymodel.WrapperErrorWithMessage(mode.ChatCompletions, 502, "private upstream failure")
+	require.True(t, handleRelayResult(c, err, true, 3, time.Time{}))
+	require.Equal(t, original, w.Body.String())
+}

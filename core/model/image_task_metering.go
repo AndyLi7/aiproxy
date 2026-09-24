@@ -7,7 +7,7 @@ import (
 
 // QueueImageMaximumAmount is only an admission bound, never settlement evidence.
 // A ceiling per output also covers the evaluator's separate tier rounding.
-func QueueImageMaximumAmount(p Price, outputs int, inputs int64) (float64, error) {
+func QueueImageMaximumAmount(p Price, outputs int, inputs int64, maximumOutputPixels ...int64) (float64, error) {
 	if p.ImageBilling == nil || p.ImageBilling.Scenario != "generation" ||
 		len(p.ConditionalPrices) != 0 ||
 		outputs < 1 ||
@@ -23,6 +23,15 @@ func QueueImageMaximumAmount(p Price, outputs int, inputs int64) (float64, error
 	rate, err := p.ImageBillingFallbackRate()
 	if err != nil {
 		return 0, err
+	}
+
+	if p.ImageBilling.Version == 2 {
+		// Caller must derive this bound from a validated immutable Registry contract,
+		// never an untrusted client estimate. Absence must not fall back to image count.
+		if len(maximumOutputPixels) != 1 || !imageInteger(maximumOutputPixels[0], 1, ImageBillingMaxSafeInteger) {
+			return 0, errors.New("pixel billing requires a verified output pixel bound")
+		}
+		return maximumPixelBillingAmount(p.ImageBilling.OutputPixels, rate, int64(outputs), maximumOutputPixels[0])
 	}
 
 	rates := []ImageBillingRate{rate}

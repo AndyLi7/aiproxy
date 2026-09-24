@@ -210,6 +210,7 @@ func doubaoTaskRequestURL(baseURL, method, taskID string) (adaptor.RequestURL, e
 
 type Adaptor struct {
 	openai.Adaptor
+	imageStore imageStoreFunc
 }
 
 const baseURL = "https://ark.cn-beijing.volces.com"
@@ -322,10 +323,10 @@ func (a *Adaptor) DoResponse(
 	switch meta.Mode {
 	case mode.ImagesGenerations:
 		if utils.IsStreamResponse(resp) {
-			return ImageStreamHandler(meta, c, resp)
+			return a.imageStreamHandler(meta, c, resp)
 		}
 
-		return ImageHandler(meta, c, resp)
+		return a.imageHandler(meta, c, resp)
 	case mode.DoubaoVideo:
 		return DoubaoNativeVideoSubmitHandler(meta, store, c, resp)
 	case mode.DoubaoVideoTasks:

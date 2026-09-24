@@ -55,6 +55,15 @@ func (a *Adaptor) PollImage(
 	)
 }
 
+// queueResultFailure identifies a structured runner failure, not a transient
+// HTTP gateway failure. Never include upstream response text in public errors.
+type queueResultFailure struct {
+	status   int
+	terminal bool
+}
+
+func (e *queueResultFailure) Error() string { return fmt.Sprintf("fal returned HTTP %d", e.status) }
+
 type Client struct {
 	HTTP         *http.Client
 	BaseURL, Key string
@@ -126,7 +135,20 @@ func (c *Client) request(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.StatusCode, fmt.Errorf("fal returned HTTP %d", resp.StatusCode)
+		failure := &queueResultFailure{status: resp.StatusCode}
+		var envelope struct {
+			Detail []struct {
+				Type string `json:"type"`
+			} `json:"detail"`
+		}
+		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&envelope) == nil {
+			for _, detail := range envelope.Detail {
+				if detail.Type == "downstream_service_unavailable" {
+					failure.terminal = true
+				}
+			}
+		}
+		return resp.StatusCode, failure
 	}
 
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out); err != nil {
@@ -206,11 +228,11 @@ func (c *Client) Poll(
 	}
 
 	statusCode, err := c.request(ctx, http.MethodGet, statusPath, nil, &status)
-	// Older fal-ai snapshots used the inference subpath for queue reads.
+	// Some fal snapshots use the inference subpath for queue reads.
 	// On an explicit method rejection, query the same accepted request at the
 	// validated owner/app queue root. This never resubmits or changes channels.
 	legacyPath := root + "/requests/" + id
-	if statusCode == http.StatusMethodNotAllowed && strings.HasPrefix(modelName, "fal-ai/") &&
+	if statusCode == http.StatusMethodNotAllowed &&
 		statusPath == modelName+"/requests/"+id+"/status" && path != legacyPath {
 		path = legacyPath
 		statusPath = path + "/status"
@@ -238,13 +260,16 @@ func (c *Client) Poll(
 
 	var result struct {
 		Images []model.ImageOutput `json:"images"`
+		Image  *model.ImageOutput  `json:"image"`
 	}
 
 	var rawResult json.RawMessage
 
 	code, err := c.request(ctx, http.MethodGet, path, nil, &rawResult)
 	if err != nil {
-		if code == 400 || code == 422 {
+		var runnerFailure *queueResultFailure
+		if code == 400 || code == 422 ||
+			(errors.As(err, &runnerFailure) && runnerFailure.terminal) {
 			return failed("upstream_failed"), nil
 		}
 		return adaptor.ImageTaskResult{}, err
@@ -260,6 +285,18 @@ func (c *Client) Poll(
 		return adaptor.ImageTaskResult{}, errors.New("invalid fal result")
 	}
 
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(rawResult, &fields) != nil {
+		return failed("invalid_result"), nil
+	}
+	_, hasImages := fields["images"]
+	_, hasImage := fields["image"]
+	if hasImages && hasImage {
+		return failed("invalid_result"), nil
+	}
+	if !hasImages && result.Image != nil {
+		result.Images = []model.ImageOutput{*result.Image}
+	}
 	if len(result.Images) == 0 {
 		return failed("invalid_result"), nil
 	}

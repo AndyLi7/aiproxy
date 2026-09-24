@@ -70,6 +70,61 @@ func TestPrivateImageRegistryRoutePreservesIdentity(t *testing.T) {
 	}
 }
 
+func TestPrivateImageRegistryCustomCapabilityPreservesIdentity(t *testing.T) {
+	const route = "tp-admin-demo-v1-hash::subject-reference"
+
+	config := map[model.ModelConfigKey]any{
+		"public_model":            "tp-admin-demo-v1-hash",
+		"capability":              "subject-reference",
+		"public_capability_model": "tp-admin-demo-v1-hash/subject-reference",
+		"x_token_platform_capability_contract": map[string]any{
+			"entry_id": "vendor/image/subject-reference",
+			"contract": map[string]any{
+				"entry_id":           "vendor/image/subject-reference",
+				"validation_version": 1,
+				"input_schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"prompt": map[string]any{"type": "string", "minLength": 1},
+					},
+					"required":             []string{"prompt"},
+					"additionalProperties": false,
+				},
+			},
+		},
+	}
+	for _, tc := range []struct {
+		id, prompt string
+		status     int
+	}{{route, "cup", 0}, {route, "", 400}, {"other::subject-reference", "cup", 503}} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		body := mustMarshalJSON(t, map[string]any{"model": tc.id, "prompt": tc.prompt})
+		c.Request = httptest.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			"/",
+			strings.NewReader(string(body)),
+		)
+		c.Request.Header.Set("Content-Type", "application/json")
+
+		err := validateImageRegistryRequest(c, mode.ImagesGenerations, tc.id, config)
+		if tc.status != 0 {
+			require.NotNil(t, err)
+			require.Equal(t, tc.status, err.Status)
+			continue
+		}
+
+		require.Nil(t, err)
+
+		actual, readErr := common.GetRequestBodyReusable(c.Request)
+		require.NoError(t, readErr)
+
+		var forwarded map[string]any
+		require.NoError(t, json.Unmarshal(actual, &forwarded))
+		require.Equal(t, route, forwarded["model"])
+	}
+}
+
 func TestImageRegistryGuardStopsDispatch(t *testing.T) {
 	for _, tc := range []struct {
 		name, body    string
@@ -186,6 +241,62 @@ func TestResolvedBaseImageRegistryPreservesRequestedIdentity(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &result))
 			require.Equal(t, requested, result["model"])
 		})
+	}
+}
+
+func TestAsyncImageRegistryRejectsSyncEndpointBeforeSize(t *testing.T) {
+	const publicID = "alibaba/2.2-5b/text-to-image"
+	config := map[model.ModelConfigKey]any{
+		"public_capability_model": publicID,
+		"x_token_platform_capability_contract": map[string]any{
+			"entry_id": publicID,
+			"contract": map[string]any{
+				"entry_id":           publicID,
+				"validation_version": 1,
+				"execution":          map[string]any{"mode": "async"},
+				"input_schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"prompt": map[string]any{"type": "string", "minLength": 1},
+						"image_size": map[string]any{"type": "object", "properties": map[string]any{
+							"width":  map[string]any{"type": "integer"},
+							"height": map[string]any{"type": "integer"},
+						}},
+					},
+					"required":             []string{"prompt"},
+					"additionalProperties": false,
+				},
+			},
+		},
+	}
+	for _, requestMode := range []mode.Mode{mode.ImagesGenerations, mode.ImagesEdits} {
+		for _, tc := range []struct {
+			path     string
+			body     string
+			wantCode string
+		}{
+			{"/v1/images/generations", `{"model":"alibaba/2.2-5b/text-to-image","prompt":"lion","size":"1536x1024"}`, "unsupported_endpoint"},
+			{"/v1/images/tasks", `{"model":"alibaba/2.2-5b/text-to-image","prompt":"lion","size":"1536x1024"}`, ""},
+			{"/v1/images/tasks", `{"model":"alibaba/2.2-5b/text-to-image","prompt":"lion","image_size":{"width":1536,"height":1024}}`, ""},
+		} {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			err := validateImageRegistryRequest(c, requestMode, publicID, config)
+			if tc.wantCode != "" {
+				require.NotNil(t, err)
+				require.Equal(t, tc.wantCode, err.Code)
+				require.Equal(t, "endpoint", err.Param)
+				continue
+			}
+			require.Nil(t, err)
+			forwarded, readErr := common.GetRequestBodyReusable(c.Request)
+			require.NoError(t, readErr)
+			var values map[string]any
+			require.NoError(t, json.Unmarshal(forwarded, &values))
+			require.NotContains(t, values, "size", "normalized request must not retain the consumed alias")
+			require.Equal(t, map[string]any{"width": float64(1536), "height": float64(1024)}, values["image_size"])
+		}
 	}
 }
 

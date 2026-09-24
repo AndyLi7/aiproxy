@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/labring/aiproxy/core/common/failover"
@@ -135,6 +136,61 @@ func TestDottedSeedreamFullQueuePath(t *testing.T) {
 	}
 
 	require.Len(t, calls, 4)
+}
+
+func TestWanFullQueuePathFallsBackAfterMethodRejection(t *testing.T) {
+	raw, err := os.ReadFile(
+		"../../../common/registryvalidation/testdata/seedream-4.5-v2-text-to-image.json",
+	)
+	require.NoError(t, err)
+	raw = []byte(strings.ReplaceAll(
+		string(raw),
+		"fal-ai/bytedance/seedream/v4.5/text-to-image",
+		"wan/v2.6/text-to-image",
+	))
+
+	var contract struct {
+		Providers map[string]struct {
+			Upstream registryvalidation.ProviderSpec `json:"upstream"`
+		} `json:"providers"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &contract))
+	spec := contract.Providers["fal"].Upstream
+	frozen, err := registryvalidation.FreezeProviderBinding(raw, registryvalidation.ProviderBinding{
+		Provider:     "fal",
+		ID:           spec.ID,
+		Revision:     spec.Revision,
+		ContractHash: spec.ContractHash,
+	})
+	require.NoError(t, err)
+
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/wan/v2.6/text-to-image/requests/abc/status":
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case "/wan/v2.6/requests/abc/status":
+			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+		case "/wan/v2.6/requests/abc":
+			_, _ = w.Write([]byte(`{"images":[{"url":"https://fal.media/out.png","width":null,"height":null}],"seed":42}`))
+		default:
+			t.Errorf("unexpected queue path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "secret"}
+	result, err := client.Poll(t.Context(), spec.Endpoint, "abc", frozen)
+	require.NoError(t, err)
+	require.Equal(t, "completed", result.Status)
+	require.Len(t, result.Data, 1)
+	require.Equal(t, []string{
+		"GET /wan/v2.6/text-to-image/requests/abc/status",
+		"GET /wan/v2.6/requests/abc/status",
+		"GET /wan/v2.6/requests/abc",
+	}, calls)
 }
 
 func TestRejectInvalidSuccess(t *testing.T) {
@@ -395,4 +451,98 @@ func TestFrozenFullQueuePaths(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "completed", result.Status)
 	require.Equal(t, 2, calls)
+}
+
+func TestFalNormalizesSingleImageWithoutWeakeningValidation(t *testing.T) {
+	for _, tc := range []struct{ name, body, status string }{
+		{"single", `{"image":{"url":"https://cdn.example/a.png","content_type":"image/png"}}`, "completed"},
+		{"empty", `{"image":null}`, "failed"},
+		{"unsafe", `{"image":{"url":"http://cdn.example/a.png"}}`, "failed"},
+		{"ambiguous", `{"image":{"url":"https://cdn.example/a.png"},"images":[{"url":"https://cdn.example/b.png"}]}`, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/status") {
+					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+				} else {
+					_, _ = w.Write([]byte(tc.body))
+				}
+			}))
+			defer s.Close()
+			c := fal.Client{HTTP: s.Client(), BaseURL: s.URL}
+			result, err := c.Poll(t.Context(), "fal-ai/test", "abc")
+			require.NoError(t, err)
+			require.Equal(t, tc.status, result.Status)
+			if tc.status == "completed" {
+				require.Len(t, result.Data, 1)
+				require.Equal(t, "https://cdn.example/a.png", result.Data[0].URL)
+			} else {
+				require.Empty(t, result.Data)
+			}
+		})
+	}
+}
+
+func TestSingleImageHonorsFrozenNativeOutput(t *testing.T) {
+	for _, required := range []string{"image", "images"} {
+		t.Run(required, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/status") {
+					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"image":{"url":"https://cdn.example/a.png"}}`))
+			}))
+			defer s.Close()
+			contract := []byte(`{"provider_contract_version":1,"selected_provider_binding":{"provider":"p","id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"providers":{"p":{"adapter":"fal-image","upstream":{"id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","endpoint":"fal-ai/test","execution":{"mode":"async","statusEndpoint":"fal-ai/test/requests/{request_id}/status","resultEndpoint":"fal-ai/test/requests/{request_id}","supportsCancellation":false},"outputJsonSchema":{"type":"object","required":["` + required + `"],"properties":{"image":{"type":"object","required":["url"],"properties":{"url":{"type":"string"}}}}}}}}}`)
+			require.True(t, json.Valid(contract), string(contract))
+			c := fal.Client{HTTP: s.Client(), BaseURL: s.URL}
+			result, err := c.Poll(t.Context(), "fal-ai/test", "abc", contract)
+			require.NoError(t, err)
+			if required == "image" {
+				require.Equal(t, "completed", result.Status)
+				require.Len(t, result.Data, 1)
+			} else {
+				require.Equal(t, "failed", result.Status)
+				require.Empty(t, result.Data)
+			}
+		})
+	}
+}
+
+func TestCompletedQueueDistinguishesRunnerFailureFromGatewayTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		terminal   bool
+	}{
+		{"runner failure", `{"detail":[{"type":"downstream_service_unavailable","msg":"Downstream service unavailable"}]}`, true},
+		{"gateway timeout", `<html>Gateway timeout</html>`, false},
+		{"unknown error", `{"detail":[{"type":"unknown"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				require.Equal(t, http.MethodGet, r.Method)
+				if strings.HasSuffix(r.URL.Path, "/status") {
+					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+					return
+				}
+				w.WriteHeader(http.StatusGatewayTimeout)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+			result, err := client.Poll(t.Context(), "wan/v2.6/text-to-image", "test-id")
+			if tc.terminal {
+				require.NoError(t, err)
+				require.Equal(t, "failed", result.Status)
+				require.Equal(t, "upstream_failed", result.Error.Code)
+			} else {
+				require.Error(t, err)
+				require.Empty(t, result.Status)
+			}
+			require.Equal(t, 2, calls)
+		})
+	}
 }

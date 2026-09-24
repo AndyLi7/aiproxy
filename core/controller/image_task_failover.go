@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -171,7 +172,7 @@ func nextImageTaskCandidate(c *gin.Context, ctx context.Context, task *model.Ima
 			continue
 		}
 		mc := middleware.GetModelConfig(c)
-		if mc.Price.HasImageBilling() && executor.ImageAdapterName() != "fal-image" {
+		if mc.Price.HasImageBilling() && !imagecapabilities.SupportsMeasuredBilling(executor.ImageAdapterName()) {
 			continue
 		}
 		var body []byte
@@ -187,6 +188,10 @@ func nextImageTaskCandidate(c *gin.Context, ctx context.Context, task *model.Ima
 				continue
 			}
 			metering, e := registryvalidation.ResolveImageMetering(contract, binding, body, input.N, model.ImageBillingMaxOutputs, mc.Price.HasImageBilling())
+			pixelLimit, pixelErr := registryvalidation.FrozenImagePixelLimit([]byte(task.ValidationContract))
+			if pixelErr != nil || pixelLimit != metering.MaxOutputPixels {
+				continue
+			}
 			// Do not change the reserved customer quantity or input metering on failover.
 			if e != nil || !compatibleImageFailoverMetering(metering, task.ExpectedImages, usage.UsageContext.ImageUsage, mc.Price.HasImageBilling()) {
 				continue

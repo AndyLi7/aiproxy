@@ -112,6 +112,9 @@ func main() {
 
 	go task.AsyncUsagePollTask(ctx)
 
+	log.Info("image result cleanup task started")
+	go task.ImageResultCleanupTask(ctx)
+
 	if common.RedisEnabled {
 		log.Info("redis health check task started")
 

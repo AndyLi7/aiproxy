@@ -119,10 +119,6 @@ func getImagesRequest(c *gin.Context) (*relaymodel.ImageRequest, error) {
 		return nil, err
 	}
 
-	if imageRequest.Prompt == "" {
-		return nil, errors.New("prompt is required")
-	}
-
 	if imageRequest.N == 0 {
 		imageRequest.N = 1
 	}
@@ -134,6 +130,11 @@ func ValidateImagesRequest(c *gin.Context, mc model.ModelConfig) error {
 	imageRequest, err := getImagesRequest(c)
 	if err != nil {
 		return err
+	}
+	// Legacy image endpoints require a prompt. Registry task endpoints validate
+	// their own schema; price and usage extraction must also allow image-only tasks.
+	if imageRequest.Prompt == "" {
+		return errors.New("prompt is required")
 	}
 
 	if err := validateSupportedImageResolution(imageRequest.Size, mc); err != nil {
@@ -288,6 +289,7 @@ func GetImagesRequestUsage(c *gin.Context, _ model.ModelConfig) (RequestUsage, e
 		Context: model.UsageContext{
 			Resolution: imageRequest.Size,
 			Quality:    imageRequest.Quality,
+			Style:      imageRequest.Style,
 		},
 	}, nil
 }

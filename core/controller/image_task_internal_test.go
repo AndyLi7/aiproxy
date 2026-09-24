@@ -173,9 +173,9 @@ func TestImageSubmitWithCompiledRegistryFixture(t *testing.T) {
 		{"accepted", 200, model.Price{}, 1, 0.01, 202},
 		{"rejected", 422, model.Price{}, 1, 0.01, 202},
 		{"unknown", 503, model.Price{}, 1, 0.01, 202},
-		{"image insufficient", 200, model.Price{ImageOutputPrice: 0.25, ImageOutputPriceUnit: 1}, 0.1, 0.25, 403},
+		{"image insufficient", 200, model.Price{ImageOutputPrice: 0.25, ImageOutputPriceUnit: 1}, 0.1, 0.25, 402},
 		{"image sufficient", 200, model.Price{ImageOutputPrice: 0.25, ImageOutputPriceUnit: 1}, 0.25, 0.25, 202},
-		{"request insufficient", 200, model.Price{PerRequestPrice: 0.5}, 0.1, 0.5, 403},
+		{"request insufficient", 200, model.Price{PerRequestPrice: 0.5}, 0.1, 0.5, 402},
 		{"request sufficient", 200, model.Price{PerRequestPrice: 0.5}, 0.5, 0.5, 202},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,7 +282,7 @@ func TestImageSubmitWithCompiledRegistryFixture(t *testing.T) {
 			require.Equal(t, tc.status, w.Code, w.Body.String())
 			require.Equal(t, 1, balanceChecks)
 
-			if tc.status == 403 {
+			if tc.status == 402 {
 				require.Zero(t, calls)
 
 				for _, table := range []any{&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}} {

@@ -32,6 +32,9 @@ func GetRequestID(c *gin.Context) string {
 
 func RequestIDMiddleware(c *gin.Context) {
 	now := GetRequestAt(c)
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	id := c.GetHeader(RequestIDHeader)
 	if !safeRequestID.MatchString(id) {

@@ -330,7 +330,6 @@ func GetModelConfigs(
 func GetAllModelConfigs() (configs []ModelConfig, err error) {
 	tx := DB.Model(&ModelConfig{})
 	err = tx.Order("created_at desc").
-		Omit("created_at", "updated_at").
 		Find(&configs).
 		Error
 

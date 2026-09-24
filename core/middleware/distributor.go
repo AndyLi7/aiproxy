@@ -354,7 +354,7 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 		AbortOperationally(
 			c,
 			model.FailureStageBalance,
-			http.StatusForbidden,
+			http.StatusPaymentRequired,
 			fmt.Sprintf("group `%s` balance not enough", group.ID),
 			relaymodel.WithType(GroupBalanceNotEnough),
 		)
@@ -512,10 +512,6 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	group := GetGroup(c)
 	token := GetToken(c)
-
-	if !checkGroupBalance(c, group) {
-		return
-	}
 
 	routeStartedAt := time.Now()
 	traceStage := BeginRequestTraceStage(
@@ -687,7 +683,22 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		requestModel,
 		mc.Config,
 	); validationErr != nil {
-		AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+		if validationErr.Status == http.StatusBadRequest {
+			code := validationErr.Code
+			if code == "" {
+				code = "invalid_parameter"
+			}
+			SetOperationalFailure(c, model.FailureStageValidation, code, validationErr.Error())
+			saveCustomerValidationDetail(c, validationErr)
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": validationErr.PublicError()})
+		} else {
+			AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+		}
+		return
+	}
+
+	// Resolve model access and validate the registry input before wallet lookup.
+	if !checkGroupBalance(c, group) {
 		return
 	}
 
@@ -1833,6 +1844,14 @@ func resolveRequestModel(
 	}
 
 	if requestModel == "" {
+		if requestMode == mode.ImagesGenerations && (c.Request.URL.Path == "/v1/images/tasks" || c.Request.URL.Path == "/v1/images/generations") {
+			AbortPublicVideoRequestError(
+				c, model.FailureStageValidation, http.StatusBadRequest,
+				"missing_parameter", "model is required and must be a non-empty string",
+				"model", nil, nil, "non-empty string",
+			)
+			return "", false
+		}
 		if IsPublicVideoRequest(c.Request.URL.Path, requestMode) {
 			AbortPublicVideoRequestError(
 				c,

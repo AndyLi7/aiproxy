@@ -2,8 +2,11 @@ package doubao
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,7 +15,9 @@ import (
 	"github.com/bytedance/sonic/ast"
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/image"
+	"github.com/labring/aiproxy/core/common/ownedimage"
 	coremodel "github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
@@ -184,7 +189,7 @@ func setDoubaoSequentialImages(node *ast.Node, n int64) error {
 	return err
 }
 
-func ImageHandler(
+func (a *Adaptor) imageHandler(
 	meta *meta.Meta,
 	c *gin.Context,
 	resp *http.Response,
@@ -276,6 +281,28 @@ func ImageHandler(
 		usage,
 		meta.ModelConfig.Price.HasImageBilling() || scenario == "layer_decomposition",
 	)
+	for _, item := range openAIResponse.Data {
+		if item.URL == "" {
+			if raw, err := base64.StdEncoding.DecodeString(item.B64Json); err == nil && len(raw) > 0 {
+				metadata := ownedimage.Inspect(raw)
+				item.MediaType, item.ContentType = metadata.ContentType, metadata.ContentType
+				if metadata.Width > 0 && metadata.Height > 0 {
+					item.Width, item.Height = metadata.Width, metadata.Height
+					item.Size = fmt.Sprintf("%dx%d", item.Width, item.Height)
+				}
+			}
+			continue
+		}
+		owned, metadata, storeErr := a.storeImage(c.Request.Context(), item.URL)
+		if storeErr != nil {
+			return adaptor.DoResponseResult{Usage: usage, UsageContext: usageContext}, adaptor.WithFailover(relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{Type: "api_error", Code: "result_storage_failed", Message: "The image was generated but could not be saved. Contact support with the request ID before retrying."}), failover.Failure{Acceptance: failover.Accepted, Class: failover.Permanent, Evidence: "result_storage_failed"})
+		}
+		item.URL, item.MediaType, item.ContentType = owned, metadata.ContentType, metadata.ContentType
+		if metadata.Width > 0 && metadata.Height > 0 {
+			item.Width, item.Height = metadata.Width, metadata.Height
+			item.Size = fmt.Sprintf("%dx%d", item.Width, item.Height)
+		}
+	}
 
 	data, err := sonic.Marshal(&openAIResponse)
 	if err != nil {
@@ -313,8 +340,16 @@ func doubaoImageResponseToOpenAI(
 			B64Json:       item.B64JSON,
 			RevisedPrompt: item.RevisedPrompt,
 		}
+		converted.Size = item.Size
+		parts := strings.Split(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(item.Size)), "×", "x"), "x")
+		if len(parts) == 2 {
+			width, widthErr := strconv.Atoi(parts[0])
+			height, heightErr := strconv.Atoi(parts[1])
+			if widthErr == nil && heightErr == nil && width > 0 && height > 0 {
+				converted.Width, converted.Height = width, height
+			}
+		}
 		if len(preserveMeasurements) > 0 && preserveMeasurements[0] {
-			converted.Size = item.Size
 			converted.ZIndex = item.ZIndex
 		}
 
@@ -328,7 +363,7 @@ func doubaoImageResponseToOpenAI(
 	}
 }
 
-func ImageStreamHandler(
+func (a *Adaptor) imageStreamHandler(
 	meta *meta.Meta,
 	c *gin.Context,
 	resp *http.Response,
@@ -350,6 +385,7 @@ func ImageStreamHandler(
 	var completedData relaymodel.ImageStreamEvent
 
 	completedImageIndexes := map[int]struct{}{}
+	storedURLs := map[string]string{}
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -364,9 +400,7 @@ func ImageStreamHandler(
 
 		var event doubaoImageStreamEvent
 		if err := sonic.Unmarshal(data, &event); err != nil {
-			log.Errorf("error unmarshalling doubao image stream response: %v", err)
-			render.OpenaiBytesData(c, data)
-			continue
+			return adaptor.DoResponseResult{Usage: usage, UsageContext: usageContext}, adaptor.WithFailover(relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{Type: "api_error", Code: "invalid_response", Message: "The image response could not be read."}), failover.Failure{Acceptance: failover.Accepted, Class: failover.Permanent})
 		}
 
 		openAIEvent, eventUsage, eventContext := convertDoubaoImageStreamEvent(
@@ -375,6 +409,19 @@ func ImageStreamHandler(
 		)
 		if eventUsage != nil {
 			usage = *eventUsage
+		}
+		if openAIEvent.URL != "" {
+			originalURL := openAIEvent.URL
+			saved := storedURLs[originalURL]
+			if saved == "" {
+				var storeErr error
+				saved, _, storeErr = a.storeImage(c.Request.Context(), originalURL)
+				if storeErr != nil {
+					return adaptor.DoResponseResult{Usage: usage, UsageContext: usageContext}, adaptor.WithFailover(relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{Type: "api_error", Code: "result_storage_failed", Message: "The image was generated but could not be saved. Contact support with the request ID before retrying."}), failover.Failure{Acceptance: failover.Accepted, Class: failover.Permanent, Evidence: "result_storage_failed"})
+				}
+				storedURLs[originalURL] = saved
+			}
+			openAIEvent.URL = saved
 		}
 
 		if openAIEvent.Type == relaymodel.ImageStreamEventPartialImage {
@@ -640,4 +687,21 @@ func measureDoubaoImages(response doubaoImageResponse, scenario string) *coremod
 	}
 
 	return usage
+}
+
+// Instance-scoped storage dependency keeps provider and persistence tests independent.
+type imageStoreFunc func(context.Context, string) (string, ownedimage.Metadata, error)
+
+func (a *Adaptor) storeImage(ctx context.Context, source string) (string, ownedimage.Metadata, error) {
+	if a.imageStore != nil {
+		return a.imageStore(ctx, source)
+	}
+	return ownedimage.StoreWithMetadata(ctx, source)
+}
+
+func ImageHandler(m *meta.Meta, c *gin.Context, r *http.Response) (adaptor.DoResponseResult, adaptor.Error) {
+	return (&Adaptor{}).imageHandler(m, c, r)
+}
+func ImageStreamHandler(m *meta.Meta, c *gin.Context, r *http.Response) (adaptor.DoResponseResult, adaptor.Error) {
+	return (&Adaptor{}).imageStreamHandler(m, c, r)
 }

@@ -518,3 +518,18 @@ func TestGetImagesRequestUsageSetsPriceCondition(t *testing.T) {
 	require.Zero(t, usage.Usage.ImageOutputTokens)
 	require.Zero(t, usage.Usage.TotalTokens)
 }
+
+func TestPromptlessImagePricingPreservesLegacyValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	makeContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/tasks", strings.NewReader(`{"model":"tryon","n":1,"model_image":"https://example.com/model.png","garment_image":"https://example.com/garment.png"}`))
+		c.Request.Header.Set("Content-Type", "application/json")
+		return c
+	}
+	_, err := GetImagesRequestPrice(makeContext(), model.ModelConfig{})
+	require.NoError(t, err)
+	_, err = GetImagesRequestUsage(makeContext(), model.ModelConfig{})
+	require.NoError(t, err)
+	require.ErrorContains(t, ValidateImagesRequest(makeContext(), model.ModelConfig{}), "prompt is required")
+}

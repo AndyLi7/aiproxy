@@ -23,6 +23,10 @@ func PublicVideoError(statusCode int) adaptor.Error {
 		err.Message = "The API key is missing or invalid."
 		err.Type = "authentication_error"
 		err.Code = "invalid_api_key"
+	case http.StatusPaymentRequired:
+		err.Message = "Your account balance is insufficient."
+		err.Type = "insufficient_quota"
+		err.Code = "insufficient_balance"
 	case http.StatusForbidden:
 		err.Message = "The API key cannot access this resource."
 		err.Type = "permission_error"

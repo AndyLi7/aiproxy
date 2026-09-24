@@ -1,0 +1,1746 @@
+[
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 999,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "below unit"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "exact unit"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1001,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 6000,
+    "name": "above unit"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 6000,
+    "name": "decimal divisor 1024 square"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1048576,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "binary divisor 1024 square"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 500,
+          "height": 500
+        },
+        {
+          "index": 1,
+          "width": 500,
+          "height": 500
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 6000,
+    "name": "per image ceiling"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_request",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 500,
+          "height": 500
+        },
+        {
+          "index": 1,
+          "width": 500,
+          "height": 500
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "aggregate ceiling"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 500,
+          "height": 500
+        },
+        {
+          "index": 1,
+          "width": 1001,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 9000,
+    "name": "unequal outputs"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "none",
+        "scope": "per_image",
+        "minimumUnits": 0
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 500,
+          "height": 500
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 750,
+    "name": "exact fractions"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "none",
+        "scope": "per_image",
+        "minimumUnits": 0
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 2
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 1573,
+    "name": "exact multiple units"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "none",
+        "scope": "per_image",
+        "minimumUnits": 0
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 500000
+        },
+        {
+          "index": 1,
+          "width": 1,
+          "height": 500000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 1,
+    "name": "round only after summing"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "none",
+        "scope": "per_image",
+        "minimumUnits": 0
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 500000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 1,
+    "name": "half micro round up"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "none",
+        "scope": "per_image",
+        "minimumUnits": 0
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1,
+          "height": 499999
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 0,
+    "name": "sub half micro"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 2
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "index": 1,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 12000,
+    "name": "per image minimum"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_request",
+        "minimumUnits": 2
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "index": 1,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 6000,
+    "name": "aggregate minimum"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": []
+    },
+    "state": "complete",
+    "amountMicros": 0,
+    "name": "zero output ignores minimum"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 0,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 0,
+    "name": "free rate"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "failed",
+      "scenario": "generation"
+    },
+    "state": "failed",
+    "amountMicros": 0,
+    "name": "failed no measurements"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "incomplete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "pending",
+    "amountMicros": null,
+    "name": "incomplete evidence"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "pending",
+    "amountMicros": null,
+    "name": "missing width"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 0,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "pending",
+    "amountMicros": null,
+    "name": "invalid dimension"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 500,
+          "height": 500
+        },
+        {
+          "index": 0,
+          "width": 500,
+          "height": 500
+        }
+      ]
+    },
+    "state": "pending",
+    "amountMicros": null,
+    "name": "duplicate index"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ],
+      "generated_count": 2
+    },
+    "state": "pending",
+    "amountMicros": null,
+    "name": "count mismatch"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "layer_decomposition",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000,
+          "z_index": 0
+        }
+      ]
+    },
+    "state": "pending",
+    "amountMicros": null,
+    "name": "scenario mismatch"
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 0,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "zero divisor",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1.5,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "fractional divisor",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": -1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "negative minimum",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "floor",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "unknown rounding",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "global",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "unknown scope",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1,
+        "formula": "eval()"
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "unknown field",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "missing pixelsPerUnit",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "missing scope",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "missing rounding",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image"
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "missing minimumUnits",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 1,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "v1 cannot accept pixel policy",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      },
+      "outputPixelTiers": []
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "v2 cannot mix tiers",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      },
+      "input": {
+        "firstNFree": 0,
+        "amountMicros": 1,
+        "unitQuantity": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 3000,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1000,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "v2 cannot mix input",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "ceil",
+        "scope": "per_image",
+        "minimumUnits": 1
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 9007199254740991,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 1001,
+          "height": 1000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 3000,
+    "name": "amount overflow",
+    "invalid": true
+  },
+  {
+    "policy": {
+      "version": 2,
+      "scenario": "generation",
+      "outputPixels": {
+        "pixelsPerUnit": 1000000,
+        "rounding": "none",
+        "scope": "per_image",
+        "minimumUnits": 0
+      }
+    },
+    "defaultRate": {
+      "amountMicros": 1,
+      "unitQuantity": 1
+    },
+    "usage": {
+      "version": 1,
+      "state": "complete",
+      "scenario": "generation",
+      "outputs": [
+        {
+          "index": 0,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 1,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 2,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 3,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 4,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 5,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 6,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 7,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 8,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 9,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 10,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 11,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 12,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 13,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 14,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 15,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 16,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 17,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 18,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 19,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 20,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 21,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 22,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 23,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 24,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 25,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 26,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 27,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 28,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 29,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 30,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 31,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 32,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 33,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 34,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 35,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 36,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 37,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 38,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 39,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 40,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 41,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 42,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 43,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 44,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 45,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 46,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 47,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 48,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 49,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 50,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 51,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 52,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 53,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 54,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 55,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 56,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 57,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 58,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 59,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 60,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 61,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 62,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 63,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 64,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 65,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 66,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 67,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 68,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 69,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 70,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 71,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 72,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 73,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 74,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 75,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 76,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 77,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 78,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 79,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 80,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 81,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 82,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 83,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 84,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 85,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 86,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 87,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 88,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 89,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 90,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 91,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 92,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 93,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 94,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 95,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 96,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 97,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 98,
+          "width": 10000000,
+          "height": 10000000
+        },
+        {
+          "index": 99,
+          "width": 10000000,
+          "height": 10000000
+        }
+      ]
+    },
+    "state": "complete",
+    "amountMicros": 10000000000,
+    "name": "large rational intermediate safe amount"
+  }
+]

@@ -18,7 +18,7 @@ func (r *GeminiSSE) Render(w http.ResponseWriter) error {
 
 	for _, bytes := range [][]byte{
 		dataBytes,
-		r.Data,
+		publicStreamData(r.Data, "", true),
 		nnBytes,
 	} {
 		// nosemgrep:

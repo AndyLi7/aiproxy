@@ -57,3 +57,26 @@ func TestTransportLocalConnectionRefused(t *testing.T) {
 		t.Fatalf("%+v: %v", f, err)
 	}
 }
+
+func TestTransportDiagnosticsDoNotAuthorizeRetryOrExposeRawError(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		observe func(*httptrace.ClientTrace)
+		want    string
+	}{
+		{"tls", func(tr *httptrace.ClientTrace) { tr.TLSHandshakeStart() }, "transport_error_during_tls_handshake"},
+		{"connected", func(tr *httptrace.ClientTrace) { tr.GotConn(httptrace.GotConnInfo{}) }, "transport_error_after_connection"},
+		{"write", func(tr *httptrace.ClientTrace) {
+			tr.WroteRequest(httptrace.WroteRequestInfo{Err: errors.New("secret")})
+		}, "transport_error_after_request_write_attempt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, classify := TraceTransport(context.Background())
+			tc.observe(httptrace.ContextClientTrace(ctx))
+			f := classify(errors.New("https://user:secret@example.com failed"))
+			if f.Acceptance != Unknown || f.Evidence != tc.want {
+				t.Fatalf("unexpected diagnostic: %+v", f)
+			}
+		})
+	}
+}

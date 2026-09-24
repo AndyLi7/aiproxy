@@ -224,7 +224,7 @@ func TestMeasuredDoubaoRequiresInputCountWithFreeRetailInputs(t *testing.T) {
 			StatusCode: http.StatusOK,
 			Body: io.NopCloser(
 				strings.NewReader(
-					`{"data":[{"url":"https://example.test/private.png","size":"2x2"}],"usage":` + tc.usage + `}`,
+					`{"data":[{"b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=","size":"2x2"}],"usage":` + tc.usage + `}`,
 				),
 			),
 		}

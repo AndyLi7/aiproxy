@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
@@ -9,6 +10,8 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 )
+
+var imageCapabilitySlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func validateImageRegistryRequest(
 	c *gin.Context,
@@ -56,13 +59,26 @@ func validateImageRegistryRequest(
 		parent, _ := config["public_model"].(string)
 
 		capability, _ := config["capability"].(string)
-		if parent == "" || (capability != "edit" && capability != "text-to-image") ||
+		if parent == "" || (len(capability) > 80 || !imageCapabilitySlug.MatchString(capability)) ||
 			config["public_capability_model"] != parent+"/"+capability ||
 			(bindingID != parent+"::"+capability && bindingID != parent+"/"+capability) {
 			return unavailable
 		}
 	}
 
+	if c.Request.URL.Path == "/v1/images/generations" {
+		var execution struct {
+			Execution struct {
+				Mode string `json:"mode"`
+			} `json:"execution"`
+		}
+		if json.Unmarshal(wrapper.Contract, &execution) != nil {
+			return unavailable
+		}
+		if execution.Execution.Mode == "async" {
+			return &registryvalidation.ValidationError{Status: 400, Param: "endpoint", Code: "unsupported_endpoint", Message: "This model uses asynchronous image generation. Submit to /v1/images/tasks and poll /v1/images/tasks/{id}.", Expected: map[string]any{"endpoint": "/v1/images/tasks", "status_endpoint": "/v1/images/tasks/{id}"}}
+		}
+	}
 	if !common.IsJSONContentType(c.Request.Header.Get("Content-Type")) {
 		return &registryvalidation.ValidationError{Status: 400}
 	}
@@ -93,6 +109,9 @@ func validateImageRegistryRequest(
 		return validationErr
 	}
 
+	// Decode into a fresh map: Unmarshal merges into existing maps and would
+	// resurrect consumed aliases (size/image) from the original request.
+	input = nil
 	if json.Unmarshal(normalized, &input) != nil {
 		return unavailable
 	}

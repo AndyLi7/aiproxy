@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
+	"github.com/labring/aiproxy/core/common/ownedimage"
 	"math"
 	"net/http"
 	"regexp"
@@ -53,7 +55,28 @@ func imageTaskFingerprint(body []byte) (string, error) {
 
 func imageTaskHTTPError(c *gin.Context, status int, code string) {
 	middleware.SetRequestID(c, "image-trace-"+middleware.GenRequestID(time.Now()))
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": code}})
+	message := imageTaskErrorMessage(code)
+	if code == "group_balance_not_enough" {
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": gin.H{
+			"message": "Your account balance is insufficient.", "type": "insufficient_quota", "code": "insufficient_balance", "param": nil,
+		}})
+		return
+	}
+	kind := "api_error"
+	if status == http.StatusBadRequest || status == http.StatusConflict {
+		kind = "invalid_request_error"
+	} else if status == http.StatusNotFound {
+		kind = "not_found_error"
+	}
+	if code == "unsupported_image_execution" {
+		message = "This model does not support asynchronous image tasks. Check its published endpoint in the model catalog."
+	}
+	stage := model.FailureStageRouting
+	if status == http.StatusBadRequest || status == http.StatusConflict {
+		stage = model.FailureStageValidation
+	}
+	middleware.SetOperationalFailure(c, stage, code, message)
+	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message, "type": kind, "param": nil}})
 }
 
 func GetImageTask(c *gin.Context) {
@@ -74,7 +97,8 @@ func GetImageTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, task)
+	enrichCompletedImageTask(c.Request.Context(), task)
+	c.JSON(200, publicImageTask(c, task))
 }
 
 type imageTaskProvider struct {
@@ -87,6 +111,7 @@ func selectImageTaskAdapter(
 ) (*model.Channel, adaptor.ImageTaskExecutor) {
 	selected, err := getInitialChannel(c, middleware.GetRoutingModel(c), mode.ImagesGenerations)
 	if err != nil || selected == nil || selected.channel == nil {
+		common.GetLogger(c).Warnf("image channel selection failed: route=%s reason=%v", middleware.GetRoutingModel(c), err)
 		imageTaskHTTPError(c, 503, "channel_unavailable")
 		return nil, nil
 	}
@@ -184,7 +209,7 @@ func submitImageTask(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusAccepted, existing)
+		c.JSON(http.StatusAccepted, publicImageTask(c, existing))
 
 		return
 	}
@@ -240,7 +265,7 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	if price.HasImageBilling() &&
-		(imageAdapter.ImageAdapterName() != "fal-image" || price.ImageBilling == nil || len(price.ConditionalPrices) != 0) {
+		(!imagecapabilities.SupportsMeasuredBilling(imageAdapter.ImageAdapterName()) || price.ImageBilling == nil || len(price.ConditionalPrices) != 0) {
 		imageTaskHTTPError(c, 400, "measured_image_billing_not_supported_by_queue_adapter")
 		return
 	}
@@ -313,6 +338,7 @@ func submitImageTask(c *gin.Context) {
 			price,
 			metering.MaximumOutputs,
 			metering.InputCount,
+			metering.MaxOutputPixels,
 		)
 		if err != nil {
 			imageTaskHTTPError(c, 400, "invalid_image_price")
@@ -377,6 +403,7 @@ func submitImageTask(c *gin.Context) {
 
 	task, created, err := model.ReserveImageTask(
 		&model.ImageTask{
+			ArchiveRequired:    ownedimage.Configured(),
 			ID:                 id,
 			Model:              wrapper.ID,
 			RequestModel:       middleware.GetRequestedModel(c),
@@ -388,6 +415,7 @@ func submitImageTask(c *gin.Context) {
 			ChannelType:        mt.Channel.Type,
 			KeyFingerprint:     model.ImageChannelKeyFingerprint(mt.Channel.Key),
 			ExpectedImages:     metering.MaximumOutputs,
+			RequestSummary:     imageTaskLogRequestSummary(body),
 		},
 		info,
 		middleware.OperationalFieldsFromContext(c),
@@ -403,7 +431,7 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	if !created {
-		c.JSON(202, task)
+		c.JSON(202, publicImageTask(c, task))
 		return
 	}
 
@@ -491,7 +519,7 @@ func replayImageTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(202, task)
+	c.JSON(202, publicImageTask(c, task))
 	c.Abort()
 }
 
@@ -527,7 +555,7 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 
 		task.Status = status
 		task.Error = taskError
-		c.JSON(202, task)
+		c.JSON(202, publicImageTask(c, task))
 
 		return
 	}
@@ -545,7 +573,7 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 
 		task.Status = "failed"
 		task.Error = taskError
-		c.JSON(202, task)
+		c.JSON(202, publicImageTask(c, task))
 
 		return
 	}
@@ -557,5 +585,5 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 
 	task.Status = "completed"
 	task.Data = result.Data
-	c.JSON(202, task)
+	c.JSON(202, publicImageTask(c, task))
 }

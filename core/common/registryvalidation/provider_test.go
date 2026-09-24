@@ -302,3 +302,61 @@ func TestFalFullProtocolMappingAndFrozenPathIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestFixedImageCountIsPlatformOnly(t *testing.T) {
+	var c map[string]any
+	if err := json.Unmarshal(providerFixture(), &c); err != nil {
+		t.Fatal(err)
+	}
+	p := mustMap(t, mustMap(t, c["providers"])["small"])
+	delete(mustMap(t, p["parameterMapping"]), "n")
+	s := mustMap(t, p["upstream"])
+	s["metering"] = map[string]any{"version": 3, "outputCountFixed": 1}
+	delete(mustMap(t, mustMap(t, s["inputJsonSchema"])["properties"]), "num_images")
+	mustMap(t, s["inputJsonSchema"])["required"] = []string{"prompt", "sync_mode"}
+	raw := mustJSON(t, c)
+	mapped, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(`{"prompt":"hi","n":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(mapped, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out["n"]; ok {
+		t.Fatal("platform n leaked")
+	}
+	if _, ok := out["num_images"]; ok {
+		t.Fatal("native count invented")
+	}
+	for _, body := range []string{`{"prompt":"hi","n":2}`, `{"prompt":"hi","n":0}`, `{"prompt":"hi","n":1,"extra":1}`} {
+		if _, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(body)); err == nil {
+			t.Fatal("invalid input accepted", body)
+		}
+	}
+}
+
+func TestFrozenPixelOutputBound(t *testing.T) {
+	var raw map[string]any
+	if err := json.Unmarshal(providerFixture(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	upstream := mustMap(t, mustMap(t, mustMap(t, raw["providers"])["small"])["upstream"])
+	upstream["metering"] = map[string]any{"version": 4, "outputCountParameter": "num_images", "maxOutputPixels": 4194304}
+	frozen, err := FreezeProviderBinding(mustJSON(t, raw), fixtureBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit, err := FrozenImagePixelLimit(frozen)
+	if err != nil || limit != 4194304 {
+		t.Fatalf("limit=%d err=%v", limit, err)
+	}
+	for _, body := range []string{`{"images":[{}]}`, `{"images":[{"width":4096,"height":4096}]}`, `{"images":[{"width":-1,"height":1024}]}`} {
+		if err := ValidateFrozenProviderOutput(frozen, []byte(body)); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	if err := ValidateFrozenProviderOutput(frozen, []byte(`{"images":[{"width":1056,"height":1024}]}`)); err != nil {
+		t.Fatal(err)
+	}
+}

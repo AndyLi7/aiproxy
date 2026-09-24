@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labring/aiproxy/core/common/consume"
+	"github.com/labring/aiproxy/core/common/ownedimage"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/adaptors"
@@ -22,6 +23,14 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		return
 	}
 
+	if task.Status == "result_processing" {
+		if err := archiveImageTask(ctx, task, ownedimage.StoreWithMetadata); err != nil {
+			retryImageUsage(info, err)
+			return
+		}
+		completeImageTaskUsage(ctx, info, task.Data)
+		return
+	}
 	if task.Status == "completed" {
 		if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs ||
 			(task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
@@ -93,6 +102,9 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		}
 	}
 
+	if result.Status == "completed" && task.ArchiveRequired {
+		result.Status = "result_processing"
+	}
 	if err = model.SetImageTaskResult(
 		task.ID,
 		result.Status,
@@ -113,6 +125,12 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	}
 
 	switch saved.Status {
+	case "result_processing":
+		if err := archiveImageTask(ctx, saved, ownedimage.StoreWithMetadata); err != nil {
+			retryImageUsage(info, err)
+			return
+		}
+		completeImageTaskUsage(ctx, info, saved.Data)
 	case "completed":
 		if len(saved.Data) == 0 || len(saved.Data) > model.ImageBillingMaxOutputs ||
 			(task.ExpectedImages > 0 && len(saved.Data) > task.ExpectedImages) {
@@ -205,4 +223,35 @@ func completeImageTaskUsage(
 	}
 
 	completePolledAsyncUsage(ctx, info, usage, usageContext)
+}
+
+func archiveImageTask(ctx context.Context, task *model.ImageTask, store func(context.Context, string) (string, ownedimage.Metadata, error)) error {
+	if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs || (task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
+		return errors.New("invalid archive output count")
+	}
+	// Bound work per poll. Each completed output is durable even when a later
+	// download/upload fails or the worker restarts.
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	for i, out := range task.Data {
+		if out.Stored {
+			continue
+		}
+		url, metadata, err := store(ownedimage.WithArchiveIdentity(ctx, task.ID, i), out.URL)
+		if err != nil {
+			return errors.New("image result storage temporarily unavailable")
+		}
+		out.URL = url
+		out.Stored = true
+		out.ContentType = metadata.ContentType
+		if metadata.Width > 0 && metadata.Height > 0 {
+			w, h := int64(metadata.Width), int64(metadata.Height)
+			out.Width = &w
+			out.Height = &h
+		}
+		if err := model.SaveArchivedImage(task, i, out); err != nil {
+			return err
+		}
+	}
+	return model.CompleteImageArchive(task)
 }

@@ -510,6 +510,9 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 
 	var captured model.AsyncUsageInfo
 	require.NoError(t, db.Where("upstream_id = ?", "video-123").First(&captured).Error)
+	require.NotEmpty(t, m.BillingOperationID)
+	require.Equal(t, m.BillingOperationID, captured.BillingOperationID)
+	require.Equal(t, m.RequestID, captured.RequestID)
 	require.Zero(t, captured.Usage.OutputTokens)
 	require.Zero(t, captured.Usage.TotalTokens)
 	require.Equal(t, "priority", captured.UsageContext.ServiceTier)

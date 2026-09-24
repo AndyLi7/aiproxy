@@ -10,16 +10,17 @@ import (
 )
 
 type ConsumeError struct {
-	RequestAt  time.Time       `gorm:"index;index:idx_consume_error_group_reqat,priority:2"         json:"request_at"`
-	CreatedAt  time.Time       `                                                                    json:"created_at"`
-	GroupID    string          `gorm:"size:64;index;index:idx_consume_error_group_reqat,priority:1" json:"group_id"`
-	RequestID  string          `gorm:"type:varchar(128);index"                                      json:"request_id"`
-	TokenName  EmptyNullString `gorm:"size:32;not null"                                             json:"token_name"`
-	Model      string          `gorm:"size:128"                                                     json:"model"`
-	Content    string          `gorm:"type:text"                                                    json:"content"`
-	ID         int             `gorm:"primaryKey"                                                   json:"id"`
-	UsedAmount float64         `                                                                    json:"used_amount"`
-	TokenID    int             `                                                                    json:"token_id"`
+	BillingOperationID string          `gorm:"type:varchar(128)" json:"billing_operation_id,omitempty"`
+	RequestAt          time.Time       `gorm:"index;index:idx_consume_error_group_reqat,priority:2"         json:"request_at"`
+	CreatedAt          time.Time       `                                                                    json:"created_at"`
+	GroupID            string          `gorm:"size:64;index;index:idx_consume_error_group_reqat,priority:1" json:"group_id"`
+	RequestID          string          `gorm:"type:varchar(128);index"                                      json:"request_id"`
+	TokenName          EmptyNullString `gorm:"size:32;not null"                                             json:"token_name"`
+	Model              string          `gorm:"size:128"                                                     json:"model"`
+	Content            string          `gorm:"type:text"                                                    json:"content"`
+	ID                 int             `gorm:"primaryKey"                                                   json:"id"`
+	UsedAmount         float64         `                                                                    json:"used_amount"`
+	TokenID            int             `                                                                    json:"token_id"`
 }
 
 func (c *ConsumeError) MarshalJSON() ([]byte, error) {
@@ -42,16 +43,22 @@ func CreateConsumeError(
 	group, tokenName, model, content string,
 	usedAmount float64,
 	tokenID int,
+	billingOperationIDs ...string,
 ) error {
+	var billingOperationID string
+	if len(billingOperationIDs) > 0 {
+		billingOperationID = billingOperationIDs[0]
+	}
 	return LogDB.Create(&ConsumeError{
-		RequestID:  requestID,
-		RequestAt:  requestAt,
-		GroupID:    group,
-		TokenName:  EmptyNullString(tokenName),
-		Model:      model,
-		Content:    content,
-		UsedAmount: usedAmount,
-		TokenID:    tokenID,
+		RequestID:          requestID,
+		BillingOperationID: billingOperationID,
+		RequestAt:          requestAt,
+		GroupID:            group,
+		TokenName:          EmptyNullString(tokenName),
+		Model:              model,
+		Content:            content,
+		UsedAmount:         usedAmount,
+		TokenID:            tokenID,
 	}).Error
 }
 

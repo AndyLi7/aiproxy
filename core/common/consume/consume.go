@@ -416,6 +416,7 @@ func processGroupConsume(
 	meta *meta.Meta,
 ) float64 {
 	ctx = context.WithValue(ctx, balance.CtxRequestID, meta.RequestID)
+	ctx = balance.ContextWithBillingOperationID(ctx, meta.BillingOperationID)
 	if currency, version, ok := meta.ModelConfig.RetailPricingMetadata(); ok {
 		ctx = balance.ContextWithPricing(ctx, currency, version)
 	}
@@ -433,6 +434,7 @@ func processGroupConsume(
 			err.Error(),
 			amount,
 			meta.Token.ID,
+			meta.BillingOperationID,
 		); err != nil {
 			log.Error("failed to create consume error: " + err.Error())
 		}

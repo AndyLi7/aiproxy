@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/labring/aiproxy/core/common"
 )
 
@@ -42,4 +43,16 @@ func RequestIDMiddleware(c *gin.Context) {
 	}
 
 	SetRequestID(c, id)
+}
+
+// GetBillingOperationID is server-owned and stable across channel retries of one
+// execution. A caller-provided correlation header never defines a charge.
+func GetBillingOperationID(c *gin.Context) string {
+	const key = "serverBillingOperationID"
+	if id := c.GetString(key); id != "" {
+		return id
+	}
+	id := uuid.NewString()
+	c.Set(key, id)
+	return id
 }

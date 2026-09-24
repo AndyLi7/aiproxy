@@ -33,10 +33,12 @@ var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
 	// Server-owned admission snapshot; never accepted from public JSON requests.
-	InternalImageTask           bool             `json:"-"`
-	MeasuredImage               bool             `json:"measured_image,omitempty"`
-	ID                          int              `json:"id"                                       gorm:"primaryKey"`
-	RequestID                   string           `json:"request_id"                               gorm:"type:varchar(128);index"`
+	InternalImageTask bool   `json:"-"`
+	MeasuredImage     bool   `json:"measured_image,omitempty"`
+	ID                int    `json:"id"                                       gorm:"primaryKey"`
+	RequestID         string `json:"request_id"                               gorm:"type:varchar(128);index"`
+	// Persist before settlement; empty on pre-upgrade rows to preserve prior debit keys.
+	BillingOperationID          string           `json:"-" gorm:"type:varchar(128)"`
 	RequestAt                   time.Time        `json:"request_at"`
 	Mode                        int              `json:"mode"                                     gorm:"index"`
 	Model                       string           `json:"model"                                    gorm:"size:128"`

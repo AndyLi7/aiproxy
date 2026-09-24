@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 )
@@ -32,15 +34,16 @@ type Meta struct {
 	Token          model.TokenCache
 	ModelConfig    model.ModelConfig
 
-	Endpoint        string
-	RequestAt       time.Time
-	RetryAt         time.Time
-	RequestID       string
-	OriginModel     string
-	RoutingModel    string
-	ActualModel     string
-	VideoCapability string
-	Mode            mode.Mode
+	Endpoint           string
+	RequestAt          time.Time
+	RetryAt            time.Time
+	RequestID          string
+	BillingOperationID string
+	OriginModel        string
+	RoutingModel       string
+	ActualModel        string
+	VideoCapability    string
+	Mode               mode.Mode
 
 	RequestTimeout time.Duration
 
@@ -65,6 +68,10 @@ func WithEndpoint(endpoint string) Option {
 	return func(meta *Meta) {
 		meta.Endpoint = endpoint
 	}
+}
+
+func WithBillingOperationID(id string) Option {
+	return func(meta *Meta) { meta.BillingOperationID = id }
 }
 
 func WithRequestID(requestID string) Option {
@@ -189,12 +196,13 @@ func NewMeta(
 	opts ...Option,
 ) *Meta {
 	meta := Meta{
-		values:       make(map[string]any),
-		Mode:         mode,
-		OriginModel:  modelName,
-		RoutingModel: modelName,
-		ActualModel:  modelName,
-		ModelConfig:  modelConfig,
+		values:             make(map[string]any),
+		BillingOperationID: uuid.NewString(),
+		Mode:               mode,
+		OriginModel:        modelName,
+		RoutingModel:       modelName,
+		ActualModel:        modelName,
+		ModelConfig:        modelConfig,
 	}
 
 	for _, opt := range opts {

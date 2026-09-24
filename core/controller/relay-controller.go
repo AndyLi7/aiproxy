@@ -657,6 +657,7 @@ func saveAsyncUsageInfo(
 
 	info := &model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
+		BillingOperationID:          meta.BillingOperationID,
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
 		Model:                       meta.OriginModel,
@@ -1243,6 +1244,7 @@ func recordMeasuredImageResult(
 	currency, version, _ := meta.ModelConfig.RetailPricingMetadata()
 	info := &model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
+		BillingOperationID:          meta.BillingOperationID,
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
 		Model:                       meta.OriginModel,

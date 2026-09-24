@@ -1065,6 +1065,7 @@ func consumeAsyncUsageGroupBalance(
 	}
 
 	ctx = context.WithValue(ctx, balance.CtxRequestID, info.RequestID)
+	ctx = balance.ContextWithBillingOperationID(ctx, info.BillingOperationID)
 	ctx = balance.ContextWithPricing(ctx, info.PricingCurrency, info.PricingVersion)
 
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
@@ -1118,6 +1119,7 @@ func recordAsyncUsageConsumeError(
 		err.Error(),
 		amount,
 		info.TokenID,
+		info.BillingOperationID,
 	); err != nil {
 		log.Error("failed to create async usage consume error: " + err.Error())
 	}

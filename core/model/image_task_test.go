@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -337,4 +338,48 @@ func TestImagePhaseTimesDoNotRegressOrInventHistory(t *testing.T) {
 	require.NoError(t, db.Create(legacy).Error)
 	require.Nil(t, legacy.RunningAt)
 	require.Nil(t, legacy.ResultExpiresAt)
+}
+
+func TestResultBillingMetadataPersistsAndTerminalReplayCannotReplaceIt(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "result-metadata.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+	require.NoError(t, db.Create(&model.ImageTask{ID: "metadata", GroupID: "g", TokenID: 1, Status: "queued"}).Error)
+	seed := int64(42)
+	require.NoError(t, model.SetImageTaskResult("metadata", "completed", []model.ImageOutput{{URL: "https://example.com/image.png", RevisedPrompt: "revised"}}, nil, model.ImageResultMetadata{NumImages: &seed, Description: "generated explanation", Seed: &seed, BillableUnits: "1.5"}))
+	require.NoError(t, model.SetImageTaskResult("metadata", "completed", []model.ImageOutput{{URL: "https://example.com/other.png"}}, nil, model.ImageResultMetadata{BillableUnits: "999"}))
+	saved, err := model.GetImageTask("metadata", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), *saved.Seed)
+	require.Equal(t, "1.5", saved.BillableUnits)
+	require.Equal(t, "revised", saved.Data[0].RevisedPrompt)
+	require.Equal(t, "generated explanation", saved.Description)
+	require.Equal(t, int64(42), *saved.NumImages)
+	encoded, err := json.Marshal(saved)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"num_images":42`)
+}
+
+func TestLargeSeedSurvivesPersistenceAndPublicJSONExactly(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "large-seed.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+	require.NoError(t, db.Create(&model.ImageTask{ID: "large", GroupID: "g", TokenID: 1, Status: "queued"}).Error)
+	exact := "18446744073709551615"
+	seed := json.Number(exact)
+	require.NoError(t, model.SetImageTaskResult("large", "completed", []model.ImageOutput{{URL: "https://example.com/a.png", Seed: &seed}}, nil, model.ImageResultMetadata{SeedExact: exact}))
+	saved, err := model.GetImageTask("large", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, exact, saved.SeedExact)
+	encoded, err := json.Marshal(saved)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"seed":`+exact)
+	require.NotContains(t, string(encoded), "seed_exact")
+	require.Equal(t, seed, *saved.Data[0].Seed)
 }

@@ -304,34 +304,39 @@ func TestFalFullProtocolMappingAndFrozenPathIsolation(t *testing.T) {
 }
 
 func TestFixedImageCountIsPlatformOnly(t *testing.T) {
-	var c map[string]any
-	if err := json.Unmarshal(providerFixture(), &c); err != nil {
-		t.Fatal(err)
-	}
-	p := mustMap(t, mustMap(t, c["providers"])["small"])
-	delete(mustMap(t, p["parameterMapping"]), "n")
-	s := mustMap(t, p["upstream"])
-	s["metering"] = map[string]any{"version": 3, "outputCountFixed": 1}
-	delete(mustMap(t, mustMap(t, s["inputJsonSchema"])["properties"]), "num_images")
-	mustMap(t, s["inputJsonSchema"])["required"] = []string{"prompt", "sync_mode"}
-	raw := mustJSON(t, c)
-	mapped, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(`{"prompt":"hi","n":1}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(mapped, &out); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := out["n"]; ok {
-		t.Fatal("platform n leaked")
-	}
-	if _, ok := out["num_images"]; ok {
-		t.Fatal("native count invented")
-	}
-	for _, body := range []string{`{"prompt":"hi","n":2}`, `{"prompt":"hi","n":0}`, `{"prompt":"hi","n":1,"extra":1}`} {
-		if _, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(body)); err == nil {
-			t.Fatal("invalid input accepted", body)
+	for _, version := range []int{3, 6, 7} {
+		var c map[string]any
+		if err := json.Unmarshal(providerFixture(), &c); err != nil {
+			t.Fatal(err)
+		}
+		p := mustMap(t, mustMap(t, c["providers"])["small"])
+		delete(mustMap(t, p["parameterMapping"]), "n")
+		s := mustMap(t, p["upstream"])
+		s["metering"] = map[string]any{"version": version, "outputCountFixed": 1}
+		if version >= 6 {
+			mustMap(t, s["metering"])["nativeImagePaths"] = []any{}
+		}
+		delete(mustMap(t, mustMap(t, s["inputJsonSchema"])["properties"]), "num_images")
+		mustMap(t, s["inputJsonSchema"])["required"] = []string{"prompt", "sync_mode"}
+		raw := mustJSON(t, c)
+		mapped, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(`{"prompt":"hi","n":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(mapped, &out); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := out["n"]; ok {
+			t.Fatal("platform n leaked")
+		}
+		if _, ok := out["num_images"]; ok {
+			t.Fatal("native count invented")
+		}
+		for _, body := range []string{`{"prompt":"hi","n":2}`, `{"prompt":"hi","n":0}`, `{"prompt":"hi","n":1,"extra":1}`} {
+			if _, err := MapBoundProviderInput(raw, fixtureBinding(), "fal-image", "fal-ai/test", "async", []byte(body)); err == nil {
+				t.Fatal("invalid input accepted", body)
+			}
 		}
 	}
 }

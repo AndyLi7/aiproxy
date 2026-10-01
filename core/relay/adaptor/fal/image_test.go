@@ -42,9 +42,10 @@ func TestQueueLifecycle(t *testing.T) {
 				t.Errorf("write mock response: %v", writeErr)
 			}
 		case "/fal-ai/minimax/requests/abc":
+			w.Header().Set("x-fal-billable-units", "1.5")
 			if _, writeErr := w.Write(
 				[]byte(
-					`{"images":[{"url":"https://cdn.example/image.png","content_type":"image/png"}]}`,
+					`{"num_images":1,"description":"generated caption","seed":42,"prompt":"revised description","images":[{"url":"https://cdn.example/image.png","content_type":"image/png"}]}`,
 				),
 			); writeErr != nil {
 				t.Errorf("write mock response: %v", writeErr)
@@ -68,6 +69,12 @@ func TestQueueLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "completed", result.Status)
 	require.Len(t, result.Data, 1)
+	require.Equal(t, int64(42), *result.Metadata.Seed)
+	require.Equal(t, "revised description", result.Metadata.Prompt)
+	require.Equal(t, "1.5", result.Metadata.BillableUnits)
+	require.Equal(t, "generated caption", result.Metadata.Description)
+	require.Equal(t, int64(1), *result.Metadata.NumImages)
+	require.Equal(t, "revised description", result.Data[0].RevisedPrompt)
 	require.Equal(t, 1, calls)
 }
 
@@ -456,6 +463,7 @@ func TestFrozenFullQueuePaths(t *testing.T) {
 func TestFalNormalizesSingleImageWithoutWeakeningValidation(t *testing.T) {
 	for _, tc := range []struct{ name, body, status string }{
 		{"single", `{"image":{"url":"https://cdn.example/a.png","content_type":"image/png"}}`, "completed"},
+		{"provider cannot set delivery state", `{"image":{"url":"https://cdn.example/a.png","stored":true,"url_expires_at":"2030-01-01T00:00:00Z","auxiliary_images":{"mask_image":{"url":"https://private.test/secret","stored":true}}}}`, "completed"},
 		{"empty", `{"image":null}`, "failed"},
 		{"unsafe", `{"image":{"url":"http://cdn.example/a.png"}}`, "failed"},
 		{"ambiguous", `{"image":{"url":"https://cdn.example/a.png"},"images":[{"url":"https://cdn.example/b.png"}]}`, "failed"},
@@ -476,6 +484,9 @@ func TestFalNormalizesSingleImageWithoutWeakeningValidation(t *testing.T) {
 			if tc.status == "completed" {
 				require.Len(t, result.Data, 1)
 				require.Equal(t, "https://cdn.example/a.png", result.Data[0].URL)
+				require.False(t, result.Data[0].Stored)
+				require.Nil(t, result.Data[0].URLExpiresAt)
+				require.Nil(t, result.Data[0].AuxiliaryImages)
 			} else {
 				require.Empty(t, result.Data)
 			}
@@ -544,5 +555,151 @@ func TestCompletedQueueDistinguishesRunnerFailureFromGatewayTimeout(t *testing.T
 			}
 			require.Equal(t, 2, calls)
 		})
+	}
+}
+
+func TestNativeOutputSeedsAndActualPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status string
+	}{
+		{`{"seeds":[0,42],"actual_prompt":"expanded","images":[{"url":"https://cdn.example/a.png"},{"url":"https://cdn.example/b.png"}]}`, "completed"},
+		{`{"seeds":[42],"images":[{"url":"https://cdn.example/a.png"},{"url":"https://cdn.example/b.png"}]}`, "failed"},
+		{`{"seeds":[],"images":[{"url":"https://cdn.example/a.png"}]}`, "failed"},
+		{`{"actual_prompt":"new","images":[{"url":"https://cdn.example/a.png","revised_prompt":"different"}]}`, "failed"},
+		{`{"seeds":[2],"images":[{"url":"https://cdn.example/a.png","seed":1}]}`, "failed"},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/status") {
+				_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+				return
+			}
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+		result, err := client.Poll(t.Context(), "fal-ai/wan-25-preview/text-to-image", "abc")
+		server.Close()
+		require.NoError(t, err)
+		require.Equal(t, tc.status, result.Status)
+		if tc.status == "completed" {
+			require.Equal(t, json.Number("0"), *result.Data[0].Seed)
+			require.Equal(t, json.Number("42"), *result.Data[1].Seed)
+			require.Equal(t, "expanded", result.Metadata.Prompt)
+			require.Equal(t, "expanded", result.Data[0].RevisedPrompt)
+		}
+	}
+}
+
+func TestOptionalOutputImageCount(t *testing.T) {
+	for _, tc := range []struct {
+		name, field string
+		count       *int64
+	}{
+		{name: "absent"}, {name: "null", field: `"num_images":null,`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/status") {
+					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{` + tc.field + `"images":[{"url":"https://cdn.example/image.png"}]}`))
+			}))
+			defer server.Close()
+			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+			result, err := client.Poll(t.Context(), "fal-ai/test/image", "abc")
+			require.NoError(t, err)
+			require.Equal(t, "completed", result.Status)
+			require.Nil(t, result.Metadata.NumImages)
+		})
+	}
+}
+
+func TestNullableActualPromptProjection(t *testing.T) {
+	for _, tc := range []struct{ name, field, want string }{
+		{"absent", "", ""},
+		{"null", `,"actual_prompt":null`, ""},
+		{"empty", `,"actual_prompt":""`, ""},
+		{"text", `,"actual_prompt":"expanded prompt"`, "expanded prompt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/status") {
+					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"}]` + tc.field + `}`))
+			}))
+			defer server.Close()
+			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+			result, err := client.Poll(t.Context(), "fal-ai/test", "test-id")
+			require.NoError(t, err)
+			require.Equal(t, "completed", result.Status)
+			require.Len(t, result.Data, 1)
+			require.Equal(t, tc.want, result.Data[0].RevisedPrompt)
+		})
+	}
+}
+
+func TestRootRevisedPromptProjection(t *testing.T) {
+	for _, tc := range []struct{ field, status, want string }{
+		{`,"revised_prompt":"expanded"`, "completed", "expanded"},
+		{`,"revised_prompt":null`, "completed", ""},
+		{`,"revised_prompt":""`, "completed", ""},
+		{`,"revised_prompt":"","prompt":"original"`, "completed", ""},
+		{`,"revised_prompt":"expanded","actual_prompt":"expanded"`, "completed", "expanded"},
+		{`,"revised_prompt":"expanded","actual_prompt":"different"`, "failed", ""},
+		{`,"revised_prompt":"","actual_prompt":"different"`, "failed", ""},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/status") {
+				_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"},{"url":"https://cdn.example/b.png"}]` + tc.field + `}`))
+		}))
+		client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+		result, err := client.Poll(t.Context(), "xai/grok-imagine-image", "id")
+		server.Close()
+		require.NoError(t, err)
+		require.Equal(t, tc.status, result.Status)
+		if result.Status == "completed" {
+			require.Len(t, result.Data, 2)
+			for _, img := range result.Data {
+				require.Equal(t, tc.want, img.RevisedPrompt)
+			}
+		}
+	}
+}
+
+func TestUsedSeedAliasPreservesExactNumbers(t *testing.T) {
+	for _, tc := range []struct{ fields, status, want string }{
+		{`,"used_seed":0`, "completed", "0"},
+		{`,"used_seed":-1`, "completed", "-1"},
+		{`,"used_seed":18446744073709551615`, "completed", "18446744073709551615"},
+		{`,"used_seed":42,"seed":42`, "completed", "42"},
+		{`,"used_seed":42,"seed":43`, "failed", ""},
+		{`,"used_seed":1.5`, "failed", ""},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/status") {
+				_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"}]` + tc.fields + `}`))
+		}))
+		client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+		result, err := client.Poll(t.Context(), "fal-ai/finegrain-eraser", "id")
+		server.Close()
+		require.NoError(t, err)
+		require.Equal(t, tc.status, result.Status)
+		if result.Status == "completed" {
+			if result.Metadata.Seed != nil {
+				value, _ := json.Marshal(*result.Metadata.Seed)
+				require.Equal(t, tc.want, string(value))
+			} else {
+				require.Equal(t, tc.want, result.Metadata.SeedExact)
+			}
+		}
 	}
 }

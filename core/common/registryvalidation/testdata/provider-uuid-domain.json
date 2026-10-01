@@ -1,0 +1,3490 @@
+[
+  {
+    "endpoint": "recraft/v4/style/pro/text-to-image",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-570/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ]
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Green color value"
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Green color value"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "An array of preferable colors"
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "prompt",
+          "image_size",
+          "colors",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "title": "Prompt",
+            "uiControl": "textarea"
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "default": "square_hd"
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "minItems": 1,
+                "maxItems": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image URLs",
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Green color value"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "background_color",
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style ID",
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Green color value"
+                }
+              }
+            },
+            "title": "Colors",
+            "description": "An array of preferable colors",
+            "default": []
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style Match",
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "square_hd",
+        "colors": [],
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "style_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The custom style used or created for this generation."
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "image_size": "image_size",
+            "image_urls": "image_urls",
+            "background_color": "background_color",
+            "style_id": "style_id",
+            "colors": "colors",
+            "style_match": "style_match"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Fpro%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Fpro%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "style_id"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:recraft/v4/style/pro/text-to-image",
+            "revision": "audit",
+            "endpoint": "recraft/v4/style/pro/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "recraft/v4/style/pro/text-to-image/requests/{request_id}",
+              "statusEndpoint": "recraft/v4/style/pro/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                }
+              },
+              "required": [
+                "prompt",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The custom style used or created for this generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:85b5a8061874888000e16740b9cd1e4a70294bc408270f820ae1ea3f1671e2ce"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "image_size": {},
+      "colors": [],
+      "n": 1,
+      "model": "admission/model-570/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "recraft/v4/style/pro/text-to-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-570/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ]
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Green color value"
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Green color value"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "An array of preferable colors"
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "prompt",
+          "image_size",
+          "colors",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "title": "Prompt",
+            "uiControl": "textarea"
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "default": "square_hd"
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "minItems": 1,
+                "maxItems": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image URLs",
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Green color value"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "background_color",
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style ID",
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Green color value"
+                }
+              }
+            },
+            "title": "Colors",
+            "description": "An array of preferable colors",
+            "default": []
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style Match",
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "square_hd",
+        "colors": [],
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "style_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The custom style used or created for this generation."
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "image_size": "image_size",
+            "image_urls": "image_urls",
+            "background_color": "background_color",
+            "style_id": "style_id",
+            "colors": "colors",
+            "style_match": "style_match"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Fpro%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Fpro%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "style_id"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:recraft/v4/style/pro/text-to-image",
+            "revision": "audit",
+            "endpoint": "recraft/v4/style/pro/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "recraft/v4/style/pro/text-to-image/requests/{request_id}",
+              "statusEndpoint": "recraft/v4/style/pro/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                }
+              },
+              "required": [
+                "prompt",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The custom style used or created for this generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:85b5a8061874888000e16740b9cd1e4a70294bc408270f820ae1ea3f1671e2ce"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "image_size": "square_hd",
+      "colors": [],
+      "n": 1,
+      "model": "admission/model-570/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "recraft/v4/style/text-to-image",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-572/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ]
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Green color value"
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Green color value"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "An array of preferable colors"
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "prompt",
+          "image_size",
+          "colors",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "title": "Prompt",
+            "uiControl": "textarea"
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "default": "square_hd"
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "minItems": 1,
+                "maxItems": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image URLs",
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Green color value"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "background_color",
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style ID",
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Green color value"
+                }
+              }
+            },
+            "title": "Colors",
+            "description": "An array of preferable colors",
+            "default": []
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style Match",
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "square_hd",
+        "colors": [],
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "style_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The custom style used or created for this generation."
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "image_size": "image_size",
+            "image_urls": "image_urls",
+            "background_color": "background_color",
+            "style_id": "style_id",
+            "colors": "colors",
+            "style_match": "style_match"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "style_id"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:recraft/v4/style/text-to-image",
+            "revision": "audit",
+            "endpoint": "recraft/v4/style/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "recraft/v4/style/text-to-image/requests/{request_id}",
+              "statusEndpoint": "recraft/v4/style/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                }
+              },
+              "required": [
+                "prompt",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The custom style used or created for this generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:c0d7a2d32bea61208378ec7cb9d3f8da54631d86ed69bb61ef669297013da879"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "image_size": {},
+      "colors": [],
+      "n": 1,
+      "model": "admission/model-572/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "recraft/v4/style/text-to-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-572/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ]
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "description": "Green color value"
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "description": "Green color value"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "An array of preferable colors"
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "prompt",
+          "image_size",
+          "colors",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "title": "Prompt",
+            "uiControl": "textarea"
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "default": "square_hd"
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "minItems": 1,
+                "maxItems": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image URLs",
+            "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+          },
+          "background_color": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "r": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Red color value"
+                  },
+                  "b": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Blue color value"
+                  },
+                  "g": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                    "default": 0,
+                    "description": "Green color value"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "background_color",
+            "description": "The preferable background color of the generated images."
+          },
+          "style_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style ID",
+            "description": "The ID of an existing V4 custom style."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "r": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Red color value"
+                },
+                "b": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Blue color value"
+                },
+                "g": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 0,
+                  "description": "Green color value"
+                }
+              }
+            },
+            "title": "Colors",
+            "description": "An array of preferable colors",
+            "default": []
+          },
+          "style_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "precise",
+                  "flexible"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style Match",
+            "description": "Override how closely the generation follows the custom style."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "square_hd",
+        "colors": [],
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "style_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The custom style used or created for this generation."
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "image_size": "image_size",
+            "image_urls": "image_urls",
+            "background_color": "background_color",
+            "style_id": "style_id",
+            "colors": "colors",
+            "style_match": "style_match"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=recraft%2Fv4%2Fstyle%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "style_id"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:recraft/v4/style/text-to-image",
+            "revision": "audit",
+            "endpoint": "recraft/v4/style/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "recraft/v4/style/text-to-image/requests/{request_id}",
+              "statusEndpoint": "recraft/v4/style/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ]
+                },
+                "image_urls": {
+                  "anyOf": [
+                    {
+                      "minItems": 1,
+                      "maxItems": 10,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URLs of the style reference images. Supports PNG, JPG, and WEBP; provide between 1 and 10 images."
+                },
+                "background_color": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "r": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Red color value"
+                        },
+                        "b": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Blue color value"
+                        },
+                        "g": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255,
+                          "description": "Green color value"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The preferable background color of the generated images."
+                },
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The ID of an existing V4 custom style."
+                },
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Red color value"
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Blue color value"
+                      },
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "Green color value"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "An array of preferable colors"
+                },
+                "style_match": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "precise",
+                        "flexible"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Override how closely the generation follows the custom style."
+                }
+              },
+              "required": [
+                "prompt",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "style_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The custom style used or created for this generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:c0d7a2d32bea61208378ec7cb9d3f8da54631d86ed69bb61ef669297013da879"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "image_size": "square_hd",
+      "colors": [],
+      "n": 1,
+      "model": "admission/model-572/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  }
+]

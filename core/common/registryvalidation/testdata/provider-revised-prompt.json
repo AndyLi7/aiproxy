@@ -1,0 +1,2981 @@
+[
+  {
+    "endpoint": "xai/grok-imagine-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-593/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Text description of the desired image."
+          },
+          "resolution": {
+            "default": "1k",
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+          },
+          "aspect_ratio": {
+            "default": "1:1",
+            "type": "string",
+            "enum": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "description": "Aspect ratio of the generated image."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "resolution",
+          "aspect_ratio",
+          "n",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "description": "Text description of the desired image.",
+            "uiControl": "textarea"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "title": "Resolution",
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "uiControl": "select"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "title": "Aspect Ratio",
+            "description": "Aspect ratio of the generated image.",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Number of Images",
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "resolution": "1k",
+        "aspect_ratio": "1:1",
+        "n": 1,
+        "output_format": "jpeg"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "resolution": "resolution",
+            "aspect_ratio": "aspect_ratio",
+            "n": "num_images",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:xai/grok-imagine-image",
+            "revision": "audit",
+            "endpoint": "xai/grok-imagine-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "xai/grok-imagine-image/requests/{request_id}",
+              "statusEndpoint": "xai/grok-imagine-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the generated image."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the generated image."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "revised_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The enhanced prompt that was used to generate the image."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The URL of the generated image."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:77e22b7bf00837b2900dddb364f64162a0fa402c96a7684c9c82e2215dcb5d50"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "resolution": "1k",
+      "aspect_ratio": "1:1",
+      "n": 1,
+      "output_format": "jpeg",
+      "model": "admission/model-593/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "xai/grok-imagine-image/edit",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-594/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Text description of the desired image."
+          },
+          "resolution": {
+            "default": "1k",
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+          },
+          "aspect_ratio": {
+            "default": "auto",
+            "type": "string",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+          },
+          "image_urls": {
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "resolution",
+          "aspect_ratio",
+          "n",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "description": "Text description of the desired image.",
+            "uiControl": "textarea"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "title": "Resolution",
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "uiControl": "select"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "title": "Aspect Ratio",
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image.",
+            "uiControl": "select"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "maxItems": 3,
+            "title": "Image URLs",
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Number of Images",
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "resolution": "1k",
+        "aspect_ratio": "auto",
+        "n": 1,
+        "output_format": "jpeg"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "resolution": "resolution",
+            "aspect_ratio": "aspect_ratio",
+            "image_urls": "image_urls",
+            "n": "num_images",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fedit",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fedit",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:xai/grok-imagine-image/edit",
+            "revision": "audit",
+            "endpoint": "xai/grok-imagine-image/edit",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "xai/grok-imagine-image/edit/requests/{request_id}",
+              "statusEndpoint": "xai/grok-imagine-image/edit/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+                },
+                "image_urls": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+                },
+                "image_urls": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "revised_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The enhanced prompt that was used to generate the image."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The URL of the edited image."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:a7e6caa0f770a7dc1e84d592f76afecb9410896865874bd4b3be5b0aa637fb2e"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "resolution": "1k",
+      "aspect_ratio": "auto",
+      "n": 1,
+      "output_format": "jpeg",
+      "model": "admission/model-594/edit"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "xai/grok-imagine-image/quality/edit",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-595/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Text description of the desired image."
+          },
+          "resolution": {
+            "default": "1k",
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+          },
+          "aspect_ratio": {
+            "default": "auto",
+            "type": "string",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+          },
+          "image_urls": {
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "resolution",
+          "aspect_ratio",
+          "n",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "description": "Text description of the desired image.",
+            "uiControl": "textarea"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "title": "Resolution",
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "uiControl": "select"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "title": "Aspect Ratio",
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image.",
+            "uiControl": "select"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "maxItems": 3,
+            "title": "Image URLs",
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Number of Images",
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "resolution": "1k",
+        "aspect_ratio": "auto",
+        "n": 1,
+        "output_format": "jpeg"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "resolution": "resolution",
+            "aspect_ratio": "aspect_ratio",
+            "image_urls": "image_urls",
+            "n": "num_images",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fquality%2Fedit",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fquality%2Fedit",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:xai/grok-imagine-image/quality/edit",
+            "revision": "audit",
+            "endpoint": "xai/grok-imagine-image/quality/edit",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "xai/grok-imagine-image/quality/edit/requests/{request_id}",
+              "statusEndpoint": "xai/grok-imagine-image/quality/edit/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+                },
+                "image_urls": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+                },
+                "image_urls": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "revised_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The enhanced prompt that was used to generate the image."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The URL of the edited image."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:fb7495bedcf3817b0f18562aaaa0c20f7b7c608fe24b33fd893d95e1233826c4"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "resolution": "1k",
+      "aspect_ratio": "auto",
+      "n": 1,
+      "output_format": "jpeg",
+      "model": "admission/model-595/edit"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "xai/grok-imagine-image/quality/text-to-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-596/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Text description of the desired image."
+          },
+          "resolution": {
+            "default": "1k",
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+          },
+          "aspect_ratio": {
+            "default": "1:1",
+            "type": "string",
+            "enum": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "description": "Aspect ratio of the generated image."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "resolution",
+          "aspect_ratio",
+          "n",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "description": "Text description of the desired image.",
+            "uiControl": "textarea"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "title": "Resolution",
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "uiControl": "select"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "title": "Aspect Ratio",
+            "description": "Aspect ratio of the generated image.",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Number of Images",
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "resolution": "1k",
+        "aspect_ratio": "1:1",
+        "n": 1,
+        "output_format": "jpeg"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "resolution": "resolution",
+            "aspect_ratio": "aspect_ratio",
+            "n": "num_images",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fquality%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fquality%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:xai/grok-imagine-image/quality/text-to-image",
+            "revision": "audit",
+            "endpoint": "xai/grok-imagine-image/quality/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "xai/grok-imagine-image/quality/text-to-image/requests/{request_id}",
+              "statusEndpoint": "xai/grok-imagine-image/quality/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the generated image."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the generated image."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "revised_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The enhanced prompt that was used to generate the image."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The URL of the generated image."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:542b7d77c606c1d4d49dd87a2350663e29f1ac96a0407c2e6b2baea3ff9c60e2"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "resolution": "1k",
+      "aspect_ratio": "1:1",
+      "n": 1,
+      "output_format": "jpeg",
+      "model": "admission/model-596/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "xai/grok-imagine-image/v2.0/edit",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-597/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "quality": {
+            "default": "medium",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium"
+            ],
+            "description": "Quality level of the edited image."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Text description of the desired image."
+          },
+          "resolution": {
+            "default": "1k",
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+          },
+          "image_urls": {
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+          },
+          "aspect_ratio": {
+            "default": "auto",
+            "type": "string",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+          }
+        },
+        "required": [
+          "quality",
+          "n",
+          "output_format",
+          "prompt",
+          "resolution",
+          "aspect_ratio"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "quality": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium"
+            ],
+            "title": "Quality",
+            "description": "Quality level of the edited image.",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Number of Images",
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "description": "Text description of the desired image.",
+            "uiControl": "textarea"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "title": "Resolution",
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "uiControl": "select"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "maxItems": 3,
+            "title": "Image URLs",
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "title": "Aspect Ratio",
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "quality": "medium",
+        "n": 1,
+        "output_format": "jpeg",
+        "resolution": "1k",
+        "aspect_ratio": "auto"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "quality": "quality",
+            "n": "num_images",
+            "output_format": "output_format",
+            "prompt": "prompt",
+            "resolution": "resolution",
+            "image_urls": "image_urls",
+            "aspect_ratio": "aspect_ratio"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fv2.0%2Fedit",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fv2.0%2Fedit",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:xai/grok-imagine-image/v2.0/edit",
+            "revision": "audit",
+            "endpoint": "xai/grok-imagine-image/v2.0/edit",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "xai/grok-imagine-image/v2.0/edit/requests/{request_id}",
+              "statusEndpoint": "xai/grok-imagine-image/v2.0/edit/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium"
+                  ],
+                  "description": "Quality level of the edited image."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "image_urls": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium"
+                  ],
+                  "description": "Quality level of the edited image."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "image_urls": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "List of URLs of the images to edit. A maximum of 3 images are supported."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image."
+                }
+              },
+              "required": [
+                "sync_mode",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "revised_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The enhanced prompt that was used to generate the image."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The URL of the edited image."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:fedf3e89a3d31e2773ef8267a75b9cc1f8a6ad07f0bc8aebd95619d802a3ce87"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "quality": "medium",
+      "n": 1,
+      "output_format": "jpeg",
+      "prompt": "test",
+      "resolution": "1k",
+      "aspect_ratio": "auto",
+      "model": "admission/model-597/edit"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "xai/grok-imagine-image/v2.0/text-to-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-598/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Text description of the desired image."
+          },
+          "resolution": {
+            "default": "1k",
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+          },
+          "aspect_ratio": {
+            "default": "1:1",
+            "type": "string",
+            "enum": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "description": "Aspect ratio of the generated image."
+          },
+          "quality": {
+            "default": "medium",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium"
+            ],
+            "description": "Quality level of the generated image."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "resolution",
+          "aspect_ratio",
+          "quality",
+          "n",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "description": "Text description of the desired image.",
+            "uiControl": "textarea"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k"
+            ],
+            "title": "Resolution",
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "uiControl": "select"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "title": "Aspect Ratio",
+            "description": "Aspect ratio of the generated image.",
+            "uiControl": "select"
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium"
+            ],
+            "title": "Quality",
+            "description": "Quality level of the generated image.",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Number of Images",
+            "description": "Number of images to generate."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "resolution": "1k",
+        "aspect_ratio": "1:1",
+        "quality": "medium",
+        "n": 1,
+        "output_format": "jpeg"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "resolution": "resolution",
+            "aspect_ratio": "aspect_ratio",
+            "quality": "quality",
+            "n": "num_images",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fv2.0%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai%2Fgrok-imagine-image%2Fv2.0%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:xai/grok-imagine-image/v2.0/text-to-image",
+            "revision": "audit",
+            "endpoint": "xai/grok-imagine-image/v2.0/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "xai/grok-imagine-image/v2.0/text-to-image/requests/{request_id}",
+              "statusEndpoint": "xai/grok-imagine-image/v2.0/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the generated image."
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium"
+                  ],
+                  "description": "Quality level of the generated image."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 8000,
+                  "description": "Text description of the desired image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1k",
+                    "2k"
+                  ],
+                  "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution."
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "2:1",
+                    "20:9",
+                    "19.5:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:19.5",
+                    "9:20",
+                    "1:2"
+                  ],
+                  "description": "Aspect ratio of the generated image."
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium"
+                  ],
+                  "description": "Quality level of the generated image."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images to generate."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "revised_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The enhanced prompt that was used to generate the image."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The URL of the generated image."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:8fab9637bf55e742f5aa4e381b65e177bc919648bb51c1a8cc29969465b4f401"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "resolution": "1k",
+      "aspect_ratio": "1:1",
+      "quality": "medium",
+      "n": 1,
+      "output_format": "jpeg",
+      "model": "admission/model-598/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  }
+]

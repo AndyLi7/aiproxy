@@ -51,3 +51,34 @@ func TestExpiredImageCleanupDeletesOnlyScopedMediaAndKeepsTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, found)
 }
+
+func TestExpiredGIFCleanupKeepsPermanentExamplesAndTask(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "gif-cleanup.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+	previous := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = previous })
+	expired := time.Now().Add(-time.Hour)
+	task := model.ImageTask{ID: "gif-task", Status: "completed", ArchiveRequired: true, ResultExpiresAt: &expired, Data: []model.ImageOutput{{URL: "https://media.test/generated-results/images/gif-task/0.gif", ContentType: "image/gif", Stored: true}, {URL: "https://media.test/capability-demo-permanent.gif", ContentType: "image/gif", Stored: true}}}
+	require.NoError(t, db.Create(&task).Error)
+	calls := 0
+	changed, err := cleanupExpiredImageTask(context.Background(), &task, func(_ context.Context, id string, index int, mime string) error {
+		calls++
+		require.Equal(t, "gif-task", id)
+		require.Equal(t, 0, index)
+		require.Equal(t, "image/gif", mime)
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, 1, calls)
+	var saved model.ImageTask
+	require.NoError(t, db.First(&saved, "id = ?", task.ID).Error)
+	require.Empty(t, saved.Data[0].URL)
+	require.Equal(t, "https://media.test/capability-demo-permanent.gif", saved.Data[1].URL)
+	require.Equal(t, "completed", saved.Status)
+	changed, err = cleanupExpiredImageTask(context.Background(), &saved, func(context.Context, string, int, string) error { t.Fatal("repeat deletion"); return nil })
+	require.NoError(t, err)
+	require.False(t, changed)
+}

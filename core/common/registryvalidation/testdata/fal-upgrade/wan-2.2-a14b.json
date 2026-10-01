@@ -1,0 +1,628 @@
+{
+  "provider_contract_version": 1,
+  "entry_id": "alibaba/wan-2.2-a14b/text-to-image",
+  "validation_version": 1,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "guidance_scale_2": {
+        "default": 4,
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "Guidance scale for the second stage of the model. This is used to control the adherence to the prompt in the second stage of the model."
+      },
+      "guidance_scale": {
+        "default": 3.5,
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "The text prompt to guide image generation."
+      },
+      "num_inference_steps": {
+        "default": 27,
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 40,
+        "description": "Number of inference steps for sampling. Higher values give better quality but take longer."
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Random seed for reproducibility. If None, a random seed is chosen."
+      },
+      "enable_prompt_expansion": {
+        "default": false,
+        "type": "boolean",
+        "description": "Whether to enable prompt expansion. This will use a large language model to expand the prompt with additional details while maintaining the original meaning."
+      },
+      "shift": {
+        "default": 2,
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "Shift value for the image. Must be between 1.0 and 10.0."
+      },
+      "acceleration": {
+        "default": "regular",
+        "type": "string",
+        "enum": [
+          "none",
+          "regular"
+        ],
+        "description": "Acceleration level to use. The more acceleration, the faster the generation, but with lower quality. The recommended value is 'regular'."
+      },
+      "negative_prompt": {
+        "default": "",
+        "type": "string",
+        "description": "Negative prompt for video generation."
+      },
+      "image_size": {
+        "default": "square_hd",
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "width": {
+                "default": 512,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142,
+                "description": "The width of the generated image."
+              },
+              "height": {
+                "default": 512,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142,
+                "description": "The height of the generated image."
+              }
+            },
+            "additionalProperties": {}
+          },
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9"
+            ]
+          }
+        ],
+        "description": "The size of the generated image."
+      },
+      "n": {
+        "default": 1,
+        "type": "number",
+        "const": 1
+      }
+    },
+    "required": [
+      "guidance_scale_2",
+      "guidance_scale",
+      "prompt",
+      "num_inference_steps",
+      "enable_prompt_expansion",
+      "shift",
+      "acceleration",
+      "negative_prompt",
+      "image_size",
+      "n"
+    ],
+    "additionalProperties": false
+  },
+  "parameter_schema": {
+    "type": "object",
+    "properties": {
+      "guidance_scale_2": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "title": "Guidance Scale (2nd Stage)",
+        "description": "Guidance scale for the second stage of the model. This is used to control the adherence to the prompt in the second stage of the model."
+      },
+      "guidance_scale": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "title": "Guidance Scale (1st Stage)",
+        "description": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality."
+      },
+      "prompt": {
+        "type": "string",
+        "title": "Prompt",
+        "description": "The text prompt to guide image generation.",
+        "uiControl": "textarea"
+      },
+      "num_inference_steps": {
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 40,
+        "title": "Number of Inference Steps",
+        "description": "Number of inference steps for sampling. Higher values give better quality but take longer."
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Seed",
+        "description": "Random seed for reproducibility. If None, a random seed is chosen."
+      },
+      "enable_prompt_expansion": {
+        "type": "boolean",
+        "title": "Enable Prompt Expansion",
+        "description": "Whether to enable prompt expansion. This will use a large language model to expand the prompt with additional details while maintaining the original meaning."
+      },
+      "shift": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "title": "Shift",
+        "description": "Shift value for the image. Must be between 1.0 and 10.0."
+      },
+      "acceleration": {
+        "type": "string",
+        "enum": [
+          "none",
+          "regular"
+        ],
+        "title": "Acceleration",
+        "description": "Acceleration level to use. The more acceleration, the faster the generation, but with lower quality. The recommended value is 'regular'.",
+        "uiControl": "select"
+      },
+      "negative_prompt": {
+        "type": "string",
+        "title": "Negative Prompt",
+        "description": "Negative prompt for video generation."
+      },
+      "image_size": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142,
+                "default": 512,
+                "description": "The width of the generated image."
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142,
+                "default": 512,
+                "description": "The height of the generated image."
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9"
+            ]
+          }
+        ],
+        "title": "Image Size",
+        "description": "The size of the generated image.",
+        "default": "square_hd"
+      },
+      "n": {
+        "type": "number",
+        "title": "Number of images"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "default_parameters": {
+    "guidance_scale_2": 4,
+    "guidance_scale": 3.5,
+    "num_inference_steps": 27,
+    "enable_prompt_expansion": false,
+    "shift": 2,
+    "acceleration": "regular",
+    "negative_prompt": "",
+    "image_size": "square_hd",
+    "n": 1
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "images": {
+        "minItems": 1,
+        "maxItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "additionalProperties": {}
+  },
+  "providers": {
+    "fal": {
+      "adapter": "fal-image",
+      "parameterMapping": {
+        "guidance_scale_2": "guidance_scale_2",
+        "guidance_scale": "guidance_scale",
+        "prompt": "prompt",
+        "num_inference_steps": "num_inference_steps",
+        "seed": "seed",
+        "enable_prompt_expansion": "enable_prompt_expansion",
+        "shift": "shift",
+        "acceleration": "acceleration",
+        "negative_prompt": "negative_prompt",
+        "image_size": "image_size"
+      },
+      "allowedPassthroughParameters": [],
+      "fixedParameters": {
+        "enable_safety_checker": true,
+        "enable_output_safety_checker": true
+      },
+      "billingBasis": {
+        "metric": "image",
+        "dimensions": [],
+        "minimumBillableUnits": 1,
+        "rounding": "none",
+        "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fwan%2Fv2.2-a14b%2Ftext-to-image",
+        "verifiedAt": "2026-09-26",
+        "requiresUpstreamUsageBilling": true
+      },
+      "source": {
+        "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fwan%2Fv2.2-a14b%2Ftext-to-image",
+        "verifiedAt": "2026-09-26",
+        "verifiedBy": "d34-local-acceptance"
+      },
+      "upstream": {
+        "metering": {
+          "nativeImagePaths": [],
+          "version": 7,
+          "outputCountFixed": 1
+        },
+        "id": "fal:fal-ai/wan/v2.2-a14b/text-to-image",
+        "revision": "8baf00c1-9789-42d6-b0ad-a433ea0ae775-1",
+        "endpoint": "fal-ai/wan/v2.2-a14b/text-to-image",
+        "execution": {
+          "mode": "async",
+          "resultEndpoint": "fal-ai/wan/v2.2-a14b/text-to-image/requests/{request_id}",
+          "statusEndpoint": "fal-ai/wan/v2.2-a14b/text-to-image/requests/{request_id}/status",
+          "supportsCancellation": true
+        },
+        "acceptedInputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "guidance_scale_2": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Guidance scale for the second stage of the model. This is used to control the adherence to the prompt in the second stage of the model."
+            },
+            "guidance_scale": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality."
+            },
+            "prompt": {
+              "type": "string",
+              "description": "The text prompt to guide image generation."
+            },
+            "num_inference_steps": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 40,
+              "description": "Number of inference steps for sampling. Higher values give better quality but take longer."
+            },
+            "seed": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Random seed for reproducibility. If None, a random seed is chosen."
+            },
+            "enable_prompt_expansion": {
+              "type": "boolean",
+              "description": "Whether to enable prompt expansion. This will use a large language model to expand the prompt with additional details while maintaining the original meaning."
+            },
+            "shift": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Shift value for the image. Must be between 1.0 and 10.0."
+            },
+            "acceleration": {
+              "type": "string",
+              "enum": [
+                "none",
+                "regular"
+              ],
+              "description": "Acceleration level to use. The more acceleration, the faster the generation, but with lower quality. The recommended value is 'regular'."
+            },
+            "negative_prompt": {
+              "type": "string",
+              "description": "Negative prompt for video generation."
+            },
+            "image_size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 14142,
+                      "description": "The width of the generated image."
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 14142,
+                      "description": "The height of the generated image."
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "square_hd",
+                    "square",
+                    "portrait_4_3",
+                    "portrait_16_9",
+                    "landscape_4_3",
+                    "landscape_16_9"
+                  ]
+                }
+              ],
+              "description": "The size of the generated image."
+            },
+            "n": {
+              "type": "number",
+              "const": 1
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        "inputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "guidance_scale_2": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Guidance scale for the second stage of the model. This is used to control the adherence to the prompt in the second stage of the model."
+            },
+            "guidance_scale": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality."
+            },
+            "prompt": {
+              "type": "string",
+              "description": "The text prompt to guide image generation."
+            },
+            "num_inference_steps": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 40,
+              "description": "Number of inference steps for sampling. Higher values give better quality but take longer."
+            },
+            "enable_output_safety_checker": {
+              "type": "boolean",
+              "const": true
+            },
+            "enable_safety_checker": {
+              "type": "boolean",
+              "const": true
+            },
+            "seed": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Random seed for reproducibility. If None, a random seed is chosen."
+            },
+            "enable_prompt_expansion": {
+              "type": "boolean",
+              "description": "Whether to enable prompt expansion. This will use a large language model to expand the prompt with additional details while maintaining the original meaning."
+            },
+            "shift": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Shift value for the image. Must be between 1.0 and 10.0."
+            },
+            "acceleration": {
+              "type": "string",
+              "enum": [
+                "none",
+                "regular"
+              ],
+              "description": "Acceleration level to use. The more acceleration, the faster the generation, but with lower quality. The recommended value is 'regular'."
+            },
+            "negative_prompt": {
+              "type": "string",
+              "description": "Negative prompt for video generation."
+            },
+            "image_size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 14142,
+                      "description": "The width of the generated image."
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 14142,
+                      "description": "The height of the generated image."
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "square_hd",
+                    "square",
+                    "portrait_4_3",
+                    "portrait_16_9",
+                    "landscape_4_3",
+                    "landscape_16_9"
+                  ]
+                }
+              ],
+              "description": "The size of the generated image."
+            }
+          },
+          "required": [
+            "prompt",
+            "enable_output_safety_checker",
+            "enable_safety_checker"
+          ],
+          "additionalProperties": false
+        },
+        "outputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "The URL where the file can be downloaded from."
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided."
+                },
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "The seed used for generation."
+            }
+          },
+          "required": [
+            "image",
+            "seed"
+          ],
+          "additionalProperties": {}
+        },
+        "contractHash": "sha256:be37a8b90bcc215b5cfafc0465b1e96be2392f7aa18261186286eed90927965d"
+      }
+    }
+  },
+  "execution": {
+    "mode": "async",
+    "endpoint": "/v1/images/tasks",
+    "statusEndpoint": "/v1/images/tasks/{task_id}",
+    "output": "image",
+    "supportsCancellation": false
+  }
+}

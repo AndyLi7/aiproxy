@@ -43,9 +43,11 @@ func TestImageContentBlocksPrivateAndReservedAddresses(t *testing.T) {
 func TestPublicImageTaskHidesProviderAndPreservesStoredTask(t *testing.T) {
 	t.Setenv("PUBLIC_IMAGE_BASE_URL", "https://gateway.example.com")
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	task := &model.ImageTask{ID: "task-one", KeyFingerprint: strings.Repeat("a", 64), Status: "completed", Data: []model.ImageOutput{{URL: "https://fal.media/private.png"}}}
+	count := int64(1)
+	task := &model.ImageTask{NumImages: &count, ID: "task-one", KeyFingerprint: strings.Repeat("a", 64), Status: "completed", Data: []model.ImageOutput{{URL: "https://fal.media/private.png"}}}
 	result := publicImageTask(ctx, task)
 	body, _ := json.Marshal(result)
+	require.Contains(t, string(body), `"num_images":1`)
 	if strings.Contains(string(body), "fal.media") || result.Status != "completed" {
 		t.Fatalf("unsafe response: %s", body)
 	}
@@ -76,16 +78,20 @@ func TestPublicImageTaskRetentionAndProcessing(t *testing.T) {
 	t.Setenv("PUBLIC_IMAGE_BASE_URL", "https://api.example.com")
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	task := &model.ImageTask{ID: "stored", KeyFingerprint: strings.Repeat("a", 64), Status: "result_processing", ArchiveRequired: true, Data: []model.ImageOutput{{URL: "https://source/image"}}}
+	task.ProviderMetadata = map[string]json.RawMessage{"caption": json.RawMessage(`"caption"`)}
 	pending := publicImageTask(c, task)
 	require.Equal(t, "in_progress", pending.Status)
 	require.Equal(t, "result_processing", pending.Phase)
 	require.Empty(t, pending.Data)
+	require.Empty(t, pending.ProviderMetadata)
+	require.NotEmpty(t, task.ProviderMetadata)
 	task.Status = "completed"
 	expiry := time.Now().UTC().Add(20 * time.Minute)
 	task.ResultExpiresAt = &expiry
 	task.Data[0].Stored = true
 	out := publicImageTask(c, task)
 	require.Equal(t, "stored", out.ResultAvailability)
+	require.Equal(t, task.ProviderMetadata, out.ProviderMetadata)
 	require.Len(t, out.Data, 1)
 	require.False(t, out.Data[0].Stored)
 	require.NotNil(t, out.Data[0].URLExpiresAt)

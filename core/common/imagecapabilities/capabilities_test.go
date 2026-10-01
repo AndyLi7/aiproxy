@@ -8,12 +8,12 @@ func TestReviewedCapabilities(t *testing.T) {
 			t.Fatalf("unexpected measured billing support: %s", adapter)
 		}
 	}
-	for version := 1; version <= 5; version++ {
+	for version := 1; version <= 12; version++ {
 		if !SupportsMetering("fal-image", "async", version) {
 			t.Fatalf("lost fal metering version %d", version)
 		}
 	}
-	if !SupportsMeasuredBilling("fal-image") || SupportsMetering("fal-image", "sync", 1) || SupportsMetering("fal-image", "async", 6) {
+	if !SupportsMeasuredBilling("fal-image") || SupportsMetering("fal-image", "sync", 1) || SupportsMetering("fal-image", "async", 13) {
 		t.Fatal("execution or metering version boundary changed")
 	}
 	ark, ok := Lookup("volcengine-ark-image")

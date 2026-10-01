@@ -1,0 +1,2722 @@
+[
+  {
+    "endpoint": "fal-ai/ccsr",
+    "scenario": "required-url",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-61/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "default": 512,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "default": 0.3333,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "default": "none",
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "description": "If specified, a patch-based sampling strategy will be used for sampling."
+          },
+          "t_max": {
+            "default": 0.6667,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "default": 226,
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "default": 2,
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "default": false,
+            "type": "boolean",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "The URL or data URI of the image to upscale."
+          },
+          "tile_vae_encoder_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "default": "adain",
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "description": "Type of color correction for samples."
+          },
+          "tile_diffusion_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "description": "Size of patch."
+          },
+          "steps": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "tile_diffusion_stride",
+          "t_min",
+          "tile_diffusion",
+          "t_max",
+          "tile_vae_decoder_size",
+          "scale",
+          "tile_vae",
+          "image_url",
+          "tile_vae_encoder_size",
+          "color_fix_type",
+          "tile_diffusion_size",
+          "steps",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "title": "Tile Diffusion Stride",
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Min",
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "title": "Tile Diffusion",
+            "description": "If specified, a patch-based sampling strategy will be used for sampling.",
+            "uiControl": "select"
+          },
+          "t_max": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Max",
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "title": "Tile Vae Decoder Size",
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Scale",
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "type": "boolean",
+            "title": "Tile Vae",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "The URL or data URI of the image to upscale.",
+            "uiControl": "textarea"
+          },
+          "tile_vae_encoder_size": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "title": "Tile Vae Encoder Size",
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "title": "Color Fix Type",
+            "description": "Type of color correction for samples.",
+            "uiControl": "select"
+          },
+          "tile_diffusion_size": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "title": "Tile Diffusion Size",
+            "description": "Size of patch."
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "title": "Steps",
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "tile_diffusion_stride": 512,
+        "t_min": 0.3333,
+        "tile_diffusion": "none",
+        "t_max": 0.6667,
+        "tile_vae_decoder_size": 226,
+        "scale": 2,
+        "tile_vae": false,
+        "tile_vae_encoder_size": 1024,
+        "color_fix_type": "adain",
+        "tile_diffusion_size": 1024,
+        "steps": 50,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "tile_diffusion_stride": "tile_diffusion_stride",
+            "t_min": "t_min",
+            "tile_diffusion": "tile_diffusion",
+            "t_max": "t_max",
+            "tile_vae_decoder_size": "tile_vae_decoder_size",
+            "scale": "scale",
+            "tile_vae": "tile_vae",
+            "image_url": "image_url",
+            "tile_vae_encoder_size": "tile_vae_encoder_size",
+            "color_fix_type": "color_fix_type",
+            "tile_diffusion_size": "tile_diffusion_size",
+            "steps": "steps",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "data-uri",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/ccsr",
+            "revision": "audit",
+            "endpoint": "fal-ai/ccsr",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/ccsr/requests/{request_id}",
+              "statusEndpoint": "fal-ai/ccsr/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The seed used for the generation."
+                }
+              },
+              "required": [
+                "image",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:5c1553d0e4afdb12ac0ceb3b1ef260953e36953a15c040a08886dffde3e107ef"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "tile_diffusion_stride": 128,
+      "t_min": 0,
+      "tile_diffusion": "none",
+      "t_max": 0,
+      "tile_vae_decoder_size": 64,
+      "scale": 1,
+      "tile_vae": false,
+      "image_url": "https://example.com/image.png",
+      "tile_vae_encoder_size": 128,
+      "color_fix_type": "none",
+      "tile_diffusion_size": 256,
+      "steps": 10,
+      "n": 1,
+      "model": "admission/model-61/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/ccsr",
+    "scenario": "required-data-uri",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-61/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "default": 512,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "default": 0.3333,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "default": "none",
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "description": "If specified, a patch-based sampling strategy will be used for sampling."
+          },
+          "t_max": {
+            "default": 0.6667,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "default": 226,
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "default": 2,
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "default": false,
+            "type": "boolean",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "The URL or data URI of the image to upscale."
+          },
+          "tile_vae_encoder_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "default": "adain",
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "description": "Type of color correction for samples."
+          },
+          "tile_diffusion_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "description": "Size of patch."
+          },
+          "steps": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "tile_diffusion_stride",
+          "t_min",
+          "tile_diffusion",
+          "t_max",
+          "tile_vae_decoder_size",
+          "scale",
+          "tile_vae",
+          "image_url",
+          "tile_vae_encoder_size",
+          "color_fix_type",
+          "tile_diffusion_size",
+          "steps",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "title": "Tile Diffusion Stride",
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Min",
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "title": "Tile Diffusion",
+            "description": "If specified, a patch-based sampling strategy will be used for sampling.",
+            "uiControl": "select"
+          },
+          "t_max": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Max",
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "title": "Tile Vae Decoder Size",
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Scale",
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "type": "boolean",
+            "title": "Tile Vae",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "The URL or data URI of the image to upscale.",
+            "uiControl": "textarea"
+          },
+          "tile_vae_encoder_size": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "title": "Tile Vae Encoder Size",
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "title": "Color Fix Type",
+            "description": "Type of color correction for samples.",
+            "uiControl": "select"
+          },
+          "tile_diffusion_size": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "title": "Tile Diffusion Size",
+            "description": "Size of patch."
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "title": "Steps",
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "tile_diffusion_stride": 512,
+        "t_min": 0.3333,
+        "tile_diffusion": "none",
+        "t_max": 0.6667,
+        "tile_vae_decoder_size": 226,
+        "scale": 2,
+        "tile_vae": false,
+        "tile_vae_encoder_size": 1024,
+        "color_fix_type": "adain",
+        "tile_diffusion_size": 1024,
+        "steps": 50,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "tile_diffusion_stride": "tile_diffusion_stride",
+            "t_min": "t_min",
+            "tile_diffusion": "tile_diffusion",
+            "t_max": "t_max",
+            "tile_vae_decoder_size": "tile_vae_decoder_size",
+            "scale": "scale",
+            "tile_vae": "tile_vae",
+            "image_url": "image_url",
+            "tile_vae_encoder_size": "tile_vae_encoder_size",
+            "color_fix_type": "color_fix_type",
+            "tile_diffusion_size": "tile_diffusion_size",
+            "steps": "steps",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "data-uri",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/ccsr",
+            "revision": "audit",
+            "endpoint": "fal-ai/ccsr",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/ccsr/requests/{request_id}",
+              "statusEndpoint": "fal-ai/ccsr/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The seed used for the generation."
+                }
+              },
+              "required": [
+                "image",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:5c1553d0e4afdb12ac0ceb3b1ef260953e36953a15c040a08886dffde3e107ef"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "tile_diffusion_stride": 128,
+      "t_min": 0,
+      "tile_diffusion": "none",
+      "t_max": 0,
+      "tile_vae_decoder_size": 64,
+      "scale": 1,
+      "tile_vae": false,
+      "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XhU0AAAAASUVORK5CYII=",
+      "tile_vae_encoder_size": 128,
+      "color_fix_type": "none",
+      "tile_diffusion_size": 256,
+      "steps": 10,
+      "n": 1,
+      "model": "admission/model-61/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/ccsr",
+    "scenario": "defaults-url",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-61/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "default": 512,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "default": 0.3333,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "default": "none",
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "description": "If specified, a patch-based sampling strategy will be used for sampling."
+          },
+          "t_max": {
+            "default": 0.6667,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "default": 226,
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "default": 2,
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "default": false,
+            "type": "boolean",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "The URL or data URI of the image to upscale."
+          },
+          "tile_vae_encoder_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "default": "adain",
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "description": "Type of color correction for samples."
+          },
+          "tile_diffusion_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "description": "Size of patch."
+          },
+          "steps": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "tile_diffusion_stride",
+          "t_min",
+          "tile_diffusion",
+          "t_max",
+          "tile_vae_decoder_size",
+          "scale",
+          "tile_vae",
+          "image_url",
+          "tile_vae_encoder_size",
+          "color_fix_type",
+          "tile_diffusion_size",
+          "steps",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "title": "Tile Diffusion Stride",
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Min",
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "title": "Tile Diffusion",
+            "description": "If specified, a patch-based sampling strategy will be used for sampling.",
+            "uiControl": "select"
+          },
+          "t_max": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Max",
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "title": "Tile Vae Decoder Size",
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Scale",
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "type": "boolean",
+            "title": "Tile Vae",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "The URL or data URI of the image to upscale.",
+            "uiControl": "textarea"
+          },
+          "tile_vae_encoder_size": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "title": "Tile Vae Encoder Size",
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "title": "Color Fix Type",
+            "description": "Type of color correction for samples.",
+            "uiControl": "select"
+          },
+          "tile_diffusion_size": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "title": "Tile Diffusion Size",
+            "description": "Size of patch."
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "title": "Steps",
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "tile_diffusion_stride": 512,
+        "t_min": 0.3333,
+        "tile_diffusion": "none",
+        "t_max": 0.6667,
+        "tile_vae_decoder_size": 226,
+        "scale": 2,
+        "tile_vae": false,
+        "tile_vae_encoder_size": 1024,
+        "color_fix_type": "adain",
+        "tile_diffusion_size": 1024,
+        "steps": 50,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "tile_diffusion_stride": "tile_diffusion_stride",
+            "t_min": "t_min",
+            "tile_diffusion": "tile_diffusion",
+            "t_max": "t_max",
+            "tile_vae_decoder_size": "tile_vae_decoder_size",
+            "scale": "scale",
+            "tile_vae": "tile_vae",
+            "image_url": "image_url",
+            "tile_vae_encoder_size": "tile_vae_encoder_size",
+            "color_fix_type": "color_fix_type",
+            "tile_diffusion_size": "tile_diffusion_size",
+            "steps": "steps",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "data-uri",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/ccsr",
+            "revision": "audit",
+            "endpoint": "fal-ai/ccsr",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/ccsr/requests/{request_id}",
+              "statusEndpoint": "fal-ai/ccsr/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The seed used for the generation."
+                }
+              },
+              "required": [
+                "image",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:5c1553d0e4afdb12ac0ceb3b1ef260953e36953a15c040a08886dffde3e107ef"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "tile_diffusion_stride": 512,
+      "t_min": 0.3333,
+      "tile_diffusion": "none",
+      "t_max": 0.6667,
+      "tile_vae_decoder_size": 226,
+      "scale": 2,
+      "tile_vae": false,
+      "image_url": "https://example.com/image.png",
+      "tile_vae_encoder_size": 1024,
+      "color_fix_type": "adain",
+      "tile_diffusion_size": 1024,
+      "steps": 50,
+      "n": 1,
+      "model": "admission/model-61/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/ccsr",
+    "scenario": "defaults-data-uri",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-61/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "default": 512,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "default": 0.3333,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "default": "none",
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "description": "If specified, a patch-based sampling strategy will be used for sampling."
+          },
+          "t_max": {
+            "default": 0.6667,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "default": 226,
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "default": 2,
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "default": false,
+            "type": "boolean",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "The URL or data URI of the image to upscale."
+          },
+          "tile_vae_encoder_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "default": "adain",
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "description": "Type of color correction for samples."
+          },
+          "tile_diffusion_size": {
+            "default": 1024,
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "description": "Size of patch."
+          },
+          "steps": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "tile_diffusion_stride",
+          "t_min",
+          "tile_diffusion",
+          "t_max",
+          "tile_vae_decoder_size",
+          "scale",
+          "tile_vae",
+          "image_url",
+          "tile_vae_encoder_size",
+          "color_fix_type",
+          "tile_diffusion_size",
+          "steps",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "tile_diffusion_stride": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 1024,
+            "title": "Tile Diffusion Stride",
+            "description": "Stride of sliding patch."
+          },
+          "t_min": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Min",
+            "description": "The starting point of uniform sampling strategy."
+          },
+          "tile_diffusion": {
+            "type": "string",
+            "enum": [
+              "none",
+              "mix",
+              "gaussian"
+            ],
+            "title": "Tile Diffusion",
+            "description": "If specified, a patch-based sampling strategy will be used for sampling.",
+            "uiControl": "select"
+          },
+          "t_max": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "T Max",
+            "description": "The ending point of uniform sampling strategy."
+          },
+          "tile_vae_decoder_size": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 2048,
+            "title": "Tile Vae Decoder Size",
+            "description": "Size of VAE patch."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "Scale",
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "tile_vae": {
+            "type": "boolean",
+            "title": "Tile Vae",
+            "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "The URL or data URI of the image to upscale.",
+            "uiControl": "textarea"
+          },
+          "tile_vae_encoder_size": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "title": "Tile Vae Encoder Size",
+            "description": "Size of latent image"
+          },
+          "color_fix_type": {
+            "type": "string",
+            "enum": [
+              "none",
+              "wavelet",
+              "adain"
+            ],
+            "title": "Color Fix Type",
+            "description": "Type of color correction for samples.",
+            "uiControl": "select"
+          },
+          "tile_diffusion_size": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 2048,
+            "title": "Tile Diffusion Size",
+            "description": "Size of patch."
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 100,
+            "title": "Steps",
+            "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed for reproducibility. Different seeds will make slightly different results."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "tile_diffusion_stride": 512,
+        "t_min": 0.3333,
+        "tile_diffusion": "none",
+        "t_max": 0.6667,
+        "tile_vae_decoder_size": 226,
+        "scale": 2,
+        "tile_vae": false,
+        "tile_vae_encoder_size": 1024,
+        "color_fix_type": "adain",
+        "tile_diffusion_size": 1024,
+        "steps": 50,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "tile_diffusion_stride": "tile_diffusion_stride",
+            "t_min": "t_min",
+            "tile_diffusion": "tile_diffusion",
+            "t_max": "t_max",
+            "tile_vae_decoder_size": "tile_vae_decoder_size",
+            "scale": "scale",
+            "tile_vae": "tile_vae",
+            "image_url": "image_url",
+            "tile_vae_encoder_size": "tile_vae_encoder_size",
+            "color_fix_type": "color_fix_type",
+            "tile_diffusion_size": "tile_diffusion_size",
+            "steps": "steps",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fccsr",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "data-uri",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/ccsr",
+            "revision": "audit",
+            "endpoint": "fal-ai/ccsr",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/ccsr/requests/{request_id}",
+              "statusEndpoint": "fal-ai/ccsr/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "tile_diffusion_stride": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 1024,
+                  "description": "Stride of sliding patch."
+                },
+                "t_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The starting point of uniform sampling strategy."
+                },
+                "tile_diffusion": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "mix",
+                    "gaussian"
+                  ],
+                  "description": "If specified, a patch-based sampling strategy will be used for sampling."
+                },
+                "t_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The ending point of uniform sampling strategy."
+                },
+                "tile_vae_decoder_size": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 2048,
+                  "description": "Size of VAE patch."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "tile_vae": {
+                  "type": "boolean",
+                  "description": "If specified, a patch-based sampling strategy will be used for VAE decoding."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "The URL or data URI of the image to upscale."
+                },
+                "tile_vae_encoder_size": {
+                  "type": "integer",
+                  "minimum": 128,
+                  "maximum": 2048,
+                  "description": "Size of latent image"
+                },
+                "color_fix_type": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "wavelet",
+                    "adain"
+                  ],
+                  "description": "Type of color correction for samples."
+                },
+                "tile_diffusion_size": {
+                  "type": "integer",
+                  "minimum": 256,
+                  "maximum": 2048,
+                  "description": "Size of patch."
+                },
+                "steps": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 100,
+                  "description": "The number of steps to run the model for. The higher the number the better the quality and longer it will take to generate."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Seed for reproducibility. Different seeds will make slightly different results."
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The seed used for the generation."
+                }
+              },
+              "required": [
+                "image",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:5c1553d0e4afdb12ac0ceb3b1ef260953e36953a15c040a08886dffde3e107ef"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "tile_diffusion_stride": 512,
+      "t_min": 0.3333,
+      "tile_diffusion": "none",
+      "t_max": 0.6667,
+      "tile_vae_decoder_size": 226,
+      "scale": 2,
+      "tile_vae": false,
+      "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XhU0AAAAASUVORK5CYII=",
+      "tile_vae_encoder_size": 1024,
+      "color_fix_type": "adain",
+      "tile_diffusion_size": 1024,
+      "steps": 50,
+      "n": 1,
+      "model": "admission/model-61/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "seed": 0
+    }
+  }
+]

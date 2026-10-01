@@ -2,6 +2,7 @@ package ownedimage
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -65,5 +66,111 @@ func TestDeleteArchivedImageUsesScopedInternalRequest(t *testing.T) {
 	})}
 	if err := deleteArchivedImage(context.Background(), "http://app.internal", "internal", "request-123", 0, "image/png", client); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOversizedArchiveIsPermanentForHeadersAndStreamingBodies(t *testing.T) {
+	for _, knownLength := range []bool{true, false} {
+		t.Run(map[bool]string{true: "content-length", false: "streamed"}[knownLength], func(t *testing.T) {
+			download := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+				length := int64(-1)
+				if knownLength {
+					length = MaxBytes + 1
+				}
+				return &http.Response{StatusCode: 200, ContentLength: length, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", MaxBytes+1)))}, nil
+			})}
+			upload := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+				t.Fatal("oversized image must not upload")
+				return nil, nil
+			})}
+			_, _, err := store(context.Background(), "https://provider.example/image", "http://app.internal", "internal", download, upload)
+			if err != ErrTooLarge {
+				t.Fatalf("expected permanent size error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAuxiliaryArchiveAndDeleteUseScopedIdentity(t *testing.T) {
+	ctx := WithAuxiliaryName(WithArchiveIdentity(context.Background(), "aux-task", 0), "mask_image")
+	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("x", 30)
+	download := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(png))}, nil
+	})}
+	upload := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("X-Musespan-Image-Auxiliary-Name") != "mask_image" || r.Header.Get("X-Musespan-Image-Task-ID") != "aux-task" || r.Header.Get("X-Musespan-Image-Output-Index") != "0" {
+			t.Fatal("missing scoped identity")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0,"data":{"url":"https://owned.test/0-mask_image.png"}}`))}, nil
+	})}
+	if _, _, err := store(ctx, "https://provider.test/mask.png", "http://internal", "internal", download, upload); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"auxiliaryName":"mask_image"`) {
+			t.Fatal("unscoped deletion")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0}`))}, nil
+	})}
+	if err := deleteArchivedImage(ctx, "http://internal", "internal", "aux-task", 0, "image/png", client); err != nil {
+		t.Fatal(err)
+	}
+	bad := WithAuxiliaryName(ctx, "../main")
+	if err := deleteArchivedImage(bad, "http://internal", "internal", "aux-task", 0, "image/png", client); err != ErrStorage {
+		t.Fatal("invalid auxiliary name accepted")
+	}
+}
+
+func TestOverlayArchiveAndDeleteUseScopedIdentity(t *testing.T) {
+	ctx := WithAuxiliaryName(WithArchiveIdentity(context.Background(), "aux-task", 0), "transparent_overlay")
+	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("x", 30)
+	download := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(png))}, nil
+	})}
+	upload := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("X-Musespan-Image-Auxiliary-Name") != "transparent_overlay" || r.Header.Get("X-Musespan-Image-Task-ID") != "aux-task" || r.Header.Get("X-Musespan-Image-Output-Index") != "0" {
+			t.Fatal("missing scoped identity")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0,"data":{"url":"https://owned.test/0-transparent_overlay.png"}}`))}, nil
+	})}
+	if _, _, err := store(ctx, "https://provider.test/mask.png", "http://internal", "internal", download, upload); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"auxiliaryName":"transparent_overlay"`) {
+			t.Fatal("unscoped deletion")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0}`))}, nil
+	})}
+	if err := deleteArchivedImage(ctx, "http://internal", "internal", "aux-task", 0, "image/png", client); err != nil {
+		t.Fatal(err)
+	}
+	bad := WithAuxiliaryName(ctx, "../main")
+	if err := deleteArchivedImage(bad, "http://internal", "internal", "aux-task", 0, "image/png", client); err != ErrStorage {
+		t.Fatal("invalid auxiliary name accepted")
+	}
+}
+
+func TestLargeBatchDeletionPreservesScopedIndices(t *testing.T) {
+	for _, index := range []int{15, 16, 35, 1023} {
+		client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(r.Body)
+			var value map[string]any
+			if json.Unmarshal(body, &value) != nil || value["outputIndex"] != float64(index) || value["taskId"] != "large-task" {
+				t.Fatal("wrong archive identity")
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0}`))}, nil
+		})}
+		if err := deleteArchivedImage(context.Background(), "http://internal", "internal", "large-task", index, "image/png", client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) { t.Fatal("invalid index reached storage"); return nil, nil })}
+	for _, index := range []int{-1, 1024} {
+		if err := deleteArchivedImage(context.Background(), "http://internal", "internal", "large-task", index, "image/png", client); err != ErrStorage {
+			t.Fatal("out of bounds identity accepted")
+		}
 	}
 }

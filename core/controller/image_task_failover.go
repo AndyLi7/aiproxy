@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/labring/aiproxy/core/common/imagecapabilities"
+	"github.com/labring/aiproxy/core/common/imageprepayment"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +45,13 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 	defer cancel()
 	for {
 		expected := len(task.Attempts)
+		if task.PrepaymentQuoteJSON != "" {
+			claimed, err := imageprepayment.Begin(ctx, task, mt.Channel.ID, mt.ActualModel, expected)
+			if err != nil || !claimed {
+				c.JSON(202, publicImageTask(c, task))
+				return
+			}
+		}
 		task.Attempts = append(task.Attempts, model.ImageTaskAttempt{ChannelID: mt.Channel.ID, StartedAt: time.Now(), Failure: failover.Failure{Acceptance: failover.Unknown, Class: failover.UnknownFailure}, Decision: "in_flight", PotentialCost: "unverified"})
 		if model.SaveImageTaskAttempt(task, expected, mt.Channel.ID, mt.Channel.BaseURL) != nil {
 			imageTaskHTTPError(c, 503, "task_store_unavailable")
@@ -79,6 +88,12 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 			imageTaskHTTPError(c, 503, "task_store_unavailable")
 			return
 		}
+		if task.PrepaymentQuoteJSON != "" && failure.Acceptance == failover.NotAccepted {
+			if err := imageprepayment.Reject(ctx, task, expected); err != nil {
+				c.JSON(202, publicImageTask(c, task))
+				return
+			}
+		}
 		if err == nil {
 			if synchronous {
 				finishSyncImageTask(c, task, result, nil)
@@ -89,6 +104,10 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 				return
 			}
 			task.Status = "queued"
+			task.UpstreamID = upstream
+			if task.PrepaymentQuoteJSON != "" {
+				_, _ = imageprepayment.Sync(ctx, task)
+			}
 			c.JSON(202, task)
 			return
 		}
@@ -129,6 +148,10 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 		if failure.Acceptance == failover.NotAccepted {
 			status = "failed"
 			taskError = &model.ImageTaskError{Code: "submission_rejected", Message: "Upstream rejected image submission"}
+			var detail *adaptor.ImageSubmissionFailure
+			if errors.As(err, &detail) && detail.PublicError != nil {
+				taskError = detail.PublicError
+			}
 		}
 		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
 			imageTaskHTTPError(c, 503, "task_store_unavailable")
@@ -206,6 +229,12 @@ func nextImageTaskCandidate(c *gin.Context, ctx context.Context, task *model.Ima
 			}
 		}
 		mt := NewMetaByContext(c, channel, mode.ImagesGenerations)
+		if task.PrepaymentQuoteJSON != "" {
+			q, err := model.ParseImagePrepaymentQuote(task.PrepaymentQuoteJSON)
+			if err != nil || q.Route(channel.ID, mt.ActualModel) == nil {
+				continue
+			}
+		}
 		task.ValidationContract = string(frozen)
 		task.UpstreamModel = mt.ActualModel
 		task.ChannelType = mt.Channel.Type

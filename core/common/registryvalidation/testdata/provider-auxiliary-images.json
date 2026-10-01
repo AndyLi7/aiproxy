@@ -1,0 +1,1176 @@
+[
+  {
+    "endpoint": "fal-ai/birefnet",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-0/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "model": {
+            "default": "General Use (Light)",
+            "type": "string",
+            "enum": [
+              "General Use (Light)",
+              "General Use (Heavy)",
+              "Portrait"
+            ],
+            "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet-DIS_ep580.pth\n            - 'General Use (Heavy)': BiRefNet-massive-epoch_240.pth\n            - 'Portrait': BiRefNet-portrait-TR_P3M_10k-epoch_120.pth\n        "
+          },
+          "operating_resolution": {
+            "default": "1024x1024",
+            "type": "string",
+            "enum": [
+              "1024x1024",
+              "2048x2048"
+            ],
+            "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images."
+          },
+          "output_format": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "webp",
+              "png",
+              "gif"
+            ],
+            "description": "The format of the output image"
+          },
+          "output_mask": {
+            "default": false,
+            "type": "boolean",
+            "description": "Whether to output the mask used to remove the background"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to remove background from"
+          },
+          "refine_foreground": {
+            "default": true,
+            "type": "boolean",
+            "description": "Whether to refine the foreground using the estimated mask"
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "model",
+          "operating_resolution",
+          "output_format",
+          "output_mask",
+          "image_url",
+          "refine_foreground",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "enum": [
+              "General Use (Light)",
+              "General Use (Heavy)",
+              "Portrait"
+            ],
+            "title": "Model",
+            "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet-DIS_ep580.pth\n            - 'General Use (Heavy)': BiRefNet-massive-epoch_240.pth\n            - 'Portrait': BiRefNet-portrait-TR_P3M_10k-epoch_120.pth\n        ",
+            "uiControl": "select"
+          },
+          "operating_resolution": {
+            "type": "string",
+            "enum": [
+              "1024x1024",
+              "2048x2048"
+            ],
+            "title": "Operating Resolution",
+            "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images.",
+            "uiControl": "select"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "webp",
+              "png",
+              "gif"
+            ],
+            "title": "Output Format",
+            "description": "The format of the output image",
+            "uiControl": "select"
+          },
+          "output_mask": {
+            "type": "boolean",
+            "title": "Output Mask",
+            "description": "Whether to output the mask used to remove the background"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to remove background from"
+          },
+          "refine_foreground": {
+            "type": "boolean",
+            "title": "Refine Foreground",
+            "description": "Whether to refine the foreground using the estimated mask"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "model": "General Use (Light)",
+        "operating_resolution": "1024x1024",
+        "output_format": "png",
+        "output_mask": false,
+        "refine_foreground": true,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "content_type": {
+                              "type": "string"
+                            },
+                            "width": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "url_expires_at": {
+                              "type": "string",
+                              "description": "ISO 8601 expiry time of this signed asset URL."
+                            }
+                          },
+                          "required": [
+                            "url"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "model": "model",
+            "operating_resolution": "operating_resolution",
+            "output_format": "output_format",
+            "output_mask": "output_mask",
+            "image_url": "image_url",
+            "refine_foreground": "refine_foreground"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fbirefnet",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fbirefnet",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 1,
+              "primary": "image",
+              "fields": [
+                "mask_image"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/birefnet",
+            "revision": "audit",
+            "endpoint": "fal-ai/birefnet",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/birefnet/requests/{request_id}",
+              "statusEndpoint": "fal-ai/birefnet/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "General Use (Light)",
+                    "General Use (Heavy)",
+                    "Portrait"
+                  ],
+                  "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet-DIS_ep580.pth\n            - 'General Use (Heavy)': BiRefNet-massive-epoch_240.pth\n            - 'Portrait': BiRefNet-portrait-TR_P3M_10k-epoch_120.pth\n        "
+                },
+                "operating_resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1024x1024",
+                    "2048x2048"
+                  ],
+                  "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "webp",
+                    "png",
+                    "gif"
+                  ],
+                  "description": "The format of the output image"
+                },
+                "output_mask": {
+                  "type": "boolean",
+                  "description": "Whether to output the mask used to remove the background"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to remove background from"
+                },
+                "refine_foreground": {
+                  "type": "boolean",
+                  "description": "Whether to refine the foreground using the estimated mask"
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "General Use (Light)",
+                    "General Use (Heavy)",
+                    "Portrait"
+                  ],
+                  "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet-DIS_ep580.pth\n            - 'General Use (Heavy)': BiRefNet-massive-epoch_240.pth\n            - 'Portrait': BiRefNet-portrait-TR_P3M_10k-epoch_120.pth\n        "
+                },
+                "operating_resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1024x1024",
+                    "2048x2048"
+                  ],
+                  "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "webp",
+                    "png",
+                    "gif"
+                  ],
+                  "description": "The format of the output image"
+                },
+                "output_mask": {
+                  "type": "boolean",
+                  "description": "Whether to output the mask used to remove the background"
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to remove background from"
+                },
+                "refine_foreground": {
+                  "type": "boolean",
+                  "description": "Whether to refine the foreground using the estimated mask"
+                }
+              },
+              "required": [
+                "sync_mode",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image"
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {}
+                },
+                "mask_image": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "description": "The URL where the file can be downloaded from."
+                        },
+                        "file_name": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The name of the file. It will be auto-generated if not provided."
+                        },
+                        "content_type": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The mime type of the file."
+                        },
+                        "width": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The width of the image"
+                        },
+                        "file_size": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The size of the file in bytes."
+                        },
+                        "height": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The height of the image"
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Mask used to remove the background"
+                }
+              },
+              "required": [
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:aba89cb8e7f6e3e288d4c97d9c8a75566bdc82a6bf06301f6602f877cb0f47e9"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "model": "admission/model-0/edit",
+      "operating_resolution": "1024x1024",
+      "output_format": "webp",
+      "output_mask": false,
+      "image_url": "https://example.com/reference.png",
+      "refine_foreground": false,
+      "n": 1
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "fal-ai/birefnet/v2",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-1/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "model": {
+            "default": "General Use (Light)",
+            "type": "string",
+            "enum": [
+              "General Use (Light)",
+              "General Use (Light 2K)",
+              "General Use (Heavy)",
+              "Matting",
+              "Portrait",
+              "General Use (Dynamic)"
+            ],
+            "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Light 2K)' model is the original model used in the BiRefNet repository but trained with 2K images.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Matting' model is a model trained specifically for matting images.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Dynamic)' model supports dynamic resolutions from 256x256 to 2304x2304.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet\n            - 'General Use (Light 2K)': BiRefNet_lite-2K\n            - 'General Use (Heavy)': BiRefNet_lite\n            - 'Matting': BiRefNet-matting\n            - 'Portrait': BiRefNet-portrait\n            - 'General Use (Dynamic)': BiRefNet_dynamic\n        "
+          },
+          "operating_resolution": {
+            "default": "1024x1024",
+            "type": "string",
+            "enum": [
+              "1024x1024",
+              "2048x2048",
+              "2304x2304"
+            ],
+            "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images. The '2304x2304' option is only available for the 'General Use (Dynamic)' model."
+          },
+          "mask_only": {
+            "default": false,
+            "type": "boolean",
+            "description": "Whether to return only the segmentation mask without applying it to the image. When set to `True`, only the mask will be returned and foreground refinement will be skipped. Useful for reducing computation and data transfer when only the mask is needed."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to remove background from"
+          },
+          "refine_foreground": {
+            "default": true,
+            "type": "boolean",
+            "description": "Whether to refine the foreground using the estimated mask"
+          },
+          "output_mask": {
+            "default": false,
+            "type": "boolean",
+            "description": "Whether to output the mask used to remove the background"
+          },
+          "output_format": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "webp",
+              "png",
+              "gif"
+            ],
+            "description": "The format of the output image"
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "model",
+          "operating_resolution",
+          "mask_only",
+          "image_url",
+          "refine_foreground",
+          "output_mask",
+          "output_format",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "enum": [
+              "General Use (Light)",
+              "General Use (Light 2K)",
+              "General Use (Heavy)",
+              "Matting",
+              "Portrait",
+              "General Use (Dynamic)"
+            ],
+            "title": "Model",
+            "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Light 2K)' model is the original model used in the BiRefNet repository but trained with 2K images.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Matting' model is a model trained specifically for matting images.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Dynamic)' model supports dynamic resolutions from 256x256 to 2304x2304.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet\n            - 'General Use (Light 2K)': BiRefNet_lite-2K\n            - 'General Use (Heavy)': BiRefNet_lite\n            - 'Matting': BiRefNet-matting\n            - 'Portrait': BiRefNet-portrait\n            - 'General Use (Dynamic)': BiRefNet_dynamic\n        ",
+            "uiControl": "select"
+          },
+          "operating_resolution": {
+            "type": "string",
+            "enum": [
+              "1024x1024",
+              "2048x2048",
+              "2304x2304"
+            ],
+            "title": "Operating Resolution",
+            "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images. The '2304x2304' option is only available for the 'General Use (Dynamic)' model.",
+            "uiControl": "select"
+          },
+          "mask_only": {
+            "type": "boolean",
+            "title": "Mask Only",
+            "description": "Whether to return only the segmentation mask without applying it to the image. When set to `True`, only the mask will be returned and foreground refinement will be skipped. Useful for reducing computation and data transfer when only the mask is needed."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to remove background from"
+          },
+          "refine_foreground": {
+            "type": "boolean",
+            "title": "Refine Foreground",
+            "description": "Whether to refine the foreground using the estimated mask"
+          },
+          "output_mask": {
+            "type": "boolean",
+            "title": "Output Mask",
+            "description": "Whether to output the mask used to remove the background"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "webp",
+              "png",
+              "gif"
+            ],
+            "title": "Output Format",
+            "description": "The format of the output image",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "model": "General Use (Light)",
+        "operating_resolution": "1024x1024",
+        "mask_only": false,
+        "refine_foreground": true,
+        "output_mask": false,
+        "output_format": "png",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "content_type": {
+                              "type": "string"
+                            },
+                            "width": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "url_expires_at": {
+                              "type": "string",
+                              "description": "ISO 8601 expiry time of this signed asset URL."
+                            }
+                          },
+                          "required": [
+                            "url"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "model": "model",
+            "operating_resolution": "operating_resolution",
+            "mask_only": "mask_only",
+            "image_url": "image_url",
+            "refine_foreground": "refine_foreground",
+            "output_mask": "output_mask",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fbirefnet%2Fv2",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fbirefnet%2Fv2",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 1,
+              "primary": "image",
+              "fields": [
+                "mask_image"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/birefnet/v2",
+            "revision": "audit",
+            "endpoint": "fal-ai/birefnet/v2",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/birefnet/v2/requests/{request_id}",
+              "statusEndpoint": "fal-ai/birefnet/v2/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "General Use (Light)",
+                    "General Use (Light 2K)",
+                    "General Use (Heavy)",
+                    "Matting",
+                    "Portrait",
+                    "General Use (Dynamic)"
+                  ],
+                  "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Light 2K)' model is the original model used in the BiRefNet repository but trained with 2K images.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Matting' model is a model trained specifically for matting images.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Dynamic)' model supports dynamic resolutions from 256x256 to 2304x2304.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet\n            - 'General Use (Light 2K)': BiRefNet_lite-2K\n            - 'General Use (Heavy)': BiRefNet_lite\n            - 'Matting': BiRefNet-matting\n            - 'Portrait': BiRefNet-portrait\n            - 'General Use (Dynamic)': BiRefNet_dynamic\n        "
+                },
+                "operating_resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1024x1024",
+                    "2048x2048",
+                    "2304x2304"
+                  ],
+                  "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images. The '2304x2304' option is only available for the 'General Use (Dynamic)' model."
+                },
+                "mask_only": {
+                  "type": "boolean",
+                  "description": "Whether to return only the segmentation mask without applying it to the image. When set to `True`, only the mask will be returned and foreground refinement will be skipped. Useful for reducing computation and data transfer when only the mask is needed."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to remove background from"
+                },
+                "refine_foreground": {
+                  "type": "boolean",
+                  "description": "Whether to refine the foreground using the estimated mask"
+                },
+                "output_mask": {
+                  "type": "boolean",
+                  "description": "Whether to output the mask used to remove the background"
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "webp",
+                    "png",
+                    "gif"
+                  ],
+                  "description": "The format of the output image"
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "General Use (Light)",
+                    "General Use (Light 2K)",
+                    "General Use (Heavy)",
+                    "Matting",
+                    "Portrait",
+                    "General Use (Dynamic)"
+                  ],
+                  "description": "\n            Model to use for background removal.\n            The 'General Use (Light)' model is the original model used in the BiRefNet repository.\n            The 'General Use (Light 2K)' model is the original model used in the BiRefNet repository but trained with 2K images.\n            The 'General Use (Heavy)' model is a slower but more accurate model.\n            The 'Matting' model is a model trained specifically for matting images.\n            The 'Portrait' model is a model trained specifically for portrait images.\n            The 'General Use (Dynamic)' model supports dynamic resolutions from 256x256 to 2304x2304.\n            The 'General Use (Light)' model is recommended for most use cases.\n\n            The corresponding models are as follows:\n            - 'General Use (Light)': BiRefNet\n            - 'General Use (Light 2K)': BiRefNet_lite-2K\n            - 'General Use (Heavy)': BiRefNet_lite\n            - 'Matting': BiRefNet-matting\n            - 'Portrait': BiRefNet-portrait\n            - 'General Use (Dynamic)': BiRefNet_dynamic\n        "
+                },
+                "operating_resolution": {
+                  "type": "string",
+                  "enum": [
+                    "1024x1024",
+                    "2048x2048",
+                    "2304x2304"
+                  ],
+                  "description": "The resolution to operate on. The higher the resolution, the more accurate the output will be for high res input images. The '2304x2304' option is only available for the 'General Use (Dynamic)' model."
+                },
+                "mask_only": {
+                  "type": "boolean",
+                  "description": "Whether to return only the segmentation mask without applying it to the image. When set to `True`, only the mask will be returned and foreground refinement will be skipped. Useful for reducing computation and data transfer when only the mask is needed."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to remove background from"
+                },
+                "refine_foreground": {
+                  "type": "boolean",
+                  "description": "Whether to refine the foreground using the estimated mask"
+                },
+                "output_mask": {
+                  "type": "boolean",
+                  "description": "Whether to output the mask used to remove the background"
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "webp",
+                    "png",
+                    "gif"
+                  ],
+                  "description": "The format of the output image"
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                }
+              },
+              "required": [
+                "image_url",
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image"
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {}
+                },
+                "mask_image": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "description": "The URL where the file can be downloaded from."
+                        },
+                        "file_name": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The name of the file. It will be auto-generated if not provided."
+                        },
+                        "content_type": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The mime type of the file."
+                        },
+                        "width": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The width of the image"
+                        },
+                        "file_size": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The size of the file in bytes."
+                        },
+                        "height": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The height of the image"
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Mask used to remove the background"
+                }
+              },
+              "required": [
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:fa4801c2c5534a358b1059a2015651b62b57a82f632b79931615bf251c638dc7"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "model": "admission/model-1/edit",
+      "operating_resolution": "1024x1024",
+      "mask_only": false,
+      "image_url": "https://example.com/reference.png",
+      "refine_foreground": false,
+      "output_mask": false,
+      "output_format": "webp",
+      "n": 1
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  }
+]

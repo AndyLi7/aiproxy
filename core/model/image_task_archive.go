@@ -9,14 +9,14 @@ import (
 // SaveArchivedImage checkpoints each successful upload; retrying storage never
 // returns to provider submission or discards already archived outputs.
 func SaveArchivedImage(task *ImageTask, index int, output ImageOutput) error {
-	if task.Status != "result_processing" || index < 0 || index >= len(task.Data) || !output.Stored {
+	if task.Status != "result_processing" || index < 0 || index >= len(task.Data) || !output.Stored || !ValidAuxiliaryImages(output) {
 		return errors.New("invalid archive checkpoint")
 	}
 	before, err := json.Marshal(task.Data)
 	if err != nil {
 		return err
 	}
-	next := append([]ImageOutput(nil), task.Data...)
+	next := CloneImageOutputs(task.Data)
 	next[index] = output
 	after, err := json.Marshal(next)
 	if err != nil {
@@ -38,8 +38,13 @@ func CompleteImageArchive(task *ImageTask) error {
 		return errors.New("empty archive")
 	}
 	for _, out := range task.Data {
-		if !out.Stored {
+		if !out.Stored || !ValidAuxiliaryImages(out) {
 			return errors.New("incomplete archive")
+		}
+		for _, asset := range out.AuxiliaryImages {
+			if asset != nil && !asset.Stored {
+				return errors.New("incomplete auxiliary archive")
+			}
 		}
 	}
 	now := time.Now().UTC()

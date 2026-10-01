@@ -1,0 +1,1148 @@
+[
+  {
+    "endpoint": "fal-ai/lcm-sd15-i2i",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-354/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "negative_prompt": {
+            "default": "",
+            "type": "string",
+            "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The image to use as a base."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+          },
+          "request_id": {
+            "default": "",
+            "type": "string",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "num_inference_steps": {
+            "default": 4,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mask URL for compatibility with generic LCM processing."
+          },
+          "guidance_scale": {
+            "default": 1,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16,
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+          },
+          "strength": {
+            "default": 0.8,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The strength of the image."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          }
+        },
+        "required": [
+          "negative_prompt",
+          "image_url",
+          "prompt",
+          "n",
+          "request_id",
+          "num_inference_steps",
+          "guidance_scale",
+          "strength"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "The image to use as a base."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results.",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "title": "Num Images",
+            "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "title": "Num Inference Steps",
+            "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Url",
+            "description": "Mask URL for compatibility with generic LCM processing."
+          },
+          "guidance_scale": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16,
+            "title": "Guidance scale (CFG)",
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+          },
+          "strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "Strength",
+            "description": "The strength of the image."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          }
+        },
+        "required": [
+          "image_url",
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "negative_prompt": "",
+        "n": 1,
+        "request_id": "",
+        "num_inference_steps": 4,
+        "guidance_scale": 1,
+        "strength": 0.8
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "num_inference_steps": {
+                "default": 4,
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "\n            Number of inference steps used to generate the image. It will be the same value of the one passed in the\n            input or the default one in case none was passed.\n        "
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "negative_prompt": "negative_prompt",
+            "image_url": "image_url",
+            "prompt": "prompt",
+            "n": "num_images",
+            "request_id": "request_id",
+            "num_inference_steps": "num_inference_steps",
+            "mask_url": "mask_url",
+            "guidance_scale": "guidance_scale",
+            "strength": "strength",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checks": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Flcm-sd15-i2i",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Flcm-sd15-i2i",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "num_inference_steps"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ],
+                [
+                  "mask_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:fal-ai/lcm-sd15-i2i",
+            "revision": "audit",
+            "endpoint": "fal-ai/lcm-sd15-i2i",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/lcm-sd15-i2i/requests/{request_id}",
+              "statusEndpoint": "fal-ai/lcm-sd15-i2i/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "negative_prompt": {
+                  "type": "string",
+                  "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to use as a base."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "num_inference_steps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12,
+                  "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+                },
+                "mask_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Mask URL for compatibility with generic LCM processing."
+                },
+                "guidance_scale": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 16,
+                  "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The strength of the image."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                }
+              },
+              "required": [
+                "image_url",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "negative_prompt": {
+                  "type": "string",
+                  "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to use as a base."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "num_inference_steps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12,
+                  "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+                },
+                "mask_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Mask URL for compatibility with generic LCM processing."
+                },
+                "guidance_scale": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 16,
+                  "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+                },
+                "enable_safety_checks": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The strength of the image."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                }
+              },
+              "required": [
+                "sync_mode",
+                "image_url",
+                "prompt",
+                "enable_safety_checks"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                },
+                "request_id": {
+                  "default": "",
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "num_inference_steps": {
+                  "default": 4,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Number of inference steps used to generate the image. It will be the same value of the one passed in the\n            input or the default one in case none was passed.\n        "
+                },
+                "nsfw_content_detected": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "description": "\n            A list of booleans indicating whether the generated image contains any\n            potentially unsafe content. If the safety check is disabled, this field\n            will have a false for each generated image.\n        "
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "content_type": {
+                        "default": "image/jpeg",
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "height",
+                      "width",
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The generated image files info."
+                },
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "seed",
+                "nsfw_content_detected",
+                "images",
+                "timings"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:da816f61d8c27085e631f720f8bbd232eb53bdadc9b36361ead89839d4322051"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "negative_prompt": "test",
+      "image_url": "https://example.com/reference.png",
+      "prompt": "test",
+      "n": 1,
+      "request_id": "test",
+      "num_inference_steps": 1,
+      "guidance_scale": 0,
+      "strength": 0,
+      "model": "admission/model-354/edit"
+    },
+    "response": {
+      "seed": 0,
+      "nsfw_content_detected": [
+        false
+      ],
+      "images": [
+        {
+          "height": 0,
+          "width": 0,
+          "url": "https://example.com/reference.png"
+        }
+      ],
+      "timings": {}
+    }
+  },
+  {
+    "endpoint": "fal-ai/lcm-sd15-i2i",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-354/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "negative_prompt": {
+            "default": "",
+            "type": "string",
+            "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The image to use as a base."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+          },
+          "request_id": {
+            "default": "",
+            "type": "string",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "num_inference_steps": {
+            "default": 4,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mask URL for compatibility with generic LCM processing."
+          },
+          "guidance_scale": {
+            "default": 1,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16,
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+          },
+          "strength": {
+            "default": 0.8,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The strength of the image."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          }
+        },
+        "required": [
+          "negative_prompt",
+          "image_url",
+          "prompt",
+          "n",
+          "request_id",
+          "num_inference_steps",
+          "guidance_scale",
+          "strength"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "The image to use as a base."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results.",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "title": "Num Images",
+            "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "title": "Num Inference Steps",
+            "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Url",
+            "description": "Mask URL for compatibility with generic LCM processing."
+          },
+          "guidance_scale": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16,
+            "title": "Guidance scale (CFG)",
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+          },
+          "strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "Strength",
+            "description": "The strength of the image."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          }
+        },
+        "required": [
+          "image_url",
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "negative_prompt": "",
+        "n": 1,
+        "request_id": "",
+        "num_inference_steps": 4,
+        "guidance_scale": 1,
+        "strength": 0.8
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "num_inference_steps": {
+                "default": 4,
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "\n            Number of inference steps used to generate the image. It will be the same value of the one passed in the\n            input or the default one in case none was passed.\n        "
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "negative_prompt": "negative_prompt",
+            "image_url": "image_url",
+            "prompt": "prompt",
+            "n": "num_images",
+            "request_id": "request_id",
+            "num_inference_steps": "num_inference_steps",
+            "mask_url": "mask_url",
+            "guidance_scale": "guidance_scale",
+            "strength": "strength",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checks": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Flcm-sd15-i2i",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Flcm-sd15-i2i",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "num_inference_steps"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ],
+                [
+                  "mask_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:fal-ai/lcm-sd15-i2i",
+            "revision": "audit",
+            "endpoint": "fal-ai/lcm-sd15-i2i",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/lcm-sd15-i2i/requests/{request_id}",
+              "statusEndpoint": "fal-ai/lcm-sd15-i2i/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "negative_prompt": {
+                  "type": "string",
+                  "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to use as a base."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "num_inference_steps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12,
+                  "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+                },
+                "mask_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Mask URL for compatibility with generic LCM processing."
+                },
+                "guidance_scale": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 16,
+                  "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The strength of the image."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                }
+              },
+              "required": [
+                "image_url",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "negative_prompt": {
+                  "type": "string",
+                  "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to use as a base."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "\n            The number of images to generate. The function will return a list of images\n            with the same prompt and negative prompt but different seeds.\n        "
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "num_inference_steps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12,
+                  "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+                },
+                "mask_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Mask URL for compatibility with generic LCM processing."
+                },
+                "guidance_scale": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 16,
+                  "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+                },
+                "enable_safety_checks": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The strength of the image."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                }
+              },
+              "required": [
+                "sync_mode",
+                "image_url",
+                "prompt",
+                "enable_safety_checks"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                },
+                "request_id": {
+                  "default": "",
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "num_inference_steps": {
+                  "default": 4,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Number of inference steps used to generate the image. It will be the same value of the one passed in the\n            input or the default one in case none was passed.\n        "
+                },
+                "nsfw_content_detected": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "description": "\n            A list of booleans indicating whether the generated image contains any\n            potentially unsafe content. If the safety check is disabled, this field\n            will have a false for each generated image.\n        "
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "content_type": {
+                        "default": "image/jpeg",
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "height",
+                      "width",
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The generated image files info."
+                },
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "seed",
+                "nsfw_content_detected",
+                "images",
+                "timings"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:da816f61d8c27085e631f720f8bbd232eb53bdadc9b36361ead89839d4322051"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "negative_prompt": "",
+      "image_url": "https://example.com/reference.png",
+      "prompt": "test",
+      "n": 1,
+      "request_id": "",
+      "num_inference_steps": 4,
+      "guidance_scale": 1,
+      "strength": 0.8,
+      "model": "admission/model-354/edit"
+    },
+    "response": {
+      "seed": 0,
+      "nsfw_content_detected": [
+        false
+      ],
+      "images": [
+        {
+          "height": 0,
+          "width": 0,
+          "url": "https://example.com/reference.png"
+        }
+      ],
+      "timings": {}
+    }
+  }
+]

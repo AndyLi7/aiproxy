@@ -42,6 +42,10 @@ func SetRelayRouter(router *gin.Engine) {
 		modelsRouter.GET("/:model", controller.RetrieveModel)
 	}
 
+	v1Router.POST("/model-tasks", controller.NativeTasks()...)
+	v1Router.GET("/model-tasks/:id", controller.GetNativeTask)
+	v1Router.GET("/model-tasks/:id/artifacts/:index", controller.GetNativeTaskArtifact)
+
 	v1Router.POST("/images/tasks", controller.ImageTasks()...)
 	v1Router.GET("/images/tasks/:id", controller.GetImageTask)
 

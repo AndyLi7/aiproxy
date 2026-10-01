@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	_ "golang.org/x/image/webp"
 	"image"
+	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
@@ -24,7 +26,21 @@ const MaxBytes = 10 * 1024 * 1024
 
 var ErrStorage = errors.New("generated image storage failed")
 
+// Permanent delivery failure: retrying the same bytes cannot reduce their size.
+var ErrTooLarge = errors.New("generated image exceeds archive size limit")
+
 type archiveIdentityKey struct{}
+type auxiliaryNameKey struct{}
+
+// WithAuxiliaryName scopes an owned mask to its parent output without counting it as another generation.
+func WithAuxiliaryName(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, auxiliaryNameKey{}, name)
+}
+func AuxiliaryName(ctx context.Context) string {
+	name, _ := ctx.Value(auxiliaryNameKey{}).(string)
+	return name
+}
+
 type archiveIdentity struct {
 	taskID string
 	index  int
@@ -110,10 +126,17 @@ func deleteArchivedImage(ctx context.Context, base, key, taskID string, index in
 	if err != nil || destination.Host == "" || (destination.Scheme != "https" && destination.Scheme != "http") || destination.User != nil || destination.RawQuery != "" || destination.Fragment != "" || key == "" {
 		return ErrStorage
 	}
-	if index < 0 || index > 15 || taskID == "" {
+	if index < 0 || index >= imagecapabilities.MaxOutputs || taskID == "" {
 		return ErrStorage
 	}
-	body, err := json.Marshal(map[string]any{"taskId": taskID, "outputIndex": index, "contentType": contentType})
+	bodyFields := map[string]any{"taskId": taskID, "outputIndex": index, "contentType": contentType}
+	if name := AuxiliaryName(ctx); name != "" {
+		if !imagecapabilities.ValidAuxiliaryImageName(name) {
+			return ErrStorage
+		}
+		bodyFields["auxiliaryName"] = name
+	}
+	body, err := json.Marshal(bodyFields)
 	if err != nil {
 		return ErrStorage
 	}
@@ -162,19 +185,29 @@ func storeWithMetadata(ctx context.Context, source, base, key string, download, 
 		return fail()
 	}
 	defer response.Body.Close()
-	if response.StatusCode != 200 || response.ContentLength > MaxBytes {
+	if response.ContentLength > MaxBytes {
+		return "", "", ErrTooLarge
+	}
+	if response.StatusCode != 200 {
 		return fail()
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, MaxBytes+1))
-	if err != nil || len(data) == 0 || len(data) > MaxBytes {
+	if len(data) > MaxBytes {
+		return "", "", ErrTooLarge
+	}
+	if err != nil || len(data) == 0 {
 		return fail()
 	}
 	mime := http.DetectContentType(data)
-	if mime != "image/jpeg" && mime != "image/png" && mime != "image/webp" {
+	if mime != "image/jpeg" && mime != "image/png" && mime != "image/webp" && mime != "image/gif" {
+		return fail()
+	}
+	inspected := Inspect(data)
+	if mime == "image/gif" && (inspected.Width <= 0 || inspected.Height <= 0) {
 		return fail()
 	}
 	if metadata != nil {
-		*metadata = Inspect(data)
+		*metadata = inspected
 	}
 	endpoint := strings.TrimRight(base, "/") + "/api/internal/media/images"
 	request, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
@@ -183,6 +216,15 @@ func storeWithMetadata(ctx context.Context, source, base, key string, download, 
 	}
 	request.Header.Set("Authorization", "Bearer "+key)
 	request.Header.Set("Content-Type", mime)
+	if name := AuxiliaryName(ctx); name != "" {
+		if !imagecapabilities.ValidAuxiliaryImageName(name) {
+			return fail()
+		}
+		if _, ok := ctx.Value(archiveIdentityKey{}).(archiveIdentity); !ok {
+			return fail()
+		}
+		request.Header.Set("X-Musespan-Image-Auxiliary-Name", name)
+	}
 	if identity, ok := ctx.Value(archiveIdentityKey{}).(archiveIdentity); ok {
 		request.Header.Set("X-Musespan-Image-Task-ID", identity.taskID)
 		request.Header.Set("X-Musespan-Image-Output-Index", strconv.Itoa(identity.index))

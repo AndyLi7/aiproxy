@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/imagecapabilities"
+	"github.com/labring/aiproxy/core/common/imageprepayment"
 	"github.com/labring/aiproxy/core/common/ownedimage"
 	"math"
 	"net/http"
@@ -97,6 +99,12 @@ func GetImageTask(c *gin.Context) {
 		return
 	}
 
+	if task.PrepaymentQuoteJSON != "" && !task.BillingSettled {
+		if _, err := imageprepayment.Sync(c.Request.Context(), task); err != nil {
+			imageTaskHTTPError(c, 503, "billing_status_unavailable")
+			return
+		}
+	}
 	enrichCompletedImageTask(c.Request.Context(), task)
 	c.JSON(200, publicImageTask(c, task))
 }
@@ -319,6 +327,26 @@ func submitImageTask(c *gin.Context) {
 		price = model.Price{}
 	}
 
+	quote, prepaymentJSON, quoteErr := mc.ImagePrepaymentQuote()
+	if quoteErr != nil {
+		imageTaskHTTPError(c, 503, "prepayment_quote_unavailable")
+		return
+	}
+	if adminDemo {
+		quote = nil
+		prepaymentJSON = ""
+	}
+	if quote != nil {
+		quote, prepaymentJSON, quoteErr = quote.ForMaximumOutputs(int64(metering.MaximumOutputs))
+		if quoteErr != nil {
+			imageTaskHTTPError(c, 503, "prepayment_quantity_unavailable")
+			return
+		}
+	}
+	if quote != nil && quote.Route(mt.Channel.ID, mt.ActualModel) == nil {
+		imageTaskHTTPError(c, 503, "prepayment_route_unavailable")
+		return
+	}
 	requestAt := time.Now()
 	// Queue image contracts expose a validated image count, so the known output
 	// charge can be checked before any paid work is reserved or submitted.
@@ -348,7 +376,7 @@ func submitImageTask(c *gin.Context) {
 		requiredBalance = math.Max(maximum, middleware.GetGroupMinimumBalance())
 	}
 
-	if !adminDemo {
+	if !adminDemo && quote == nil {
 		balanceConsumer := middleware.GetGroupBalanceConsumerFromContext(c)
 		if balanceConsumer == nil || balanceConsumer.CheckBalance == nil {
 			imageTaskHTTPError(c, 503, "balance_unavailable")
@@ -363,6 +391,7 @@ func submitImageTask(c *gin.Context) {
 
 	info := &model.AsyncUsageInfo{
 		InternalImageTask:           adminDemo,
+		BillingOperationID:          mt.BillingOperationID,
 		RequestID:                   id,
 		RequestAt:                   requestAt,
 		UsageContext:                requestUsage.Context,
@@ -403,19 +432,21 @@ func submitImageTask(c *gin.Context) {
 
 	task, created, err := model.ReserveImageTask(
 		&model.ImageTask{
-			ArchiveRequired:    ownedimage.Configured(),
-			ID:                 id,
-			Model:              wrapper.ID,
-			RequestModel:       middleware.GetRequestedModel(c),
-			ValidationContract: string(rawWrapper.Contract),
-			GroupID:            group.ID,
-			TokenID:            token.ID,
-			Fingerprint:        fingerprint,
-			UpstreamModel:      mt.ActualModel,
-			ChannelType:        mt.Channel.Type,
-			KeyFingerprint:     model.ImageChannelKeyFingerprint(mt.Channel.Key),
-			ExpectedImages:     metering.MaximumOutputs,
-			RequestSummary:     imageTaskLogRequestSummary(body),
+			ArchiveRequired:     ownedimage.Configured(),
+			PrepaymentQuoteJSON: prepaymentJSON,
+			BillingOperationID:  mt.BillingOperationID,
+			ID:                  id,
+			Model:               wrapper.ID,
+			RequestModel:        middleware.GetRequestedModel(c),
+			ValidationContract:  string(rawWrapper.Contract),
+			GroupID:             group.ID,
+			TokenID:             token.ID,
+			Fingerprint:         fingerprint,
+			UpstreamModel:       mt.ActualModel,
+			ChannelType:         mt.Channel.Type,
+			KeyFingerprint:      model.ImageChannelKeyFingerprint(mt.Channel.Key),
+			ExpectedImages:      metering.MaximumOutputs,
+			RequestSummary:      imageTaskLogRequestSummary(body),
 		},
 		info,
 		middleware.OperationalFieldsFromContext(c),
@@ -435,6 +466,28 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
+	if task.PrepaymentQuoteJSON != "" {
+		// Ambiguous wallet replies never authorize paid work. The reserved task and
+		// debit are recovered by their server operation ID; no upstream retry here.
+		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID); err != nil {
+			if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) {
+				if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "insufficient_balance", Message: "Insufficient balance"}); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+				zero := int64(0)
+				task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
+				if err := model.SaveImageTaskBilling(task); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+				imageTaskHTTPError(c, 402, "group_balance_not_enough")
+				return
+			}
+			imageTaskHTTPError(c, 503, "prepayment_pending")
+			return
+		}
+	}
 	dispatchImageTaskWithFailover(c, task, imageAdapter, mt, mappedBody)
 }
 
@@ -546,6 +599,10 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 				Code:    "submission_rejected",
 				Message: "Upstream rejected image submission",
 			}
+			var detail *adaptor.ImageSubmissionFailure
+			if errors.As(err, &detail) && detail.PublicError != nil {
+				taskError = detail.PublicError
+			}
 		}
 
 		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
@@ -578,12 +635,18 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 		return
 	}
 
-	if model.CompleteSyncImageTask(task.ID, result.Data) != nil {
+	if model.CompleteSyncImageTask(task.ID, result.Data, result.Metadata) != nil {
 		imageTaskHTTPError(c, 503, "task_store_unavailable")
 		return
 	}
 
 	task.Status = "completed"
 	task.Data = result.Data
+	task.ProviderMetadata = result.Metadata.ProviderMetadata
+	task.Seed = result.Metadata.Seed
+	task.SeedExact = result.Metadata.SeedExact
+	task.Prompt = result.Metadata.Prompt
+	task.Description = result.Metadata.Description
+	task.NumImages = result.Metadata.NumImages
 	c.JSON(202, publicImageTask(c, task))
 }

@@ -552,6 +552,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		group.Status == model.GroupStatusInternal && channelHeader != ""
 	publicModel := requestModel
 	routingModel := resolveImageCapability(c, mode, requestModel)
+	routingModel = resolveNativeCapability(c, mode, routingModel)
 
 	resolvedLocal := false
 	if isCapabilityCreateMode(mode) {

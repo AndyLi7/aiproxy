@@ -1,0 +1,629 @@
+{
+  "provider_contract_version": 1,
+  "entry_id": "test/native-images/text-to-image",
+  "validation_version": 1,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "max_images": {
+        "default": 1,
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "n": {
+        "default": 1,
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "image_size": {
+        "default": {
+          "height": 2048,
+          "width": 2048
+        },
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "height": {
+                "default": 512,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142
+              },
+              "width": {
+                "default": 512,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142
+              }
+            },
+            "additionalProperties": {}
+          },
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9",
+              "auto_2K",
+              "auto_4K"
+            ]
+          }
+        ]
+      },
+      "elements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "frontal_image_url": {
+              "type": "string",
+              "format": "uri",
+              "x-fal": {
+                "max_width": 4096
+              }
+            },
+            "reference_image_urls": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "frontal_image_url"
+          ],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "required": [
+      "max_images",
+      "prompt",
+      "n",
+      "image_size"
+    ],
+    "additionalProperties": false
+  },
+  "parameter_schema": {
+    "type": "object",
+    "properties": {
+      "max_images": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6,
+        "title": "Max Images"
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Seed"
+      },
+      "prompt": {
+        "type": "string",
+        "title": "Prompt",
+        "uiControl": "textarea"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6,
+        "title": "Num Images"
+      },
+      "image_size": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "height": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142,
+                "default": 512
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14142,
+                "default": 512
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9",
+              "auto_2K",
+              "auto_4K"
+            ]
+          }
+        ],
+        "title": "Image Size",
+        "default": {
+          "height": 2048,
+          "width": 2048
+        }
+      },
+      "elements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "frontal_image_url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "reference_image_urls": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "frontal_image_url"
+          ]
+        },
+        "title": "elements"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "default_parameters": {
+    "max_images": 1,
+    "n": 1,
+    "image_size": {
+      "height": 2048,
+      "width": 2048
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "images": {
+        "minItems": 1,
+        "maxItems": 36,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "additionalProperties": {}
+  },
+  "providers": {
+    "fal": {
+      "adapter": "fal-image",
+      "parameterMapping": {
+        "max_images": "max_images",
+        "seed": "seed",
+        "prompt": "prompt",
+        "n": "num_images",
+        "image_size": "image_size",
+        "elements": "elements"
+      },
+      "allowedPassthroughParameters": [],
+      "fixedParameters": {
+        "sync_mode": false,
+        "enable_safety_checker": true
+      },
+      "billingBasis": {
+        "metric": "image",
+        "dimensions": [],
+        "minimumBillableUnits": 1,
+        "rounding": "none",
+        "sourceUrl": "https://fal.ai/models/fal-ai/test/native-images/api",
+        "verifiedAt": "2026-09-26",
+        "requiresUpstreamUsageBilling": true
+      },
+      "source": {
+        "url": "https://fal.ai/models/fal-ai/test/native-images/api",
+        "verifiedAt": "2026-09-26",
+        "verifiedBy": "test"
+      },
+      "upstream": {
+        "metering": {
+          "nativeImagePaths": [
+            [
+              "elements",
+              "*",
+              "frontal_image_url"
+            ],
+            [
+              "elements",
+              "*",
+              "reference_image_urls",
+              "*"
+            ]
+          ],
+          "version": 6,
+          "outputCountParameter": "num_images",
+          "outputCountMultiplierParameter": "max_images"
+        },
+        "id": "fal:fal-ai/test/native-images",
+        "revision": "v1",
+        "endpoint": "fal-ai/test/native-images",
+        "execution": {
+          "mode": "async",
+          "resultEndpoint": "fal-ai/test/native-images/requests/{request_id}",
+          "statusEndpoint": "fal-ai/test/native-images/requests/{request_id}/status",
+          "supportsCancellation": true
+        },
+        "acceptedInputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "max_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "seed": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "image_size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 14142
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 14142
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "square_hd",
+                    "square",
+                    "portrait_4_3",
+                    "portrait_16_9",
+                    "landscape_4_3",
+                    "landscape_16_9",
+                    "auto_2K",
+                    "auto_4K"
+                  ]
+                }
+              ]
+            },
+            "elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "frontal_image_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "x-fal": {
+                      "max_width": 4096
+                    }
+                  },
+                  "reference_image_urls": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "frontal_image_url"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        "inputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "enable_safety_checker": {
+              "type": "boolean",
+              "const": true
+            },
+            "max_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "seed": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sync_mode": {
+              "type": "boolean",
+              "const": false
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "num_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "image_size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 14142
+                    },
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 14142
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "square_hd",
+                    "square",
+                    "portrait_4_3",
+                    "portrait_16_9",
+                    "landscape_4_3",
+                    "landscape_16_9",
+                    "auto_2K",
+                    "auto_4K"
+                  ]
+                }
+              ]
+            },
+            "elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "frontal_image_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "x-fal": {
+                      "max_width": 4096
+                    }
+                  },
+                  "reference_image_urls": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "frontal_image_url"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": [
+            "enable_safety_checker",
+            "sync_mode",
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        "outputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "seed": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "images": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "height": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "content_type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "file_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "file_size": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "width": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": [
+            "seed",
+            "images"
+          ],
+          "additionalProperties": {}
+        },
+        "contractHash": "sha256:518064dbecbd119c7b2c9682ab869959126d8e6d5a4f54363eef53d3ca1c9694"
+      }
+    }
+  },
+  "execution": {
+    "mode": "async",
+    "endpoint": "/v1/images/tasks",
+    "statusEndpoint": "/v1/images/tasks/{task_id}",
+    "output": "image",
+    "supportsCancellation": false
+  }
+}

@@ -38,7 +38,7 @@ func readMetadata(ctx context.Context, source string, client *http.Client) (Meta
 	reader := bufio.NewReader(io.LimitReader(response.Body, 1<<20))
 	prefix, _ := reader.Peek(512)
 	mime := http.DetectContentType(prefix)
-	if mime != "image/png" && mime != "image/jpeg" && mime != "image/webp" {
+	if mime != "image/png" && mime != "image/jpeg" && mime != "image/webp" && mime != "image/gif" {
 		return Metadata{}, ErrStorage
 	}
 	config, _, err := image.DecodeConfig(reader)

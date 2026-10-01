@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"math/big"
 	"slices"
 )
@@ -12,7 +13,7 @@ import (
 const (
 	ImageBillingMaxSafeInteger int64 = 9007199254740991
 	ImageBillingMaxTiers             = 64
-	ImageBillingMaxOutputs           = 1024
+	ImageBillingMaxOutputs           = imagecapabilities.MaxOutputs
 	ImageBillingMaxDimension   int64 = 10000000
 	ImageBillingMaxRules             = 256
 )

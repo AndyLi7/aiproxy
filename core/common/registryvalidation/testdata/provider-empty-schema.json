@@ -1,0 +1,70 @@
+[
+  {
+    "endpoint": "bria/fibo-bbq-preview/generate",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "default": [],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A list of text to be rendered in the image."
+    }
+  },
+  {
+    "endpoint": "bria/fibo-edit-1.5/edit",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "default": [],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A list of text to be rendered in the image."
+    }
+  },
+  {
+    "endpoint": "bria/fibo-gen-1.5/text-to-image",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "default": [],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A list of text to be rendered in the image."
+    }
+  },
+  {
+    "endpoint": "bria/fibo/generate",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "default": [],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A list of text to be rendered in the image."
+    }
+  }
+]

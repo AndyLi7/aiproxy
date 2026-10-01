@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labring/aiproxy/core/common/consume"
+	"github.com/labring/aiproxy/core/common/imageprepayment"
 	"github.com/labring/aiproxy/core/common/ownedimage"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
@@ -25,7 +26,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 
 	if task.Status == "result_processing" {
 		if err := archiveImageTask(ctx, task, ownedimage.StoreWithMetadata); err != nil {
-			retryImageUsage(info, err)
+			handleImageArchiveFailure(info, task.ID, err)
 			return
 		}
 		completeImageTaskUsage(ctx, info, task.Data)
@@ -110,6 +111,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		result.Status,
 		result.Data,
 		result.Error,
+		result.Metadata,
 	); err != nil {
 		retryImageUsage(info, err)
 		return
@@ -127,7 +129,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	switch saved.Status {
 	case "result_processing":
 		if err := archiveImageTask(ctx, saved, ownedimage.StoreWithMetadata); err != nil {
-			retryImageUsage(info, err)
+			handleImageArchiveFailure(info, task.ID, err)
 			return
 		}
 		completeImageTaskUsage(ctx, info, saved.Data)
@@ -163,6 +165,31 @@ func completeImageTaskUsage(
 	info *model.AsyncUsageInfo,
 	outputs []model.ImageOutput,
 ) {
+	task, err := model.GetImageTask(info.ImageTaskID, info.GroupID, info.TokenID)
+	if err != nil {
+		retryImageUsage(info, err)
+		return
+	}
+	if task.PrepaymentQuoteJSON != "" {
+		receipt, err := imageprepayment.Sync(ctx, task)
+		if err != nil {
+			retryImageUsage(info, err)
+			return
+		}
+		if receipt.ChargedMicros == nil {
+			touchAsyncUsagePollCursor(info)
+			return
+		}
+		// The D34 wallet has already finalized this exact operation. Keep usage/log
+		// accounting, but never invoke legacy post-consumption for a prepaid task.
+		info.BalanceConsumed = true
+		info.Price = model.Price{}
+		info.MeasuredImage = false
+		info.Usage = model.Usage{ImageOutputTokens: model.ZeroNullInt64(len(outputs))}
+		info.Amount = model.Amount{UsedAmount: float64(*receipt.ChargedMicros) / 1000000, ImageOutputAmount: float64(*receipt.ChargedMicros) / 1000000}
+		completePolledAsyncUsage(ctx, info, info.Usage, info.UsageContext)
+		return
+	}
 	// Freeze the no-customer-billing decision at admission, independent of current
 	// group status, credentials, release or retail price configuration.
 	if info.InternalImageTask {
@@ -233,25 +260,67 @@ func archiveImageTask(ctx context.Context, task *model.ImageTask, store func(con
 	// download/upload fails or the worker restarts.
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	for i, out := range task.Data {
-		if out.Stored {
-			continue
+	for _, out := range task.Data {
+		if !model.ValidAuxiliaryImages(out) {
+			return errors.New("invalid auxiliary image")
 		}
-		url, metadata, err := store(ownedimage.WithArchiveIdentity(ctx, task.ID, i), out.URL)
-		if err != nil {
-			return errors.New("image result storage temporarily unavailable")
+	}
+	for i := range task.Data {
+		out := model.CloneImageOutputs(task.Data[i : i+1])[0]
+		archive := func(asset *model.ImageOutput, name string) error {
+			assetCtx := ownedimage.WithArchiveIdentity(ctx, task.ID, i)
+			if name != "" {
+				assetCtx = ownedimage.WithAuxiliaryName(assetCtx, name)
+			}
+			url, metadata, err := store(assetCtx, asset.URL)
+			if err != nil {
+				if errors.Is(err, ownedimage.ErrTooLarge) {
+					return ownedimage.ErrTooLarge
+				}
+				return errors.New("image result storage temporarily unavailable")
+			}
+			asset.URL, asset.Stored, asset.ContentType = url, true, metadata.ContentType
+			if metadata.Width > 0 && metadata.Height > 0 {
+				w, h := int64(metadata.Width), int64(metadata.Height)
+				asset.Width, asset.Height = &w, &h
+			}
+			return nil
 		}
-		out.URL = url
-		out.Stored = true
-		out.ContentType = metadata.ContentType
-		if metadata.Width > 0 && metadata.Height > 0 {
-			w, h := int64(metadata.Width), int64(metadata.Height)
-			out.Width = &w
-			out.Height = &h
+		if !out.Stored {
+			if err := archive(&out, ""); err != nil {
+				return err
+			}
+			if err := model.SaveArchivedImage(task, i, out); err != nil {
+				return err
+			}
 		}
-		if err := model.SaveArchivedImage(task, i, out); err != nil {
-			return err
+		for name, asset := range out.AuxiliaryImages {
+			if asset == nil || asset.Stored {
+				continue
+			}
+			// Clone again after each checkpoint: mutating a shared map before the
+			// CAS would change the expected persisted JSON and lose the checkpoint.
+			out = model.CloneImageOutputs(task.Data[i : i+1])[0]
+			if err := archive(out.AuxiliaryImages[name], name); err != nil {
+				return err
+			}
+			if err := model.SaveArchivedImage(task, i, out); err != nil {
+				return err
+			}
 		}
 	}
 	return model.CompleteImageArchive(task)
+}
+
+// Permanent size failures must terminate; transport/storage outages remain retryable.
+func handleImageArchiveFailure(info *model.AsyncUsageInfo, taskID string, archiveErr error) {
+	if !errors.Is(archiveErr, ownedimage.ErrTooLarge) {
+		retryImageUsage(info, archiveErr)
+		return
+	}
+	if err := model.SetImageTaskResult(taskID, "failed", nil, &model.ImageTaskError{Code: "archive_size_exceeded", Message: "Image result exceeds delivery size limit"}); err != nil {
+		retryImageUsage(info, err)
+		return
+	}
+	log.WithField("task_id", taskID).Warn("image delivery size limit exceeded")
 }

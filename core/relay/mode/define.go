@@ -13,6 +13,7 @@ func (m Mode) String() string {
 }
 
 var modeNames = map[Mode]string{
+	NativeTasks:             "NativeTasks",
 	Unknown:                 "Unknown",
 	ChatCompletions:         "ChatCompletions",
 	Completions:             "Completions",
@@ -98,4 +99,5 @@ const (
 	DoubaoVideoTasksDelete
 	ResponsesCompact
 	AlphaSearch
+	NativeTasks
 )

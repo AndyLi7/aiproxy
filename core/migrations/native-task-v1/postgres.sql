@@ -1,0 +1,6 @@
+-- Review before applying to the gateway LOG database. Not an automatic migration.
+CREATE TABLE "native_tasks" ("recovery_owner" varchar(64),"recovery_until" bigint,"next_recovery_at" bigint,"billing_settled" boolean,"delivery_base" varchar(512),"artifact_manifest" text,"delivered_output" text,"billing_receipt_json" text,"frozen_contract" text,"native_input" text,"channel_id" bigint,"endpoint" varchar(256),"key_fingerprint" varchar(64),"credential_scope" varchar(128),"prepayment_quote_json" text,"billing_operation_id" varchar(200),"error_code" varchar(64),"upstream_id" varchar(256),"id" varchar(128),"group_id" varchar(64) NOT NULL,"token_id" bigint NOT NULL,"model" varchar(256) NOT NULL,"fingerprint" varchar(64) NOT NULL,"output_schema" text NOT NULL,"output_schema_hash" varchar(64) NOT NULL,"status" varchar(32) NOT NULL,"native_output" text,"created_at" timestamptz,"updated_at" timestamptz,PRIMARY KEY ("id"));
+CREATE INDEX IF NOT EXISTS "idx_native_tasks_group_id" ON "native_tasks" ("group_id");
+CREATE INDEX IF NOT EXISTS "idx_native_tasks_billing_settled" ON "native_tasks" ("billing_settled");
+CREATE INDEX IF NOT EXISTS "idx_native_tasks_next_recovery_at" ON "native_tasks" ("next_recovery_at");
+CREATE INDEX IF NOT EXISTS "idx_native_tasks_recovery_until" ON "native_tasks" ("recovery_until");

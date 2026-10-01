@@ -284,6 +284,7 @@ var (
 )
 
 func AsyncUsagePollTask(ctx context.Context) {
+	go ImagePrepaymentRecoveryTask(ctx)
 	ticker := time.NewTicker(asyncUsagePollInterval)
 	defer ticker.Stop()
 

@@ -49,3 +49,29 @@ func TestImageArchiveResumesWithoutRegeneration(t *testing.T) {
 	require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Count(&n).Error)
 	require.Zero(t, n)
 }
+
+func TestOversizedArchiveTerminatesAndCannotBeReplayedAsSuccess(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "oversize.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+	task := &model.ImageTask{ID: "oversize", Status: "result_processing", ArchiveRequired: true, ExpectedImages: 1, Data: []model.ImageOutput{{URL: "https://upstream/1"}}}
+	require.NoError(t, db.Create(task).Error)
+	info := &model.AsyncUsageInfo{ImageTaskID: task.ID}
+	err = archiveImageTask(context.Background(), task, func(context.Context, string) (string, ownedimage.Metadata, error) {
+		return "", ownedimage.Metadata{}, ownedimage.ErrTooLarge
+	})
+	require.ErrorIs(t, err, ownedimage.ErrTooLarge)
+	handleImageArchiveFailure(info, task.ID, err)
+	var saved model.ImageTask
+	require.NoError(t, db.First(&saved, "id = ?", task.ID).Error)
+	require.Equal(t, "failed", saved.Status)
+	require.NotNil(t, saved.Error)
+	require.Equal(t, "archive_size_exceeded", saved.Error.Code)
+	require.Zero(t, info.RetryCount)
+	require.NoError(t, model.SetImageTaskResult(task.ID, "completed", []model.ImageOutput{{URL: "https://owned/image"}}, nil))
+	require.NoError(t, db.First(&saved, "id = ?", task.ID).Error)
+	require.Equal(t, "failed", saved.Status)
+}

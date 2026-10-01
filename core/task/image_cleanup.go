@@ -13,6 +13,16 @@ import (
 )
 
 func temporaryImageOutput(taskID string, index int, output model.ImageOutput) bool {
+	return temporaryImageAsset(taskID, index, "", output)
+}
+func temporaryImageAsset(taskID string, index int, name string, output model.ImageOutput) bool {
+	if name != "" && !model.ValidAuxiliaryImageName(name) {
+		return false
+	}
+	suffix := ""
+	if name != "" {
+		suffix = "-" + name
+	}
 	extension := ""
 	switch output.ContentType {
 	case "image/png":
@@ -21,6 +31,8 @@ func temporaryImageOutput(taskID string, index int, output model.ImageOutput) bo
 		extension = "jpg"
 	case "image/webp":
 		extension = "webp"
+	case "image/gif":
+		extension = "gif"
 	default:
 		return false
 	}
@@ -28,31 +40,53 @@ func temporaryImageOutput(taskID string, index int, output model.ImageOutput) bo
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return false
 	}
-	return output.Stored && strings.HasSuffix(parsed.Path, fmt.Sprintf("/generated-results/images/%s/%d.%s", taskID, index, extension))
+	return output.Stored && strings.HasSuffix(parsed.Path, fmt.Sprintf("/generated-results/images/%s/%d%s.%s", taskID, index, suffix, extension))
 }
 
 func cleanupExpiredImageTask(ctx context.Context, task *model.ImageTask, deleteImage func(context.Context, string, int, string) error) (bool, error) {
 	if task.ResultExpiresAt == nil || time.Now().Before(*task.ResultExpiresAt) {
 		return false, nil
 	}
-	outputs := append([]model.ImageOutput(nil), task.Data...)
 	changed := false
-	for index, output := range outputs {
-		if !temporaryImageOutput(task.ID, index, output) {
-			continue
+	for index := range task.Data {
+		if !model.ValidAuxiliaryImages(task.Data[index]) {
+			return false, fmt.Errorf("invalid auxiliary image")
 		}
-		if err := deleteImage(ctx, task.ID, index, output.ContentType); err != nil {
-			return false, err
+		remove := func(name string) error {
+			next := model.CloneImageOutputs(task.Data)
+			asset := &next[index]
+			if name != "" {
+				asset = next[index].AuxiliaryImages[name]
+			}
+			if asset == nil || !temporaryImageAsset(task.ID, index, name, *asset) {
+				return nil
+			}
+			assetCtx := ctx
+			if name != "" {
+				assetCtx = ownedimage.WithAuxiliaryName(ctx, name)
+			}
+			if err := deleteImage(assetCtx, task.ID, index, asset.ContentType); err != nil {
+				return err
+			}
+			asset.URL = ""
+			asset.Stored = false
+			asset.URLExpiresAt = nil
+			if err := model.MarkExpiredImageMediaDeleted(task, next, time.Now().UTC()); err != nil {
+				return err
+			}
+			changed = true
+			return nil
 		}
-		outputs[index].URL = ""
-		outputs[index].Stored = false
-		outputs[index].URLExpiresAt = nil
-		changed = true
+		if err := remove(""); err != nil {
+			return changed, err
+		}
+		for name := range task.Data[index].AuxiliaryImages {
+			if err := remove(name); err != nil {
+				return changed, err
+			}
+		}
 	}
-	if !changed {
-		return false, nil
-	}
-	return true, model.MarkExpiredImageMediaDeleted(task, outputs, time.Now().UTC())
+	return changed, nil
 }
 
 func ImageResultCleanupTask(ctx context.Context) {

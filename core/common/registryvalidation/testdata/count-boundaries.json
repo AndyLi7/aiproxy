@@ -1,0 +1,2935 @@
+[
+  {
+    "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+    "scenario": "count-boundary/n",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-29/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "default": "auto_2K",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The text prompt used to generate the image"
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "image_size",
+          "prompt",
+          "n",
+          "max_images"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling.",
+            "default": "auto_2K"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The text prompt used to generate the image",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Num Images",
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Max Images",
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "auto_2K",
+        "n": 1,
+        "max_images": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 36,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "image_size": "image_size",
+            "prompt": "prompt",
+            "n": "num_images",
+            "max_images": "max_images"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "return_byteplus_urls": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images",
+              "outputCountMultiplierParameter": "max_images"
+            },
+            "id": "fal:bytedance/seedream/v5/lite/text-to-image",
+            "revision": "audit",
+            "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}",
+              "statusEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "return_byteplus_urls": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "return_byteplus_urls",
+                "prompt",
+                "sync_mode",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Seed used for generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  "description": "Generated images"
+                }
+              },
+              "required": [
+                "seed",
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:30f6ecb4df4bf7b3ffaf16942ebced611eb335e4e06b1b6e750435e6b0e758dd"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "image_size": "auto_2K",
+      "prompt": "test",
+      "n": 6,
+      "max_images": 1,
+      "model": "admission/model-29/text-to-image"
+    },
+    "response": {
+      "seed": 0,
+      "images": [
+        {
+          "url": "https://example.com/count-boundary-0.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-1.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-2.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-3.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-4.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-5.png"
+        }
+      ]
+    },
+    "boundaryEvidence": {
+      "source": "frozen public count limits and provider count binding",
+      "parameters": [
+        "n"
+      ],
+      "outputCount": 6
+    }
+  },
+  {
+    "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+    "scenario": "count-boundary/max_images",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-29/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "default": "auto_2K",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The text prompt used to generate the image"
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "image_size",
+          "prompt",
+          "n",
+          "max_images"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling.",
+            "default": "auto_2K"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The text prompt used to generate the image",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Num Images",
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Max Images",
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "auto_2K",
+        "n": 1,
+        "max_images": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 36,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "image_size": "image_size",
+            "prompt": "prompt",
+            "n": "num_images",
+            "max_images": "max_images"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "return_byteplus_urls": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images",
+              "outputCountMultiplierParameter": "max_images"
+            },
+            "id": "fal:bytedance/seedream/v5/lite/text-to-image",
+            "revision": "audit",
+            "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}",
+              "statusEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "return_byteplus_urls": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "return_byteplus_urls",
+                "prompt",
+                "sync_mode",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Seed used for generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  "description": "Generated images"
+                }
+              },
+              "required": [
+                "seed",
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:30f6ecb4df4bf7b3ffaf16942ebced611eb335e4e06b1b6e750435e6b0e758dd"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "image_size": "auto_2K",
+      "prompt": "test",
+      "n": 1,
+      "max_images": 6,
+      "model": "admission/model-29/text-to-image"
+    },
+    "response": {
+      "seed": 0,
+      "images": [
+        {
+          "url": "https://example.com/count-boundary-0.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-1.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-2.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-3.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-4.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-5.png"
+        }
+      ]
+    },
+    "boundaryEvidence": {
+      "source": "frozen public count limits and provider count binding",
+      "parameters": [
+        "max_images"
+      ],
+      "outputCount": 6
+    }
+  },
+  {
+    "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+    "scenario": "count-boundary/n+max_images",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-29/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "default": "auto_2K",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The text prompt used to generate the image"
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "image_size",
+          "prompt",
+          "n",
+          "max_images"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling.",
+            "default": "auto_2K"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The text prompt used to generate the image",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Num Images",
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Max Images",
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "auto_2K",
+        "n": 1,
+        "max_images": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 36,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "image_size": "image_size",
+            "prompt": "prompt",
+            "n": "num_images",
+            "max_images": "max_images"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "return_byteplus_urls": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images",
+              "outputCountMultiplierParameter": "max_images"
+            },
+            "id": "fal:bytedance/seedream/v5/lite/text-to-image",
+            "revision": "audit",
+            "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}",
+              "statusEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "return_byteplus_urls": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "return_byteplus_urls",
+                "prompt",
+                "sync_mode",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Seed used for generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  "description": "Generated images"
+                }
+              },
+              "required": [
+                "seed",
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:30f6ecb4df4bf7b3ffaf16942ebced611eb335e4e06b1b6e750435e6b0e758dd"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "image_size": "auto_2K",
+      "prompt": "test",
+      "n": 6,
+      "max_images": 6,
+      "model": "admission/model-29/text-to-image"
+    },
+    "response": {
+      "seed": 0,
+      "images": [
+        {
+          "url": "https://example.com/count-boundary-0.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-1.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-2.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-3.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-4.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-5.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-6.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-7.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-8.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-9.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-10.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-11.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-12.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-13.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-14.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-15.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-16.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-17.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-18.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-19.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-20.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-21.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-22.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-23.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-24.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-25.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-26.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-27.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-28.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-29.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-30.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-31.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-32.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-33.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-34.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-35.png"
+        }
+      ]
+    },
+    "boundaryEvidence": {
+      "source": "frozen public count limits and provider count binding",
+      "parameters": [
+        "n",
+        "max_images"
+      ],
+      "outputCount": 36
+    }
+  },
+  {
+    "endpoint": "fal-ai/janus",
+    "scenario": "count-boundary/n",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-342/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "output_format": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "description": "The format of the generated image."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "description": "Number of images to generate in parallel."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducible generation."
+          },
+          "image_size": {
+            "default": "square",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "description": "The size of the generated image."
+          },
+          "temperature": {
+            "default": 1,
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 2,
+            "description": "Controls randomness in the generation. Higher values make output more random."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to generate an image from."
+          },
+          "cfg_weight": {
+            "default": 5,
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Classifier Free Guidance scale - how closely to follow the prompt."
+          }
+        },
+        "required": [
+          "output_format",
+          "n",
+          "image_size",
+          "temperature",
+          "prompt",
+          "cfg_weight"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "title": "Num Images",
+            "description": "Number of images to generate in parallel."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Random seed for reproducible generation."
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image.",
+            "default": "square"
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 2,
+            "title": "Temperature",
+            "description": "Controls randomness in the generation. Higher values make output more random."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to generate an image from.",
+            "uiControl": "textarea"
+          },
+          "cfg_weight": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "title": "Cfg Weight",
+            "description": "Classifier Free Guidance scale - how closely to follow the prompt."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "output_format": "png",
+        "n": 1,
+        "image_size": "square",
+        "temperature": 1,
+        "cfg_weight": 5
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "output_format": "output_format",
+            "n": "num_images",
+            "seed": "seed",
+            "image_size": "image_size",
+            "temperature": "temperature",
+            "prompt": "prompt",
+            "cfg_weight": "cfg_weight"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fjanus",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fjanus",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:fal-ai/janus",
+            "revision": "audit",
+            "endpoint": "fal-ai/janus",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/janus/requests/{request_id}",
+              "statusEndpoint": "fal-ai/janus/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16,
+                  "description": "Number of images to generate in parallel."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                },
+                "temperature": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 2,
+                  "description": "Controls randomness in the generation. Higher values make output more random."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to generate an image from."
+                },
+                "cfg_weight": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 20,
+                  "description": "Classifier Free Guidance scale - how closely to follow the prompt."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16,
+                  "description": "Number of images to generate in parallel."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation."
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                },
+                "temperature": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 2,
+                  "description": "Controls randomness in the generation. Higher values make output more random."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to generate an image from."
+                },
+                "cfg_weight": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 20,
+                  "description": "Classifier Free Guidance scale - how closely to follow the prompt."
+                }
+              },
+              "required": [
+                "enable_safety_checker",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "has_nsfw_concepts": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "description": "Whether the generated images contain NSFW concepts."
+                },
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "content_type": {
+                        "default": "image/jpeg",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "height": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "width",
+                      "height"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The generated image files info."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt used for generating the image."
+                }
+              },
+              "required": [
+                "has_nsfw_concepts",
+                "timings",
+                "images",
+                "seed",
+                "prompt"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:ec45661a225bfd2210a1b35f23dc3fd13989d067d8ba571cb8c145f85413d018"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "output_format": "png",
+      "n": 16,
+      "image_size": "square",
+      "temperature": 1,
+      "prompt": "test",
+      "cfg_weight": 5,
+      "model": "admission/model-342/text-to-image"
+    },
+    "response": {
+      "has_nsfw_concepts": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "timings": {},
+      "images": [
+        {
+          "url": "https://example.com/count-boundary-0.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-1.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-2.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-3.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-4.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-5.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-6.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-7.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-8.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-9.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-10.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-11.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-12.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-13.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-14.png",
+          "width": 0,
+          "height": 0
+        },
+        {
+          "url": "https://example.com/count-boundary-15.png",
+          "width": 0,
+          "height": 0
+        }
+      ],
+      "seed": 0,
+      "prompt": "test"
+    },
+    "boundaryEvidence": {
+      "source": "frozen public count limits and provider count binding",
+      "parameters": [
+        "n"
+      ],
+      "outputCount": 16
+    }
+  },
+  {
+    "endpoint": "wan/v2.6/text-to-image",
+    "scenario": "count-boundary/n",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-592/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions."
+          },
+          "negative_prompt": {
+            "default": "",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content to avoid in the generated image. Max 500 characters."
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducibility (0-2147483647)."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters."
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference."
+          }
+        },
+        "required": [
+          "negative_prompt",
+          "prompt",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Size",
+            "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions."
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt",
+            "description": "Content to avoid in the generated image. Max 500 characters.",
+            "default": ""
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url",
+            "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Random seed for reproducibility (0-2147483647)."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters.",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "title": "Max Images",
+            "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "negative_prompt": "",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "provider_metadata": {
+            "type": "object",
+            "properties": {
+              "generated_text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Generated text content (in mixed text-and-image mode). May be None if only images were generated."
+              }
+            },
+            "additionalProperties": false
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "image_size": "image_size",
+            "negative_prompt": "negative_prompt",
+            "image_url": "image_url",
+            "seed": "seed",
+            "prompt": "prompt",
+            "n": "max_images"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=wan%2Fv2.6%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=wan%2Fv2.6%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputMetadata": {
+              "version": 1,
+              "fields": [
+                "generated_text"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "max_images"
+            },
+            "id": "fal:wan/v2.6/text-to-image",
+            "revision": "audit",
+            "endpoint": "wan/v2.6/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "wan/v2.6/text-to-image/requests/{request_id}",
+              "statusEndpoint": "wan/v2.6/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions."
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Content to avoid in the generated image. Max 500 characters."
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647)."
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters."
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5,
+                  "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        },
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions."
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Content to avoid in the generated image. Max 500 characters."
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647)."
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5,
+                  "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference."
+                }
+              },
+              "required": [
+                "enable_safety_checker",
+                "prompt"
+              ],
+              "additionalProperties": false,
+              "description": "Input for Wan 2.6 text-to-image or mixed text-and-image generation (enable_interleave=true)"
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "generated_text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Generated text content (in mixed text-and-image mode). May be None if only images were generated."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The seed used for generation"
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "Generated images in PNG format"
+                }
+              },
+              "required": [
+                "seed",
+                "images"
+              ],
+              "additionalProperties": {},
+              "description": "Output for Wan 2.6 text-to-image (can include generated text in mixed mode)"
+            },
+            "contractHash": "sha256:7199a26ece7f2dcbc273fc89b31133e3905de5ab20a523d7b1c92f56ecf99ca8"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "negative_prompt": "",
+      "prompt": "test",
+      "n": 5,
+      "model": "admission/model-592/text-to-image"
+    },
+    "response": {
+      "seed": 0,
+      "images": [
+        {
+          "url": "https://example.com/count-boundary-0.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-1.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-2.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-3.png"
+        },
+        {
+          "url": "https://example.com/count-boundary-4.png"
+        }
+      ]
+    },
+    "boundaryEvidence": {
+      "source": "frozen public count limits and provider count binding",
+      "parameters": [
+        "n"
+      ],
+      "outputCount": 5
+    }
+  }
+]

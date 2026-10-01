@@ -2,6 +2,9 @@
 // cannot grant an adapter new capabilities; new adapters must register here.
 package imagecapabilities
 
+// MaxOutputs is the shared metering, result and archive identity ceiling.
+const MaxOutputs = 1024
+
 type Capabilities struct {
 	Execution        string
 	MeasuredBilling  bool
@@ -11,7 +14,7 @@ type Capabilities struct {
 func Lookup(adapter string) (Capabilities, bool) {
 	switch adapter {
 	case "fal-image":
-		return Capabilities{Execution: "async", MeasuredBilling: true, MeteringVersions: []int{1, 2, 3, 4, 5}}, true
+		return Capabilities{Execution: "async", MeasuredBilling: true, MeteringVersions: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}, true
 	case "volcengine-ark-image":
 		return Capabilities{Execution: "sync"}, true
 	default:

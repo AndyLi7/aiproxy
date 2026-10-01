@@ -19,12 +19,15 @@ type ProviderBinding struct {
 	ContractHash string `json:"contractHash"`
 }
 type ProviderSpec struct {
-	Metering     json.RawMessage `json:"metering,omitempty"`
-	ID           string          `json:"id"`
-	Revision     string          `json:"revision"`
-	ContractHash string          `json:"contractHash"`
-	Endpoint     string          `json:"endpoint"`
-	Execution    struct {
+	OutputArtifacts *OutputArtifactProjection `json:"outputArtifacts,omitempty"`
+	OutputImages    *OutputImageProjection    `json:"outputImages,omitempty"`
+	OutputMetadata  *OutputMetadataProjection `json:"outputMetadata,omitempty"`
+	Metering        json.RawMessage           `json:"metering,omitempty"`
+	ID              string                    `json:"id"`
+	Revision        string                    `json:"revision"`
+	ContractHash    string                    `json:"contractHash"`
+	Endpoint        string                    `json:"endpoint"`
+	Execution       struct {
 		Mode                 string `json:"mode"`
 		StatusEndpoint       string `json:"statusEndpoint"`
 		ResultEndpoint       string `json:"resultEndpoint"`
@@ -88,6 +91,15 @@ func bound(raw []byte, b ProviderBinding) (*boundProvider, error) {
 		s.ContractHash != b.ContractHash ||
 		s.Endpoint == "" {
 		return nil, ErrProviderContract
+	}
+	if err := validateOutputArtifactProjection(s); err != nil {
+		return nil, err
+	}
+	if err := validateOutputImageProjection(s); err != nil {
+		return nil, err
+	}
+	if err := validateOutputMetadataProjection(s); err != nil {
+		return nil, err
 	}
 
 	return &p, nil
@@ -207,7 +219,7 @@ func MapBoundProviderInput(
 			// Fixed-count contracts keep n as a platform control, not an upstream field.
 			var metering ImageMetering
 			if key == "n" && json.Unmarshal(s.Metering, &metering) == nil &&
-				(metering.Version == 3 || metering.Version == 4 || metering.Version == 5) && metering.OutputCountFixed != nil &&
+				(metering.Version == 3 || metering.Version == 4 || metering.Version == 5 || metering.Version == 6 || metering.Version == 7 || (metering.Version == 8 || metering.Version == 9 || (metering.Version == 10 || (metering.Version == 11 || metering.Version == 12)))) && metering.OutputCountFixed != nil &&
 				*metering.OutputCountFixed == 1 {
 				if value != float64(1) {
 					return nil, ErrProviderContract

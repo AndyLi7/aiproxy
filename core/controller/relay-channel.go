@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"net/http"
 	"slices"
 	"strconv"
 
@@ -463,6 +464,33 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 	log := common.GetLogger(c)
 	eligible := imageProviderPredicate(c, modelName, m)
 
+	var prepaid *model.ImagePrepaymentQuote
+	if m == mode.ImagesGenerations || m == mode.ImagesEdits {
+		var quoteErr error
+		mc := middleware.GetModelConfig(c)
+		prepaid, _, quoteErr = mc.ImagePrepaymentQuote()
+		if quoteErr != nil {
+			return nil, quoteErr
+		}
+		if prepaid != nil {
+			if c.Request.URL.Path != "/v1/images/tasks" || c.Request.Method != http.MethodPost {
+				return nil, ErrChannelsNotFound
+			}
+			compatible := eligible
+			eligible = func(ch *model.Channel) bool {
+				if ch == nil || (compatible != nil && !compatible(ch)) {
+					return false
+				}
+				for _, quoted := range prepaid.Routes {
+					if quoted.ChannelID == ch.ID {
+						return true
+					}
+				}
+				return false
+			}
+		}
+	}
+
 	group := middleware.GetGroup(c)
 	availableSet := group.GetAvailableSets()
 
@@ -533,6 +561,14 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 	}
 
 	preferChannelIDs := getPreferChannelIDs(c, modelName, m)
+	if prepaid != nil {
+		// Quotes are ordered by the frozen customer estimate. Health filtering
+		// still applies; only explicitly quoted channels may accept this task.
+		preferChannelIDs = nil
+		for _, route := range prepaid.Routes {
+			preferChannelIDs = append(preferChannelIDs, route.ChannelID)
+		}
+	}
 
 	if len(preferChannelIDs) > 0 {
 		log.Data["prefer_channels"] = fmt.Sprintf("%v", preferChannelIDs)

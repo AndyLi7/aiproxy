@@ -233,10 +233,15 @@ func ValidateImage(contract []byte, publicID string, body []byte) ([]byte, *Vali
 	}
 	// Old published contracts can require prompt without a minLength. Reject a
 	// blank prompt before a paid synchronous or asynchronous submission.
+	// Bound provider contracts can explicitly publish an empty default (e.g.
+	// upscale/redux). Their schema remains authoritative for that exact value.
+	promptSchema, _ := properties["prompt"].(map[string]any)
+	emptyDefault, hasDefault := promptSchema["default"].(string)
+	allowsEmptyDefault := entry.ProviderVersion != nil && hasDefault && emptyDefault == ""
 	if required, ok := entry.Schema["required"].([]any); ok {
 		for _, name := range required {
 			if name == "prompt" {
-				if prompt, isString := input["prompt"].(string); isString && strings.TrimSpace(prompt) == "" {
+				if prompt, isString := input["prompt"].(string); isString && strings.TrimSpace(prompt) == "" && !(allowsEmptyDefault && prompt == "") {
 					return nil, &ValidationError{Status: 400, Param: "prompt", Expected: map[string]any{"minLength": 1}}
 				}
 			}

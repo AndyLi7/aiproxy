@@ -23,9 +23,13 @@ import (
 // Output URLs are capability URLs, not upstream redirects. No provider URL or
 // credential is embedded in them. A task's persisted, server-only key fingerprint
 // makes signatures stable across restarts without introducing a new public secret.
-func imageContentSignature(task *model.ImageTask, index int, expires int64) string {
+func imageContentSignature(task *model.ImageTask, index int, expires int64, auxiliary ...string) string {
 	mac := hmac.New(sha256.New, []byte(task.KeyFingerprint))
-	fmt.Fprintf(mac, "image-content-v1\n%s\n%d\n%d", task.ID, index, expires)
+	if len(auxiliary) > 0 && auxiliary[0] != "" {
+		fmt.Fprintf(mac, "image-auxiliary-content-v1\n%s\n%d\n%s\n%d", task.ID, index, auxiliary[0], expires)
+	} else {
+		fmt.Fprintf(mac, "image-content-v1\n%s\n%d\n%d", task.ID, index, expires)
+	}
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -37,6 +41,7 @@ func publicImageTask(c *gin.Context, task *model.ImageTask) *model.ImageTask {
 	}
 	if task.Status != "completed" {
 		result.Data = nil
+		result.ProviderMetadata = nil
 	}
 	group, exists := c.Get(middleware.Group)
 	internal, ok := group.(model.GroupCache)
@@ -46,7 +51,7 @@ func publicImageTask(c *gin.Context, task *model.ImageTask) *model.ImageTask {
 	if result.Error != nil {
 		result.Error = &model.ImageTaskError{Code: "generation_failed", Message: "Image generation failed. Contact support with the request ID."}
 	}
-	result.Data = append([]model.ImageOutput(nil), task.Data...)
+	result.Data = model.CloneImageOutputs(task.Data)
 	if task.Status != "completed" {
 		result.Data = nil
 		return &result
@@ -70,7 +75,7 @@ func publicImageTask(c *gin.Context, task *model.ImageTask) *model.ImageTask {
 		result.Data[index].Stored = false
 		result.Data[index].URLExpiresAt = &expiry
 		// Historical tasks without a signing key must not fall back to upstream URLs.
-		if len(task.KeyFingerprint) != 64 {
+		if len(task.KeyFingerprint) != 64 || !model.ValidAuxiliaryImages(result.Data[index]) {
 			result.Data = nil
 			result.Status = "failed"
 			result.Error = &model.ImageTaskError{Code: "result_unavailable", Message: "The image result is unavailable."}
@@ -83,26 +88,59 @@ func publicImageTask(c *gin.Context, task *model.ImageTask) *model.ImageTask {
 			result.Error = &model.ImageTaskError{Code: "result_unavailable", Message: "The image result is unavailable."}
 			break
 		}
-		target := url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: fmt.Sprintf("/v1/images/tasks/%s/content/%d", task.ID, index)}
-		query := target.Query()
-		query.Set("expires", strconv.FormatInt(expires, 10))
-		query.Set("signature", imageContentSignature(task, index, expires))
-		target.RawQuery = query.Encode()
-		result.Data[index].URL = target.String()
+		sign := func(asset *model.ImageOutput, name string) {
+			target := url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: fmt.Sprintf("/v1/images/tasks/%s/content/%d", task.ID, index)}
+			query := target.Query()
+			query.Set("expires", strconv.FormatInt(expires, 10))
+			query.Set("signature", imageContentSignature(task, index, expires, name))
+			if name != "" {
+				query.Set("auxiliary", name)
+			}
+			target.RawQuery = query.Encode()
+			asset.URL = target.String()
+			asset.Stored = false
+			asset.URLExpiresAt = &expiry
+		}
+		sign(&result.Data[index], "")
+		for name, asset := range result.Data[index].AuxiliaryImages {
+			if asset != nil {
+				sign(asset, name)
+			}
+		}
 	}
 	return &result
 }
 
-func validImageContentSignature(task *model.ImageTask, index int, expires int64, signature string, now int64) bool {
+func validImageContentSignature(task *model.ImageTask, index int, expires int64, signature string, now int64, auxiliary ...string) bool {
 	if len(task.KeyFingerprint) != 64 || index < 0 || index >= len(task.Data) || expires < now || expires > now+3600 {
+		return false
+	}
+	name := ""
+	if len(auxiliary) > 0 {
+		name = auxiliary[0]
+	}
+	if imageContentAsset(task, index, name) == nil {
 		return false
 	}
 	decoded, err := hex.DecodeString(signature)
 	if err != nil {
 		return false
 	}
-	expected, _ := hex.DecodeString(imageContentSignature(task, index, expires))
+	expected, _ := hex.DecodeString(imageContentSignature(task, index, expires, name))
 	return hmac.Equal(decoded, expected)
+}
+
+func imageContentAsset(task *model.ImageTask, index int, name string) *model.ImageOutput {
+	if index < 0 || index >= len(task.Data) || !model.ValidAuxiliaryImages(task.Data[index]) {
+		return nil
+	}
+	if name == "" {
+		return &task.Data[index]
+	}
+	if !model.ValidAuxiliaryImageName(name) {
+		return nil
+	}
+	return task.Data[index].AuxiliaryImages[name]
 }
 
 func publicImageIP(ip net.IP) bool {
@@ -148,6 +186,10 @@ func imageContentClient() *http.Client {
 }
 
 func GetImageTaskContent(c *gin.Context) {
+	getImageTaskContent(c, imageContentClient)
+}
+
+func getImageTaskContent(c *gin.Context, newClient func() *http.Client) {
 	fail := func(status int) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(status, gin.H{"error": gin.H{"code": "result_unavailable", "message": "The image result is unavailable."}})
@@ -163,7 +205,7 @@ func GetImageTaskContent(c *gin.Context) {
 		return
 	}
 	var task model.ImageTask
-	if model.LogDB.Where("id = ?", c.Param("id")).First(&task).Error != nil || !validImageContentSignature(&task, index, expires, c.Query("signature"), time.Now().Unix()) {
+	if model.LogDB.Where("id = ?", c.Param("id")).First(&task).Error != nil || !validImageContentSignature(&task, index, expires, c.Query("signature"), time.Now().Unix(), c.Query("auxiliary")) || task.Status != "completed" {
 		fail(404)
 		return
 	}
@@ -171,7 +213,7 @@ func GetImageTaskContent(c *gin.Context) {
 		fail(410)
 		return
 	}
-	target, err := url.Parse(task.Data[index].URL)
+	target, err := url.Parse(imageContentAsset(&task, index, c.Query("auxiliary")).URL)
 	if err != nil || target.Scheme != "https" || target.User != nil || target.Hostname() == "" {
 		fail(502)
 		return
@@ -181,7 +223,7 @@ func GetImageTaskContent(c *gin.Context) {
 		fail(502)
 		return
 	}
-	client := imageContentClient()
+	client := newClient()
 	defer client.CloseIdleConnections()
 	response, err := client.Do(request)
 	if err != nil {
@@ -204,7 +246,7 @@ func GetImageTaskContent(c *gin.Context) {
 		contentType = "image/svg+xml"
 		c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
 	}
-	if contentType != "image/svg+xml" && contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {
+	if contentType != "image/svg+xml" && contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" && contentType != "image/gif" {
 		fail(502)
 		return
 	}

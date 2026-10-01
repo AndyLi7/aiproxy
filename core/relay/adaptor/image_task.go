@@ -15,9 +15,10 @@ import (
 )
 
 type ImageTaskResult struct {
-	Status string
-	Data   []model.ImageOutput
-	Error  *model.ImageTaskError
+	Metadata model.ImageResultMetadata
+	Status   string
+	Data     []model.ImageOutput
+	Error    *model.ImageTaskError
 }
 
 type ImageTaskExecutor interface{ ImageAdapterName() string }

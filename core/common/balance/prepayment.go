@@ -12,6 +12,13 @@ import (
 
 var ErrPrepaymentInsufficientBalance = errors.New("insufficient prepayment balance")
 
+// The wallet refuses these before any provider call, so the same request can
+// be retried later without a double charge.
+var (
+	ErrPrepaymentTooManyActiveTasks = errors.New("too many active prepaid tasks")
+	ErrPrepaymentModelPaused        = errors.New("model paused pending billing review")
+)
+
 // Prepayment callbacks are opt-in and never use the legacy balance cache.
 // The durable caller retries the same operation ID after an ambiguous response.
 type PrepaymentCommand struct {
@@ -70,8 +77,13 @@ func (e *ExternalHTTP) Prepayment(ctx context.Context, command PrepaymentCommand
 		return receipt, errors.New("prepayment outcome unknown; retry original billing operation")
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusPaymentRequired {
+	switch response.StatusCode {
+	case http.StatusPaymentRequired:
 		return receipt, ErrPrepaymentInsufficientBalance
+	case http.StatusTooManyRequests:
+		return receipt, ErrPrepaymentTooManyActiveTasks
+	case http.StatusLocked:
+		return receipt, ErrPrepaymentModelPaused
 	}
 	if response.StatusCode != http.StatusOK {
 		return receipt, errors.New("prepayment unavailable")

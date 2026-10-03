@@ -14,6 +14,7 @@ import (
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -29,6 +30,8 @@ type Plan struct {
 	ChannelID                            int
 	Endpoint, CredentialScope, QuoteJSON string
 	DeliveryBase                         string
+	// Log describes the request-log row recorded once the task is submitted.
+	Log *model.NativeTaskLog
 }
 type Engine struct {
 	DB       *gorm.DB
@@ -37,6 +40,10 @@ type Engine struct {
 }
 
 var ErrUnavailable = errors.New("native execution unavailable")
+
+// ErrNotNativeModel means the requested model has no native task route at all,
+// which the caller can fix by choosing another model; ErrUnavailable is ours.
+var ErrNotNativeModel = errors.New("model has no native task route")
 var ErrPending = errors.New("native submission requires reconciliation")
 var taskID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
@@ -105,6 +112,12 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		return task, err
 	}
 	task.Status = "submitting"
+	if p.Log != nil {
+		// The request log is an operator view; it never blocks a paid submission.
+		if logErr := model.RecordNativeTaskLog(e.DB, task, *p.Log); logErr != nil {
+			log.Errorf("record native task log %s: %v", id, logErr)
+		}
+	}
 	upstreamID, submitErr := e.Provider.SubmitNative(ctx, task.Endpoint, []byte(task.NativeInput))
 	if submitErr != nil {
 		state, code := "submission_unknown", "submission_outcome_unknown"
@@ -163,6 +176,11 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 	}
 	if task.Status == "failed" && (task.ErrorCode == "upstream_task_failed" || task.ErrorCode == "upstream_result_rejected") {
 		if _, err := call(balance.PrepaymentCommand{Action: "execution_finished"}); err != nil {
+			return err
+		}
+		// Owner decision 2026-10-02 (option A): the customer received nothing, so
+		// refund in full. Any later provider bill is booked as platform loss.
+		if _, err := call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
 			return err
 		}
 	}

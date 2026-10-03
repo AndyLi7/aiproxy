@@ -42,9 +42,34 @@ func NativeTaskEngine() (*nativetask.Engine, bool) {
 	}
 	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet}, true
 }
+
+// nativeFailureStage mirrors image tasks so native rejections are filtered and
+// labelled the same way in request logs.
+func nativeFailureStage(status int) model.FailureStage {
+	switch status {
+	case http.StatusBadRequest, http.StatusConflict:
+		return model.FailureStageValidation
+	case http.StatusUnauthorized:
+		return model.FailureStageAuth
+	case http.StatusPaymentRequired:
+		return model.FailureStageBalance
+	default:
+		return model.FailureStageRouting
+	}
+}
+func recordNativeFailure(c *gin.Context, status int, code, message string) {
+	middleware.SetOperationalFailure(c, nativeFailureStage(status), code, message)
+}
+
+// nativeTaskError writes the shared native envelope and logs the same code.
+func nativeTaskError(c *gin.Context, status int, code string) {
+	recordNativeFailure(c, status, code, nativetask.ErrorMessage(code))
+	nativetask.WriteError(c.Writer, status, code)
+	c.Abort()
+}
 func nativeTaskRuntime(c *gin.Context) {
 	if _, ok := NativeTaskEngine(); !ok {
-		c.AbortWithStatusJSON(503, gin.H{"error": gin.H{"code": "native_execution_unavailable"}})
+		nativeTaskError(c, 503, "native_execution_unavailable")
 		return
 	}
 	c.Next()
@@ -55,12 +80,14 @@ func NativeTasks() []gin.HandlerFunc {
 func nativeHTTP(c *gin.Context) (*nativetask.HTTP, bool) {
 	engine, ok := NativeTaskEngine()
 	if !ok {
-		c.JSON(503, gin.H{"error": gin.H{"code": "native_execution_unavailable"}})
+		nativeTaskError(c, 503, "native_execution_unavailable")
 		return nil, false
 	}
 	return &nativetask.HTTP{Engine: engine, Identity: func(*http.Request) (string, int, error) {
 		return middleware.GetGroup(c).ID, middleware.GetToken(c).ID, nil
-	}, ResolvePoller: nativetask.ResolveFalPoller(model.GetChannelByID)}, true
+	}, ResolvePoller: nativetask.ResolveFalPoller(model.GetChannelByID), OnError: func(status int, code, message string) {
+		recordNativeFailure(c, status, code, message)
+	}}, true
 }
 func submitNativeTask(c *gin.Context) {
 	handler, ok := nativeHTTP(c)
@@ -69,6 +96,11 @@ func submitNativeTask(c *gin.Context) {
 	}
 	handler.ResolvePlan = func(_ *http.Request, _ []byte) (nativetask.Plan, nativetask.Provider, error) {
 		mc := middleware.GetModelConfig(c)
+		if mc.Config[NativeResultConfigKey] == nil {
+			// The model is not published for native tasks: the caller chose the
+			// wrong model or endpoint. Every later failure is a server-side route.
+			return nativetask.Plan{}, nil, nativetask.ErrNotNativeModel
+		}
 		encoded, err := json.Marshal(mc.Config[NativeResultConfigKey])
 		if err != nil {
 			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
@@ -89,7 +121,9 @@ func submitNativeTask(c *gin.Context) {
 		if err != nil || quote == nil {
 			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
 		}
-		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote}, &fal.Client{Key: channel.Key}, nil
+		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote,
+			Log: &model.NativeTaskLog{RequestAt: middleware.GetRequestAt(c), TokenName: middleware.GetToken(c).Name, Endpoint: "POST /v1/model-tasks",
+				RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}, &fal.Client{Key: channel.Key}, nil
 	}
 	handler.Create(c.Writer, c.Request)
 }
@@ -117,12 +151,12 @@ func RecoverNativeTasks(ctx context.Context, owner string) error {
 func replayNativeTask(c *gin.Context) {
 	group, token := middleware.GetGroup(c), middleware.GetToken(c)
 	if group.ID == "" || token.ID <= 0 {
-		c.AbortWithStatusJSON(401, gin.H{"error": gin.H{"code": "authentication_required"}})
+		nativeTaskError(c, 401, "authentication_required")
 		return
 	}
 	id := c.GetHeader("X-Request-Id")
 	if !imageRequestID.MatchString(id) {
-		c.AbortWithStatusJSON(400, gin.H{"error": gin.H{"code": "invalid_request_id"}})
+		nativeTaskError(c, 400, "invalid_request_id")
 		return
 	}
 	task, err := model.GetNativeTask(model.LogDB, id, group.ID, token.ID)
@@ -131,12 +165,12 @@ func replayNativeTask(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.AbortWithStatusJSON(503, gin.H{"error": gin.H{"code": "task_store_unavailable"}})
+		nativeTaskError(c, 503, "task_store_unavailable")
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, nativeresult.MaxBytes+1))
 	if err != nil || len(raw) > nativeresult.MaxBytes {
-		c.AbortWithStatusJSON(400, gin.H{"error": gin.H{"code": "invalid_request"}})
+		nativeTaskError(c, 400, "invalid_request")
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(raw))

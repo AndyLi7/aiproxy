@@ -8,6 +8,27 @@ import (
 
 type RecoveryReport struct{ Claimed, Advanced, Deferred int }
 
+// NativeTaskDeadline bounds how long an accepted task may stay undeliverable
+// before it is failed and refunded.
+const NativeTaskDeadline = 6 * time.Hour
+
+// recoveryDelay backs off with task age so a stuck task stops being re-claimed
+// every minute: about an eighth of its age, between 15s (1m after an error)
+// and 30 minutes.
+func recoveryDelay(age time.Duration, failed bool) time.Duration {
+	delay := 15 * time.Second
+	if failed {
+		delay = time.Minute
+	}
+	if scaled := age / 8; scaled > delay {
+		delay = scaled
+	}
+	if delay > 30*time.Minute {
+		delay = 30 * time.Minute
+	}
+	return delay
+}
+
 // RecoverOnce is safe to invoke from multiple workers: durable leases bound
 // concurrent polling. It never calls Submit or retries an uncertain paid call.
 func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, resolve ResolvePoller, archive ArchiveFunc) (RecoveryReport, error) {
@@ -33,9 +54,22 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		workCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		_, workErr := e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
 		cancel()
-		delay := 15 * time.Second
+		age := current.Sub(task.CreatedAt)
+		if workErr != nil && age > NativeTaskDeadline && (task.Status == "queued" || task.Status == "running" || task.Status == "result_received") {
+			// Still undeliverable after the deadline: end it and refund instead of
+			// retrying forever. Unknown submissions settle through the wallet timeout.
+			code := "upstream_task_failed"
+			if task.Status == "result_received" {
+				code = "upstream_result_rejected"
+			}
+			if model.FailAcceptedNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, code) == nil {
+				if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
+					workErr = e.SyncBilling(ctx, failed)
+				}
+			}
+		}
+		delay := recoveryDelay(age, workErr != nil)
 		if workErr != nil {
-			delay = time.Minute
 			report.Deferred++
 		} else {
 			report.Advanced++

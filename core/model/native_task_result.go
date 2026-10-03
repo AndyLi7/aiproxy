@@ -215,3 +215,24 @@ func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code str
 	}
 	return nil
 }
+
+// FailAcceptedNativeTask ends an accepted task that can never deliver: the
+// provider failed it, its result was permanently rejected, or it outlived its
+// deadline. Billing then refunds the customer (platform_failure).
+func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code string) error {
+	if code != "upstream_task_failed" && code != "upstream_result_rejected" {
+		return ErrNativeTaskConflict
+	}
+	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).Updates(map[string]any{"status": "failed", "error_code": code, "updated_at": time.Now()})
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected == 1 {
+		return nil
+	}
+	task, err := GetNativeTask(db, id, group, token)
+	if err == nil && task.Status == "failed" {
+		return nil
+	}
+	return ErrNativeTaskConflict
+}

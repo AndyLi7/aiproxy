@@ -59,6 +59,7 @@ func imageTaskHTTPError(c *gin.Context, status int, code string) {
 	middleware.SetRequestID(c, "image-trace-"+middleware.GenRequestID(time.Now()))
 	message := imageTaskErrorMessage(code)
 	if code == "group_balance_not_enough" {
+		middleware.SetOperationalFailure(c, model.FailureStageBalance, "insufficient_balance", "Your account balance is insufficient.")
 		c.JSON(http.StatusPaymentRequired, gin.H{"error": gin.H{
 			"message": "Your account balance is insufficient.", "type": "insufficient_quota", "code": "insufficient_balance", "param": nil,
 		}})
@@ -471,15 +472,22 @@ func submitImageTask(c *gin.Context) {
 		// debit are recovered by their server operation ID; no upstream retry here.
 		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID); err != nil {
 			if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) {
-				if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "insufficient_balance", Message: "Insufficient balance"}); err != nil {
-					imageTaskHTTPError(c, 503, "task_store_unavailable")
-					return
-				}
-				zero := int64(0)
-				task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
-				if err := model.SaveImageTaskBilling(task); err != nil {
-					imageTaskHTTPError(c, 503, "task_store_unavailable")
-					return
+				// The wallet refuses admission atomically and nothing has been sent
+				// to a provider, so releasing the reservation lets the same
+				// X-Request-Id and body succeed after a top-up without any risk of
+				// a double charge or a repeated provider call.
+				if releaseErr := model.ReleaseImageTaskReservation(task.ID); releaseErr != nil {
+					common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
+					if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "insufficient_balance", Message: "Insufficient balance"}); err != nil {
+						imageTaskHTTPError(c, 503, "task_store_unavailable")
+						return
+					}
+					zero := int64(0)
+					task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
+					if err := model.SaveImageTaskBilling(task); err != nil {
+						imageTaskHTTPError(c, 503, "task_store_unavailable")
+						return
+					}
 				}
 				imageTaskHTTPError(c, 402, "group_balance_not_enough")
 				return

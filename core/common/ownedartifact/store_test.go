@@ -76,3 +76,25 @@ func TestArchiveRejectsOversizeBeforeUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestArchiveSeparatesPermanentSourceErrors(t *testing.T) {
+	status := 404
+	download := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) { return response(status, "gone"), nil })}
+	upload := &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) { t.Fatal("must not upload"); return nil, nil })}
+	// A data: URI or plain http source can never be archived.
+	for _, source := range []string{"data:image/png;base64,AAAA", "http://example.com/x"} {
+		if _, err := store(context.Background(), "task", 0, source, "http://app", "key", download, upload); err != ErrUnsupportedSource {
+			t.Fatalf("%s: %v", source, err)
+		}
+	}
+	// The source refusing the file is permanent; throttling and outages are not.
+	if _, err := store(context.Background(), "task", 0, "https://example.com/x", "http://app", "key", download, upload); err != ErrSourceRejected {
+		t.Fatal(err)
+	}
+	for _, code := range []int{429, 503} {
+		status = code
+		if _, err := store(context.Background(), "task", 0, "https://example.com/x", "http://app", "key", download, upload); err != ErrStorage {
+			t.Fatalf("%d: %v", code, err)
+		}
+	}
+}

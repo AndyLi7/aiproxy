@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common/balance"
@@ -21,6 +22,7 @@ import (
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor/fal"
+	"github.com/labring/aiproxy/core/relay/mode"
 )
 
 // Private trials use the same durable execution/wallet engine without inserting a
@@ -140,7 +142,13 @@ func (d nativeTrialDependencies) create(c *gin.Context) {
 	}
 	// Disabled shadow channels are deliberately eligible here, never public routing.
 	plan := nativetask.Plan{Contract: input.Contract, ChannelID: channel.ID, Endpoint: input.Endpoint,
-		CredentialScope: input.CredentialScope, KeyFingerprint: input.KeyFingerprint, DeliveryBase: input.DeliveryBase, QuoteJSON: string(input.Quote)}
+		CredentialScope: input.CredentialScope, KeyFingerprint: input.KeyFingerprint, DeliveryBase: input.DeliveryBase, QuoteJSON: string(input.Quote),
+		Log: &model.NativeTaskLog{RequestAt: time.Now(), Endpoint: "POST /api/native-trials", RequestSource: model.RequestSourceAdminDemo,
+			IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}
+	// Trials are paid examples run by operators; log them as admin demos.
+	if owner, tokenErr := d.token(token); tokenErr == nil && owner != nil {
+		plan.Log.TokenName = string(owner.Name)
+	}
 	requestEngine := *engine
 	requestEngine.Provider = d.provider(channel)
 	task, err := requestEngine.Submit(c.Request.Context(), id, group, token, body, plan)

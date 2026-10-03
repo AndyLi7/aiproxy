@@ -47,11 +47,16 @@ func (e *Engine) Poll(ctx context.Context, id, group string, token int, resolve 
 		return task, ErrUnavailable
 	}
 	result, err := provider.PollNative(ctx, task.Endpoint, task.UpstreamID, contract)
+	if permanent(err) {
+		return e.rejectResult(ctx, id, group, token)
+	}
 	if err != nil {
 		return task, err
 	}
 	if result.Status == "result_received" {
-		if err = model.SaveNativeTaskResult(e.DB, id, group, token, result.Output); err != nil {
+		if err = model.SaveNativeTaskResult(e.DB, id, group, token, result.Output); permanent(err) {
+			return e.rejectResult(ctx, id, group, token)
+		} else if err != nil {
 			return task, err
 		}
 		return e.Deliver(ctx, id, group, token, archive)

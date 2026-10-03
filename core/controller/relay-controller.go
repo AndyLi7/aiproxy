@@ -313,21 +313,21 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 				statusCode = requestParamErr.StatusCode
 
 				errorCode = requestParamErr.Code
-				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
-					middleware.AbortPublicVideoRequestError(
-						c,
-						model.FailureStageValidation,
-						statusCode,
-						errorCode,
-						requestParamErr.Message,
-						requestParamErr.Param,
-						requestParamErr.Value,
-						requestParamErr.AllowedValues,
-						requestParamErr.Expected,
-					)
+				// Parameter errors come only from the OpenAI-style image and video
+				// validators; clients need the code and the offending field.
+				middleware.AbortPublicVideoRequestError(
+					c,
+					model.FailureStageValidation,
+					statusCode,
+					errorCode,
+					requestParamErr.Message,
+					requestParamErr.Param,
+					requestParamErr.Value,
+					requestParamErr.AllowedValues,
+					requestParamErr.Expected,
+				)
 
-					return
-				}
+				return
 			}
 
 			middleware.AbortOperationallyWithCodeWithMode(mode, c,
@@ -524,11 +524,13 @@ func recordResult(
 ) {
 	fields := middleware.OperationalFieldsFromContext(c)
 	if result.Error != nil {
+		// Log the code the customer receives; the upstream status stays in safe_error.
+		_, publicCode, _ := publicUpstreamError(result.Error.StatusCode())
 		failureFields := model.BuildOperationalFields(
 			fields.RequestSource,
 			model.FailureStageUpstream,
 			result.Error.Error(),
-			"upstream_error",
+			publicCode,
 		)
 		failureFields.RequestedModel = fields.RequestedModel
 		failureFields.PublicModel = fields.PublicModel
@@ -542,10 +544,14 @@ func recordResult(
 	middleware.MarkOperationalLogRecorded(c)
 
 	code := http.StatusOK
+	detailCode := http.StatusOK
 
 	content := ""
 	if result.Error != nil {
-		code = result.Error.StatusCode()
+		// The log shows the status the customer received; detail retention
+		// still follows the upstream status.
+		detailCode = result.Error.StatusCode()
+		code, _, _ = publicUpstreamError(detailCode)
 		respBody, _ := result.Error.MarshalJSON()
 		content = conv.BytesToString(respBody)
 	}
@@ -562,7 +568,7 @@ func recordResult(
 		detail = buildRequestDetailForLog(
 			result.BodyDetail,
 			meta.ModelConfig,
-			code,
+			detailCode,
 			forceSaveDetail,
 		)
 	}
@@ -1115,15 +1121,26 @@ func RelayNotImplemented(c *gin.Context) {
 	)
 }
 
+// publicUpstreamError is the status, code and message a customer receives for an
+// upstream failure. Upstream 401/402/403/404 describe the provider account or
+// route, never the customer's key, balance or model, so they become a 502.
+func publicUpstreamError(upstreamStatus int) (int, string, string) {
+	switch upstreamStatus {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return upstreamStatus, "invalid_request",
+			"The request could not be processed. Please check the input parameters."
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound:
+		return http.StatusBadGateway, "upstream_unavailable",
+			"The upstream provider could not process this request. Retry later or contact support with the request ID."
+	default:
+		return upstreamStatus, "upstream_unavailable",
+			"The service is temporarily unavailable. Please try again later."
+	}
+}
+
 // Only called after upstream execution/retry decisions; original errors remain in audit logs.
 func writePublicUpstreamError(c *gin.Context, original adaptor.Error) {
-	status := original.StatusCode()
-	message := "The service is temporarily unavailable. Please try again later."
-	code := "upstream_unavailable"
-	if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
-		message = "The request could not be processed. Please check the input parameters."
-		code = "invalid_request"
-	}
+	status, code, message := publicUpstreamError(original.StatusCode())
 	safe := relaymodel.WrapperErrorWithMessage(middleware.GetMode(c), status, message,
 		relaymodel.WithType("api_error"), relaymodel.WithCode(code))
 	// Video envelopes already have their own public serializer. Avoid remapping

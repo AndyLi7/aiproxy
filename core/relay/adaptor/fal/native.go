@@ -48,8 +48,11 @@ func (c *Client) nativeRequest(ctx context.Context, method, path string, body []
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, nativeresult.MaxBytes+1))
-	if err != nil || len(raw) > nativeresult.MaxBytes {
+	if err != nil {
 		return nil, response.StatusCode, errors.New("invalid fal response")
+	}
+	if len(raw) > nativeresult.MaxBytes {
+		return nil, response.StatusCode, nativeresult.ErrTooLarge
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, response.StatusCode, &queueResultFailure{status: response.StatusCode}

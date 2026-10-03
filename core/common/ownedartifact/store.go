@@ -23,6 +23,11 @@ const MaxBytes = 64 << 20
 
 var ErrStorage = errors.New("native artifact storage unavailable")
 var ErrTooLarge = errors.New("native artifact exceeds archive limit")
+
+// ErrUnsupportedSource and ErrSourceRejected are permanent: the provider URL
+// can never be archived, so retrying the same task cannot succeed.
+var ErrUnsupportedSource = errors.New("native artifact source is not archivable")
+var ErrSourceRejected = errors.New("native artifact source rejected the download")
 var identity = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 var keyPattern = regexp.MustCompile(`^native-results/[A-Za-z0-9_-]{1,128}/[0-9]{1,4}/[a-f0-9]{64}\.bin$`)
 
@@ -86,7 +91,7 @@ func store(ctx context.Context, task string, index int, source, base, key string
 	}
 	u, err := url.Parse(source)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
-		return empty, ErrStorage
+		return empty, ErrUnsupportedSource
 	}
 	endpoint, err := internalEndpoint(base, key)
 	if err != nil {
@@ -101,6 +106,9 @@ func store(ctx context.Context, task string, index int, source, base, key string
 		return empty, ErrStorage
 	}
 	defer response.Body.Close()
+	if response.StatusCode >= 400 && response.StatusCode < 500 && response.StatusCode != http.StatusRequestTimeout && response.StatusCode != http.StatusTooManyRequests {
+		return empty, ErrSourceRejected
+	}
 	if response.StatusCode != http.StatusOK {
 		return empty, ErrStorage
 	}

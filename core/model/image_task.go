@@ -152,7 +152,7 @@ func ReserveImageTask(
 		}
 
 		var prior []Log
-		if err := tx.Select("group_id", "token_id", "model", "capability", "code", "error_code", "failure_stage", "endpoint", "channel_id", "upstream_id", "used_amount").
+		if err := tx.Select("group_id", "token_id", "code", "failure_stage", "channel_id", "upstream_id", "used_amount").
 			Where("request_id = ?", task.ID).Limit(101).Find(&prior).Error; err != nil {
 			return err
 		}
@@ -160,17 +160,7 @@ func ReserveImageTask(
 			return ErrImageTaskConflict
 		}
 		for _, previous := range prior {
-			// A gateway-only endpoint rejection has not submitted a generation.
-			// Preserve its audit log while allowing the same owner to switch endpoints.
-			identity := previous.Model
-			if previous.Capability != "" {
-				identity += "/" + previous.Capability
-			}
-			if previous.GroupID != task.GroupID || previous.TokenID != task.TokenID ||
-				identity != task.Model || previous.Code != 400 || previous.ErrorCode != "unsupported_endpoint" ||
-				previous.FailureStage != FailureStageValidation ||
-				(previous.Endpoint != "POST /v1/images/generations" && previous.Endpoint != "/v1/images/generations") ||
-				previous.ChannelID != 0 || previous.UpstreamID != "" || previous.Amount.UsedAmount != 0 {
+			if !gatewayOnlyImageRejection(previous, task) {
 				return ErrImageTaskConflict
 			}
 		}
@@ -234,6 +224,82 @@ func ReserveImageTask(
 	}
 
 	return task, created, err
+}
+
+// gatewayOnlyImageRejection reports a prior log row that cannot have submitted
+// a generation: the gateway rejected it (for example invalid input, missing
+// balance or a rate limit) before any provider was selected or paid. Such rows
+// keep their audit value but must not stop the same caller from retrying the
+// same X-Request-Id. Unauthenticated rejections carry no owner and are treated
+// the same way, so a request first sent with a wrong key can be retried. Rows
+// owned by another key, successful rows and rows that reached a provider still
+// conflict.
+func gatewayOnlyImageRejection(previous Log, task *ImageTask) bool {
+	sameOwner := previous.GroupID == task.GroupID && previous.TokenID == task.TokenID
+	unauthenticated := previous.GroupID == "" && previous.TokenID == 0
+
+	return (sameOwner || unauthenticated) &&
+		previous.Code >= 400 &&
+		previous.FailureStage != FailureStageUpstream &&
+		previous.ChannelID == 0 &&
+		previous.UpstreamID == "" &&
+		previous.Amount.UsedAmount == 0
+}
+
+// ReleaseImageTaskReservation frees a reservation whose wallet admission was
+// refused for insufficient balance. The wallet refuses atomically, so nothing
+// was charged, and the caller has not dispatched anything to a provider. The
+// task, its accounting outbox and its reservation log row are removed together
+// so the same X-Request-Id and body can be retried after a top-up. A
+// reservation that may have reached a provider is never released.
+func ReleaseImageTaskReservation(id string) error {
+	return LogDB.Transaction(func(tx *gorm.DB) error {
+		var task ImageTask
+		if err := tx.First(&task, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if task.Status != "submitting" || task.UpstreamID != "" || len(task.Attempts) != 0 ||
+			task.Billing != nil || task.UsageID == 0 {
+			return errors.New("image reservation is no longer releasable")
+		}
+
+		var info AsyncUsageInfo
+		if err := tx.First(&info, "id = ? AND image_task_id = ? AND status = ?", task.UsageID, id, AsyncUsageStatusNone).
+			Error; err != nil {
+			return err
+		}
+
+		if info.LogID != 0 {
+			if tx.Migrator().HasTable(&RequestDetail{}) {
+				if err := tx.Where("log_id = ?", info.LogID).Delete(&RequestDetail{}).Error; err != nil {
+					return err
+				}
+			}
+
+			if err := tx.Where("id = ? AND request_id = ? AND (upstream_id IS NULL OR upstream_id = '')", info.LogID, id).
+				Delete(&Log{}).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Where("id = ? AND status = ?", info.ID, AsyncUsageStatusNone).
+			Delete(&AsyncUsageInfo{}).Error; err != nil {
+			return err
+		}
+
+		result := tx.Where("id = ? AND status = ? AND upstream_id = ?", id, "submitting", "").
+			Delete(&ImageTask{})
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected != 1 {
+			return errors.New("image reservation already resolved")
+		}
+
+		return nil
+	})
 }
 
 func AcceptImageTask(id, upstream string) error {

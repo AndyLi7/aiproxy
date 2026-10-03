@@ -85,3 +85,19 @@ func TestPrepaymentActualCostReceiptRequiresFrozenPolicy(t *testing.T) {
 		})
 	}
 }
+
+// The wallet's admission refusals stay distinguishable so customers get a
+// specific error instead of a generic outage.
+func TestPrepaymentAdmissionRefusalsAreTyped(t *testing.T) {
+	for status, want := range map[int]error{
+		http.StatusPaymentRequired: ErrPrepaymentInsufficientBalance,
+		http.StatusTooManyRequests: ErrPrepaymentTooManyActiveTasks,
+		http.StatusLocked:          ErrPrepaymentModelPaused,
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		client := &ExternalHTTP{url: server.URL, key: "private-test-key"}
+		_, err := client.Prepayment(context.Background(), PrepaymentCommand{Action: "admit", Group: "user", BillingOperationID: "op-1"})
+		require.ErrorIs(t, err, want)
+		server.Close()
+	}
+}

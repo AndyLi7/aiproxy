@@ -57,8 +57,10 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 			return ErrNativeTaskConflict
 		}
 		if parsed.Status == "refunded" {
-			return tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"reserved", "submitting", "submission_unknown"}).Updates(map[string]any{"status": "failed", "error_code": "submission_timeout"}).Error
+			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"reserved", "submitting", "submission_unknown"}).Updates(map[string]any{"status": "failed", "error_code": "submission_timeout"}).Error; err != nil {
+				return err
+			}
 		}
-		return nil
+		return syncNativeTaskLog(tx, id, group, token, receipt)
 	})
 }

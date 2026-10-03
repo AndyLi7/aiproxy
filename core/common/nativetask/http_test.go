@@ -100,6 +100,8 @@ func TestNativeHTTPArtifactOwnershipAndIntegrity(t *testing.T) {
 	response = httptest.NewRecorder()
 	h.GetArtifact(response, r, "req", "0")
 	require.Equal(t, 404, response.Code)
+	// Another key's task reads as missing, with guidance rather than a bare code.
+	require.Contains(t, response.Body.String(), "the key that submitted the task")
 	require.Equal(t, 2, downloads)
 	require.Equal(t, 1, p.calls)
 }

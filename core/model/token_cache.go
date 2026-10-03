@@ -185,7 +185,7 @@ func CacheGetTokenByKey(key string) (*TokenCache, error) {
 			cacheSetModelLocal(cacheKey, tokenCache, cloneTokenCache)
 			return tokenCache, nil
 		} else if err != nil && !errors.Is(err, redis.Nil) {
-			log.Errorf("get token (%s) from redis error: %s", key, err.Error())
+			log.Errorf("get token from redis error: %s", err.Error()) // never log the plaintext key
 		}
 	}
 

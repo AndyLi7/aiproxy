@@ -4,7 +4,7 @@ package controller
 func imageTaskErrorMessage(code string) string {
 	switch code {
 	case "task_not_found":
-		return "No image task with this ID is available to this API key. Check the task ID and use the key that submitted it."
+		return "No image task with this ID exists for this API key. If your POST may not have reached us (timeout or network error), resend the same body with the same X-Request-Id; it is idempotent and is not charged twice. Do not keep polling an ID that returns 404."
 	case "task_store_unavailable":
 		return "Image task storage is temporarily unavailable. Retry querying the same task before submitting another generation."
 	case "channel_unavailable":
@@ -12,7 +12,7 @@ func imageTaskErrorMessage(code string) string {
 	case "invalid_request_id":
 		return "X-Request-ID must be a valid request identifier. Use a unique identifier for each new generation and reuse it only for retries."
 	case "request_id_conflict":
-		return "This request ID is already associated with a different request. Reuse the original body to retry, or choose a new ID for a new generation."
+		return "This X-Request-Id is already used by a different request body or another API key. Retry with the identical body and key, or use a new X-Request-Id for a new generation."
 	case "invalid_request":
 		return "The request body must be valid JSON matching this model's input schema."
 	case "invalid_image_count":

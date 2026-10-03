@@ -33,6 +33,9 @@ func (e *Engine) Deliver(ctx context.Context, id, group string, token int, archi
 		return task, ErrUnavailable
 	}
 	artifacts, err := nativeresult.PlanArtifacts([]byte(task.NativeOutput), contract.Artifacts)
+	if permanent(err) {
+		return e.rejectResult(ctx, id, group, token)
+	}
 	if err != nil {
 		return task, err
 	}
@@ -48,6 +51,9 @@ func (e *Engine) Deliver(ctx context.Context, id, group string, token int, archi
 			continue
 		}
 		receipt, err := archive(ctx, id, index, a.Source)
+		if permanent(err) {
+			return e.rejectResult(ctx, id, group, token)
+		}
 		if err != nil {
 			return task, err
 		}

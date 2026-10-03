@@ -141,9 +141,10 @@ func TestImageReservationRejectsPreexistingOperationalRequestID(t *testing.T) {
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
-	require.NoError(t, db.Create(&model.Log{RequestID: "collision", Code: 404}).Error)
+	// A request ID already logged for another API key is never adopted.
+	require.NoError(t, db.Create(&model.Log{RequestID: "collision", GroupID: "other-group", TokenID: 9, Code: 404}).Error)
 	_, _, err = model.ReserveImageTask(
-		&model.ImageTask{ID: "collision"},
+		&model.ImageTask{ID: "collision", GroupID: "g", TokenID: 1},
 		&model.AsyncUsageInfo{RequestID: "collision"},
 	)
 	require.ErrorIs(t, err, model.ErrImageTaskConflict)
@@ -252,12 +253,27 @@ func TestImageReservationAfterEndpointRejection(t *testing.T) {
 		{"safe fallback", func(l *model.Log) {}, true},
 		{"other owner", func(l *model.Log) { l.TokenID = 2 }, false},
 		{"other group", func(l *model.Log) { l.GroupID = "other" }, false},
-		{"other model", func(l *model.Log) { l.Model = "other" }, false},
+		// Any gateway-only rejection of the same caller is harmless: it never
+		// reached a provider, so the caller may fix the request and retry the ID.
+		{"other model", func(l *model.Log) { l.Model = "other" }, true},
+		{"other validation", func(l *model.Log) { l.ErrorCode = "invalid_parameter" }, true},
+		{"gateway status without provider", func(l *model.Log) { l.Code = 504 }, true},
+		{"insufficient balance", func(l *model.Log) {
+			l.Code, l.ErrorCode, l.FailureStage = 402, "insufficient_balance", model.FailureStageBalance
+		}, true},
+		{"rate limited", func(l *model.Log) {
+			l.Code, l.ErrorCode, l.FailureStage = 429, "rate_limited", model.FailureStageRateLimit
+		}, true},
+		{"model not found", func(l *model.Log) {
+			l.Code, l.ErrorCode, l.FailureStage = 404, "model_unavailable", model.FailureStageModel
+		}, true},
+		{"unauthenticated", func(l *model.Log) {
+			l.GroupID, l.TokenID, l.Code, l.ErrorCode, l.FailureStage = "", 0, 401, "invalid_api_key", model.FailureStageAuth
+		}, true},
+		{"successful request", func(l *model.Log) { l.Code, l.ErrorCode, l.FailureStage = 200, "", "" }, false},
 		{"upstream attempted", func(l *model.Log) { l.ChannelID = 1 }, false},
 		{"upstream accepted", func(l *model.Log) { l.UpstreamID = "accepted" }, false},
 		{"charged", func(l *model.Log) { l.Amount.UsedAmount = 0.01 }, false},
-		{"timeout", func(l *model.Log) { l.Code = 504 }, false},
-		{"other validation", func(l *model.Log) { l.ErrorCode = "invalid_parameter" }, false},
 		{"uncertain stage", func(l *model.Log) { l.FailureStage = model.FailureStageUpstream }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -297,7 +313,7 @@ func TestImageReservationAfterEndpointRejection(t *testing.T) {
 			require.NoError(t, model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "test", Message: "test"}))
 			var preserved model.Log
 			require.NoError(t, db.First(&preserved, prior.ID).Error)
-			require.Equal(t, 400, preserved.Code)
+			require.Equal(t, prior.Code, preserved.Code)
 			require.Empty(t, preserved.UpstreamID)
 			require.Zero(t, preserved.Amount.UsedAmount)
 
@@ -382,4 +398,78 @@ func TestLargeSeedSurvivesPersistenceAndPublicJSONExactly(t *testing.T) {
 	require.Contains(t, string(encoded), `"seed":`+exact)
 	require.NotContains(t, string(encoded), "seed_exact")
 	require.Equal(t, seed, *saved.Data[0].Seed)
+}
+
+func TestReleasedImageReservationCanBeReservedAgain(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "release.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}))
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+
+	reserve := func(operation string) (*model.ImageTask, bool) {
+		task, created, err := model.ReserveImageTask(
+			&model.ImageTask{ID: "topup", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "same", BillingOperationID: operation, RequestSummary: `{"prompt":"p"}`},
+			&model.AsyncUsageInfo{RequestID: "topup", ChannelID: 7, BillingOperationID: operation},
+		)
+		require.NoError(t, err)
+		return task, created
+	}
+
+	_, created := reserve("first-operation")
+	require.True(t, created)
+	require.NoError(t, model.ReleaseImageTaskReservation("topup"))
+
+	for _, table := range []any{&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}} {
+		var n int64
+		require.NoError(t, db.Model(table).Count(&n).Error)
+		require.Zero(t, n, "%T", table)
+	}
+	_, err = model.GetImageTask("topup", "g", 1)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	// After a top-up the same ID and body reserve a fresh billing operation.
+	task, created := reserve("second-operation")
+	require.True(t, created)
+	require.Equal(t, "second-operation", task.BillingOperationID)
+}
+
+func TestImageReservationIsNotReleasedOnceItMayHaveReachedAProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*testing.T, *gorm.DB)
+	}{
+		{"accepted", func(t *testing.T, _ *gorm.DB) { require.NoError(t, model.AcceptImageTask("kept", "provider-id")) }},
+		{"submission unknown", func(t *testing.T, db *gorm.DB) {
+			require.NoError(t, db.Model(&model.ImageTask{}).Where("id = ?", "kept").Update("status", "submission_unknown").Error)
+		}},
+		{"attempt started", func(t *testing.T, db *gorm.DB) {
+			require.NoError(t, db.Model(&model.ImageTask{}).Where("id = ?", "kept").Update("attempts", `[{"channel_id":7}]`).Error)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "kept.db"))
+			require.NoError(t, err)
+			require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+			old := model.LogDB
+			model.LogDB = db
+			t.Cleanup(func() { model.LogDB = old })
+
+			_, created, err := model.ReserveImageTask(
+				&model.ImageTask{ID: "kept", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "same"},
+				&model.AsyncUsageInfo{RequestID: "kept", ChannelID: 7},
+			)
+			require.NoError(t, err)
+			require.True(t, created)
+			tc.mutate(t, db)
+
+			require.Error(t, model.ReleaseImageTaskReservation("kept"))
+			for _, table := range []any{&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}} {
+				var n int64
+				require.NoError(t, db.Model(table).Count(&n).Error)
+				require.EqualValues(t, 1, n, "%T", table)
+			}
+		})
+	}
 }

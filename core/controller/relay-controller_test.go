@@ -605,18 +605,30 @@ func TestBuildRequestDetailForLogDropsInvalidUTF8Bodies(t *testing.T) {
 }
 
 func TestUpstreamFailurePublicBoundary(t *testing.T) {
-	for _, status := range []int{401, 402, 403, 429, 500} {
+	// Upstream 401/402/403/404 concern the provider account, so customers get a
+	// 502 instead of a status that blames their own key or balance.
+	for _, tc := range []struct {
+		upstream, status int
+		message          string
+	}{
+		{401, 502, "upstream provider could not process this request"},
+		{402, 502, "upstream provider could not process this request"},
+		{403, 502, "upstream provider could not process this request"},
+		{404, 502, "upstream provider could not process this request"},
+		{429, 429, "temporarily unavailable"},
+		{500, 500, "temporarily unavailable"},
+	} {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
 		middleware.SetRequestID(c, "safe-request-id")
-		original := relaymodel.WrapperErrorWithMessage(mode.ChatCompletions, status, "fal private-key upstream balance exhausted", relaymodel.WithType("private_provider_type"))
+		original := relaymodel.WrapperErrorWithMessage(mode.ChatCompletions, tc.upstream, "fal private-key upstream balance exhausted", relaymodel.WithType("private_provider_type"))
 		handleRelayResult(c, original, false, 0, time.Time{})
 		require.NotContains(t, w.Body.String(), "private-key")
 		require.NotContains(t, w.Body.String(), "fal")
 		require.NotContains(t, w.Body.String(), "balance")
-		require.Contains(t, w.Body.String(), "temporarily unavailable")
-		require.Equal(t, status, w.Code)
+		require.Contains(t, w.Body.String(), tc.message)
+		require.Equal(t, tc.status, w.Code)
 		require.Contains(t, original.Error(), "private-key")
 	}
 }

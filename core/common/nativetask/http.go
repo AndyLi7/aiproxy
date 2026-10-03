@@ -24,22 +24,88 @@ type HTTP struct {
 	ResolvePoller ResolvePoller
 	Archive       ArchiveFunc
 	Download      func(*http.Request, string) (*http.Response, error)
+	// OnError lets the gateway log the same code and message the client receives.
+	OnError func(status int, code, message string)
 }
 
-func writeError(w http.ResponseWriter, status int, code string) {
+// errorMessages tell API clients, including generated client code, what to
+// change. A bare code such as task_not_found was read as a model problem.
+var errorMessages = map[string]string{
+	"task_not_found":               "No task with this ID exists for this API key. If your POST may not have reached us (timeout or network error), resend the exact same request body with the same X-Request-Id; it is idempotent and is not charged twice. Do not keep polling an ID that returns 404.",
+	"artifact_not_found":           "No artifact at that index is available to this API key. Check the task ID, the index and the key that submitted the task.",
+	"request_id_conflict":          "This request ID is already used by a different request. Reuse the original body to retry, or choose a new ID for a new task.",
+	"invalid_request_id":           "X-Request-Id must be 1-128 letters, digits, '_' or '-'. Use a unique ID for each new task and reuse it only for retries.",
+	"invalid_request":              "The request body must be valid JSON matching this model's input schema.",
+	"invalid_input":                "The input does not match this model's input schema. Check the model's API documentation.",
+	"native_model_unavailable":     "This model is not available for tasks on this endpoint. Check the model ID in the model catalog.",
+	"model_route_unavailable":      "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
+	"authentication_required":      "A valid API key is required.",
+	"insufficient_balance":         "Your account balance is insufficient.",
+	"too_many_active_tasks":        "Too many of your tasks are generating at once. Wait for one to finish, then retry with the same X-Request-Id.",
+	"model_unavailable":            "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
+	"task_store_unavailable":       "Task storage is temporarily unavailable. Retry querying the same task before submitting another task.",
+	"task_temporarily_unavailable": "This task is temporarily unavailable. Retry querying the same task later.",
+	"native_execution_unavailable": "Task execution is temporarily unavailable. Retry later with the same request ID.",
+	"artifact_unavailable":         "The task result is temporarily unavailable. Retry downloading it later.",
+	"artifact_integrity_failed":    "The task result could not be verified. Contact support with the task ID.",
+	"billing_status_unavailable":   "Billing status is temporarily unavailable. Retry querying the same task later.",
+}
+
+// failureMessages explain the error code of a task that ended as failed.
+// Every listed failure is refunded in full by SyncBilling or recovery.
+var failureMessages = map[string]string{
+	"upstream_task_failed":     "The provider could not generate this result. You were not charged; submit a new task with a new X-Request-Id.",
+	"upstream_result_rejected": "The provider returned a result we could not deliver. You were not charged; submit a new task with a new X-Request-Id.",
+	"upstream_rejected":        "The provider rejected this request before generating. You were not charged.",
+	"submission_timeout":       "The provider did not confirm this task in time. You were not charged; submit a new task with a new X-Request-Id.",
+}
+
+// ErrorMessage is the client-facing sentence for a native error code.
+func ErrorMessage(code string) string {
+	if message := errorMessages[code]; message != "" {
+		return message
+	}
+	return code
+}
+
+// errorType follows the OpenAI-style type used by the other /v1 endpoints.
+func errorType(status int) string {
+	switch status {
+	case http.StatusBadRequest, http.StatusConflict:
+		return "invalid_request_error"
+	case http.StatusNotFound:
+		return "not_found_error"
+	case http.StatusPaymentRequired:
+		return "insufficient_quota"
+	default:
+		return "api_error"
+	}
+}
+
+// WriteError writes the native error envelope: every error has a code, a
+// message and a type.
+func WriteError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": code}})
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
+		"code": code, "message": ErrorMessage(code), "type": errorType(status),
+	}})
+}
+func (h *HTTP) writeError(w http.ResponseWriter, status int, code string) {
+	if h != nil && h.OnError != nil {
+		h.OnError(status, code, ErrorMessage(code))
+	}
+	WriteError(w, status, code)
 }
 func (h *HTTP) owner(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	if h == nil || h.Engine == nil || h.Engine.DB == nil || h.Identity == nil {
-		writeError(w, 503, "native_execution_unavailable")
+		h.writeError(w, 503, "native_execution_unavailable")
 		return "", 0, false
 	}
 	group, token, err := h.Identity(r)
 	if err != nil || group == "" || token <= 0 {
-		writeError(w, 401, "authentication_required")
+		h.writeError(w, 401, "authentication_required")
 		return "", 0, false
 	}
 	return group, token, true
@@ -57,7 +123,11 @@ func WritePublic(w http.ResponseWriter, status int, task *model.NativeTask) {
 	case "completed":
 		response["output"] = json.RawMessage(task.DeliveredOutput)
 	case "failed":
-		response["error"] = map[string]string{"code": task.ErrorCode}
+		message := failureMessages[task.ErrorCode]
+		if message == "" {
+			message = "This task failed. Contact support with the task ID."
+		}
+		response["error"] = map[string]string{"code": task.ErrorCode, "message": message}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -71,12 +141,12 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.Header.Get("X-Request-Id")
 	if !taskID.MatchString(id) {
-		writeError(w, 400, "invalid_request_id")
+		h.writeError(w, 400, "invalid_request_id")
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, nativeresult.MaxBytes+1))
 	if err != nil || len(raw) > nativeresult.MaxBytes {
-		writeError(w, 400, "invalid_request")
+		h.writeError(w, 400, "invalid_request")
 		return
 	}
 	// Accepted retries use their original frozen route. Reserved retries may resolve
@@ -85,12 +155,12 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		digest := sha256.Sum256(raw)
 		if existing.Fingerprint != hex.EncodeToString(digest[:]) {
-			writeError(w, 409, "request_id_conflict")
+			h.writeError(w, 409, "request_id_conflict")
 			return
 		}
 		if existing.Status != "reserved" {
 			if err = h.Engine.SyncBilling(r.Context(), existing); err != nil {
-				writeError(w, 503, "billing_status_unavailable")
+				h.writeError(w, 503, "billing_status_unavailable")
 				return
 			}
 			WritePublic(w, 202, existing)
@@ -98,16 +168,21 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		writeError(w, 503, "task_store_unavailable")
+		h.writeError(w, 503, "task_store_unavailable")
 		return
 	}
 	if h.ResolvePlan == nil {
-		writeError(w, 503, "native_execution_unavailable")
+		h.writeError(w, 503, "native_execution_unavailable")
 		return
 	}
 	plan, provider, err := h.ResolvePlan(r, raw)
+	if errors.Is(err, ErrNotNativeModel) {
+		h.writeError(w, 400, "native_model_unavailable")
+		return
+	}
 	if err != nil {
-		writeError(w, 400, "native_model_unavailable")
+		// Route, channel and quote failures are ours, not a wrong model ID.
+		h.writeError(w, 503, "model_route_unavailable")
 		return
 	}
 	// Per-request engine copy prevents credentials from leaking across concurrent calls.
@@ -117,16 +192,20 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, model.ErrNativeTaskConflict):
-			writeError(w, 409, "request_id_conflict")
+			h.writeError(w, 409, "request_id_conflict")
 		case errors.Is(err, nativeresult.ErrRequest), errors.Is(err, nativeresult.ErrInvalid):
-			writeError(w, 400, "invalid_input")
+			h.writeError(w, 400, "invalid_input")
 		case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):
-			writeError(w, 402, "insufficient_balance")
+			h.writeError(w, 402, "insufficient_balance")
+		case errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks):
+			h.writeError(w, 429, "too_many_active_tasks")
+		case errors.Is(err, balance.ErrPrepaymentModelPaused):
+			h.writeError(w, 503, "model_unavailable")
 		default:
 			if task != nil && task.Status != "reserved" {
 				WritePublic(w, 202, task)
 			} else {
-				writeError(w, 503, "native_execution_unavailable")
+				h.writeError(w, 503, "native_execution_unavailable")
 			}
 		}
 		return
@@ -140,11 +219,11 @@ func (h *HTTP) Get(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	task, err := h.Engine.Poll(r.Context(), id, group, token, h.ResolvePoller, h.Archive)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		writeError(w, 404, "task_not_found")
+		h.writeError(w, 404, "task_not_found")
 		return
 	}
 	if err != nil {
-		writeError(w, 503, "task_temporarily_unavailable")
+		h.writeError(w, 503, "task_temporarily_unavailable")
 		return
 	}
 	WritePublic(w, 200, task)
@@ -156,17 +235,17 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 	}
 	index, err := strconv.Atoi(indexText)
 	if err != nil || index < 0 || index >= 1024 {
-		writeError(w, 404, "artifact_not_found")
+		h.writeError(w, 404, "artifact_not_found")
 		return
 	}
 	task, err := model.GetNativeTask(h.Engine.DB, id, group, token)
 	if err != nil || task.Status != "completed" {
-		writeError(w, 404, "artifact_not_found")
+		h.writeError(w, 404, "artifact_not_found")
 		return
 	}
 	entries := map[int]ownedartifact.Receipt{}
 	if json.Unmarshal([]byte(task.ArtifactManifest), &entries) != nil || !ownedartifact.ValidReceipt(id, index, entries[index]) {
-		writeError(w, 404, "artifact_not_found")
+		h.writeError(w, 404, "artifact_not_found")
 		return
 	}
 	receipt := entries[index]
@@ -177,11 +256,11 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 		source, err = ownedartifact.Download(r.Context(), receipt.Key)
 	}
 	if err != nil || source == nil {
-		writeError(w, 503, "artifact_unavailable")
+		h.writeError(w, 503, "artifact_unavailable")
 		return
 	}
 	if source.Body == nil {
-		writeError(w, 503, "artifact_unavailable")
+		h.writeError(w, 503, "artifact_unavailable")
 		return
 	}
 	defer source.Body.Close()
@@ -189,7 +268,7 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 	raw, err := io.ReadAll(io.LimitReader(source.Body, receipt.Size+1))
 	sum := sha256.Sum256(raw)
 	if source.StatusCode != 200 || err != nil || int64(len(raw)) != receipt.Size || hex.EncodeToString(sum[:]) != receipt.SHA256 {
-		writeError(w, 503, "artifact_integrity_failed")
+		h.writeError(w, 503, "artifact_integrity_failed")
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")

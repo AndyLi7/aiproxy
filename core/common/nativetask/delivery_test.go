@@ -83,3 +83,24 @@ func TestNativeDeliveryPreservesEmptySuccess(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeDeliveryPermanentArchiveErrorFailsAndRefunds(t *testing.T) {
+	e, plan, w, _ := setup(t)
+	ctx := context.Background()
+	var contract nativeresult.TaskContract
+	require.NoError(t, json.Unmarshal(plan.Contract, &contract))
+	contract.Artifacts = []nativeresult.ArtifactBinding{{Path: []string{"files", "*", "url"}}}
+	plan.Contract, _ = json.Marshal(contract)
+	plan.DeliveryBase = "https://gateway.example"
+	task, err := e.Submit(ctx, "req", "g", 1, body, plan)
+	require.NoError(t, err)
+	require.NoError(t, model.SaveNativeTaskResult(e.DB, task.ID, "g", 1, []byte(`{"files":[{"url":"https://provider.example/gone.png"}]}`)))
+	archive := func(context.Context, string, int, string) (ownedartifact.Receipt, error) {
+		return ownedartifact.Receipt{}, ownedartifact.ErrSourceRejected
+	}
+	failed, err := e.Deliver(ctx, task.ID, "g", 1, archive)
+	require.NoError(t, err)
+	require.Equal(t, "failed", failed.Status)
+	require.Equal(t, "upstream_result_rejected", failed.ErrorCode)
+	require.True(t, refundedWith(w, "platform_failure"))
+}

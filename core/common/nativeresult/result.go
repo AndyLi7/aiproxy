@@ -17,6 +17,9 @@ const MaxNodes = 100000
 
 var ErrInvalid = errors.New("native result does not match its frozen contract")
 
+// ErrTooLarge marks a provider result over MaxBytes; re-polling cannot shrink it.
+var ErrTooLarge = errors.New("native result exceeds size limit")
+
 type denyLoader struct{}
 
 func (denyLoader) Load(string) (any, error) {

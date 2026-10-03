@@ -3,6 +3,7 @@ package nativetask
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
@@ -50,4 +51,30 @@ func TestNativeRecoveryNeverRetriesUnknownSubmission(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Advanced)
 	require.Zero(t, provider.calls)
+}
+
+func TestNativeRecoveryBacksOffWithAge(t *testing.T) {
+	require.Equal(t, 15*time.Second, recoveryDelay(time.Minute, false))
+	require.Equal(t, time.Minute, recoveryDelay(time.Minute, true))
+	require.Equal(t, 15*time.Minute, recoveryDelay(2*time.Hour, true))
+	require.Equal(t, 30*time.Minute, recoveryDelay(48*time.Hour, false))
+}
+
+func TestNativeRecoveryExpiresStuckAcceptedTasks(t *testing.T) {
+	e, plan, w, _ := setup(t)
+	ctx := context.Background()
+	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
+	require.NoError(t, err)
+	now := time.Now()
+	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("created_at", now.Add(-NativeTaskDeadline-time.Minute)).Error)
+	resolve := func(context.Context, *model.NativeTask) (Poller, error) {
+		return &pollStub{err: errors.New("provider unreachable")}, nil
+	}
+	_, err = e.RecoverOnce(ctx, "worker", now, resolve, nil)
+	require.NoError(t, err)
+	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, "failed", task.Status)
+	require.Equal(t, "upstream_task_failed", task.ErrorCode)
+	require.True(t, refundedWith(w, "platform_failure"))
 }

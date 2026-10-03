@@ -175,7 +175,8 @@ func (d nativeTrialDependencies) read(c *gin.Context, artifact bool) {
 	if artifact {
 		handler.GetArtifact(c.Writer, c.Request, c.Param("id"), c.Param("index"))
 	} else {
-		task, err := engine.Poll(c.Request.Context(), c.Param("id"), group, token, handler.ResolvePoller, nil)
+		// Reads never poll the provider; recovery workers advance trials too.
+		task, err := model.GetNativeTask(engine.DB, c.Param("id"), group, token)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			middleware.ErrorResponse(c, 404, "trial not found")
 			return

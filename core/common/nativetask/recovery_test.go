@@ -54,7 +54,8 @@ func TestNativeRecoveryNeverRetriesUnknownSubmission(t *testing.T) {
 }
 
 func TestNativeRecoveryBacksOffWithAge(t *testing.T) {
-	require.Equal(t, 15*time.Second, recoveryDelay(time.Minute, false))
+	require.Equal(t, 2*time.Second, recoveryDelay(5*time.Second, false))
+	require.Equal(t, 7500*time.Millisecond, recoveryDelay(time.Minute, false))
 	require.Equal(t, time.Minute, recoveryDelay(time.Minute, true))
 	require.Equal(t, 15*time.Minute, recoveryDelay(2*time.Hour, true))
 	require.Equal(t, 30*time.Minute, recoveryDelay(48*time.Hour, false))

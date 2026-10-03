@@ -13,10 +13,10 @@ type RecoveryReport struct{ Claimed, Advanced, Deferred int }
 const NativeTaskDeadline = 6 * time.Hour
 
 // recoveryDelay backs off with task age so a stuck task stops being re-claimed
-// every minute: about an eighth of its age, between 15s (1m after an error)
-// and 30 minutes.
+// every minute: about an eighth of its age, between 2s (1m after an error)
+// and 30 minutes. Customer reads never poll, so young tasks are polled often.
 func recoveryDelay(age time.Duration, failed bool) time.Duration {
-	delay := 15 * time.Second
+	delay := 2 * time.Second
 	if failed {
 		delay = time.Minute
 	}

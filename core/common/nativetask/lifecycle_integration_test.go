@@ -126,16 +126,26 @@ func TestNativeLifecycleProtocolRestartAndOwnedDownload(t *testing.T) {
 			e = &Engine{DB: reopened, Wallet: w}
 			h.Engine = e
 			t.Cleanup(func() { conn, _ := reopened.DB(); _ = conn.Close() })
+			// A customer read never polls the provider or archives anything.
+			queued := httptest.NewRecorder()
+			h.Get(queued, httptest.NewRequest("GET", "/", nil), "req")
+			require.Equal(t, 200, queued.Code)
+			require.Contains(t, queued.Body.String(), `"status":"queued"`)
+			require.Zero(t, polls)
 			w.fail = "delivered"
-			pending := httptest.NewRecorder()
-			h.Get(pending, httptest.NewRequest("GET", "/", nil), "req")
-			require.Equal(t, 503, pending.Code)
-			require.NotContains(t, pending.Body.String(), "provider.example")
+			report, err := e.RecoverOnce(context.Background(), "first-worker", time.Now(), h.ResolvePoller, archive)
+			require.NoError(t, err)
+			require.Equal(t, 1, report.Deferred)
 			saved, err := model.GetNativeTask(reopened, "req", "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, "delivery_ready", saved.Status)
+			pending := httptest.NewRecorder()
+			h.Get(pending, httptest.NewRequest("GET", "/", nil), "req")
+			require.Equal(t, 200, pending.Code)
+			require.Contains(t, pending.Body.String(), `"status":"running"`)
+			require.NotContains(t, pending.Body.String(), "provider.example")
 			w.fail = ""
-			report, err := e.RecoverOnce(context.Background(), "restart-worker", time.Now().Add(time.Minute), h.ResolvePoller, archive)
+			report, err = e.RecoverOnce(context.Background(), "restart-worker", time.Now().Add(2*time.Minute), h.ResolvePoller, archive)
 			require.NoError(t, err)
 			require.Equal(t, 1, report.Advanced)
 			complete := httptest.NewRecorder()

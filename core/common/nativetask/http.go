@@ -26,6 +26,15 @@ type HTTP struct {
 	Download      func(*http.Request, string) (*http.Response, error)
 	// OnError lets the gateway log the same code and message the client receives.
 	OnError func(status int, code, message string)
+	// limiter defaults to the process-wide customer read limits.
+	limiter *readLimiter
+}
+
+func (h *HTTP) reads() *readLimiter {
+	if h.limiter != nil {
+		return h.limiter
+	}
+	return customerReads
 }
 
 // errorMessages tell API clients, including generated client code, what to
@@ -42,6 +51,7 @@ var errorMessages = map[string]string{
 	"authentication_required":      "A valid API key is required.",
 	"insufficient_balance":         "Your account balance is insufficient.",
 	"too_many_active_tasks":        "Too many of your tasks are generating at once. Wait for one to finish, then retry with the same X-Request-Id.",
+	"rate_limit_exceeded":          "Too many requests for this API key. Poll each task about every 5 seconds and download results a few at a time.",
 	"model_unavailable":            "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
 	"task_store_unavailable":       "Task storage is temporarily unavailable. Retry querying the same task before submitting another task.",
 	"task_temporarily_unavailable": "This task is temporarily unavailable. Retry querying the same task later.",
@@ -212,12 +222,20 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	WritePublic(w, 202, task)
 }
+
+// Get only reads stored state. Polling the provider, archiving results and
+// billing sync belong to the recovery workers, so a polling loop can never
+// trigger provider calls or large transfers.
 func (h *HTTP) Get(w http.ResponseWriter, r *http.Request, id string) {
 	group, token, ok := h.owner(w, r)
 	if !ok {
 		return
 	}
-	task, err := h.Engine.Poll(r.Context(), id, group, token, h.ResolvePoller, h.Archive)
+	if !h.reads().allowStatus(group, token) {
+		h.writeError(w, 429, "rate_limit_exceeded")
+		return
+	}
+	task, err := model.GetNativeTask(h.Engine.DB, id, group, token)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		h.writeError(w, 404, "task_not_found")
 		return
@@ -228,6 +246,14 @@ func (h *HTTP) Get(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	WritePublic(w, 200, task)
 }
+
+// Artifacts up to this size are verified in full before the first byte is sent.
+// Larger ones stream, holding back the tail until the digest matches.
+const (
+	bufferedArtifactLimit = 8 << 20
+	artifactTailHoldback  = 64 << 10
+)
+
 func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText string) {
 	group, token, ok := h.owner(w, r)
 	if !ok {
@@ -248,6 +274,12 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 		h.writeError(w, 404, "artifact_not_found")
 		return
 	}
+	release, ok := h.reads().acquireDownload(group, token)
+	if !ok {
+		h.writeError(w, 429, "rate_limit_exceeded")
+		return
+	}
+	defer release()
 	receipt := entries[index]
 	var source *http.Response
 	if h.Download != nil {
@@ -264,19 +296,69 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 		return
 	}
 	defer source.Body.Close()
-	// Reverify immutable receipt before emitting even one byte to the customer.
-	raw, err := io.ReadAll(io.LimitReader(source.Body, receipt.Size+1))
-	sum := sha256.Sum256(raw)
-	if source.StatusCode != 200 || err != nil || int64(len(raw)) != receipt.Size || hex.EncodeToString(sum[:]) != receipt.SHA256 {
+	// A declared length that disagrees with the receipt fails before any byte is sent.
+	if source.StatusCode != 200 || (source.ContentLength > 0 && source.ContentLength != receipt.Size) {
 		h.writeError(w, 503, "artifact_integrity_failed")
 		return
 	}
+	if receipt.Size > bufferedArtifactLimit {
+		streamArtifact(w, source.Body, receipt)
+		return
+	}
+	// Reverify immutable receipt before emitting even one byte to the customer.
+	raw, err := io.ReadAll(io.LimitReader(source.Body, receipt.Size+1))
+	sum := sha256.Sum256(raw)
+	if err != nil || int64(len(raw)) != receipt.Size || hex.EncodeToString(sum[:]) != receipt.SHA256 {
+		h.writeError(w, 503, "artifact_integrity_failed")
+		return
+	}
+	writeArtifactHeaders(w, receipt.Size)
+	_, _ = w.Write(raw)
+}
+
+func writeArtifactHeaders(w http.ResponseWriter, size int64) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="artifact.bin"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("Cache-Control", "private, no-store")
-	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(200)
-	_, _ = w.Write(raw)
+}
+
+// streamArtifact keeps memory bounded for large artifacts. The last
+// artifactTailHoldback bytes are written only after the size and digest match,
+// so a corrupted object is never delivered complete: the response falls short
+// of its Content-Length and the server drops the connection.
+func streamArtifact(w http.ResponseWriter, body io.Reader, receipt ownedartifact.Receipt) {
+	writeArtifactHeaders(w, receipt.Size)
+	digest := sha256.New()
+	reader := io.LimitReader(body, receipt.Size+1)
+	held := make([]byte, 0, artifactTailHoldback+32<<10)
+	chunk := make([]byte, 32<<10)
+	var read int64
+	for {
+		n, err := reader.Read(chunk)
+		if n > 0 {
+			read += int64(n)
+			digest.Write(chunk[:n])
+			held = append(held, chunk[:n]...)
+			if over := len(held) - artifactTailHoldback; over > 0 {
+				if _, werr := w.Write(held[:over]); werr != nil {
+					return
+				}
+				held = append(held[:0], held[over:]...)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return
+		}
+	}
+	if read != receipt.Size || hex.EncodeToString(digest.Sum(nil)) != receipt.SHA256 {
+		return
+	}
+	_, _ = w.Write(held)
 }

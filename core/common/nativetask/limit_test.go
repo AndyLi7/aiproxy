@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -49,11 +50,23 @@ func TestArtifactDownloadsAreBoundedPerKeyAndGlobally(t *testing.T) {
 	for _, r := range releases[1:] {
 		r()
 	}
-	for i := 0; i < artifactDownloadsGlobal; i++ {
-		_, ok := l.acquireDownload("g", 100+i)
+	// One account's keys share a group cap below the global one.
+	var groupReleases []func()
+	for i := 0; i < artifactDownloadsPerGroup; i++ {
+		release, ok := l.acquireDownload("g", 100+i)
 		require.True(t, ok)
+		groupReleases = append(groupReleases, release)
 	}
 	_, ok = l.acquireDownload("g", 999)
+	require.False(t, ok)
+	for _, r := range groupReleases {
+		r()
+	}
+	for i := 0; i < artifactDownloadsGlobal; i++ {
+		_, ok := l.acquireDownload("group-"+strconv.Itoa(i), 1)
+		require.True(t, ok)
+	}
+	_, ok = l.acquireDownload("another", 1)
 	require.False(t, ok)
 }
 

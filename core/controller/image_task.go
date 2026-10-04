@@ -9,6 +9,7 @@ import (
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"github.com/labring/aiproxy/core/common/imageprepayment"
+	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/common/ownedimage"
 	"math"
 	"net/http"
@@ -84,12 +85,13 @@ func imageTaskHTTPError(c *gin.Context, status int, code string) {
 
 func GetImageTask(c *gin.Context) {
 	middleware.SetRequestID(c, "image-poll-"+middleware.GenRequestID(time.Now()))
+	group, token := middleware.GetGroup(c).ID, middleware.GetToken(c).ID
+	if !nativetask.AllowCustomerRead(group, token) {
+		imageTaskHTTPError(c, 429, "rate_limit_exceeded")
+		return
+	}
 
-	task, err := model.GetImageTask(
-		c.Param("id"),
-		middleware.GetGroup(c).ID,
-		middleware.GetToken(c).ID,
-	)
+	task, err := model.GetImageTask(c.Param("id"), group, token)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		imageTaskHTTPError(c, 404, "task_not_found")
 		return
@@ -100,12 +102,8 @@ func GetImageTask(c *gin.Context) {
 		return
 	}
 
-	if task.PrepaymentQuoteJSON != "" && !task.BillingSettled {
-		if _, err := imageprepayment.Sync(c.Request.Context(), task); err != nil {
-			imageTaskHTTPError(c, 503, "billing_status_unavailable")
-			return
-		}
-	}
+	// A poll only reads stored state. Billing sync runs when the task completes
+	// and in background recovery, so a polling loop cannot multiply wallet calls.
 	enrichCompletedImageTask(c.Request.Context(), task)
 	c.JSON(200, publicImageTask(c, task))
 }
@@ -471,28 +469,38 @@ func submitImageTask(c *gin.Context) {
 		// Ambiguous wallet replies never authorize paid work. The reserved task and
 		// debit are recovered by their server operation ID; no upstream retry here.
 		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID); err != nil {
-			if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) {
-				// The wallet refuses admission atomically and nothing has been sent
-				// to a provider, so releasing the reservation lets the same
-				// X-Request-Id and body succeed after a top-up without any risk of
-				// a double charge or a repeated provider call.
-				if releaseErr := model.ReleaseImageTaskReservation(task.ID); releaseErr != nil {
-					common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
-					if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "insufficient_balance", Message: "Insufficient balance"}); err != nil {
-						imageTaskHTTPError(c, 503, "task_store_unavailable")
-						return
-					}
-					zero := int64(0)
-					task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
-					if err := model.SaveImageTaskBilling(task); err != nil {
-						imageTaskHTTPError(c, 503, "task_store_unavailable")
-						return
-					}
-				}
-				imageTaskHTTPError(c, 402, "group_balance_not_enough")
+			status, code, taskCode, taskMessage := 0, "", "", ""
+			switch {
+			case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):
+				status, code, taskCode, taskMessage = 402, "group_balance_not_enough", "insufficient_balance", "Insufficient balance"
+			case errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks):
+				status, code, taskCode, taskMessage = 429, "too_many_active_tasks", "too_many_active_tasks", "Too many active tasks"
+			case errors.Is(err, balance.ErrPrepaymentModelPaused):
+				status, code, taskCode, taskMessage = 503, "model_unavailable", "model_unavailable", "Model temporarily unavailable"
+			}
+			if code == "" {
+				imageTaskHTTPError(c, 503, "prepayment_pending")
 				return
 			}
-			imageTaskHTTPError(c, 503, "prepayment_pending")
+			// The wallet refuses admission atomically and nothing has been sent
+			// to a provider, so releasing the reservation lets the same
+			// X-Request-Id and body succeed later without any risk of a double
+			// charge or a repeated provider call. It also leaves no unsettled
+			// task for billing recovery to revisit.
+			if releaseErr := model.ReleaseImageTaskReservation(task.ID); releaseErr != nil {
+				common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
+				if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: taskCode, Message: taskMessage}); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+				zero := int64(0)
+				task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
+				if err := model.SaveImageTaskBilling(task); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+			}
+			imageTaskHTTPError(c, status, code)
 			return
 		}
 	}

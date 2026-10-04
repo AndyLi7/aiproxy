@@ -1,6 +1,7 @@
 package nativetask
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // HTTP is embedded behind the gateway's authenticated, rate-limited middleware.
@@ -169,8 +171,10 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if existing.Status != "reserved" {
-			if err = h.Engine.SyncBilling(r.Context(), existing); err != nil {
-				h.writeError(w, 503, "billing_status_unavailable")
+			// A replay only reports stored state, like Get. Recovery workers own
+			// billing sync, so a retry loop cannot multiply wallet calls.
+			if !h.reads().allowStatus(group, token) {
+				h.writeError(w, 429, "rate_limit_exceeded")
 				return
 			}
 			WritePublic(w, 202, existing)
@@ -281,6 +285,16 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 	}
 	defer release()
 	receipt := entries[index]
+	// A slow reader must not hold a download slot indefinitely: the whole
+	// transfer, including the storage read, ends at this deadline. The server
+	// has no write timeout, so the deadline is cleared again for keep-alive reuse.
+	deadline := time.Now().Add(artifactTransferTime(receipt.Size))
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(deadline)
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
+	ctx, cancel := context.WithDeadline(r.Context(), deadline)
+	defer cancel()
+	r = r.WithContext(ctx)
 	var source *http.Response
 	if h.Download != nil {
 		source, err = h.Download(r, receipt.Key)
@@ -314,6 +328,12 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 	}
 	writeArtifactHeaders(w, receipt.Size)
 	_, _ = w.Write(raw)
+}
+
+// artifactTransferTime allows 30 seconds plus one second per 128 KiB, so a
+// client reading at least that fast always finishes.
+var artifactTransferTime = func(size int64) time.Duration {
+	return 30*time.Second + time.Duration(size/(128<<10))*time.Second
 }
 
 func writeArtifactHeaders(w http.ResponseWriter, size int64) {

@@ -65,6 +65,18 @@ func TestGIFPublicSignedDownloadPreservesAnimationAndAuthorization(t *testing.T)
 	require.Len(t, decoded.Image, 2)
 	require.Equal(t, []int{7, 13}, decoded.Delay)
 	require.Equal(t, 3, decoded.LoopCount)
+	// Public signed URLs share a fixed number of in-flight transfers.
+	for range cap(imageContentSlots) {
+		imageContentSlots <- struct{}{}
+	}
+	busy := httptest.NewRecorder()
+	router.ServeHTTP(busy, httptest.NewRequest("GET", public.Data[0].URL, nil))
+	for range cap(imageContentSlots) {
+		<-imageContentSlots
+	}
+	require.Equal(t, 503, busy.Code)
+	require.Equal(t, "1", busy.Header().Get("Retry-After"))
+	require.Equal(t, 1, calls, "a refused transfer never fetches the stored image")
 	for _, mutate := range []func(*url.URL){func(u *url.URL) { q := u.Query(); q.Set("signature", strings.Repeat("0", 64)); u.RawQuery = q.Encode() }, func(u *url.URL) { u.Path = strings.Replace(u.Path, "gif-task", "other-task", 1) }, func(u *url.URL) { u.Path = strings.TrimSuffix(u.Path, "0") + "1" }} {
 		u, err := url.Parse(public.Data[0].URL)
 		require.NoError(t, err)

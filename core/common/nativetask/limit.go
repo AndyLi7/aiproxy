@@ -12,9 +12,11 @@ import (
 const (
 	statusReadsPerSecond = 20
 	statusReadBurst      = 40
-	// Each download holds a socket and up to bufferedArtifactLimit bytes.
-	artifactDownloadsPerKey = 4
-	artifactDownloadsGlobal = 16
+	// Each download holds a socket and up to bufferedArtifactLimit bytes. The
+	// group cap stops one account's many keys from taking every global slot.
+	artifactDownloadsPerKey   = 4
+	artifactDownloadsPerGroup = 8
+	artifactDownloadsGlobal   = 16
 )
 
 type readBucket struct {
@@ -27,13 +29,20 @@ type readLimiter struct {
 	now     func() time.Time
 	buckets map[string]*readBucket
 	active  map[string]int
+	groups  map[string]int
 	total   int
 }
 
 var customerReads = newReadLimiter(time.Now)
 
+// AllowCustomerRead applies the same per-key read limit to other customer
+// polling endpoints, such as image task status.
+func AllowCustomerRead(group string, token int) bool {
+	return customerReads.allowStatus(group, token)
+}
+
 func newReadLimiter(now func() time.Time) *readLimiter {
-	return &readLimiter{now: now, buckets: map[string]*readBucket{}, active: map[string]int{}}
+	return &readLimiter{now: now, buckets: map[string]*readBucket{}, active: map[string]int{}, groups: map[string]int{}}
 }
 
 func readKey(group string, token int) string { return group + "/" + strconv.Itoa(token) }
@@ -73,17 +82,18 @@ func (l *readLimiter) evictIdle(now time.Time) {
 	}
 }
 
-// acquireDownload bounds concurrent artifact downloads per key and overall.
+// acquireDownload bounds concurrent artifact downloads per key, per group and overall.
 // The returned release must be called exactly once.
 func (l *readLimiter) acquireDownload(group string, token int) (func(), bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	key := readKey(group, token)
-	if l.total >= artifactDownloadsGlobal || l.active[key] >= artifactDownloadsPerKey {
+	if l.total >= artifactDownloadsGlobal || l.active[key] >= artifactDownloadsPerKey || l.groups[group] >= artifactDownloadsPerGroup {
 		return nil, false
 	}
 	l.total++
 	l.active[key]++
+	l.groups[group]++
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -92,6 +102,9 @@ func (l *readLimiter) acquireDownload(group string, token int) (func(), bool) {
 			l.total--
 			if l.active[key]--; l.active[key] <= 0 {
 				delete(l.active, key)
+			}
+			if l.groups[group]--; l.groups[group] <= 0 {
+				delete(l.groups, group)
 			}
 		})
 	}, true

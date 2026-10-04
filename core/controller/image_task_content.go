@@ -189,6 +189,10 @@ func GetImageTaskContent(c *gin.Context) {
 	getImageTaskContent(c, imageContentClient)
 }
 
+// Signed result URLs are public and each transfer buffers up to 20 MiB, so
+// only a fixed number may be in flight at once.
+var imageContentSlots = make(chan struct{}, 32)
+
 func getImageTaskContent(c *gin.Context, newClient func() *http.Client) {
 	fail := func(status int) {
 		c.Header("Cache-Control", "no-store")
@@ -218,6 +222,19 @@ func getImageTaskContent(c *gin.Context, newClient func() *http.Client) {
 		fail(502)
 		return
 	}
+	select {
+	case imageContentSlots <- struct{}{}:
+		defer func() { <-imageContentSlots }()
+	default:
+		c.Header("Retry-After", "1")
+		fail(503)
+		return
+	}
+	// A slow reader must not hold a slot indefinitely. The server has no write
+	// timeout, so the deadline is cleared again for keep-alive reuse.
+	controller := http.NewResponseController(c.Writer)
+	_ = controller.SetWriteDeadline(time.Now().Add(time.Minute))
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 	request, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target.String(), nil)
 	if err != nil {
 		fail(502)

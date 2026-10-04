@@ -19,7 +19,26 @@ import (
 
 // A wallet refusal happens before any provider call, so the same X-Request-Id
 // and body must succeed after a top-up, exactly once, without a double charge.
+// Every refusal releases the reservation: nothing is left for billing recovery.
 func TestImageTaskPrepaymentRefusalKeepsRequestIDRetryable(t *testing.T) {
+	for _, refusal := range []struct {
+		name       string
+		status     int
+		wantStatus int
+		wantCode   string
+		wantStage  model.FailureStage
+	}{
+		{"insufficient balance", http.StatusPaymentRequired, http.StatusPaymentRequired, "insufficient_balance", model.FailureStageBalance},
+		{"too many active tasks", http.StatusTooManyRequests, http.StatusTooManyRequests, "too_many_active_tasks", model.FailureStageRouting},
+		{"model paused", http.StatusLocked, http.StatusServiceUnavailable, "model_unavailable", model.FailureStageRouting},
+	} {
+		t.Run(refusal.name, func(t *testing.T) {
+			testImageTaskPrepaymentRefusal(t, refusal.status, refusal.wantStatus, refusal.wantCode, refusal.wantStage)
+		})
+	}
+}
+
+func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int, wantCode string, wantStage model.FailureStage) {
 	toppedUp := false
 	admits := []string{}
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,8 +47,8 @@ func TestImageTaskPrepaymentRefusalKeepsRequestIDRetryable(t *testing.T) {
 		if command.Action == "admit" {
 			admits = append(admits, command.BillingOperationID)
 			if !toppedUp {
-				w.WriteHeader(http.StatusPaymentRequired)
-				_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "message": "Insufficient balance"})
+				w.WriteHeader(refusalStatus)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "message": "refused"})
 				return
 			}
 		}
@@ -111,15 +130,15 @@ func TestImageTaskPrepaymentRefusalKeepsRequestIDRetryable(t *testing.T) {
 	}
 
 	w, c := submit()
-	require.Equal(t, http.StatusPaymentRequired, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), `"insufficient_balance"`)
+	require.Equal(t, wantStatus, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"`+wantCode+`"`)
 	require.Zero(t, providerCalls)
 	require.Zero(t, count(&model.ImageTask{}))
 	require.Zero(t, count(&model.AsyncUsageInfo{}))
 	require.Zero(t, count(&model.Log{}))
 	fields := middleware.OperationalFieldsFromContext(c)
-	require.Equal(t, model.FailureStageBalance, fields.FailureStage)
-	require.Equal(t, "insufficient_balance", fields.ErrorCode)
+	require.Equal(t, wantStage, fields.FailureStage)
+	require.Equal(t, wantCode, fields.ErrorCode)
 
 	toppedUp = true
 	w, _ = submit()

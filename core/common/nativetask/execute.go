@@ -98,6 +98,13 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		return e.Wallet.Prepayment(ctx, command)
 	}
 	if _, err = call(balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON}); err != nil {
+		if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) || errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks) || errors.Is(err, balance.ErrPrepaymentModelPaused) {
+			// The wallet refused before holding anything. Drop the reservation so a
+			// refused request leaves no row behind; the same request may be retried.
+			if _, releaseErr := model.ReleaseNativeReservation(e.DB, id, group, token, task.UpdatedAt); releaseErr != nil {
+				log.Errorf("release refused native reservation %s: %v", id, releaseErr)
+			}
+		}
 		return task, err
 	}
 	attemptID := task.BillingOperationID + ":1"

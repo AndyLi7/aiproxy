@@ -79,6 +79,13 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 			return result.Error
 		}
 		created = result.RowsAffected == 1
+		if !created {
+			// A retry marks its reservation as in use, so stale-reservation cleanup
+			// cannot delete it while this request is talking to the wallet.
+			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", task.ID, task.GroupID, task.TokenID, "reserved").Update("updated_at", time.Now()).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Where("id = ? AND group_id = ? AND token_id = ?", task.ID, task.GroupID, task.TokenID).First(&saved).Error; err != nil {
 			return ErrNativeTaskConflict
 		}
@@ -91,6 +98,15 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 		return nil, false, err
 	}
 	return &saved, created, nil
+}
+
+// ReleaseNativeReservation deletes a reservation the wallet never admitted, so
+// a refused or abandoned submission leaves no row for recovery to poll. Only a
+// reservation untouched since notAfter is removed: a concurrent retry of the
+// same request refreshes it first and keeps it.
+func ReleaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time) (bool, error) {
+	result := db.Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND updated_at <= ?", id, group, token, "reserved", "", notAfter).Delete(&NativeTask{})
+	return result.RowsAffected == 1, result.Error
 }
 
 func GetNativeTask(db *gorm.DB, id, group string, token int) (*NativeTask, error) {

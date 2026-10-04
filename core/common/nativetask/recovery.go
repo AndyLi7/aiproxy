@@ -2,8 +2,11 @@ package nativetask
 
 import (
 	"context"
-	"github.com/labring/aiproxy/core/model"
+	"errors"
 	"time"
+
+	"github.com/labring/aiproxy/core/common/balance"
+	"github.com/labring/aiproxy/core/model"
 )
 
 type RecoveryReport struct{ Claimed, Advanced, Deferred int }
@@ -11,6 +14,11 @@ type RecoveryReport struct{ Claimed, Advanced, Deferred int }
 // NativeTaskDeadline bounds how long an accepted task may stay undeliverable
 // before it is failed and refunded.
 const NativeTaskDeadline = 6 * time.Hour
+
+// staleReservationAge is how long a reservation the wallet has no record of is
+// kept before recovery deletes it. Admission takes seconds; this only removes
+// reservations whose admission was refused or never reached the wallet.
+const staleReservationAge = time.Hour
 
 // recoveryDelay backs off with task age so a stuck task stops being re-claimed
 // every minute: about an eighth of its age, between 2s (1m after an error)
@@ -66,6 +74,13 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 				if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
 					workErr = e.SyncBilling(ctx, failed)
 				}
+			}
+		}
+		if task.Status == "reserved" && errors.Is(workErr, balance.ErrPrepaymentNotFound) && age > staleReservationAge {
+			// Nothing is held or owed for it, and a retry creates a new reservation.
+			if released, err := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, current.Add(-staleReservationAge)); err == nil && released {
+				report.Advanced++
+				continue
 			}
 		}
 		delay := recoveryDelay(age, workErr != nil)

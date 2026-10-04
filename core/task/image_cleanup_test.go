@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,4 +82,28 @@ func TestExpiredGIFCleanupKeepsPermanentExamplesAndTask(t *testing.T) {
 	changed, err = cleanupExpiredImageTask(context.Background(), &saved, func(context.Context, string, int, string) error { t.Fatal("repeat deletion"); return nil })
 	require.NoError(t, err)
 	require.False(t, changed)
+}
+
+func TestTemporaryImageAssetAcceptsSignedAndLegacyNamesOnly(t *testing.T) {
+	signature := "0123456789abcdef0123456789abcdef"
+	png := func(url string) model.ImageOutput {
+		return model.ImageOutput{URL: url, Stored: true, ContentType: "image/png"}
+	}
+	require.True(t, temporaryImageAsset("task", 0, "", png("https://media.test/generated-results/images/task/0-"+signature+".png")))
+	require.True(t, temporaryImageAsset("task", 0, "", png("https://media.test/generated-results/images/task/0.png")))
+	require.True(t, temporaryImageAsset("task", 0, "mask_image", png("https://media.test/generated-results/images/task/0-mask_image-"+signature+".png")))
+	for _, url := range []string{
+		"https://media.test/generated-results/images/task/0-mask_image-" + signature + ".png",
+		"https://media.test/generated-results/images/task/1-" + signature + ".png",
+		"https://media.test/generated-results/images/other/0-" + signature + ".png",
+		"https://media.test/generated-results/images/task/0-" + strings.ToUpper(signature) + ".png",
+		"https://media.test/generated-results/images/task/0-" + signature[:31] + ".png",
+		"https://media.test/generated-results/images/task/0-" + signature + ".jpg",
+		"http://media.test/generated-results/images/task/0-" + signature + ".png",
+	} {
+		require.False(t, temporaryImageAsset("task", 0, "", png(url)), url)
+	}
+	unstored := png("https://media.test/generated-results/images/task/0-" + signature + ".png")
+	unstored.Stored = false
+	require.False(t, temporaryImageAsset("task", 0, "", unstored))
 }

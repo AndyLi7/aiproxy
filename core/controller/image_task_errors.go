@@ -27,6 +27,12 @@ func imageTaskErrorMessage(code string) string {
 		return "Billing configuration for this image model is unavailable. Contact support with the request ID before retrying."
 	case "balance_unavailable":
 		return "Your account balance could not be checked. Please retry later."
+	case "too_many_active_tasks":
+		return "Too many of your tasks are generating at once. Wait for one to finish, then retry with the same X-Request-Id."
+	case "model_unavailable":
+		return "This model is temporarily unavailable. Retry later with the same X-Request-Id."
+	case "rate_limit_exceeded":
+		return "Too many requests for this API key. Poll each task about every 5 seconds."
 	default:
 		return "The image request could not be completed. Contact support with the request ID."
 	}

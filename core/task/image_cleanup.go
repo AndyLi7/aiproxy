@@ -37,10 +37,27 @@ func temporaryImageAsset(taskID string, index int, name string, output model.Ima
 		return false
 	}
 	parsed, err := url.Parse(output.URL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || !output.Stored {
 		return false
 	}
-	return output.Stored && strings.HasSuffix(parsed.Path, fmt.Sprintf("/generated-results/images/%s/%d%s.%s", taskID, index, suffix, extension))
+	stem := strings.TrimSuffix(parsed.Path, "."+extension)
+	if stem == parsed.Path {
+		return false
+	}
+	// Results stored since 2026-10-04 end with an unguessable signature segment.
+	if signed := len(stem) - 33; signed > 0 && stem[signed] == '-' && lowerHex(stem[signed+1:]) {
+		stem = stem[:signed]
+	}
+	return strings.HasSuffix(stem, fmt.Sprintf("/generated-results/images/%s/%d%s", taskID, index, suffix))
+}
+
+func lowerHex(value string) bool {
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func cleanupExpiredImageTask(ctx context.Context, task *model.ImageTask, deleteImage func(context.Context, string, int, string) error) (bool, error) {

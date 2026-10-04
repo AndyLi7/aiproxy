@@ -19,6 +19,9 @@ var (
 	ErrPrepaymentModelPaused        = errors.New("model paused pending billing review")
 )
 
+// ErrPrepaymentNotFound means the wallet holds nothing for this operation.
+var ErrPrepaymentNotFound = errors.New("prepayment not found")
+
 // Prepayment callbacks are opt-in and never use the legacy balance cache.
 // The durable caller retries the same operation ID after an ambiguous response.
 type PrepaymentCommand struct {
@@ -84,6 +87,8 @@ func (e *ExternalHTTP) Prepayment(ctx context.Context, command PrepaymentCommand
 		return receipt, ErrPrepaymentTooManyActiveTasks
 	case http.StatusLocked:
 		return receipt, ErrPrepaymentModelPaused
+	case http.StatusNotFound:
+		return receipt, ErrPrepaymentNotFound
 	}
 	if response.StatusCode != http.StatusOK {
 		return receipt, errors.New("prepayment unavailable")

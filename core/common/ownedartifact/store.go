@@ -169,7 +169,12 @@ func Download(ctx context.Context, key string) (*http.Response, error) {
 		return nil, ErrStorage
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := (&http.Client{Timeout: 60 * time.Second, CheckRedirect: noRedirect}).Do(request)
+	// A caller's deadline bounds the whole transfer, which may stream for longer.
+	timeout := 60 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+	}
+	response, err := (&http.Client{Timeout: timeout, CheckRedirect: noRedirect}).Do(request)
 	if err != nil {
 		return nil, ErrStorage
 	}

@@ -285,6 +285,7 @@ var (
 
 func AsyncUsagePollTask(ctx context.Context) {
 	go ImagePrepaymentRecoveryTask(ctx)
+	go UpstreamBillingRecoveryTask(ctx)
 	ticker := time.NewTicker(asyncUsagePollInterval)
 	defer ticker.Stop()
 

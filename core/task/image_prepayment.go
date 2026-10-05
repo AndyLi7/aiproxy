@@ -23,7 +23,7 @@ func ImagePrepaymentRecoveryTask(ctx context.Context) {
 	}
 }
 func recoverImagePrepayments(ctx context.Context) {
-	client, ok := balance.Default.(*balance.ExternalHTTP)
+	_, ok := balance.Default.(*balance.ExternalHTTP)
 	if !ok || model.LogDB == nil || !model.LogDB.Migrator().HasColumn(&model.ImageTask{}, "billing_next_check_at") {
 		return
 	}
@@ -47,8 +47,30 @@ func recoverImagePrepayments(ctx context.Context) {
 			log.WithField("task_id", task.ID).Warn("image prepayment state synchronization unavailable")
 		}
 	}
-	// The app continues to collect late bills even after customer settlement.
-	if err := client.RecoverPrepayments(ctx); err != nil {
-		log.Warn("upstream billing recovery unavailable")
+}
+
+// upstreamBillingInterval paces the application's provider bill matching. fal
+// posts a bill about 10–20s after a task finishes, so customers see the final
+// charge within about half a minute; the application backs off older tasks.
+const upstreamBillingInterval = 10 * time.Second
+
+// UpstreamBillingRecoveryTask asks the application to match provider bills,
+// including late bills that arrive after customer settlement.
+func UpstreamBillingRecoveryTask(ctx context.Context) {
+	ticker := time.NewTicker(upstreamBillingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			client, ok := balance.Default.(*balance.ExternalHTTP)
+			if !ok {
+				continue
+			}
+			if err := client.RecoverPrepayments(ctx); err != nil {
+				log.Warn("upstream billing recovery unavailable")
+			}
+		}
 	}
 }

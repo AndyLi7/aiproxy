@@ -115,6 +115,14 @@ func GetNativeTask(db *gorm.DB, id, group string, token int) (*NativeTask, error
 	return &task, err
 }
 
+// GetNativeTaskInGroup finds a task by ID within one customer group, for
+// administrative reads on behalf of the group's owner across all their keys.
+func GetNativeTaskInGroup(db *gorm.DB, id, group string) (*NativeTask, error) {
+	var task NativeTask
+	err := db.Where("id = ? AND group_id = ?", id, group).First(&task).Error
+	return &task, err
+}
+
 // SaveNativeTaskResult atomically persists the complete original provider JSON.
 // This is result_received, NOT publicly completed: artifact delivery and billing
 // recovery must run before the executor can expose a completed result.

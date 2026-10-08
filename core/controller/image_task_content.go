@@ -48,7 +48,11 @@ func publicImageTask(c *gin.Context, task *model.ImageTask) *model.ImageTask {
 	if exists && ok && internal.Status == model.GroupStatusInternal {
 		return &result
 	}
-	if result.Error != nil {
+	if result.Error != nil && result.Error.Code == model.AsyncGenerationTimeoutCode {
+		// The one platform-owned failure customers can act on, with a fixed
+		// message: no stored or provider text is ever echoed.
+		result.Error = &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode, Message: model.AsyncGenerationTimeoutMessage}
+	} else if result.Error != nil {
 		result.Error = &model.ImageTaskError{Code: "generation_failed", Message: "Image generation failed. Contact support with the request ID."}
 	}
 	result.Data = model.CloneImageOutputs(task.Data)

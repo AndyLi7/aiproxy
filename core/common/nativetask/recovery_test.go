@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
@@ -61,21 +62,62 @@ func TestNativeRecoveryBacksOffWithAge(t *testing.T) {
 	require.Equal(t, 30*time.Minute, recoveryDelay(48*time.Hour, false))
 }
 
-func TestNativeRecoveryExpiresStuckAcceptedTasks(t *testing.T) {
-	e, plan, w, _ := setup(t)
+// Waiting for the provider ends at model.AsyncGenerationDeadline
+// (generation_deadline_test.go). NativeTaskDeadline remains the backstop for a
+// received result that can never be delivered: it fails as
+// upstream_result_rejected and is refunded in full.
+func TestNativeRecoveryExpiresUndeliverableResultsAfterLongDeadline(t *testing.T) {
+	e, plan, _, _ := setup(t)
 	ctx := context.Background()
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
+	require.NoError(t, model.SaveNativeTaskResult(e.DB, "req", "g", 1, []byte(`{"labels":[]}`)))
 	now := time.Now()
 	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("created_at", now.Add(-NativeTaskDeadline-time.Minute)).Error)
-	resolve := func(context.Context, *model.NativeTask) (Poller, error) {
-		return &pollStub{err: errors.New("provider unreachable")}, nil
-	}
-	_, err = e.RecoverOnce(ctx, "worker", now, resolve, nil)
+	once := &failOnceWallet{action: "execution_finished"}
+	e.Wallet = once
+	_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) {
+		return nil, errors.New("a received result is never polled again")
+	}, nil)
 	require.NoError(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "failed", task.Status)
-	require.Equal(t, "upstream_task_failed", task.ErrorCode)
-	require.True(t, refundedWith(w, "platform_failure"))
+	require.Equal(t, "upstream_result_rejected", task.ErrorCode)
+	require.True(t, refundedWith(&once.walletStub, "platform_failure"))
+}
+
+// A received result younger than the long deadline keeps being retried.
+func TestNativeRecoveryRetriesUndeliveredResultsBeforeLongDeadline(t *testing.T) {
+	e, plan, w, _ := setup(t)
+	ctx := context.Background()
+	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
+	require.NoError(t, err)
+	require.NoError(t, model.SaveNativeTaskResult(e.DB, "req", "g", 1, []byte(`{"labels":[]}`)))
+	now := time.Now()
+	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("created_at", now.Add(-NativeTaskDeadline+time.Minute)).Error)
+	w.fail = "execution_finished"
+	report, err := e.RecoverOnce(ctx, "worker", now, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Deferred)
+	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, "result_received", task.Status)
+	require.False(t, refundedWith(w, "platform_failure"))
+}
+
+// failOnceWallet fails one wallet action the first time it is called.
+type failOnceWallet struct {
+	walletStub
+	action string
+	done   bool
+}
+
+func (f *failOnceWallet) Prepayment(ctx context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+	if c.Action == f.action && !f.done {
+		f.done = true
+		f.commands = append(f.commands, c)
+		return balance.PrepaymentReceipt{}, errors.New("wallet timeout")
+	}
+	return f.walletStub.Prepayment(ctx, c)
 }

@@ -337,6 +337,86 @@ func AcceptImageTask(id, upstream string) error {
 	})
 }
 
+// ImageTaskAcceptedAt is when the provider accepted the task: queued_at, which
+// AcceptImageTask records together with the upstream ID. Rows accepted before
+// that column existed fall back to the earlier reservation time.
+func ImageTaskAcceptedAt(task *ImageTask) time.Time {
+	if task.QueuedAt != nil {
+		return *task.QueuedAt
+	}
+	return task.CreatedAt
+}
+
+// ImageTaskAwaitingProvider reports an accepted task with no provider result
+// yet, the only state AsyncGenerationDeadline applies to. result_processing
+// already holds the provider's result and keeps its own archive retries.
+func ImageTaskAwaitingProvider(task *ImageTask) bool {
+	return task != nil && task.UpstreamID != "" &&
+		(task.Status == "queued" || task.Status == "in_progress")
+}
+
+// ImageGenerationDeadline is when an accepted task stops waiting for the
+// provider: AsyncGenerationDeadline after acceptance.
+func ImageGenerationDeadline(task *ImageTask) time.Time {
+	return ImageTaskAcceptedAt(task).Add(AsyncGenerationDeadline)
+}
+
+// ImageGenerationExpired reports an accepted task still waiting for the
+// provider at its deadline.
+func ImageGenerationExpired(task *ImageTask, now time.Time) bool {
+	return ImageTaskAwaitingProvider(task) && !now.Before(ImageGenerationDeadline(task))
+}
+
+// ExpireImageGeneration fails an accepted image task the provider has not
+// finished within AsyncGenerationDeadline of acceptance, with the public code
+// AsyncGenerationTimeoutCode. It is a compare-and-set on the pre-result states
+// that also enforces the deadline itself, so a result saved first is delivered
+// and a later result is discarded (SetImageTaskResult never leaves failed). The
+// accounting outbox and request log fail in the same commit. expired reports
+// whether this call made the change; only that caller refunds and cancels.
+func ExpireImageGeneration(id string, now time.Time) (bool, error) {
+	encodedError, err := json.Marshal(&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage})
+	if err != nil {
+		return false, err
+	}
+
+	expired := false
+	err = LogDB.Transaction(func(tx *gorm.DB) error {
+		at := time.Now().UTC()
+		result := tx.Model(&ImageTask{}).
+			Where("id = ? AND upstream_id <> ? AND status IN ? AND COALESCE(queued_at, created_at) <= ?",
+				id, "", []string{"queued", "in_progress"}, now.UTC().Add(-AsyncGenerationDeadline)).
+			Updates(map[string]any{
+				"status": "failed", "data": "null", "error": string(encodedError), "updated_at": at,
+				"completed_at": at, "retain_until": at.Add(30 * 24 * time.Hour),
+			})
+		if result.Error != nil || result.RowsAffected != 1 {
+			return result.Error
+		}
+		expired = true
+
+		if err := tx.Model(&AsyncUsageInfo{}).
+			Where("image_task_id = ?", id).
+			Update("status", AsyncUsageStatusFailed).
+			Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&Log{}).
+			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
+			Updates(map[string]any{
+				"async_usage_status": AsyncUsageStatusFailed, "code": 502,
+				"error_code": AsyncGenerationTimeoutCode, "safe_error": "Image generation timed out",
+			}).
+			Error
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return expired, nil
+}
+
 func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
 	if status == "completed" && len(data) == 0 {
 		return errors.New("empty completed image result")

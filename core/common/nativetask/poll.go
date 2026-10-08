@@ -10,6 +10,14 @@ type Poller interface {
 	PollNative(context.Context, string, string, *nativeresult.CompiledTask) (nativeresult.PollResult, error)
 }
 
+// Canceller is optional on a Poller (fal's client implements it). Cancellation
+// is best effort: it never changes the task or its billing, its outcome is only
+// logged, and a provider may still finish and bill. It is only reached through
+// ResolvePoller, so it always uses the task's own bound credential.
+type Canceller interface {
+	CancelNative(ctx context.Context, endpoint, upstreamID string) (string, error)
+}
+
 // ResolvePoller must bind the recorded channel and credential fingerprint; it
 // must reject a rotated credential rather than polling another provider account.
 type ResolvePoller func(context.Context, *model.NativeTask) (Poller, error)

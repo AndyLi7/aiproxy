@@ -75,6 +75,15 @@ func Sync(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt
 		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "execution_finished"}); err != nil {
 			return balance.PrepaymentReceipt{}, err
 		}
+	} else if task.Status == "failed" && task.UpstreamID != "" && task.Error != nil && task.Error.Code == model.AsyncGenerationTimeoutCode {
+		// Owner rule 2026-10-08: the provider did not finish within
+		// AsyncGenerationDeadline. Refund in full in one wallet call, reason
+		// platform_failure; a later bill is platform loss. execution_finished
+		// is not sent: between it and the settle, a provider bill could be
+		// settled as an actual charge.
+		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
+			return balance.PrepaymentReceipt{}, err
+		}
 	} else if task.Status == "failed" {
 		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
 			return balance.PrepaymentReceipt{}, err

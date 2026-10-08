@@ -30,3 +30,6 @@ func ResolveFalPoller(load func(int) (*model.Channel, error)) ResolvePoller {
 		return &fal.Client{Key: channel.Key}, nil
 	}
 }
+
+// Expired tasks are cancelled through the bound fal client; fail the build if it stops being a Canceller.
+var _ Canceller = (*fal.Client)(nil)

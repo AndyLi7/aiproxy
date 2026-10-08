@@ -191,6 +191,14 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 			return err
 		}
 	}
+	if task.Status == "failed" && task.ErrorCode == model.AsyncGenerationTimeoutCode {
+		// Owner rule 2026-10-08: refund in full in one wallet call, reason
+		// platform_failure. execution_finished is not sent: between it and the
+		// settle, a provider bill could be settled as an actual charge.
+		if _, err := call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
+			return err
+		}
+	}
 	if task.Status == "result_received" || task.Status == "delivery_ready" || task.Status == "completed" {
 		if _, err := call(balance.PrepaymentCommand{Action: "execution_finished"}); err != nil {
 			return err

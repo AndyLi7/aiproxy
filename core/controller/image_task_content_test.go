@@ -104,3 +104,15 @@ func TestPublicImageTaskRetentionAndProcessing(t *testing.T) {
 	require.Equal(t, "expired", out.ResultAvailability)
 	require.Empty(t, out.Data)
 }
+
+// generation_timeout is the one platform-owned failure customers see as is,
+// always with the fixed message; every other failure stays masked.
+func TestPublicImageTaskShowsOnlyTheFixedGenerationTimeout(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	task := &model.ImageTask{ID: "timed-out", Status: "failed", Error: &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode, Message: "fal-ai internal text"}}
+	out := publicImageTask(ctx, task)
+	require.Equal(t, &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode, Message: model.AsyncGenerationTimeoutMessage}, out.Error)
+	require.Equal(t, "fal-ai internal text", task.Error.Message, "stored task not mutated")
+	task.Error = &model.ImageTaskError{Code: "upstream_failed", Message: "fal-ai internal text"}
+	require.Equal(t, "generation_failed", publicImageTask(ctx, task).Error.Code)
+}

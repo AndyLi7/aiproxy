@@ -49,46 +49,18 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		return
 	}
 
-	ch, err := model.GetChannelByID(info.ChannelID)
+	result, cancelUpstream, err := pollImageTask(ctx, info, task)
+	// Owner rule 2026-10-08, for every model and provider: an accepted task
+	// still waiting for the provider at model.AsyncGenerationDeadline fails and
+	// is refunded. A result this final poll returned still wins; an error or an
+	// unfinished status past the deadline does not.
+	if (err != nil || (result.Status != "completed" && result.Status != "failed")) &&
+		model.ImageGenerationExpired(task, time.Now()) {
+		expireImageGeneration(ctx, info, task, cancelUpstream)
+		return
+	}
 	if err != nil {
-		retryImageUsage(info, err)
-		return
-	}
-
-	if task.KeyFingerprint != "" &&
-		task.KeyFingerprint != model.ImageChannelKeyFingerprint(ch.Key) {
-		retryImageUsage(info, errors.New("image channel credential changed"))
-		return
-	}
-
-	channelType := task.ChannelType
-	if channelType == 0 {
-		channelType = ch.Type
-	}
-
-	if ch.Type != channelType {
-		retryImageUsage(info, errors.New("image channel identity changed"))
-		return
-	}
-
-	a, ok := adaptors.GetAdaptor(channelType)
-	if !ok {
-		retryImageUsage(info, errors.New("image adapter unavailable"))
-		return
-	}
-
-	adapter, ok := a.(adaptor.ImageTaskAdapter)
-	if !ok {
-		retryImageUsage(info, errors.New("image adapter unavailable"))
-		return
-	}
-
-	pollCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
-
-	result, err := adapter.PollImage(pollCtx, ch, info, task)
-	if err != nil {
-		retryImageUsage(info, err)
+		retryImageUsageBefore(info, err, nextImageDeadlinePoll(task))
 		return
 	}
 
@@ -148,13 +120,155 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	}
 }
 
+// imageCancel asks the provider once to stop an expired task. pollImageTask
+// only returns one bound to the channel identity that passed its checks.
+type imageCancel func(context.Context) (string, error)
+
+// pollImageTask polls the provider with the credential that accepted the task.
+// A rotated key, a retargeted channel or a missing adapter is an error, and
+// then no cancel is offered, so another account's key is never used.
+func pollImageTask(
+	ctx context.Context,
+	info *model.AsyncUsageInfo,
+	task *model.ImageTask,
+) (adaptor.ImageTaskResult, imageCancel, error) {
+	ch, err := model.GetChannelByID(info.ChannelID)
+	if err != nil {
+		return adaptor.ImageTaskResult{}, nil, err
+	}
+
+	if task.KeyFingerprint != "" &&
+		task.KeyFingerprint != model.ImageChannelKeyFingerprint(ch.Key) {
+		return adaptor.ImageTaskResult{}, nil, errors.New("image channel credential changed")
+	}
+
+	channelType := task.ChannelType
+	if channelType == 0 {
+		channelType = ch.Type
+	}
+
+	if ch.Type != channelType {
+		return adaptor.ImageTaskResult{}, nil, errors.New("image channel identity changed")
+	}
+
+	a, ok := adaptors.GetAdaptor(channelType)
+	if !ok {
+		return adaptor.ImageTaskResult{}, nil, errors.New("image adapter unavailable")
+	}
+
+	adapter, ok := a.(adaptor.ImageTaskAdapter)
+	if !ok {
+		return adaptor.ImageTaskResult{}, nil, errors.New("image adapter unavailable")
+	}
+
+	var cancelUpstream imageCancel
+	if canceller, ok := a.(adaptor.ImageTaskCanceller); ok && task.UpstreamID != "" {
+		cancelUpstream = func(ctx context.Context) (string, error) {
+			return canceller.CancelImage(ctx, ch, info, task)
+		}
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
+	defer cancel()
+
+	result, err := adapter.PollImage(pollCtx, ch, info, task)
+
+	return result, cancelUpstream, err
+}
+
+const (
+	// imageTimeoutRefundTimeout bounds the immediate refund of an expired task;
+	// prepayment recovery retries it every minute after that.
+	imageTimeoutRefundTimeout = 30 * time.Second
+	// imageCancelTimeout bounds the one best-effort provider cancel.
+	imageCancelTimeout = 10 * time.Second
+)
+
+// expireImageGeneration ends a task that outlived model.AsyncGenerationDeadline.
+// The order is durable failure, refund, then one best-effort cancel: neither
+// the refund nor the cancel can undo the failure, and the cancel never delays
+// the refund. Only the call that made the failure refunds and cancels.
+func expireImageGeneration(
+	ctx context.Context,
+	info *model.AsyncUsageInfo,
+	task *model.ImageTask,
+	cancelUpstream imageCancel,
+) {
+	expired, err := model.ExpireImageGeneration(task.ID, time.Now())
+	if err != nil {
+		retryImageUsage(info, err)
+		return
+	}
+
+	if !expired {
+		// A result was saved first; the next pass dispatches the durable state.
+		touchAsyncUsagePollCursor(info)
+		return
+	}
+
+	entry := log.WithField("task_id", task.ID).WithField("channel_id", info.ChannelID)
+	entry.Warn("image task generation timed out")
+	// Detached: claim renewal stops once the outbox is failed and cancels ctx,
+	// and a shutting-down worker should still finish the refund and cancel.
+	detached := context.WithoutCancel(ctx)
+
+	if task.PrepaymentQuoteJSON != "" {
+		refundCtx, cancel := context.WithTimeout(detached, imageTimeoutRefundTimeout)
+		failed, err := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
+		if err == nil {
+			_, err = imageprepayment.Sync(refundCtx, failed)
+		}
+		cancel()
+
+		if err != nil {
+			entry.WithError(err).Warn("image task generation timed out; refund deferred to prepayment recovery")
+		}
+	}
+
+	if cancelUpstream == nil {
+		entry.Warn("image task generation timed out; provider cancel unavailable")
+	} else {
+		cancelCtx, cancel := context.WithTimeout(detached, imageCancelTimeout)
+		outcome, err := cancelUpstream(cancelCtx)
+		cancel()
+
+		if err != nil {
+			entry.WithError(err).Warn("image task generation timed out; provider cancel failed")
+		} else {
+			entry.WithField("cancel", outcome).Info("image task generation timed out; provider cancel sent")
+		}
+	}
+
+	markAsyncUsageFailed(info, "image generation timed out")
+}
+
+// nextImageDeadlinePoll is the latest next poll for a task still waiting for
+// the provider: one second past its deadline, so a provider that keeps
+// erroring is expired within seconds of the deadline, not a full backoff later.
+// Zero means no bound.
+func nextImageDeadlinePoll(task *model.ImageTask) time.Time {
+	if !model.ImageTaskAwaitingProvider(task) {
+		return time.Time{}
+	}
+	return model.ImageGenerationDeadline(task).Add(time.Second)
+}
+
 func retryImageUsage(info *model.AsyncUsageInfo, err error) {
+	retryImageUsageBefore(info, err, time.Time{})
+}
+
+// retryImageUsageBefore backs off like retryImageUsage, but never schedules
+// the next poll after latest (when set).
+func retryImageUsageBefore(info *model.AsyncUsageInfo, err error, latest time.Time) {
 	// Transient transport/storage errors must never discard accepted work or
 	// restart a submission. Backoff is bounded; records remain recoverable.
 	info.RetryCount++
 	info.Error = err.Error()
 
 	info.NextPollAt = time.Now().Add(model.AsyncUsageBackoffDelay(info.RetryCount))
+	if !latest.IsZero() && latest.Before(info.NextPollAt) {
+		info.NextPollAt = latest
+	}
 	if updateErr := model.RetryClaimedAsyncUsageInfo(info); updateErr != nil {
 		log.WithError(updateErr).Warn("persist image task retry")
 	}

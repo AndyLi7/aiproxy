@@ -174,7 +174,11 @@ func AcceptNativeTask(db *gorm.DB, id, group string, token int, upstreamID strin
 	if (task.Status != "reserved" && task.Status != "submitting") || task.UpstreamID != "" {
 		return ErrNativeTaskConflict
 	}
-	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, task.Status, "").Updates(map[string]any{"status": "queued", "upstream_id": upstreamID, "updated_at": time.Now()})
+	// created_at becomes the acceptance time, in the same compare-and-set that
+	// records the provider identity: AsyncGenerationDeadline counts from here,
+	// not from a reservation an earlier ambiguous attempt may have left behind.
+	now := time.Now()
+	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, task.Status, "").Updates(map[string]any{"status": "queued", "upstream_id": upstreamID, "created_at": now, "updated_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -241,8 +245,10 @@ func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code str
 }
 
 // FailAcceptedNativeTask ends an accepted task that can never deliver: the
-// provider failed it, its result was permanently rejected, or it outlived its
-// deadline. Billing then refunds the customer (platform_failure).
+// provider failed it, its result was permanently rejected, or a received result
+// stayed undeliverable past the long recovery deadline. Waiting for the provider
+// is ended by ExpireNativeGeneration instead. Billing then refunds the customer
+// (platform_failure).
 func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code string) error {
 	if code != "upstream_task_failed" && code != "upstream_result_rejected" {
 		return ErrNativeTaskConflict
@@ -259,4 +265,16 @@ func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code strin
 		return nil
 	}
 	return ErrNativeTaskConflict
+}
+
+// ExpireNativeGeneration fails an accepted task the provider has not finished
+// within AsyncGenerationDeadline of acceptance (created_at). It only moves
+// queued or running rows with a provider identity that are past the deadline,
+// so it and SaveNativeTaskResult exclude each other: a result saved first is
+// delivered, and a result arriving after expiry is discarded. expired reports
+// whether this call made the change; only that caller cancels upstream.
+// Billing then refunds the customer in full (platform_failure).
+func ExpireNativeGeneration(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
+	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id <> ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"queued", "running"}, now.Add(-AsyncGenerationDeadline)).Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
+	return r.RowsAffected == 1, r.Error
 }

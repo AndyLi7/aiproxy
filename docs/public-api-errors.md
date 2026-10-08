@@ -35,3 +35,21 @@ remains available through the application catalog APIs.
 The application /v1/videos/models endpoint requires a valid Bearer API key,
 returns only entitled listed video models, uses no-store caching, and returns
 401 invalid_api_key for absent, malformed or rejected credentials.
+
+Async generation tasks (`POST /v1/model-tasks` and `POST /v1/images/tasks`)
+have one deadline for every model: a task the provider accepted but has not
+finished 15 minutes after acceptance ends with status = failed and
+error.code = generation_timeout:
+```json
+{"status":"failed","error":{"code":"generation_timeout","message":"The provider did not finish this task within 15 minutes, so it was stopped. You were not charged; submit a new task with a new X-Request-Id."}}
+```
+The clock starts when the provider accepts the task, not at the first request.
+The prepaid hold is refunded in full and the provider is asked to cancel (best
+effort); a result that arrives later is discarded and never billed to the
+customer. Retrying with the same X-Request-Id returns the same failed task, so
+submit again with a new X-Request-Id. Clients should keep polling for about 20
+minutes before giving up locally. Submissions the provider never confirmed are
+not covered by this rule and keep their submission_timeout path. On
+/v1/images/tasks, an image the provider already returned that is still being
+stored (status in_progress, phase result_processing) is not covered either, and
+every other image failure is still reported as generation_failed.

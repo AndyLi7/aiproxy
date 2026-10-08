@@ -6,9 +6,15 @@ import (
 )
 
 // ImageSubmissionFailure contains safe evidence, never upstream bodies or credentials.
+// ProviderStatus and ProviderReason are operator evidence for server logs only:
+// they are never returned to customers and never persisted with a task.
 type ImageSubmissionFailure struct {
 	Failure     failover.Failure
 	PublicError *model.ImageTaskError
+	// ProviderStatus is the provider's HTTP status, or 0 when no response arrived.
+	ProviderStatus int
+	// ProviderReason is a short sanitized summary (see ProviderErrorReason).
+	ProviderReason string
 }
 
 func (e *ImageSubmissionFailure) Error() string {

@@ -10,6 +10,7 @@ import (
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/common/ownedartifact"
 	"github.com/labring/aiproxy/core/model"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"io"
 	"net/http"
@@ -69,6 +70,7 @@ var failureMessages = map[string]string{
 	"upstream_task_failed":           "The provider could not generate this result. You were not charged; submit a new task with a new X-Request-Id.",
 	"upstream_result_rejected":       "The provider returned a result we could not deliver. You were not charged; submit a new task with a new X-Request-Id.",
 	"upstream_rejected":              "The provider rejected this request before generating. You were not charged.",
+	model.UpstreamUnavailableCode:    model.UpstreamUnavailableMessage,
 	"submission_timeout":             "The provider did not confirm this task in time. You were not charged; submit a new task with a new X-Request-Id.",
 	model.AsyncGenerationTimeoutCode: model.AsyncGenerationTimeoutMessage,
 }
@@ -217,9 +219,18 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, balance.ErrPrepaymentModelPaused):
 			h.writeError(w, 503, "model_unavailable")
 		default:
+			// Never swallow this error: a pending or wallet-blocked task looks
+			// queued to the customer, so the log is the only trace of why.
+			fields := log.Fields{"lane": "native", "task_id": id, "group": group, "error": err.Error()}
+			if task != nil {
+				fields["task_status"] = task.Status
+				fields["model"] = task.Model
+			}
 			if task != nil && task.Status != "reserved" {
+				log.WithFields(fields).Warn("native task create returned stored state after an error")
 				WritePublic(w, 202, task)
 			} else {
+				log.WithFields(fields).Error("native task create unavailable")
 				h.writeError(w, 503, "native_execution_unavailable")
 			}
 		}

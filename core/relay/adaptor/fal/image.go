@@ -66,6 +66,8 @@ type queueResultFailure struct {
 	status   int
 	terminal bool
 	issues   []model.ImageParameterIssue
+	// reason is the sanitized summary for server logs (adaptor.ProviderErrorReason).
+	reason string
 }
 
 func (e *queueResultFailure) Error() string { return fmt.Sprintf("fal returned HTTP %d", e.status) }
@@ -138,7 +140,7 @@ func (c *Client) request(
 
 	resp, err := copyClient.Do(req)
 	if err != nil {
-		return 0, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err)}
+		return 0, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err), ProviderReason: transportReason(err)}
 	}
 	defer resp.Body.Close()
 	if len(captureHeaders) == 1 && captureHeaders[0] != nil {
@@ -146,14 +148,15 @@ func (c *Client) request(
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		failure := &queueResultFailure{status: resp.StatusCode}
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		failure := &queueResultFailure{status: resp.StatusCode, reason: adaptor.ProviderErrorReason(resp.StatusCode, raw, c.Key)}
 		var envelope struct {
 			Detail []struct {
 				Type string `json:"type"`
 				Loc  []any  `json:"loc"`
 			} `json:"detail"`
 		}
-		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&envelope) == nil {
+		if json.NewDecoder(bytes.NewReader(raw)).Decode(&envelope) == nil {
 			for _, detail := range envelope.Detail {
 				if issue, ok := parameterIssue(detail.Type, detail.Loc); ok && len(failure.issues) < 8 {
 					failure.issues = append(failure.issues, issue)
@@ -183,23 +186,52 @@ func (c *Client) Submit(ctx context.Context, modelName string, body []byte) (str
 	}
 
 	code, err := c.request(ctx, http.MethodPost, modelName, body, &result)
-	if code == 400 || code == 413 || code == 422 || code == 451 {
-		var failure *queueResultFailure
-		if code == 422 && errors.As(err, &failure) && len(failure.issues) > 0 {
-			return "", &adaptor.ImageSubmissionFailure{Failure: adaptor.ErrImageSubmissionRejected.Failure, PublicError: &model.ImageTaskError{Code: "invalid_parameters", Message: "Request parameters are invalid; check the listed fields", Issues: failure.issues}}
-		}
-		return "", adaptor.ErrImageSubmissionRejected
+	var failure *queueResultFailure
+	reason := ""
+	if errors.As(err, &failure) {
+		reason = failure.reason
 	}
-
-	if err != nil {
-		return "", err
+	// Owner rule 2026-10-08: see adaptor.InputRejectionStatus and
+	// adaptor.ProviderUnavailableStatus. Only these statuses prove fal created
+	// no request; every other answer leaves acceptance unknown.
+	switch {
+	case adaptor.InputRejectionStatus(code):
+		var public *model.ImageTaskError
+		if code == 422 && failure != nil && len(failure.issues) > 0 {
+			public = &model.ImageTaskError{Code: "invalid_parameters", Message: "Request parameters are invalid; check the listed fields", Issues: failure.issues}
+		}
+		return "", adaptor.NewSubmissionRejected(code, reason, public)
+	case adaptor.ProviderUnavailableStatus(code):
+		return "", adaptor.NewProviderUnavailable(code, reason)
+	case err != nil:
+		var transport *adaptor.ImageSubmissionFailure
+		if errors.As(err, &transport) {
+			return "", transport
+		}
+		if reason == "" {
+			reason = "unreadable response body"
+		}
+		return "", adaptor.NewSubmissionUnknown(code, reason)
 	}
 
 	if !segment.MatchString(result.ID) {
-		return "", errors.New("invalid fal request id")
+		return "", adaptor.NewSubmissionUnknown(code, "response without a valid request_id")
 	}
 
 	return result.ID, nil
+}
+
+// transportReason labels a transport error for server logs without its text,
+// which can contain the request URL.
+func transportReason(err error) string {
+	var timeout interface{ Timeout() bool }
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "request canceled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
+		return "request timed out"
+	}
+	return "transport error"
 }
 
 func failed(code string) adaptor.ImageTaskResult {

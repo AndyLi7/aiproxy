@@ -132,7 +132,14 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		if errors.As(submitErr, &rejected) && rejected.Failure.Acceptance == failover.NotAccepted {
 			// Persist the rejection before callbacks; recovery can replay both identities.
 			state, code = "failed", "upstream_rejected"
+			if adaptor.ProviderUnavailable(submitErr) {
+				// Owner rule 2026-10-08: the provider created no request for a
+				// reason that is not the customer's input (401/402/403/404/429,
+				// or the connection failed before the request was sent).
+				code = model.UpstreamUnavailableCode
+			}
 		}
+		logSubmissionFailure(task, submitErr, state, code)
 		if err = model.TransitionNativeSubmission(e.DB, id, group, token, "submitting", state, code); err != nil {
 			return task, err
 		}
@@ -156,6 +163,34 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	return task, err
 }
 
+// notAcceptedCode reports the error codes of a submission the provider did not
+// accept. Both refund the hold in full as wallet reason not_accepted.
+func notAcceptedCode(code string) bool {
+	return code == "upstream_rejected" || code == model.UpstreamUnavailableCode
+}
+
+// logSubmissionFailure records every failed provider submission for operators
+// (owner rule 2026-10-08). It logs identities, the provider status and the
+// adaptor's sanitized reason only: never credentials, request bodies or the
+// customer's input.
+func logSubmissionFailure(task *model.NativeTask, err error, state, code string) {
+	status, reason := adaptor.SubmissionEvidence(err)
+	acceptance := failover.FromError(err).Acceptance
+	log.WithFields(log.Fields{
+		"lane":            "native",
+		"task_id":         task.ID,
+		"group":           task.GroupID,
+		"model":           task.Model,
+		"endpoint":        task.Endpoint,
+		"channel_id":      task.ChannelID,
+		"provider_status": status,
+		"provider_reason": reason,
+		"acceptance":      string(acceptance),
+		"task_status":     state,
+		"error_code":      code,
+	}).Warn("native task provider submission failed")
+}
+
 // SyncBilling performs only idempotent wallet callbacks; it never calls a provider.
 // Polling/recovery can retry it after a crash between task persistence and wallet
 // acknowledgement, always using the same operation and attempt identities.
@@ -173,7 +208,7 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 			return err
 		}
 	}
-	if task.Status == "failed" && task.ErrorCode == "upstream_rejected" {
+	if task.Status == "failed" && notAcceptedCode(task.ErrorCode) {
 		if _, err := call(balance.PrepaymentCommand{Action: "reject_attempt", AttemptID: task.BillingOperationID + ":1"}); err != nil {
 			return err
 		}

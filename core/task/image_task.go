@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/imageprepayment"
 	"github.com/labring/aiproxy/core/common/ownedimage"
@@ -240,6 +241,60 @@ func expireImageGeneration(
 	}
 
 	markAsyncUsageFailed(info, "image generation timed out")
+}
+
+// unconfirmedImageBatch bounds one pass of expireUnconfirmedImageSubmissions.
+const unconfirmedImageBatch = 20
+
+// expireUnconfirmedImageSubmissions applies model.AsyncGenerationDeadline to
+// image submissions the provider never confirmed (owner rule 2026-10-08): no
+// upstream ID, outcome unknown or the submitting process died. Each fails with
+// generation_timeout, and a prepaid hold is refunded in full in one wallet
+// call (imageprepayment.Sync: settle failed/platform_failure, no
+// execution_finished). Without an upstream ID nothing is polled or cancelled,
+// and nothing is ever resubmitted. A refund that fails here stays unsettled
+// and ImagePrepaymentRecoveryTask retries it. Tasks with an upstream ID are
+// never touched here: processOneImageUsage owns them.
+func expireUnconfirmedImageSubmissions(ctx context.Context, now time.Time) {
+	if model.LogDB == nil || !model.LogDB.Migrator().HasTable(&model.ImageTask{}) {
+		return
+	}
+	tasks, err := model.UnconfirmedImageSubmissions(now, unconfirmedImageBatch)
+	if err != nil {
+		log.WithError(err).Warn("unconfirmed image submission scan unavailable")
+		return
+	}
+	for i := range tasks {
+		task := &tasks[i]
+		expired, err := model.ExpireUnconfirmedImageSubmission(task.ID, now)
+		if err != nil {
+			log.WithField("task_id", task.ID).WithError(err).Warn("expire unconfirmed image submission")
+			continue
+		}
+		if !expired {
+			continue
+		}
+		entry := log.WithFields(log.Fields{
+			"lane": "image", "task_id": task.ID, "model": task.Model, "endpoint": task.UpstreamModel,
+			"previous_status": task.Status, "prepaid": task.PrepaymentQuoteJSON != "",
+		})
+		entry.Warn("image task submission was not confirmed within the generation deadline; failed with generation_timeout")
+		if task.PrepaymentQuoteJSON == "" {
+			continue
+		}
+		if _, ok := balance.Default.(*balance.ExternalHTTP); !ok {
+			continue
+		}
+		refundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imageTimeoutRefundTimeout)
+		failed, err := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
+		if err == nil {
+			_, err = imageprepayment.Sync(refundCtx, failed)
+		}
+		cancel()
+		if err != nil {
+			entry.WithError(err).Warn("unconfirmed image submission timed out; refund deferred to prepayment recovery")
+		}
+	}
 }
 
 // nextImageDeadlinePoll is the latest next poll for a task still waiting for

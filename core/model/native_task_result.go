@@ -194,7 +194,16 @@ func TransitionNativeSubmission(db *gorm.DB, id, group string, token int, from, 
 	if !allowed {
 		return ErrNativeTaskConflict
 	}
-	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, from, "").Updates(map[string]any{"status": to, "error_code": code, "updated_at": time.Now()})
+	now := time.Now()
+	changes := map[string]any{"status": to, "error_code": code, "updated_at": now}
+	if to == "submitting" {
+		// created_at becomes the submission time: AsyncGenerationDeadline for a
+		// submission that is never confirmed counts from here, so a reservation
+		// resumed long after it was made is never expired while its provider
+		// call is still in flight. AcceptNativeTask moves it again on acceptance.
+		changes["created_at"] = now
+	}
+	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, from, "").Updates(changes)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -276,5 +285,19 @@ func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code strin
 // Billing then refunds the customer in full (platform_failure).
 func ExpireNativeGeneration(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
 	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id <> ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"queued", "running"}, now.Add(-AsyncGenerationDeadline)).Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
+	return r.RowsAffected == 1, r.Error
+}
+
+// ExpireUnconfirmedNativeSubmission fails a submission the provider never
+// confirmed (no upstream ID: submission_unknown, or submitting left behind by
+// a process that died mid-call) once AsyncGenerationDeadline has passed since
+// the submission started (created_at), with AsyncGenerationTimeoutCode. It is
+// a compare-and-set on those states, so a concurrent acceptance wins or loses
+// atomically, and it never touches a task with an upstream ID. Billing then
+// refunds the customer in full (platform_failure); there is no ID to cancel
+// and the task is never resubmitted. expired reports whether this call made
+// the change.
+func ExpireUnconfirmedNativeSubmission(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
+	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id = ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"submitting", "submission_unknown"}, now.Add(-AsyncGenerationDeadline)).Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
 	return r.RowsAffected == 1, r.Error
 }

@@ -45,11 +45,23 @@ func recoveryDelay(age time.Duration, failed bool) time.Duration {
 	return delay
 }
 
-// awaitingProvider is an accepted task with no result yet, the only state the
-// generation deadline applies to. Its created_at is the acceptance time.
-// Unaccepted tasks (no upstream ID) keep the wallet's submission timeout.
+// awaitingProvider is an accepted task with no result yet. Its created_at is
+// the acceptance time.
 func awaitingProvider(task *model.NativeTask) bool {
 	return task.UpstreamID != "" && (task.Status == "queued" || task.Status == "running")
+}
+
+// unconfirmedSubmission is a submission the provider never confirmed: no
+// upstream ID, and its outcome was unknown or the submitting process died.
+// Its created_at is the time the submission started.
+func unconfirmedSubmission(task *model.NativeTask) bool {
+	return task.UpstreamID == "" && (task.Status == "submission_unknown" || task.Status == "submitting")
+}
+
+// underGenerationDeadline reports the states model.AsyncGenerationDeadline
+// applies to: waiting for the provider, before or after it accepted.
+func underGenerationDeadline(task *model.NativeTask) bool {
+	return awaitingProvider(task) || unconfirmedSubmission(task)
 }
 
 // expireGeneration applies model.AsyncGenerationDeadline after this pass's
@@ -60,8 +72,11 @@ func awaitingProvider(task *model.NativeTask) bool {
 // task; err is a refund error, which the next pass retries through Poll and
 // SyncBilling because the row stays failed and unsettled.
 func (e *Engine) expireGeneration(ctx context.Context, task *model.NativeTask, now time.Time, resolve ResolvePoller) (bool, error) {
-	if !awaitingProvider(task) || now.Before(task.CreatedAt.Add(model.AsyncGenerationDeadline)) {
+	if !underGenerationDeadline(task) || now.Before(task.CreatedAt.Add(model.AsyncGenerationDeadline)) {
 		return false, nil
+	}
+	if unconfirmedSubmission(task) {
+		return e.expireUnconfirmed(ctx, task, now)
 	}
 	expired, err := model.ExpireNativeGeneration(e.DB, task.ID, task.GroupID, task.TokenID, now)
 	if err != nil || !expired {
@@ -76,6 +91,31 @@ func (e *Engine) expireGeneration(ctx context.Context, task *model.NativeTask, n
 	}
 	// Only the call that ended the task cancels, so a cancel is sent once.
 	cancelUpstream(ctx, task, resolve)
+	return true, err
+}
+
+// expireUnconfirmed ends a submission the provider never confirmed within
+// model.AsyncGenerationDeadline (owner rule 2026-10-08): durable failure with
+// generation_timeout, then a full refund in one wallet call (SyncBilling:
+// settle failed/platform_failure, no execution_finished). There is no upstream
+// ID, so nothing is polled or cancelled, and the task is never resubmitted.
+// A refund error is retried by later passes: the row stays failed, unsettled.
+func (e *Engine) expireUnconfirmed(ctx context.Context, task *model.NativeTask, now time.Time) (bool, error) {
+	expired, err := model.ExpireUnconfirmedNativeSubmission(e.DB, task.ID, task.GroupID, task.TokenID, now)
+	if err != nil || !expired {
+		return false, err
+	}
+	log.WithFields(log.Fields{
+		"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model,
+		"endpoint": task.Endpoint, "channel_id": task.ChannelID, "previous_status": task.Status,
+	}).Warn("native task submission was not confirmed within the generation deadline; failed with generation_timeout")
+	failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)
+	if err == nil {
+		err = e.SyncBilling(ctx, failed)
+	}
+	if err != nil {
+		log.Warnf("native task %s unconfirmed submission timed out; refund deferred to recovery: %v", task.ID, err)
+	}
 	return true, err
 }
 
@@ -165,8 +205,8 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		}
 		release := now.Add(time.Since(started))
 		next := release.Add(recoveryDelay(age, workErr != nil))
-		if !expired && awaitingProvider(fresh) {
-			// Poll once more right at the deadline instead of up to ~2 minutes
+		if !expired && underGenerationDeadline(fresh) {
+			// Check once more right at the deadline instead of up to ~2 minutes
 			// late. One second past it: leases are whole seconds, and a claim just
 			// before the deadline would only poll and reschedule again.
 			if deadline := fresh.CreatedAt.Add(model.AsyncGenerationDeadline).Add(time.Second); deadline.After(release) && deadline.Before(next) {

@@ -611,14 +611,7 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 		var taskError *model.ImageTaskError
 		if errors.Is(err, adaptor.ErrImageSubmissionRejected) {
 			status = "failed"
-			taskError = &model.ImageTaskError{
-				Code:    "submission_rejected",
-				Message: "Upstream rejected image submission",
-			}
-			var detail *adaptor.ImageSubmissionFailure
-			if errors.As(err, &detail) && detail.PublicError != nil {
-				taskError = detail.PublicError
-			}
+			taskError = adaptor.NotAcceptedTaskError(err)
 		}
 
 		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {

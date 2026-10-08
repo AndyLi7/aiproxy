@@ -28,15 +28,22 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 		retries         int64
 		wantAttempts    int
 		wantStatus      string
+		wantCode        string
 	}{
 		{name: "connection failure then backup", retries: 2, wantAttempts: 2, wantStatus: "queued"},
-		{name: "all connections fail only once", allFail: true, retries: 10, wantAttempts: 2, wantStatus: "failed"},
+		{name: "all connections fail only once", allFail: true, retries: 10, wantAttempts: 2, wantStatus: "failed", wantCode: "upstream_unavailable"},
 		{name: "HTTP 503 unknown", primaryStatus: 503, retries: 2, wantAttempts: 1, wantStatus: "submission_unknown"},
-		{name: "HTTP 429 unknown", primaryStatus: 429, retries: 2, wantAttempts: 1, wantStatus: "submission_unknown"},
+		// Owner rule 2026-10-08: these prove fal created no request, so the
+		// existing failover may try the next channel (another account).
+		{name: "HTTP 429 not accepted then backup", primaryStatus: 429, retries: 2, wantAttempts: 2, wantStatus: "queued"},
+		{name: "HTTP 403 exhausted balance then backup", primaryStatus: 403, retries: 2, wantAttempts: 2, wantStatus: "queued"},
+		{name: "HTTP 401 then backup", primaryStatus: 401, retries: 2, wantAttempts: 2, wantStatus: "queued"},
+		{name: "HTTP 403 without failover", primaryStatus: 403, retries: 0, wantAttempts: 1, wantStatus: "failed", wantCode: "upstream_unavailable"},
+		{name: "HTTP 403 pinned", primaryStatus: 403, pinned: true, retries: 2, wantAttempts: 1, wantStatus: "failed", wantCode: "upstream_unavailable"},
 		{name: "accepted stays", primaryStatus: 200, retries: 2, wantAttempts: 1, wantStatus: "queued"},
-		{name: "invalid request stays", primaryStatus: 422, retries: 2, wantAttempts: 1, wantStatus: "failed"},
-		{name: "pinned stays", pinned: true, retries: 2, wantAttempts: 1, wantStatus: "failed"},
-		{name: "disabled stays", retries: 0, wantAttempts: 1, wantStatus: "failed"},
+		{name: "invalid request stays", primaryStatus: 422, retries: 2, wantAttempts: 1, wantStatus: "failed", wantCode: "submission_rejected"},
+		{name: "pinned stays", pinned: true, retries: 2, wantAttempts: 1, wantStatus: "failed", wantCode: "upstream_unavailable"},
+		{name: "disabled stays", retries: 0, wantAttempts: 1, wantStatus: "failed", wantCode: "upstream_unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "attempt.db"))
@@ -93,6 +100,12 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 			task, err := model.GetImageTask(original.ID, "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantStatus, task.Status)
+			if tc.wantCode != "" {
+				require.NotNil(t, task.Error)
+				require.Equal(t, tc.wantCode, task.Error.Code)
+			} else {
+				require.Nil(t, task.Error)
+			}
 			require.Len(t, task.Attempts, tc.wantAttempts)
 			require.False(t, task.Attempts[len(task.Attempts)-1].Retry)
 			if tc.allFail {

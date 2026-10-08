@@ -91,3 +91,37 @@ func TestSyncImageBridgeRejectsRedirectAndInvalidResult(t *testing.T) {
 		})
 	}
 }
+
+// Owner rule 2026-10-08 applies to the synchronous bridge too: Ark's
+// credential, overdue-account, unknown-endpoint and throttling answers prove
+// nothing was generated, so the task fails as upstream_unavailable instead of
+// waiting as submission_unknown. Server errors stay uncertain.
+func TestSyncImageBridgeProviderUnavailableIsNotAccepted(t *testing.T) {
+	for _, code := range []int{401, 402, 403, 404, 429, 500} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte(`{"error":{"code":"AccountOverdueError","message":"Account overdue for key secret-ark-key"}}`))
+			}))
+			defer s.Close()
+
+			_, err := (&Adaptor{}).GenerateImage(
+				t.Context(),
+				&meta.Meta{ActualModel: "seedream-test", Channel: meta.ChannelMeta{BaseURL: s.URL, Key: "secret-ark-key"}},
+				[]byte(`{"prompt":"private prompt","stream":false,"response_format":"url"}`),
+				syncContract(),
+			)
+			require.Error(t, err)
+			status, reason := adaptor.SubmissionEvidence(err)
+			require.Equal(t, code, status)
+			require.Equal(t, "Account overdue for key [redacted]", reason)
+			if code == 500 {
+				require.False(t, adaptor.ProviderUnavailable(err))
+				require.NotErrorIs(t, err, adaptor.ErrImageSubmissionRejected)
+				return
+			}
+			require.True(t, adaptor.ProviderUnavailable(err))
+			require.Equal(t, "upstream_unavailable", adaptor.NotAcceptedTaskError(err).Code)
+		})
+	}
+}

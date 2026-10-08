@@ -204,29 +204,6 @@ func TestGenerationDeadlineSkipsReceivedResults(t *testing.T) {
 	require.Empty(t, poll.cancels)
 }
 
-// Tasks the provider never confirmed have no upstream ID to cancel; they keep
-// the wallet's submission_timeout path and are not touched by this rule.
-func TestGenerationDeadlineLeavesUnacceptedTasks(t *testing.T) {
-	e, plan, w, _ := setup(t)
-	_, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: "req", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp", OutputSchema: `{}`, FrozenContract: string(plan.Contract), BillingOperationID: "native:req"})
-	require.NoError(t, err)
-	require.NoError(t, model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""))
-	require.NoError(t, model.TransitionNativeSubmission(e.DB, "req", "g", 1, "submitting", "submission_unknown", "submission_outcome_unknown"))
-	now := acceptedAgo(t, e, time.Hour)
-	expired, err := model.ExpireNativeGeneration(e.DB, "req", "g", 1, now)
-	require.NoError(t, err)
-	require.False(t, expired)
-	_, err = e.RecoverOnce(context.Background(), "worker", now, func(context.Context, *model.NativeTask) (Poller, error) {
-		t.Fatal("must not poll or cancel an unknown identity")
-		return nil, nil
-	}, nil)
-	require.NoError(t, err)
-	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
-	require.NoError(t, err)
-	require.Equal(t, "submission_unknown", task.Status)
-	require.False(t, refundedWith(w, "platform_failure"))
-}
-
 // Younger tasks are untouched, and their next poll is pulled in to the
 // deadline so the rule fires within seconds of 15 minutes, not ~2 later.
 func TestGenerationDeadlineSchedulesAPollAtTheDeadline(t *testing.T) {

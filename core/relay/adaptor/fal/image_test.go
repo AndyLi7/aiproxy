@@ -274,7 +274,7 @@ func TestFalPollingErrorsAndNoCredentialRedirect(t *testing.T) {
 }
 
 func TestSubmissionRejectionIsDistinctFromUnknownAcceptance(t *testing.T) {
-	for _, code := range []int{400, 401, 408, 413, 422, 429, 451, 500, 503} {
+	for _, code := range []int{302, 400, 401, 402, 403, 404, 408, 413, 422, 429, 451, 500, 502, 503} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
 			s := httptest.NewServer(
 				http.HandlerFunc(
@@ -290,17 +290,59 @@ func TestSubmissionRejectionIsDistinctFromUnknownAcceptance(t *testing.T) {
 				[]byte(`{"prompt":"test","n":1}`),
 			)
 			require.Error(t, err)
-			// Only explicit invalid-request statuses are terminal rejections.
-			// Authentication, throttling and server errors do not establish
-			// whether an asynchronous queue accepted work.
+			// Owner rule 2026-10-08: input rejections and provider-unavailable
+			// statuses (credential, payment or exhausted balance, unknown
+			// endpoint, throttling) prove fal created no request. Server errors,
+			// timeouts and redirects do not establish whether it accepted work.
 			rejected := code == 400 || code == 413 || code == 422 || code == 451
-			require.Equal(t, rejected, errors.Is(err, adaptor.ErrImageSubmissionRejected))
+			unavailable := code == 401 || code == 402 || code == 403 || code == 404 || code == 429
+			require.Equal(t, rejected || unavailable, errors.Is(err, adaptor.ErrImageSubmissionRejected))
+			require.Equal(t, unavailable, adaptor.ProviderUnavailable(err))
 			failure := failover.FromError(err)
-			if rejected {
+			status, _ := adaptor.SubmissionEvidence(err)
+			require.Equal(t, code, status)
+			switch {
+			case rejected:
 				require.Equal(t, failover.NotAccepted, failure.Acceptance)
 				require.Equal(t, failover.InvalidRequest, failure.Class)
-			} else {
+			case unavailable:
+				require.Equal(t, failover.NotAccepted, failure.Acceptance)
+				require.Equal(t, failover.Transient, failure.Class)
+				require.Equal(t, "upstream_unavailable", adaptor.NotAcceptedTaskError(err).Code)
+			default:
 				require.Equal(t, failover.Unknown, failure.Acceptance)
+			}
+		})
+	}
+}
+
+// The 2026-10-08 incident: fal answered an exhausted account with 403. The
+// task is not accepted, and operators get the status and fal's own reason,
+// never the API key or the customer's prompt.
+func TestSubmitCarriesSanitizedProviderEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want, absent string
+		code                     int
+	}{
+		{"exhausted balance", `{"detail":"User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing."}`, "User is locked. Reason: Exhausted balance.", "", 403},
+		{"echoed credential", `{"detail":"invalid key fal-key-0123456789"}`, "invalid key [redacted]", "fal-key-0123456789", 401},
+		{"input rejection", `{"detail":[{"type":"string_too_long","loc":["body","prompt"],"input":"secret customer prompt"}]}`, "string_too_long@body.prompt", "secret customer prompt", 422},
+		{"server error", `<html>bad gateway</html>`, "<html>bad gateway</html>", "", 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.code)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer s.Close()
+			c := fal.Client{HTTP: s.Client(), BaseURL: s.URL, Key: "fal-key-0123456789"}
+			_, err := c.SubmitNative(t.Context(), "fal-ai/qwen-image", []byte(`{"prompt":"secret customer prompt"}`))
+			status, reason := adaptor.SubmissionEvidence(err)
+			require.Equal(t, tc.code, status)
+			require.Contains(t, reason, tc.want)
+			require.NotContains(t, reason, "secret customer prompt")
+			if tc.absent != "" {
+				require.NotContains(t, reason, tc.absent)
 			}
 		})
 	}

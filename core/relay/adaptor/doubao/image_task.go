@@ -81,16 +81,22 @@ func (*Adaptor) GenerateImage(
 
 	response, err := once.Do(req)
 	if err != nil {
-		return adaptor.ImageTaskResult{}, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err)}
+		return adaptor.ImageTaskResult{}, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err), ProviderReason: "transport error"}
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode == 400 || response.StatusCode == 413 || response.StatusCode == 422 || response.StatusCode == 451 {
-		return adaptor.ImageTaskResult{}, adaptor.ErrImageSubmissionRejected
-	}
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return adaptor.ImageTaskResult{}, errors.New("synchronous image submission outcome unknown")
+	// Owner rule 2026-10-08: input rejections and provider-unavailable statuses
+	// prove nothing was generated; any other non-2xx answer is uncertain.
+	if status := response.StatusCode; status < 200 || status >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		reason := adaptor.ProviderErrorReason(status, raw, m.Channel.Key)
+		switch {
+		case adaptor.InputRejectionStatus(status):
+			return adaptor.ImageTaskResult{}, adaptor.NewSubmissionRejected(status, reason, nil)
+		case adaptor.ProviderUnavailableStatus(status):
+			return adaptor.ImageTaskResult{}, adaptor.NewProviderUnavailable(status, reason)
+		}
+		return adaptor.ImageTaskResult{}, adaptor.NewSubmissionUnknown(status, reason)
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))

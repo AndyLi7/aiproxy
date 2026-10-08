@@ -48,8 +48,23 @@ The prepaid hold is refunded in full and the provider is asked to cancel (best
 effort); a result that arrives later is discarded and never billed to the
 customer. Retrying with the same X-Request-Id returns the same failed task, so
 submit again with a new X-Request-Id. Clients should keep polling for about 20
-minutes before giving up locally. Submissions the provider never confirmed are
-not covered by this rule and keep their submission_timeout path. On
-/v1/images/tasks, an image the provider already returned that is still being
-stored (status in_progress, phase result_processing) is not covered either, and
-every other image failure is still reported as generation_failed.
+minutes before giving up locally. A submission the provider never confirmed
+(its answer was lost or ambiguous, so there is no provider task) ends the same
+way 15 minutes after it was submitted: generation_timeout, refunded in full;
+it is never resubmitted and there is nothing to cancel. On /v1/images/tasks, an
+image the provider already returned that is still being stored (status
+in_progress, phase result_processing) is not covered.
+
+When the provider refuses a submission for reasons on its or the platform's
+side (provider HTTP 401, 402, 403, 404 or 429: credentials, payment or an
+exhausted provider balance, an unknown endpoint, throttling), or the connection
+to the provider failed before the request was sent (for example a DNS or
+connect error), it created no task. The task fails at once with error.code =
+upstream_unavailable and the prepaid hold is refunded in full:
+```json
+{"status":"failed","error":{"code":"upstream_unavailable","message":"The provider is temporarily unavailable, so this task was not started. You were not charged; try again later with a new X-Request-Id."}}
+```
+On /v1/images/tasks another configured channel is tried first when failover is
+enabled. Provider answers that reject the customer's input (400, 413, 422, 451)
+keep their existing codes. Every other /v1/images/tasks failure is still
+reported as generation_failed.

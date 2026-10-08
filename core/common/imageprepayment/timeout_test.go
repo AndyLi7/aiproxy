@@ -75,3 +75,30 @@ func TestSyncRefundsGenerationTimeoutInOneCall(t *testing.T) {
 		})
 	}
 }
+
+// A submission the provider never confirmed (no upstream ID, unknown attempt)
+// that timed out is refunded in one call too: nothing is accepted, rejected or
+// marked finished on its behalf.
+func TestSyncRefundsUnconfirmedGenerationTimeoutInOneCall(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+	oldDB, oldBalance := model.LogDB, balance.Default
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB, balance.Default = oldDB, oldBalance })
+	wallet := &fakeWallet{}
+	server := wallet.serve(t)
+	defer server.Close()
+	balance.Default = balance.NewExternalHTTP(server.URL, "test")
+	task := &model.ImageTask{
+		ID: "unconfirmed", GroupID: "g", TokenID: 1, Status: "failed",
+		BillingOperationID: "op", PrepaymentQuoteJSON: `{"version":1}`,
+		Attempts: []model.ImageTaskAttempt{{Failure: failover.Failure{Acceptance: failover.Unknown}}},
+		Error:    &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode},
+	}
+	require.NoError(t, db.Create(task).Error)
+	receipt, err := Sync(t.Context(), task)
+	require.NoError(t, err)
+	require.Equal(t, "refunded", receipt.Status)
+	require.Equal(t, []string{"settle:failed/platform_failure", "get"}, wallet.actions)
+}

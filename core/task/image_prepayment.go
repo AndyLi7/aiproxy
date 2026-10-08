@@ -18,6 +18,7 @@ func ImagePrepaymentRecoveryTask(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			expireUnconfirmedImageSubmissions(ctx, time.Now())
 			recoverImagePrepayments(ctx)
 		}
 	}

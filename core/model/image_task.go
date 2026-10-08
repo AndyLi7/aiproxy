@@ -417,6 +417,75 @@ func ExpireImageGeneration(id string, now time.Time) (bool, error) {
 	return expired, nil
 }
 
+// unconfirmedImageSubmission selects image tasks the provider never confirmed:
+// no upstream ID, and the submission outcome was unknown or the submitting
+// process died, reserved at least AsyncGenerationDeadline before now. An
+// image task is reserved and submitted in the same request, so created_at is
+// the submission time.
+func unconfirmedImageSubmission(tx *gorm.DB, now time.Time) *gorm.DB {
+	return tx.Where("(upstream_id = ? OR upstream_id IS NULL) AND status IN ? AND created_at <= ?",
+		"", []string{"submitting", "submission_unknown"}, now.UTC().Add(-AsyncGenerationDeadline))
+}
+
+// UnconfirmedImageSubmissions lists up to limit tasks ExpireUnconfirmedImageSubmission
+// would fail at now, oldest first.
+func UnconfirmedImageSubmissions(now time.Time, limit int) ([]ImageTask, error) {
+	var tasks []ImageTask
+	err := unconfirmedImageSubmission(LogDB.Model(&ImageTask{}), now).
+		Order("created_at ASC").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
+// ExpireUnconfirmedImageSubmission fails an image task whose submission the
+// provider never confirmed within AsyncGenerationDeadline (owner rule
+// 2026-10-08), with the public code AsyncGenerationTimeoutCode. It is a
+// compare-and-set that never touches a task with an upstream ID, so a
+// concurrent acceptance either wins or is refused (AcceptImageTask only moves
+// submitting and submission_unknown rows). The accounting outbox and request
+// log fail in the same commit. There is no upstream ID to poll or cancel; a
+// prepaid hold is refunded in full by imageprepayment.Sync. expired reports
+// whether this call made the change.
+func ExpireUnconfirmedImageSubmission(id string, now time.Time) (bool, error) {
+	encodedError, err := json.Marshal(&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage})
+	if err != nil {
+		return false, err
+	}
+
+	expired := false
+	err = LogDB.Transaction(func(tx *gorm.DB) error {
+		at := time.Now().UTC()
+		result := unconfirmedImageSubmission(tx.Model(&ImageTask{}).Where("id = ?", id), now).
+			Updates(map[string]any{
+				"status": "failed", "data": "null", "error": string(encodedError), "updated_at": at,
+				"completed_at": at, "retain_until": at.Add(30 * 24 * time.Hour),
+			})
+		if result.Error != nil || result.RowsAffected != 1 {
+			return result.Error
+		}
+		expired = true
+
+		if err := tx.Model(&AsyncUsageInfo{}).
+			Where("image_task_id = ?", id).
+			Update("status", AsyncUsageStatusFailed).
+			Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&Log{}).
+			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
+			Updates(map[string]any{
+				"async_usage_status": AsyncUsageStatusFailed, "code": 502,
+				"error_code": AsyncGenerationTimeoutCode, "safe_error": "Image submission was not confirmed",
+			}).
+			Error
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return expired, nil
+}
+
 func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
 	if status == "completed" && len(data) == 0 {
 		return errors.New("empty completed image result")
@@ -496,9 +565,15 @@ func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageT
 				return err
 			}
 
+			logChanges := map[string]any{"async_usage_status": AsyncUsageStatusFailed, "code": 502, "safe_error": "Image generation failed"}
+			if taskError != nil && PublicTaskErrorMessage(taskError.Code) != "" {
+				// The request log carries the same platform-owned code customers
+				// receive from the task API (for example upstream_unavailable).
+				logChanges["error_code"] = taskError.Code
+			}
 			return tx.Model(&Log{}).
 				Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
-				Updates(map[string]any{"async_usage_status": AsyncUsageStatusFailed, "code": 502, "safe_error": "Image generation failed"}).
+				Updates(logChanges).
 				Error
 		}
 

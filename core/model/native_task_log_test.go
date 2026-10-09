@@ -2,8 +2,10 @@ package model_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
@@ -95,7 +97,42 @@ func TestNativeTaskLogMarksFailedTasks(t *testing.T) {
 	require.Equal(t, model.AsyncUsageStatusFailed, rows[0].AsyncUsageStatus)
 	require.Equal(t, "upstream_rejected", rows[0].ErrorCode)
 	require.Equal(t, model.RequestSourceAdminDemo, rows[0].RequestSource)
+	require.Equal(t, "Native task failed", rows[0].SafeError)
+	require.Empty(t, rows[0].FailureStage)
 	require.Zero(t, rows[0].Amount.UsedAmount)
+}
+
+// Owner decision 2026-10-09: a task failed with invalid_parameters summarizes
+// the rejected fields and rules only, bounded to 256 bytes, without a failure
+// stage.
+func TestNativeTaskLogNamesRejectedParameters(t *testing.T) {
+	db := nativeLogDB(t)
+	task := submittedNativeTask(t, db, "pg_native_invalid")
+	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Endpoint: "POST /v1/model-tasks", Mode: int(mode.NativeTasks)}))
+	require.NoError(t, model.AcceptNativeTask(db, "pg_native_invalid", "g", 1, "fal-request-1"))
+	issues := []nativeresult.ParameterIssue{{Field: "voice", Rule: "unsupported_value"}, {Field: "image_urls[0]", Rule: "file_size"}}
+	require.NoError(t, model.UpdateNativePoll(db, "pg_native_invalid", "g", 1, "failed", "invalid_parameters", issues...))
+	require.NoError(t, model.SaveNativeBillingTerminal(db, "pg_native_invalid", "g", 1, `{"status":"refunded","chargedMicros":0}`))
+	rows := nativeLogRows(t, db, "pg_native_invalid")
+	require.Len(t, rows, 1)
+	require.Equal(t, 502, rows[0].Code)
+	require.Equal(t, model.AsyncUsageStatusFailed, rows[0].AsyncUsageStatus)
+	require.Equal(t, "invalid_parameters", rows[0].ErrorCode)
+	require.Equal(t, "Invalid parameters: voice (unsupported_value), image_urls[0] (file_size)", rows[0].SafeError)
+	require.Empty(t, rows[0].FailureStage)
+
+	long := submittedNativeTask(t, db, "pg_native_invalid_long")
+	require.NoError(t, model.RecordNativeTaskLog(db, long, model.NativeTaskLog{Mode: int(mode.NativeTasks)}))
+	many := make([]nativeresult.ParameterIssue, 8)
+	for i := range many {
+		many[i] = nativeresult.ParameterIssue{Field: "voice_setting.voice_id_" + strings.Repeat("x", 40), Rule: "unsupported_value"}
+	}
+	require.NoError(t, model.TransitionNativeSubmission(db, "pg_native_invalid_long", "g", 1, "submitting", "failed", "invalid_parameters", many...))
+	require.NoError(t, model.SaveNativeBillingTerminal(db, "pg_native_invalid_long", "g", 1, `{"status":"refunded","chargedMicros":0}`))
+	rows = nativeLogRows(t, db, "pg_native_invalid_long")
+	require.LessOrEqual(t, len(rows[0].SafeError), 256)
+	require.True(t, strings.HasPrefix(rows[0].SafeError, "Invalid parameters: voice_setting.voice_id_"))
+	require.True(t, strings.HasSuffix(rows[0].SafeError, "(unsupported_value)"))
 }
 
 func TestNativeTaskLogIsSkippedWithoutLogStorage(t *testing.T) {

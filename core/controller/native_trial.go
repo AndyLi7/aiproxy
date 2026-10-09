@@ -217,6 +217,9 @@ func writeNativeTrial(c *gin.Context, status int, task *model.NativeTask) {
 	}
 	if task.Status == "failed" {
 		data["errorCode"] = task.ErrorCode
+		if issues := model.NativeTaskIssues(task); len(issues) > 0 {
+			data["errorIssues"] = issues
+		}
 	}
 	c.Header("Cache-Control", "private, no-store")
 	c.JSON(status, middleware.APIResponse{Success: true, Data: data})

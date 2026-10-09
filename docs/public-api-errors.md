@@ -68,3 +68,18 @@ On /v1/images/tasks another configured channel is tried first when failover is
 enabled. Provider answers that reject the customer's input (400, 413, 422, 451)
 keep their existing codes. Every other /v1/images/tasks failure is still
 reported as generation_failed.
+
+On /v1/model-tasks, when the provider rejects the input and names the fields,
+at submission or after accepting the task, the task fails with error.code =
+invalid_parameters and up to 8 issues. Each issue has only a parameter path
+(`voice`, `voice_setting.voice_id`, `image_urls[0]`) and a rule: required,
+string, integer, number, boolean, array, object, allowed_value, range, length,
+multiple, invalid, unsupported_value, file_size, file_format, file_unreadable,
+duration or content_policy. Provider messages and the submitted values are
+never returned. The prepaid hold is refunded in full:
+```json
+{"status":"failed","error":{"code":"invalid_parameters","message":"The provider rejected the listed input parameters. You were not charged; fix them and submit a new task with a new X-Request-Id.","issues":[{"field":"voice","rule":"unsupported_value"}]}}
+```
+Fields the platform sets itself (not in the model's input schema) are never
+listed. A rejection that names no other field keeps upstream_rejected (at
+submission) or upstream_result_rejected (after acceptance).

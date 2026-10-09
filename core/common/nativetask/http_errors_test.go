@@ -122,6 +122,7 @@ func TestFailedNativeTaskExplainsItsCode(t *testing.T) {
 		"upstream_task_failed":     "The provider could not generate this result. You were not charged; submit a new task with a new X-Request-Id.",
 		"upstream_result_rejected": "The provider returned a result we could not deliver. You were not charged; submit a new task with a new X-Request-Id.",
 		"upstream_rejected":        "The provider rejected this request before generating. You were not charged.",
+		"invalid_parameters":       "The provider rejected the listed input parameters. You were not charged; fix them and submit a new task with a new X-Request-Id.",
 		"submission_timeout":       "The provider did not confirm this task in time. You were not charged; submit a new task with a new X-Request-Id.",
 		"something_new":            "This task failed. Contact support with the task ID.",
 	} {
@@ -135,4 +136,30 @@ func TestFailedNativeTaskExplainsItsCode(t *testing.T) {
 		require.Equal(t, "failed", response.Status)
 		require.Equal(t, map[string]string{"code": code, "message": message}, response.Error)
 	}
+}
+
+// Issues appear only for a failed invalid_parameters task with valid stored
+// issues; a stored value that does not validate is never shown.
+func TestFailedNativeTaskListsOnlyValidIssues(t *testing.T) {
+	stored := `{"issues":[{"field":"voice_setting.voice_id","rule":"unsupported_value"},{"field":"image_urls[0]","rule":"file_size"}]}`
+	for _, tc := range []struct {
+		name, code, status, publicError, want string
+	}{
+		{"issues", "invalid_parameters", "failed", stored, `{"code":"invalid_parameters","message":"The provider rejected the listed input parameters. You were not charged; fix them and submit a new task with a new X-Request-Id.","issues":[{"field":"voice_setting.voice_id","rule":"unsupported_value"},{"field":"image_urls[0]","rule":"file_size"}]}`},
+		{"other code", "upstream_result_rejected", "failed", stored, `{"code":"upstream_result_rejected","message":"The provider returned a result we could not deliver. You were not charged; submit a new task with a new X-Request-Id."}`},
+		{"unreadable", "invalid_parameters", "failed", `{"issues":[{"field":"https://fal.ai","rule":"Voice not found"}]}`, `{"code":"invalid_parameters","message":"The provider rejected the listed input parameters. You were not charged; fix them and submit a new task with a new X-Request-Id."}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			WritePublic(w, http.StatusOK, &model.NativeTask{ID: "t", Model: "m", Status: tc.status, ErrorCode: tc.code, PublicError: tc.publicError})
+			var response struct {
+				Error json.RawMessage `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			require.JSONEq(t, tc.want, string(response.Error))
+		})
+	}
+	w := httptest.NewRecorder()
+	WritePublic(w, http.StatusOK, &model.NativeTask{ID: "t", Model: "m", Status: "running", ErrorCode: "invalid_parameters", PublicError: stored})
+	require.NotContains(t, w.Body.String(), "issues")
 }

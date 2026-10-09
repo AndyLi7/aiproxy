@@ -47,3 +47,20 @@ func TestNativePlatformControlsAreServerOwned(t *testing.T) {
 		}
 	}
 }
+
+// Issues naming a frozen platform control (by its top-level name) are not the
+// customer's; every other field, including look-alike names, is kept.
+func TestCustomerIssuesDropPlatformControls(t *testing.T) {
+	c, err := CompileTaskContract([]byte(`{"version":1,"model":"native","input_schema":{"type":"object"},"upstream_input_schema":{"type":"object"},"fixed_parameters":{"sync_mode":false,"output_format":"wav"},"output_schema":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := []ParameterIssue{{Field: "sync_mode", Rule: "unsupported_value"}, {Field: "sync_mode_extra", Rule: "boolean"}, {Field: "output_format", Rule: "allowed_value"}, {Field: "image_urls[0]", Rule: "file_size"}, {Field: "voice_setting.voice_id", Rule: "unsupported_value"}}
+	got := c.CustomerIssues(issues)
+	if len(got) != 3 || got[0].Field != "sync_mode_extra" || got[1].Field != "image_urls[0]" || got[2].Field != "voice_setting.voice_id" {
+		t.Fatalf("kept %v", got)
+	}
+	if got := c.CustomerIssues(issues[:1]); got != nil {
+		t.Fatalf("kept a platform control %v", got)
+	}
+}

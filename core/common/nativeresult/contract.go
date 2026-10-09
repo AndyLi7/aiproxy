@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 var ErrRequest = errors.New("native request does not match the selected model")
@@ -158,4 +159,25 @@ func (c *CompiledTask) PrepareUpstreamInput(raw []byte) (json.RawMessage, error)
 		return validated, nil
 	}
 	return result, nil
+}
+
+// CustomerIssues drops the issues that name a registry-frozen platform control:
+// the customer cannot send or change one (ValidateRequest refuses it) and its
+// name is not public. Nil when none remains; such a rejection is the
+// platform's, not the customer's input error.
+func (c *CompiledTask) CustomerIssues(issues []ParameterIssue) []ParameterIssue {
+	var kept []ParameterIssue
+	for _, issue := range issues {
+		name := issue.Field
+		if end := strings.IndexAny(name, ".["); end >= 0 {
+			name = name[:end]
+		}
+		if c != nil {
+			if _, fixed := c.fixed[name]; fixed {
+				continue
+			}
+		}
+		kept = append(kept, issue)
+	}
+	return kept
 }

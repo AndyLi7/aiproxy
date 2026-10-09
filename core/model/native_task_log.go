@@ -107,6 +107,34 @@ func RecordNativeTaskLog(db *gorm.DB, task *NativeTask, info NativeTaskLog) erro
 	})
 }
 
+// nativeSafeErrorLimit bounds the request-log summary of rejected parameters.
+const nativeSafeErrorLimit = 256
+
+// nativeTaskSafeError is the request-log summary of a failed task. Rejected
+// parameters list only field paths and rule codes, e.g. "Invalid parameters:
+// voice (unsupported_value)"; issues that do not fit are left out.
+func nativeTaskSafeError(task *NativeTask) string {
+	issues := NativeTaskIssues(task)
+	if len(issues) == 0 {
+		return "Native task failed"
+	}
+	summary := "Invalid parameters:"
+	for i, issue := range issues {
+		part := " " + issue.Field + " (" + issue.Rule + ")"
+		if i > 0 {
+			part = "," + part
+		}
+		if len(summary)+len(part) > nativeSafeErrorLimit {
+			if i == 0 {
+				return truncateNativeLogField(summary+part, nativeSafeErrorLimit)
+			}
+			break
+		}
+		summary += part
+	}
+	return summary
+}
+
 // syncNativeTaskLog mirrors the task's progress and wallet receipt into its
 // request-log row. It is idempotent and runs on every billing sync.
 func syncNativeTaskLog(tx *gorm.DB, id, group string, token int, receipt string) error {
@@ -115,7 +143,7 @@ func syncNativeTaskLog(tx *gorm.DB, id, group string, token int, receipt string)
 	}
 
 	var task NativeTask
-	if err := tx.Select("status", "upstream_id", "error_code").
+	if err := tx.Select("status", "upstream_id", "error_code", "public_error").
 		Where("id = ? AND group_id = ? AND token_id = ?", id, group, token).
 		First(&task).Error; err != nil {
 		return err
@@ -133,7 +161,7 @@ func syncNativeTaskLog(tx *gorm.DB, id, group string, token int, receipt string)
 		changes["async_usage_status"] = AsyncUsageStatusFailed
 		changes["code"] = 502
 		changes["error_code"] = truncateNativeLogField(task.ErrorCode, 64)
-		changes["safe_error"] = "Native task failed"
+		changes["safe_error"] = nativeTaskSafeError(&task)
 	}
 
 	var parsed struct {

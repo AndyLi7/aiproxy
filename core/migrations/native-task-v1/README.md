@@ -13,6 +13,11 @@ go run ./cmd/native-task-migration -dialect postgres
 go run ./cmd/native-task-migration -dialect mysql
 ```
 
+These scripts are regenerated from the current model, so they create a new
+table with every current column. A table created from an earlier copy is
+upgraded by the reviewed additive scripts in [native-task-v2](../native-task-v2/README.md)
+(`public_error`, 2026-10-09), applied before the matching binary is deployed.
+
 The command prints DDL only. It has no apply option. PostgreSQL/MySQL dialect
 planning disables connection probes; SQLite uses an ephemeral in-memory database.
 MySQL payload fields use LONGTEXT so bounded native JSON larger than 64 KiB fits.

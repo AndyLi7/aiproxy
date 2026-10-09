@@ -12,6 +12,7 @@ import (
 
 	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/nativeresult"
+	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 )
 
@@ -47,15 +48,18 @@ func (c *Client) nativeRequest(ctx context.Context, method, path string, body []
 		return nil, 0, &adaptor.ImageSubmissionFailure{Failure: classify(err)}
 	}
 	defer response.Body.Close()
+	// An error answer is parsed like the image lane's (issues and log reason)
+	// and never mistaken for an oversized result.
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
+		return nil, response.StatusCode, providerFailure(response.StatusCode, raw, c.Key)
+	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, nativeresult.MaxBytes+1))
 	if err != nil {
 		return nil, response.StatusCode, errors.New("invalid fal response")
 	}
 	if len(raw) > nativeresult.MaxBytes {
 		return nil, response.StatusCode, nativeresult.ErrTooLarge
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, response.StatusCode, &queueResultFailure{status: response.StatusCode}
 	}
 	return raw, response.StatusCode, nil
 }
@@ -98,12 +102,12 @@ func (c *Client) PollNative(ctx context.Context, modelName, id string, contract 
 	case "IN_PROGRESS":
 		return NativeResult{Status: "running"}, nil
 	case "FAILED":
-		return NativeResult{Status: "failed", ErrorCode: "upstream_task_failed"}, nil
+		return NativeResult{Status: "failed", ErrorCode: "upstream_task_failed", ProviderStatus: http.StatusOK, ProviderReason: "queue status FAILED"}, nil
 	case "COMPLETED":
 		raw, code, err := c.nativeRequest(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			if code == 400 || code == 422 {
-				return NativeResult{Status: "failed", ErrorCode: "upstream_result_rejected"}, nil
+				return rejectedResult(code, err), nil
 			}
 			return NativeResult{}, err
 		}
@@ -115,4 +119,27 @@ func (c *Client) PollNative(ctx context.Context, modelName, id string, contract 
 	default:
 		return NativeResult{}, errors.New("unknown fal task status")
 	}
+}
+
+// rejectedResult ends an accepted request whose result fal refused with 400 or
+// 422: it rejected the input while running it (fal bills nothing for these).
+// With named fields the task fails as invalid_parameters with those issues
+// (owner decision 2026-10-09), otherwise as upstream_result_rejected. The
+// status and the sanitized type@field reason are for operator logs only.
+func rejectedResult(status int, err error) NativeResult {
+	result := NativeResult{Status: "failed", ErrorCode: "upstream_result_rejected", ProviderStatus: status}
+	var failure *queueResultFailure
+	if !errors.As(err, &failure) {
+		return result
+	}
+	result.ProviderReason = failure.reason
+	issues := make([]nativeresult.ParameterIssue, 0, len(failure.issues))
+	for _, issue := range failure.issues {
+		issues = append(issues, nativeresult.ParameterIssue{Field: issue.Field, Rule: issue.Rule})
+	}
+	// Storage refuses issues it cannot show; such a task keeps the generic code.
+	if nativeresult.ValidParameterIssues(issues) {
+		result.ErrorCode, result.Issues = model.InvalidParametersCode, issues
+	}
+	return result
 }

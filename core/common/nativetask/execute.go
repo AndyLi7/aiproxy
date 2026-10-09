@@ -128,6 +128,7 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	upstreamID, submitErr := e.Provider.SubmitNative(ctx, task.Endpoint, []byte(task.NativeInput))
 	if submitErr != nil {
 		state, code := "submission_unknown", "submission_outcome_unknown"
+		var issues []nativeresult.ParameterIssue
 		var rejected *adaptor.ImageSubmissionFailure
 		if errors.As(submitErr, &rejected) && rejected.Failure.Acceptance == failover.NotAccepted {
 			// Persist the rejection before callbacks; recovery can replay both identities.
@@ -137,14 +138,20 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 				// reason that is not the customer's input (401/402/403/404/429,
 				// or the connection failed before the request was sent).
 				code = model.UpstreamUnavailableCode
+			} else if issues = contract.CustomerIssues(rejectedIssues(rejected.PublicError)); len(issues) > 0 {
+				// Owner decision 2026-10-09: name the rejected fields. Billing is
+				// still the not-accepted refund of upstream_rejected. A rejected
+				// platform control alone stays upstream_rejected.
+				code = model.InvalidParametersCode
 			}
 		}
 		logSubmissionFailure(task, submitErr, state, code)
-		if err = model.TransitionNativeSubmission(e.DB, id, group, token, "submitting", state, code); err != nil {
+		if err = model.TransitionNativeSubmission(e.DB, id, group, token, "submitting", state, code, issues...); err != nil {
 			return task, err
 		}
 		task.Status = state
 		task.ErrorCode = code
+		task.PublicError = model.NativeTaskPublicError(code, issues)
 		if state == "failed" {
 			if _, err = call(balance.PrepaymentCommand{Action: "reject_attempt", AttemptID: attemptID}); err != nil {
 				return task, err
@@ -163,10 +170,52 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	return task, err
 }
 
-// notAcceptedCode reports the error codes of a submission the provider did not
-// accept. Both refund the hold in full as wallet reason not_accepted.
-func notAcceptedCode(code string) bool {
-	return code == "upstream_rejected" || code == model.UpstreamUnavailableCode
+// rejectedIssues are the fields an input rejection named, when the adaptor's
+// public error is invalid_parameters with issues storage accepts; else none.
+func rejectedIssues(public *model.ImageTaskError) []nativeresult.ParameterIssue {
+	if public == nil || public.Code != model.InvalidParametersCode {
+		return nil
+	}
+	issues := make([]nativeresult.ParameterIssue, 0, len(public.Issues))
+	for _, issue := range public.Issues {
+		issues = append(issues, nativeresult.ParameterIssue{Field: issue.Field, Rule: issue.Rule})
+	}
+	if !nativeresult.ValidParameterIssues(issues) {
+		return nil
+	}
+	return issues
+}
+
+// notAccepted reports a failed submission the provider did not accept. Each
+// refunds the hold in full as wallet reason not_accepted. invalid_parameters
+// is one only without an upstream ID; with one it failed after acceptance.
+func notAccepted(task *model.NativeTask) bool {
+	if task.Status != "failed" {
+		return false
+	}
+	switch task.ErrorCode {
+	case "upstream_rejected", model.UpstreamUnavailableCode:
+		return true
+	case model.InvalidParametersCode:
+		return task.UpstreamID == ""
+	}
+	return false
+}
+
+// failedAfterAcceptance reports a task the provider accepted and then failed
+// or rejected. Each is refunded in full (execution_finished, then settle
+// failed/platform_failure).
+func failedAfterAcceptance(task *model.NativeTask) bool {
+	if task.Status != "failed" {
+		return false
+	}
+	switch task.ErrorCode {
+	case "upstream_task_failed", "upstream_result_rejected":
+		return true
+	case model.InvalidParametersCode:
+		return task.UpstreamID != ""
+	}
+	return false
 }
 
 // logSubmissionFailure records every failed provider submission for operators
@@ -208,7 +257,7 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 			return err
 		}
 	}
-	if task.Status == "failed" && notAcceptedCode(task.ErrorCode) {
+	if notAccepted(task) {
 		if _, err := call(balance.PrepaymentCommand{Action: "reject_attempt", AttemptID: task.BillingOperationID + ":1"}); err != nil {
 			return err
 		}
@@ -216,12 +265,13 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 			return err
 		}
 	}
-	if task.Status == "failed" && (task.ErrorCode == "upstream_task_failed" || task.ErrorCode == "upstream_result_rejected") {
+	if failedAfterAcceptance(task) {
 		if _, err := call(balance.PrepaymentCommand{Action: "execution_finished"}); err != nil {
 			return err
 		}
 		// Owner decision 2026-10-02 (option A): the customer received nothing, so
 		// refund in full. Any later provider bill is booked as platform loss.
+		// fal bills nothing when it rejects the input after acceptance.
 		if _, err := call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
 			return err
 		}
@@ -274,5 +324,6 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 	task.BillingSettled = saved.BillingSettled
 	task.Status = saved.Status
 	task.ErrorCode = saved.ErrorCode
+	task.PublicError = saved.PublicError
 	return nil
 }

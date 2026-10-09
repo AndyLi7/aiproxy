@@ -72,6 +72,34 @@ type queueResultFailure struct {
 
 func (e *queueResultFailure) Error() string { return fmt.Sprintf("fal returned HTTP %d", e.status) }
 
+// errorBodyLimit bounds how much of a fal error response is read.
+const errorBodyLimit = 64 << 10
+
+// providerFailure parses a non-2xx fal response for both async lanes: the
+// log-only reason, at most 8 public parameter issues from detail[].type/loc
+// and whether fal reports its downstream service as unavailable. The body
+// itself is never kept.
+func providerFailure(status int, raw []byte, key string) *queueResultFailure {
+	failure := &queueResultFailure{status: status, reason: adaptor.ProviderErrorReason(status, raw, key)}
+	var envelope struct {
+		Detail []struct {
+			Type string `json:"type"`
+			Loc  []any  `json:"loc"`
+		} `json:"detail"`
+	}
+	if json.NewDecoder(bytes.NewReader(raw)).Decode(&envelope) == nil {
+		for _, detail := range envelope.Detail {
+			if issue, ok := parameterIssue(detail.Type, detail.Loc); ok && len(failure.issues) < 8 {
+				failure.issues = append(failure.issues, issue)
+			}
+			if detail.Type == "downstream_service_unavailable" {
+				failure.terminal = true
+			}
+		}
+	}
+	return failure
+}
+
 type Client struct {
 	HTTP         *http.Client
 	BaseURL, Key string
@@ -148,25 +176,8 @@ func (c *Client) request(
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		failure := &queueResultFailure{status: resp.StatusCode, reason: adaptor.ProviderErrorReason(resp.StatusCode, raw, c.Key)}
-		var envelope struct {
-			Detail []struct {
-				Type string `json:"type"`
-				Loc  []any  `json:"loc"`
-			} `json:"detail"`
-		}
-		if json.NewDecoder(bytes.NewReader(raw)).Decode(&envelope) == nil {
-			for _, detail := range envelope.Detail {
-				if issue, ok := parameterIssue(detail.Type, detail.Loc); ok && len(failure.issues) < 8 {
-					failure.issues = append(failure.issues, issue)
-				}
-				if detail.Type == "downstream_service_unavailable" {
-					failure.terminal = true
-				}
-			}
-		}
-		return resp.StatusCode, failure
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
+		return resp.StatusCode, providerFailure(resp.StatusCode, raw, c.Key)
 	}
 
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out); err != nil {

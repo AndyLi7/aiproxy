@@ -70,6 +70,7 @@ var failureMessages = map[string]string{
 	"upstream_task_failed":           "The provider could not generate this result. You were not charged; submit a new task with a new X-Request-Id.",
 	"upstream_result_rejected":       "The provider returned a result we could not deliver. You were not charged; submit a new task with a new X-Request-Id.",
 	"upstream_rejected":              "The provider rejected this request before generating. You were not charged.",
+	model.InvalidParametersCode:      "The provider rejected the listed input parameters. You were not charged; fix them and submit a new task with a new X-Request-Id.",
 	model.UpstreamUnavailableCode:    model.UpstreamUnavailableMessage,
 	"submission_timeout":             "The provider did not confirm this task in time. You were not charged; submit a new task with a new X-Request-Id.",
 	model.AsyncGenerationTimeoutCode: model.AsyncGenerationTimeoutMessage,
@@ -142,7 +143,12 @@ func WritePublic(w http.ResponseWriter, status int, task *model.NativeTask) {
 		if message == "" {
 			message = "This task failed. Contact support with the task ID."
 		}
-		response["error"] = map[string]string{"code": task.ErrorCode, "message": message}
+		failure := map[string]any{"code": task.ErrorCode, "message": message}
+		// Rejected fields name only a path and a rule, never provider text.
+		if issues := model.NativeTaskIssues(task); len(issues) > 0 {
+			failure["issues"] = issues
+		}
+		response["error"] = failure
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, no-store")

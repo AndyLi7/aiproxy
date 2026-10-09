@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
+	log "github.com/sirupsen/logrus"
 )
 
 type Poller interface {
@@ -69,7 +70,11 @@ func (e *Engine) Poll(ctx context.Context, id, group string, token int, resolve 
 		}
 		return e.Deliver(ctx, id, group, token, archive)
 	}
-	if err = model.UpdateNativePoll(e.DB, id, group, token, result.Status, result.ErrorCode); err != nil {
+	if result.Status == "failed" {
+		result = customerRejection(contract, result)
+		logProviderFailure(task, result)
+	}
+	if err = model.UpdateNativePoll(e.DB, id, group, token, result.Status, result.ErrorCode, result.Issues...); err != nil {
 		return task, err
 	}
 	task, err = model.GetNativeTask(e.DB, id, group, token)
@@ -77,4 +82,40 @@ func (e *Engine) Poll(ctx context.Context, id, group string, token int, resolve 
 		return nil, err
 	}
 	return task, e.SyncBilling(ctx, task)
+}
+
+// customerRejection keeps only the issues the customer can fix. When fal named
+// registry-frozen platform controls only, the task fails as
+// upstream_result_rejected instead; the log reason still names them.
+func customerRejection(contract *nativeresult.CompiledTask, result nativeresult.PollResult) nativeresult.PollResult {
+	if result.ErrorCode != model.InvalidParametersCode || len(result.Issues) == 0 {
+		return result
+	}
+	result.Issues = contract.CustomerIssues(result.Issues)
+	if len(result.Issues) == 0 {
+		result.ErrorCode = "upstream_result_rejected"
+	}
+	return result
+}
+
+// logProviderFailure records an accepted task the provider failed or whose
+// input it rejected, for operators. It logs identities, the provider status,
+// the adaptor's sanitized type@field reason and the number of issues only:
+// never credentials, provider messages or the customer's input.
+func logProviderFailure(task *model.NativeTask, result nativeresult.PollResult) {
+	fields := log.Fields{
+		"lane":            "native",
+		"task_id":         task.ID,
+		"group":           task.GroupID,
+		"model":           task.Model,
+		"endpoint":        task.Endpoint,
+		"channel_id":      task.ChannelID,
+		"provider_status": result.ProviderStatus,
+		"provider_reason": result.ProviderReason,
+		"error_code":      result.ErrorCode,
+	}
+	if len(result.Issues) > 0 {
+		fields["issues"] = len(result.Issues)
+	}
+	log.WithFields(fields).Warn("native task failed at the provider")
 }

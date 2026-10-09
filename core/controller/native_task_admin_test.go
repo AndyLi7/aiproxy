@@ -59,8 +59,49 @@ func TestGroupNativeTaskReadIsScopedToTheGroupAndHidesPlatformParameters(t *test
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, "failed", body.Data["status"])
 	require.Equal(t, "upstream_task_failed", body.Data["errorCode"])
+	require.NotContains(t, body.Data, "errorIssues")
 	require.JSONEq(t, `{"prompt":"a lion at dawn","image_size":"square_hd"}`, body.Data["inputJSON"].(string))
 	// Routing and provider identity never leave the gateway.
 	require.NotContains(t, response.Body.String(), "private-upstream")
 	require.NotContains(t, response.Body.String(), "fal-ai/private/endpoint")
+}
+
+// Owner decision 2026-10-09: customer history names the rejected fields of an
+// invalid_parameters task, as field paths and rule codes only.
+func TestGroupNativeTaskReadListsRejectedParameters(t *testing.T) {
+	database, err := model.OpenSQLite(filepath.Join(t.TempDir(), "tasks.db"))
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.NativeTask{}))
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, database.Create(&model.NativeTask{
+		ID: "task-voice", GroupID: "customer", TokenID: 7, Model: "vendor/model/text-to-speech", Fingerprint: "f",
+		OutputSchema: "{}", OutputSchemaHash: "h", Status: "failed", ErrorCode: "invalid_parameters",
+		PublicError:    `{"issues":[{"field":"voice","rule":"unsupported_value"}]}`,
+		FrozenContract: `{"version":1,"model":"vendor/model/text-to-speech","input_schema":{},"output_schema":{}}`, NativeInput: `{"voice":"NoSuchVoice123"}`,
+		UpstreamID: "private-upstream",
+	}).Error)
+	reader := groupNativeTaskReader{engine: func() (*nativetask.Engine, bool) {
+		return &nativetask.Engine{DB: database}, true
+	}}
+	router := gin.New()
+	router.GET("/api/native-tasks/:group/:id", reader.detail)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest("GET", "/api/native-tasks/customer/task-voice", nil))
+	require.Equal(t, 200, response.Code)
+	var body struct {
+		Data struct {
+			ErrorCode   string `json:"errorCode"`
+			ErrorIssues []struct {
+				Field string `json:"field"`
+				Rule  string `json:"rule"`
+			} `json:"errorIssues"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "invalid_parameters", body.Data.ErrorCode)
+	require.Len(t, body.Data.ErrorIssues, 1)
+	require.Equal(t, "voice", body.Data.ErrorIssues[0].Field)
+	require.Equal(t, "unsupported_value", body.Data.ErrorIssues[0].Rule)
 }

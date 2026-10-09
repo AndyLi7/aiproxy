@@ -43,6 +43,14 @@ const UpstreamUnavailableCode = "upstream_unavailable"
 // retry needs a new X-Request-Id: the same one replays the failed task.
 const UpstreamUnavailableMessage = "The provider is temporarily unavailable, so this task was not started. You were not charged; try again later with a new X-Request-Id."
 
+// InvalidParametersCode is the public task error code, on both async lanes,
+// for input the provider rejected while naming the fields. Its issues carry
+// only field paths and rule codes, never provider text or the customer's
+// values. On the native lane (owner decision 2026-10-09) it is refunded in
+// full: like upstream_rejected when the provider never accepted the request,
+// like upstream_result_rejected when it rejected the input after acceptance.
+const InvalidParametersCode = "invalid_parameters"
+
 // PublicTaskErrorMessage is the fixed client-facing message of a
 // platform-owned task failure code that customers see as is, or "" for every
 // other code. Provider or stored text is never echoed for these codes.

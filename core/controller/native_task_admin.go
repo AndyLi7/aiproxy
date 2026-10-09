@@ -95,6 +95,9 @@ func (r groupNativeTaskReader) detail(c *gin.Context) {
 	}
 	if task.Status == "failed" {
 		data["errorCode"] = task.ErrorCode
+		if issues := model.NativeTaskIssues(task); len(issues) > 0 {
+			data["errorIssues"] = issues
+		}
 	}
 	c.Header("Cache-Control", "private, no-store")
 	c.JSON(http.StatusOK, middleware.APIResponse{Success: true, Data: data})

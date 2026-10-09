@@ -172,3 +172,24 @@ func TestNativeTrialArtifactListRequiresBoundManifestAndOwnedOutput(t *testing.T
 		require.Empty(t, list, change)
 	}
 }
+
+// Trial evidence names the rejected fields of an invalid_parameters task.
+func TestNativeTrialListsRejectedParameters(t *testing.T) {
+	task := &model.NativeTask{ID: "trial_voice", Model: "test/model/native", Status: "failed", ErrorCode: "invalid_parameters",
+		PublicError:    `{"issues":[{"field":"voice","rule":"unsupported_value"}]}`,
+		FrozenContract: `{"version":1,"model":"test/model/native","input_schema":{"type":"object"},"output_schema":{"type":"null"}}`}
+	out := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(out)
+	writeNativeTrial(c, 200, task)
+	var response struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Body.Bytes(), &response))
+	require.JSONEq(t, `"invalid_parameters"`, string(response.Data["errorCode"]))
+	require.JSONEq(t, `[{"field":"voice","rule":"unsupported_value"}]`, string(response.Data["errorIssues"]))
+	task.ErrorCode, task.PublicError = "upstream_task_failed", ""
+	out = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(out)
+	writeNativeTrial(c, 200, task)
+	require.NotContains(t, out.Body.String(), "errorIssues")
+}

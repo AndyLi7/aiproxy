@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"encoding/json"
+	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -56,4 +57,65 @@ func TestNativeTaskResultOwnershipReplayAndRecovery(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.NativeTask{}).Count(&count).Error)
 	require.EqualValues(t, 1, count)
+}
+
+func acceptedNativeTask(t *testing.T, db *gorm.DB, id string) {
+	t.Helper()
+	_, _, err := model.ReserveNativeTask(db, model.NativeTask{ID: id, GroupID: "g", TokenID: 1, Model: "a/b/c", Fingerprint: "hash", OutputSchema: `{}`})
+	require.NoError(t, err)
+	require.NoError(t, model.TransitionNativeSubmission(db, id, "g", 1, "reserved", "submitting", ""))
+	require.NoError(t, model.AcceptNativeTask(db, id, "g", 1, "upstream-"+id))
+}
+
+// Owner decision 2026-10-09: invalid_parameters is an allowed failure on
+// every path, always with the issues it names and never without them.
+func TestNativeInvalidParametersIsStoredWithItsIssues(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
+	voice := []nativeresult.ParameterIssue{{Field: "voice", Rule: "unsupported_value"}}
+	nine := make([]nativeresult.ParameterIssue, 9)
+	for i := range nine {
+		nine[i] = nativeresult.ParameterIssue{Field: "voice", Rule: "invalid"}
+	}
+
+	// Submit-time rejection.
+	_, _, err = model.ReserveNativeTask(db, model.NativeTask{ID: "submit", GroupID: "g", TokenID: 1, Model: "a/b/c", Fingerprint: "hash", OutputSchema: `{}`})
+	require.NoError(t, err)
+	require.ErrorIs(t, model.TransitionNativeSubmission(db, "submit", "g", 1, "reserved", "submitting", "invalid_parameters", voice...), model.ErrNativeTaskConflict)
+	require.NoError(t, model.TransitionNativeSubmission(db, "submit", "g", 1, "reserved", "submitting", ""))
+	for _, bad := range [][]nativeresult.ParameterIssue{nil, nine, {{Field: "https://fal.ai", Rule: "invalid"}}, {{Field: "voice", Rule: "Voice not found"}}} {
+		require.ErrorIs(t, model.TransitionNativeSubmission(db, "submit", "g", 1, "submitting", "failed", "invalid_parameters", bad...), model.ErrNativeTaskConflict)
+	}
+	require.ErrorIs(t, model.TransitionNativeSubmission(db, "submit", "g", 1, "submitting", "failed", "upstream_rejected", voice...), model.ErrNativeTaskConflict)
+	require.NoError(t, model.TransitionNativeSubmission(db, "submit", "g", 1, "submitting", "failed", "invalid_parameters", voice...))
+	task, err := model.GetNativeTask(db, "submit", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, voice, model.NativeTaskIssues(task))
+
+	// Rejection after acceptance, through polling.
+	acceptedNativeTask(t, db, "poll")
+	require.ErrorIs(t, model.UpdateNativePoll(db, "poll", "g", 1, "failed", "invalid_parameters"), model.ErrNativeTaskConflict)
+	require.ErrorIs(t, model.UpdateNativePoll(db, "poll", "g", 1, "failed", "upstream_task_failed", voice...), model.ErrNativeTaskConflict)
+	require.ErrorIs(t, model.UpdateNativePoll(db, "poll", "g", 1, "failed", "something_new"), model.ErrNativeTaskConflict)
+	require.NoError(t, model.UpdateNativePoll(db, "poll", "g", 1, "failed", "invalid_parameters", voice...))
+	task, err = model.GetNativeTask(db, "poll", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, "failed", task.Status)
+	require.Equal(t, "invalid_parameters", task.ErrorCode)
+	require.Equal(t, voice, model.NativeTaskIssues(task))
+
+	// FailAcceptedNativeTask accepts it too, and other codes leave public_error empty.
+	acceptedNativeTask(t, db, "fail")
+	require.ErrorIs(t, model.FailAcceptedNativeTask(db, "fail", "g", 1, "invalid_parameters"), model.ErrNativeTaskConflict)
+	require.NoError(t, model.FailAcceptedNativeTask(db, "fail", "g", 1, "invalid_parameters", voice...))
+	task, err = model.GetNativeTask(db, "fail", "g", 1)
+	require.NoError(t, err)
+	require.Equal(t, voice, model.NativeTaskIssues(task))
+	acceptedNativeTask(t, db, "other")
+	require.NoError(t, model.FailAcceptedNativeTask(db, "other", "g", 1, "upstream_result_rejected"))
+	task, err = model.GetNativeTask(db, "other", "g", 1)
+	require.NoError(t, err)
+	require.Empty(t, task.PublicError)
+	require.Nil(t, model.NativeTaskIssues(task))
 }

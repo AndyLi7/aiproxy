@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -17,6 +18,10 @@ var ErrNativeTaskConflict = errors.New("native task state conflict")
 // NativeTask is additive storage, separate from ImageTask. Do not auto-migrate
 // production until the native task executor and reviewed migration are ready.
 // Provider bytes remain private until declared artifacts have been persisted.
+// PublicError is JSON {"issues":[{field,rule}]} for InvalidParametersCode only
+// (see NativeTaskIssues). migrations/native-task-v2 adds it to an existing
+// table and must be applied before a binary with the field is deployed:
+// NativeTaskStorageReady refuses storage missing any column.
 type NativeTask struct {
 	RecoveryOwner       string    `gorm:"size:64" json:"-"`
 	RecoveryUntil       int64     `gorm:"index" json:"-"`
@@ -35,6 +40,7 @@ type NativeTask struct {
 	PrepaymentQuoteJSON string    `gorm:"type:text" json:"-"`
 	BillingOperationID  string    `gorm:"size:200" json:"-"`
 	ErrorCode           string    `gorm:"size:64" json:"-"`
+	PublicError         string    `gorm:"type:text" json:"-"`
 	UpstreamID          string    `gorm:"size:256" json:"-"`
 	ID                  string    `gorm:"primaryKey;size:128" json:"-"`
 	GroupID             string    `gorm:"size:64;not null;index" json:"-"`
@@ -47,6 +53,53 @@ type NativeTask struct {
 	NativeOutput        string    `gorm:"type:text" json:"-"`
 	CreatedAt           time.Time `json:"-"`
 	UpdatedAt           time.Time `json:"-"`
+}
+
+// nativePublicError is the stored form of NativeTask.PublicError.
+type nativePublicError struct {
+	Issues []nativeresult.ParameterIssue `json:"issues"`
+}
+
+// nativeFailureDetail returns the public_error value for a failure code:
+// InvalidParametersCode requires valid issues (nativeresult.ValidParameterIssues)
+// and every other code takes none. Anything else is a conflict, so a task is
+// never stored as invalid_parameters without the fields it names.
+func nativeFailureDetail(code string, issues []nativeresult.ParameterIssue) (string, error) {
+	if code != InvalidParametersCode {
+		if len(issues) > 0 {
+			return "", ErrNativeTaskConflict
+		}
+		return "", nil
+	}
+	if !nativeresult.ValidParameterIssues(issues) {
+		return "", ErrNativeTaskConflict
+	}
+	raw, err := json.Marshal(nativePublicError{Issues: issues})
+	return string(raw), err
+}
+
+// NativeTaskPublicError is the stored public_error value for code and issues,
+// or "" for a code without issues. Executors use it to keep an in-memory task
+// equal to the row the transition wrote.
+func NativeTaskPublicError(code string, issues []nativeresult.ParameterIssue) string {
+	detail, err := nativeFailureDetail(code, issues)
+	if err != nil {
+		return ""
+	}
+	return detail
+}
+
+// NativeTaskIssues returns the parameter issues of a failed invalid_parameters
+// task, or nil. Stored values that do not validate are never shown.
+func NativeTaskIssues(task *NativeTask) []nativeresult.ParameterIssue {
+	if task == nil || task.Status != "failed" || task.ErrorCode != InvalidParametersCode || task.PublicError == "" {
+		return nil
+	}
+	var stored nativePublicError
+	if json.Unmarshal([]byte(task.PublicError), &stored) != nil || !nativeresult.ValidParameterIssues(stored.Issues) {
+		return nil
+	}
+	return stored.Issues
 }
 
 // ReserveNativeTask claims idempotency before any caller may reserve funds or
@@ -66,6 +119,7 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 	task.DeliveredOutput = ""
 	task.ArtifactManifest = ""
 	task.ErrorCode = ""
+	task.PublicError = ""
 	task.BillingReceiptJSON = ""
 	task.RecoveryOwner = ""
 	task.RecoveryUntil = 0
@@ -189,13 +243,21 @@ func AcceptNativeTask(db *gorm.DB, id, group string, token int, upstreamID strin
 }
 
 // TransitionNativeSubmission is a compare-and-set transition owned by the executor.
-func TransitionNativeSubmission(db *gorm.DB, id, group string, token int, from, to, code string) error {
+// issues name the rejected fields of a failed InvalidParametersCode submission.
+func TransitionNativeSubmission(db *gorm.DB, id, group string, token int, from, to, code string, issues ...nativeresult.ParameterIssue) error {
 	allowed := (from == "reserved" && to == "submitting") || (from == "submitting" && (to == "submission_unknown" || to == "failed"))
-	if !allowed {
+	if !allowed || (code == InvalidParametersCode && to != "failed") {
 		return ErrNativeTaskConflict
+	}
+	detail, err := nativeFailureDetail(code, issues)
+	if err != nil {
+		return err
 	}
 	now := time.Now()
 	changes := map[string]any{"status": to, "error_code": code, "updated_at": now}
+	if to == "failed" {
+		changes["public_error"] = detail
+	}
 	if to == "submitting" {
 		// created_at becomes the submission time: AsyncGenerationDeadline for a
 		// submission that is never confirmed counts from here, so a reservation
@@ -226,12 +288,17 @@ func SaveNativeTaskBillingReceipt(db *gorm.DB, id, group string, token int, rece
 
 // UpdateNativePoll only advances accepted tasks; a stale queued response cannot
 // regress running work, and terminal results cannot be overwritten by polling.
-func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code string) error {
+// issues name the rejected fields of an InvalidParametersCode failure.
+func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code string, issues ...nativeresult.ParameterIssue) error {
 	if status != "queued" && status != "running" && status != "failed" {
 		return ErrNativeTaskConflict
 	}
-	if status == "failed" && code != "upstream_task_failed" && code != "upstream_result_rejected" {
+	if status == "failed" && !acceptedFailureCode(code) {
 		return ErrNativeTaskConflict
+	}
+	detail, err := nativeFailureDetail(code, issues)
+	if err != nil {
+		return err
 	}
 	task, err := GetNativeTask(db, id, group, token)
 	if err != nil {
@@ -243,7 +310,7 @@ func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code str
 	if task.Status != "queued" && task.Status != "running" {
 		return ErrNativeTaskConflict
 	}
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, task.Status).Updates(map[string]any{"status": status, "error_code": code, "updated_at": time.Now()})
+	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, task.Status).Updates(map[string]any{"status": status, "error_code": code, "public_error": detail, "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}
@@ -253,16 +320,28 @@ func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code str
 	return nil
 }
 
+// acceptedFailureCode reports the failure codes of a task the provider
+// accepted that polling or delivery may record. Billing refunds each in full
+// (execution_finished, then settle failed/platform_failure).
+func acceptedFailureCode(code string) bool {
+	return code == "upstream_task_failed" || code == "upstream_result_rejected" || code == InvalidParametersCode
+}
+
 // FailAcceptedNativeTask ends an accepted task that can never deliver: the
 // provider failed it, its result was permanently rejected, or a received result
 // stayed undeliverable past the long recovery deadline. Waiting for the provider
 // is ended by ExpireNativeGeneration instead. Billing then refunds the customer
-// (platform_failure).
-func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code string) error {
-	if code != "upstream_task_failed" && code != "upstream_result_rejected" {
+// (platform_failure). issues name the rejected fields of an
+// InvalidParametersCode failure.
+func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code string, issues ...nativeresult.ParameterIssue) error {
+	if !acceptedFailureCode(code) {
 		return ErrNativeTaskConflict
 	}
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).Updates(map[string]any{"status": "failed", "error_code": code, "updated_at": time.Now()})
+	detail, err := nativeFailureDetail(code, issues)
+	if err != nil {
+		return err
+	}
+	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).Updates(map[string]any{"status": "failed", "error_code": code, "public_error": detail, "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}

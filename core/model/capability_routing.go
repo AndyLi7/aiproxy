@@ -102,7 +102,7 @@ func decodeCapabilityConfigValue[T any](value any) (T, bool) {
 
 func CapabilityRoutingMetadataFromConfig(config ModelConfig) (CapabilityRoutingMetadata, bool) {
 	version, ok := modelConfigPositiveInt(config.Config, ModelConfigCapabilityContractVersionKey)
-	if !ok {
+	if !ok || version != ModelCapabilityContractVersion {
 		return CapabilityRoutingMetadata{}, false
 	}
 

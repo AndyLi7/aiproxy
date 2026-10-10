@@ -9,14 +9,16 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
 )
 
 type ImageTaskResult struct {
-	Status string
-	Data   []model.ImageOutput
-	Error  *model.ImageTaskError
+	Metadata model.ImageResultMetadata
+	Status   string
+	Data     []model.ImageOutput
+	Error    *model.ImageTaskError
 }
 
 type ImageTaskExecutor interface{ ImageAdapterName() string }
@@ -40,7 +42,22 @@ type ImageTaskAdapter interface {
 	) (ImageTaskResult, error)
 }
 
-var ErrImageSubmissionRejected = errors.New("upstream rejected image submission")
+// ImageTaskCanceller is optional on an ImageTaskAdapter whose provider queue
+// can stop an accepted request (fal). The worker calls it once, best effort,
+// after a task outlived model.AsyncGenerationDeadline and was failed and
+// refunded; the outcome is only logged. It receives the same channel and
+// AsyncUsageInfo base URL that passed the poll's identity checks, so it never
+// uses another channel's credential. It is not a public cancel API.
+type ImageTaskCanceller interface {
+	CancelImage(
+		ctx context.Context,
+		channel *model.Channel,
+		info *model.AsyncUsageInfo,
+		task *model.ImageTask,
+	) (string, error)
+}
+
+var ErrImageSubmissionRejected = &ImageSubmissionFailure{Failure: failover.Failure{Acceptance: failover.NotAccepted, Class: failover.InvalidRequest, Evidence: "invalid_submission"}}
 
 // MapImageProviderInput executes the server-owned contract, independent of model names.
 func MapImageProviderInput(

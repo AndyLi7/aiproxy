@@ -1,0 +1,620 @@
+{
+  "endpoint": "fal-ai/stepx-edit2",
+  "scenario": "required",
+  "contract": {
+    "provider_contract_version": 1,
+    "entry_id": "admission/model-499/edit",
+    "validation_version": 1,
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The image URL to generate an image from. Needs to match the dimensions of the mask."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The prompt to generate an image from."
+        },
+        "enable_reflection_mode": {
+          "default": true,
+          "type": "boolean",
+          "description": "Enable reflection mode. Reviews outputs, corrects unintended changes, and determines when editing is complete."
+        },
+        "output_format": {
+          "default": "jpeg",
+          "type": "string",
+          "enum": [
+            "jpeg",
+            "png"
+          ],
+          "description": "The format of the generated image."
+        },
+        "enable_thinking_mode": {
+          "default": true,
+          "type": "boolean",
+          "description": "Enable thinking mode. Uses multimodal language model knowledge to interpret abstract editing instructions."
+        },
+        "num_inference_steps": {
+          "default": 50,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "The number of inference steps to perform. Recommended: 50."
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+        },
+        "guidance_scale": {
+          "default": 6,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20,
+          "description": "\n            The true CFG scale. Controls how closely the model follows the prompt.\n        "
+        },
+        "negative_prompt": {
+          "default": "",
+          "type": "string",
+          "description": "\n            The negative prompt to use. Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+        },
+        "n": {
+          "default": 1,
+          "type": "number",
+          "const": 1
+        }
+      },
+      "required": [
+        "image_url",
+        "prompt",
+        "enable_reflection_mode",
+        "output_format",
+        "enable_thinking_mode",
+        "num_inference_steps",
+        "guidance_scale",
+        "negative_prompt",
+        "n"
+      ],
+      "additionalProperties": false
+    },
+    "parameter_schema": {
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "title": "Image URL",
+          "description": "The image URL to generate an image from. Needs to match the dimensions of the mask."
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "description": "The prompt to generate an image from.",
+          "uiControl": "textarea"
+        },
+        "enable_reflection_mode": {
+          "type": "boolean",
+          "title": "Enable Reflection Mode",
+          "description": "Enable reflection mode. Reviews outputs, corrects unintended changes, and determines when editing is complete."
+        },
+        "output_format": {
+          "type": "string",
+          "enum": [
+            "jpeg",
+            "png"
+          ],
+          "title": "Output Format",
+          "description": "The format of the generated image.",
+          "uiControl": "select"
+        },
+        "enable_thinking_mode": {
+          "type": "boolean",
+          "title": "Enable Thinking Mode",
+          "description": "Enable thinking mode. Uses multimodal language model knowledge to interpret abstract editing instructions."
+        },
+        "num_inference_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "title": "Num Inference Steps",
+          "description": "The number of inference steps to perform. Recommended: 50."
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Seed",
+          "description": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+        },
+        "guidance_scale": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20,
+          "title": "True CFG scale",
+          "description": "\n            The true CFG scale. Controls how closely the model follows the prompt.\n        "
+        },
+        "negative_prompt": {
+          "type": "string",
+          "title": "Negative Prompt",
+          "description": "\n            The negative prompt to use. Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+        },
+        "n": {
+          "type": "number",
+          "title": "Number of images"
+        }
+      },
+      "required": [
+        "image_url",
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "default_parameters": {
+      "enable_reflection_mode": true,
+      "output_format": "jpeg",
+      "enable_thinking_mode": true,
+      "num_inference_steps": 50,
+      "guidance_scale": 6,
+      "negative_prompt": "",
+      "n": 1
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "provider_metadata": {
+          "type": "object",
+          "properties": {
+            "best_info": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": {}
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Reflection analysis (only available when reflection mode is enabled)."
+            },
+            "reformat_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The model's interpretation of your instruction (only available when thinking mode is enabled)."
+            },
+            "think_info": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Reasoning process details (only available when thinking mode is enabled)."
+            }
+          },
+          "additionalProperties": false,
+          "x-platform-structured-metadata-limits": {
+            "maxBytes": 1048576,
+            "maxDepth": 32,
+            "maxNodes": 100000
+          }
+        },
+        "images": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "images"
+      ],
+      "additionalProperties": {}
+    },
+    "providers": {
+      "fal": {
+        "adapter": "fal-image",
+        "parameterMapping": {
+          "image_url": "image_url",
+          "prompt": "prompt",
+          "enable_reflection_mode": "enable_reflection_mode",
+          "output_format": "output_format",
+          "enable_thinking_mode": "enable_thinking_mode",
+          "num_inference_steps": "num_inference_steps",
+          "seed": "seed",
+          "guidance_scale": "guidance_scale",
+          "negative_prompt": "negative_prompt"
+        },
+        "allowedPassthroughParameters": [],
+        "fixedParameters": {
+          "sync_mode": false,
+          "enable_safety_checker": true
+        },
+        "billingBasis": {
+          "metric": "image",
+          "dimensions": [],
+          "minimumBillableUnits": 1,
+          "rounding": "none",
+          "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fstepx-edit2",
+          "verifiedAt": "2026-09-27",
+          "requiresUpstreamUsageBilling": true
+        },
+        "source": {
+          "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fstepx-edit2",
+          "verifiedAt": "2026-09-27",
+          "verifiedBy": "admission-audit"
+        },
+        "upstream": {
+          "outputMetadata": {
+            "version": 3,
+            "fields": [
+              "best_info",
+              "reformat_prompt",
+              "think_info"
+            ]
+          },
+          "metering": {
+            "nativeImagePaths": [
+              [
+                "image_url"
+              ]
+            ],
+            "version": 7,
+            "outputCountFixed": 1
+          },
+          "id": "fal:fal-ai/stepx-edit2",
+          "revision": "audit",
+          "endpoint": "fal-ai/stepx-edit2",
+          "execution": {
+            "mode": "async",
+            "resultEndpoint": "fal-ai/stepx-edit2/requests/{request_id}",
+            "statusEndpoint": "fal-ai/stepx-edit2/requests/{request_id}/status",
+            "supportsCancellation": true
+          },
+          "acceptedInputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "The image URL to generate an image from. Needs to match the dimensions of the mask."
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt to generate an image from."
+              },
+              "enable_reflection_mode": {
+                "type": "boolean",
+                "description": "Enable reflection mode. Reviews outputs, corrects unintended changes, and determines when editing is complete."
+              },
+              "output_format": {
+                "type": "string",
+                "enum": [
+                  "jpeg",
+                  "png"
+                ],
+                "description": "The format of the generated image."
+              },
+              "enable_thinking_mode": {
+                "type": "boolean",
+                "description": "Enable thinking mode. Uses multimodal language model knowledge to interpret abstract editing instructions."
+              },
+              "num_inference_steps": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "The number of inference steps to perform. Recommended: 50."
+              },
+              "seed": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+              },
+              "guidance_scale": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 20,
+                "description": "\n            The true CFG scale. Controls how closely the model follows the prompt.\n        "
+              },
+              "negative_prompt": {
+                "type": "string",
+                "description": "\n            The negative prompt to use. Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+              },
+              "n": {
+                "type": "number",
+                "const": 1
+              }
+            },
+            "required": [
+              "image_url",
+              "prompt"
+            ],
+            "additionalProperties": false
+          },
+          "inputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "The image URL to generate an image from. Needs to match the dimensions of the mask."
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt to generate an image from."
+              },
+              "enable_reflection_mode": {
+                "type": "boolean",
+                "description": "Enable reflection mode. Reviews outputs, corrects unintended changes, and determines when editing is complete."
+              },
+              "output_format": {
+                "type": "string",
+                "enum": [
+                  "jpeg",
+                  "png"
+                ],
+                "description": "The format of the generated image."
+              },
+              "enable_thinking_mode": {
+                "type": "boolean",
+                "description": "Enable thinking mode. Uses multimodal language model knowledge to interpret abstract editing instructions."
+              },
+              "num_inference_steps": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "The number of inference steps to perform. Recommended: 50."
+              },
+              "seed": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+              },
+              "guidance_scale": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 20,
+                "description": "\n            The true CFG scale. Controls how closely the model follows the prompt.\n        "
+              },
+              "negative_prompt": {
+                "type": "string",
+                "description": "\n            The negative prompt to use. Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+              },
+              "sync_mode": {
+                "type": "boolean",
+                "const": false
+              },
+              "enable_safety_checker": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "required": [
+              "image_url",
+              "prompt",
+              "sync_mode",
+              "enable_safety_checker"
+            ],
+            "additionalProperties": false
+          },
+          "outputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "has_nsfw_concepts": {
+                "type": "array",
+                "items": {
+                  "type": "boolean"
+                },
+                "description": "Whether the generated images contain NSFW concepts."
+              },
+              "images": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "content_type": {
+                      "default": "image/jpeg",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "width",
+                    "height"
+                  ],
+                  "additionalProperties": {}
+                },
+                "description": "The generated images"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt used for generating the image."
+              },
+              "reformat_prompt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The model's interpretation of your instruction (only available when thinking mode is enabled)."
+              },
+              "best_info": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": {}
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Reflection analysis (only available when reflection mode is enabled)."
+              },
+              "timings": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "seed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+              },
+              "think_info": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Reasoning process details (only available when thinking mode is enabled)."
+              }
+            },
+            "required": [
+              "has_nsfw_concepts",
+              "images",
+              "prompt",
+              "timings",
+              "seed"
+            ],
+            "additionalProperties": {}
+          },
+          "contractHash": "sha256:867e2586bf6c326b5b3f3b88aca19384483e44b7f6d3e709d196db7a51fc3891"
+        }
+      }
+    },
+    "execution": {
+      "mode": "async",
+      "endpoint": "/v1/images/tasks",
+      "statusEndpoint": "/v1/images/tasks/{task_id}",
+      "output": "image",
+      "supportsCancellation": false
+    }
+  },
+  "request": {
+    "image_url": "https://example.com/reference.png",
+    "prompt": "test",
+    "enable_reflection_mode": false,
+    "output_format": "jpeg",
+    "enable_thinking_mode": false,
+    "num_inference_steps": 1,
+    "guidance_scale": 0,
+    "negative_prompt": "test",
+    "n": 1,
+    "model": "admission/model-499/edit"
+  },
+  "response": {
+    "has_nsfw_concepts": [
+      false
+    ],
+    "images": [
+      {
+        "url": "https://example.com/reference.png",
+        "width": 0,
+        "height": 0
+      }
+    ],
+    "prompt": "test",
+    "timings": {},
+    "seed": 0
+  }
+}

@@ -173,9 +173,9 @@ func TestImageSubmitWithCompiledRegistryFixture(t *testing.T) {
 		{"accepted", 200, model.Price{}, 1, 0.01, 202},
 		{"rejected", 422, model.Price{}, 1, 0.01, 202},
 		{"unknown", 503, model.Price{}, 1, 0.01, 202},
-		{"image insufficient", 200, model.Price{ImageOutputPrice: 0.25, ImageOutputPriceUnit: 1}, 0.1, 0.25, 403},
+		{"image insufficient", 200, model.Price{ImageOutputPrice: 0.25, ImageOutputPriceUnit: 1}, 0.1, 0.25, 402},
 		{"image sufficient", 200, model.Price{ImageOutputPrice: 0.25, ImageOutputPriceUnit: 1}, 0.25, 0.25, 202},
-		{"request insufficient", 200, model.Price{PerRequestPrice: 0.5}, 0.1, 0.5, 403},
+		{"request insufficient", 200, model.Price{PerRequestPrice: 0.5}, 0.1, 0.5, 402},
 		{"request sufficient", 200, model.Price{PerRequestPrice: 0.5}, 0.5, 0.5, 202},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,7 +282,7 @@ func TestImageSubmitWithCompiledRegistryFixture(t *testing.T) {
 			require.Equal(t, tc.status, w.Code, w.Body.String())
 			require.Equal(t, 1, balanceChecks)
 
-			if tc.status == 403 {
+			if tc.status == 402 {
 				require.Zero(t, calls)
 
 				for _, table := range []any{&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}} {
@@ -404,6 +404,35 @@ func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 			default:
 				require.Equal(t, model.AsyncUsageStatusFailed, info.Status)
 			}
+		})
+	}
+}
+
+func TestAdminImageTaskRequiresInternalOwnedToken(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		group model.GroupCache
+		token int
+	}{
+		{"customer spoof", model.GroupCache{ID: "customer", Status: model.GroupStatusEnabled}, 1},
+		{"internal without token", model.GroupCache{ID: "admin", Status: model.GroupStatusInternal}, 0},
+		{"internal without owner", model.GroupCache{Status: model.GroupStatusInternal}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/tasks", strings.NewReader(`{"model":"private","prompt":"hi","n":1}`))
+			c.Request.Header.Set("X-Request-ID", "admin-auth")
+			c.Request.Header.Set(middleware.OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+			c.Set(middleware.Group, tc.group)
+			c.Set(middleware.Token, model.TokenCache{ID: tc.token})
+			c.Set(middleware.ModelConfig, model.ModelConfig{Config: map[model.ModelConfigKey]any{
+				"x_token_platform_capability_contract": map[string]any{
+					"entry_id": "original", "contract": map[string]any{"execution": map[string]any{"mode": "async", "output": "image"}},
+				},
+			}})
+			submitImageTask(c)
+			require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 		})
 	}
 }

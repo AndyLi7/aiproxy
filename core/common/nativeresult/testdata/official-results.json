@@ -1,0 +1,1202 @@
+[
+  {
+    "endpoint": "fal-ai/image2svg",
+    "sourceSha256": "4a8b45366edba51acef00a599be22d626eb1018e2cb93044ebec8f32cb059abb",
+    "schema": {
+      "$ref": "#/components/schemas/Image2svgOutput",
+      "components": {
+        "schemas": {
+          "QueueStatus": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "IN_QUEUE",
+                  "IN_PROGRESS",
+                  "COMPLETED"
+                ]
+              },
+              "request_id": {
+                "type": "string",
+                "description": "The request id."
+              },
+              "response_url": {
+                "type": "string",
+                "description": "The response url."
+              },
+              "status_url": {
+                "type": "string",
+                "description": "The status url."
+              },
+              "cancel_url": {
+                "type": "string",
+                "description": "The cancel url."
+              },
+              "logs": {
+                "type": "object",
+                "description": "The logs.",
+                "additionalProperties": true
+              },
+              "metrics": {
+                "type": "object",
+                "description": "The metrics.",
+                "additionalProperties": true
+              },
+              "queue_position": {
+                "type": "integer",
+                "description": "The queue position."
+              }
+            },
+            "required": [
+              "status",
+              "request_id"
+            ]
+          },
+          "Image2svgInput": {
+            "type": "object",
+            "title": "Image2SVGInput",
+            "x-fal-order-properties": [
+              "image_url",
+              "colormode",
+              "hierarchical",
+              "mode",
+              "filter_speckle",
+              "color_precision",
+              "layer_difference",
+              "corner_threshold",
+              "length_threshold",
+              "max_iterations",
+              "splice_threshold",
+              "path_precision"
+            ],
+            "required": [
+              "image_url"
+            ],
+            "properties": {
+              "hierarchical": {
+                "type": "string",
+                "title": "Hierarchical",
+                "description": "Hierarchical mode: stacked or cutout",
+                "default": "stacked",
+                "enum": [
+                  "stacked",
+                  "cutout"
+                ]
+              },
+              "length_threshold": {
+                "type": "number",
+                "title": "Length Threshold",
+                "maximum": 10,
+                "minimum": 0,
+                "description": "Length threshold for curves/lines",
+                "default": 4
+              },
+              "color_precision": {
+                "type": "integer",
+                "title": "Color Precision",
+                "maximum": 10,
+                "minimum": 1,
+                "description": "Color quantization level",
+                "default": 6
+              },
+              "filter_speckle": {
+                "type": "integer",
+                "title": "Filter Speckle",
+                "maximum": 20,
+                "minimum": 0,
+                "description": "Filter out small speckles and noise",
+                "default": 4
+              },
+              "mode": {
+                "type": "string",
+                "title": "Mode",
+                "description": "Mode: spline (curved) or polygon (straight lines)",
+                "default": "spline",
+                "enum": [
+                  "spline",
+                  "polygon"
+                ]
+              },
+              "max_iterations": {
+                "type": "integer",
+                "title": "Max Iterations",
+                "maximum": 20,
+                "minimum": 1,
+                "description": "Maximum number of iterations for optimization",
+                "default": 10
+              },
+              "layer_difference": {
+                "type": "integer",
+                "title": "Layer Difference",
+                "maximum": 32,
+                "minimum": 1,
+                "description": "Layer difference threshold for hierarchical mode",
+                "default": 16
+              },
+              "splice_threshold": {
+                "type": "integer",
+                "title": "Splice Threshold",
+                "maximum": 90,
+                "minimum": 0,
+                "description": "Splice threshold for joining paths",
+                "default": 45
+              },
+              "path_precision": {
+                "type": "integer",
+                "title": "Path Precision",
+                "maximum": 10,
+                "minimum": 1,
+                "description": "Decimal precision for path coordinates",
+                "default": 3
+              },
+              "colormode": {
+                "type": "string",
+                "title": "Colormode",
+                "description": "Choose between color or binary (black and white) output",
+                "default": "color",
+                "enum": [
+                  "color",
+                  "binary"
+                ]
+              },
+              "image_url": {
+                "type": "string",
+                "title": "Image Url",
+                "examples": [
+                  "https://v3.fal.media/files/kangaroo/EfqY747bBKy1Ynrgbk5ba_04pwiD1LTsnMZuyEyw757_8f986248a89845d3ba90c23b14089f10.jpg"
+                ],
+                "description": "The image to convert to SVG"
+              },
+              "corner_threshold": {
+                "type": "integer",
+                "title": "Corner Threshold",
+                "maximum": 180,
+                "minimum": 0,
+                "description": "Corner detection threshold in degrees",
+                "default": 60
+              }
+            }
+          },
+          "Image2svgOutput": {
+            "type": "object",
+            "title": "Image2SVGOutput",
+            "x-fal-order-properties": [
+              "images"
+            ],
+            "required": [
+              "images"
+            ],
+            "properties": {
+              "images": {
+                "type": "array",
+                "title": "Images",
+                "items": {
+                  "$ref": "#/components/schemas/File"
+                },
+                "description": "The converted SVG file",
+                "examples": [
+                  [
+                    {
+                      "file_size": 1247850,
+                      "content_type": "image/svg+xml",
+                      "url": "https://v3.fal.media/files/koala/B31yLkOEc6AVTzgeyr_9K_output.svg",
+                      "file_name": "output.svg"
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "File": {
+            "type": "object",
+            "title": "File",
+            "x-fal-order-properties": [
+              "url",
+              "content_type",
+              "file_name",
+              "file_size"
+            ],
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "file_size": {
+                "title": "File Size",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  4404019
+                ],
+                "description": "The size of the file in bytes."
+              },
+              "content_type": {
+                "title": "Content Type",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  "image/png"
+                ],
+                "description": "The mime type of the file."
+              },
+              "url": {
+                "type": "string",
+                "title": "Url",
+                "description": "The URL where the file can be downloaded from."
+              },
+              "file_name": {
+                "title": "File Name",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  "z9RV14K95DvU.png"
+                ],
+                "description": "The name of the file. It will be auto-generated if not provided."
+              }
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "images": [
+        {
+          "url": "https://example.org/result.svg",
+          "content_type": "image/svg+xml"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "fal-ai/vecglypher",
+    "sourceSha256": "3c11ff600d594228714a9d930e2f2b2c96bcda3c08b97e82522116a7866b6523",
+    "schema": {
+      "$ref": "#/components/schemas/VecglypherOutput",
+      "components": {
+        "schemas": {
+          "QueueStatus": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "IN_QUEUE",
+                  "IN_PROGRESS",
+                  "COMPLETED"
+                ]
+              },
+              "request_id": {
+                "type": "string",
+                "description": "The request id."
+              },
+              "response_url": {
+                "type": "string",
+                "description": "The response url."
+              },
+              "status_url": {
+                "type": "string",
+                "description": "The status url."
+              },
+              "cancel_url": {
+                "type": "string",
+                "description": "The cancel url."
+              },
+              "logs": {
+                "type": "object",
+                "description": "The logs.",
+                "additionalProperties": true
+              },
+              "metrics": {
+                "type": "object",
+                "description": "The metrics.",
+                "additionalProperties": true
+              },
+              "queue_position": {
+                "type": "integer",
+                "description": "The queue position."
+              }
+            },
+            "required": [
+              "status",
+              "request_id"
+            ]
+          },
+          "VecglypherInput": {
+            "type": "object",
+            "required": [
+              "prompt"
+            ],
+            "title": "TextToSVGInput",
+            "properties": {
+              "top_p": {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 1,
+                "description": "Top-p (nucleus) sampling parameter.",
+                "default": 0.95,
+                "title": "Top P"
+              },
+              "style_description": {
+                "examples": [
+                  "italic style, 400 weight, serif, text, elegant"
+                ],
+                "type": "string",
+                "description": "Font style description using typography terms such as weight (100-900), style (italic, oblique), category (serif, sans-serif, display, handwriting, monospace), and characteristics (geometric, humanist, condensed, rounded).",
+                "default": "italic style, 400 weight, serif, text, elegant",
+                "title": "Style Description"
+              },
+              "max_tokens": {
+                "minimum": 256,
+                "type": "integer",
+                "maximum": 16384,
+                "description": "Maximum tokens to generate. Increase for longer text.",
+                "default": 8192,
+                "title": "Max Tokens"
+              },
+              "temperature": {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 2,
+                "description": "Sampling temperature. Lower values produce more deterministic output.",
+                "default": 0.1,
+                "title": "Temperature"
+              },
+              "seed": {
+                "description": "Random seed for reproducibility.",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Seed"
+              },
+              "fill_color": {
+                "examples": [
+                  "black",
+                  "#FF5733",
+                  "rgb(255,87,51)",
+                  "none"
+                ],
+                "type": "string",
+                "description": "Fill color for the generated glyphs. Accepts any valid SVG/CSS color value.",
+                "default": "black",
+                "title": "Fill Color"
+              },
+              "enable_safety_checker": {
+                "type": "boolean",
+                "description": "Enable input safety checking.",
+                "default": true,
+                "title": "Enable Safety Checker"
+              },
+              "top_k": {
+                "minimum": -1,
+                "type": "integer",
+                "maximum": 100,
+                "description": "Top-k sampling parameter.",
+                "default": 5,
+                "title": "Top K"
+              },
+              "stroke_color": {
+                "examples": [
+                  "black",
+                  "#333333",
+                  "none"
+                ],
+                "description": "Optional stroke (outline) color for the generated glyphs. When set, adds an outline around each glyph path.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Stroke Color"
+              },
+              "repetition_penalty": {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 2,
+                "description": "Repetition penalty to reduce repeated SVG path segments.",
+                "default": 1,
+                "title": "Repetition Penalty"
+              },
+              "stroke_width": {
+                "minimum": 0.1,
+                "type": "number",
+                "maximum": 50,
+                "description": "Stroke width in SVG units. Only applies when stroke_color is set.",
+                "default": 1,
+                "title": "Stroke Width"
+              },
+              "prompt": {
+                "examples": [
+                  "g"
+                ],
+                "type": "string",
+                "description": "The target text to generate as vector glyphs. Each character is rendered as a separate SVG path element.",
+                "title": "Prompt"
+              },
+              "output_size": {
+                "minimum": 64,
+                "type": "integer",
+                "maximum": 4096,
+                "description": "Maximum dimension (width or height) of the output SVG in pixels. The aspect ratio is preserved.",
+                "default": 512,
+                "title": "Output Size"
+              }
+            },
+            "x-fal-order-properties": [
+              "prompt",
+              "style_description",
+              "temperature",
+              "seed",
+              "enable_safety_checker",
+              "top_p",
+              "top_k",
+              "repetition_penalty",
+              "max_tokens",
+              "output_size",
+              "fill_color",
+              "stroke_color",
+              "stroke_width"
+            ]
+          },
+          "VecglypherOutput": {
+            "type": "object",
+            "required": [
+              "image",
+              "svg_content",
+              "seed",
+              "timings"
+            ],
+            "title": "VecGlypherOutput",
+            "properties": {
+              "timings": {
+                "examples": [
+                  {
+                    "inference": 10.83
+                  }
+                ],
+                "type": "object",
+                "description": "Timing breakdown of the generation process.",
+                "title": "Timings",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "seed": {
+                "examples": [
+                  1835785439
+                ],
+                "type": "integer",
+                "description": "The seed used for generation.",
+                "title": "Seed"
+              },
+              "image": {
+                "examples": [
+                  {
+                    "content_type": "image/svg+xml",
+                    "file_size": 959,
+                    "url": "https://v3b.fal.media/files/b/0a90bfc3/0f8Su2aQUzPQy4NZMDQpp_180c718ac5d8407092d0688ea2605f0c.svg",
+                    "file_name": "180c718ac5d8407092d0688ea2605f0c.svg"
+                  }
+                ],
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/File"
+                  }
+                ],
+                "description": "The generated SVG file containing vector glyphs."
+              },
+              "svg_content": {
+                "type": "string",
+                "description": "Raw SVG content as a string.",
+                "title": "Svg Content"
+              }
+            },
+            "x-fal-order-properties": [
+              "image",
+              "svg_content",
+              "seed",
+              "timings"
+            ]
+          },
+          "File": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "title": "File",
+            "properties": {
+              "content_type": {
+                "examples": [
+                  "image/png"
+                ],
+                "description": "The mime type of the file.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Content Type"
+              },
+              "file_size": {
+                "examples": [
+                  4404019
+                ],
+                "description": "The size of the file in bytes.",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "File Size"
+              },
+              "url": {
+                "type": "string",
+                "description": "The URL where the file can be downloaded from.",
+                "title": "Url"
+              },
+              "file_name": {
+                "examples": [
+                  "z9RV14K95DvU.png"
+                ],
+                "description": "The name of the file. It will be auto-generated if not provided.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "File Name"
+              }
+            },
+            "x-fal-order-properties": [
+              "url",
+              "content_type",
+              "file_name",
+              "file_size"
+            ]
+          }
+        }
+      }
+    },
+    "output": {
+      "image": {
+        "url": "https://example.org/glyph.svg",
+        "content_type": "image/svg+xml"
+      },
+      "svg_content": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+      "seed": 9007199254740993,
+      "timings": {
+        "inference": 1.25
+      }
+    }
+  },
+  {
+    "endpoint": "pixelcut/background-removal",
+    "sourceSha256": "7c29f071b90f75a01afe33893360e27e3b587aac8d3120f24a83dc07358827d9",
+    "schema": {
+      "$ref": "#/components/schemas/BackgroundRemovalOutput",
+      "components": {
+        "schemas": {
+          "QueueStatus": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "IN_QUEUE",
+                  "IN_PROGRESS",
+                  "COMPLETED"
+                ]
+              },
+              "request_id": {
+                "type": "string",
+                "description": "The request id."
+              },
+              "response_url": {
+                "type": "string",
+                "description": "The response url."
+              },
+              "status_url": {
+                "type": "string",
+                "description": "The status url."
+              },
+              "cancel_url": {
+                "type": "string",
+                "description": "The cancel url."
+              },
+              "logs": {
+                "type": "object",
+                "description": "The logs.",
+                "additionalProperties": true
+              },
+              "metrics": {
+                "type": "object",
+                "description": "The metrics.",
+                "additionalProperties": true
+              },
+              "queue_position": {
+                "type": "integer",
+                "description": "The queue position."
+              }
+            },
+            "required": [
+              "status",
+              "request_id"
+            ]
+          },
+          "BackgroundRemovalInput": {
+            "type": "object",
+            "required": [
+              "image_url"
+            ],
+            "title": "BgrmInput",
+            "x-fal-order-properties": [
+              "image_url",
+              "output_format",
+              "sync_mode"
+            ],
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "title": "Image Url",
+                "description": "Input image (JPEG or PNG)",
+                "examples": [
+                  "https://cdn3.pixelcut.app/fal/background-remover/jewelry.jpg",
+                  "https://cdn3.pixelcut.app/fal/background-remover/portrait.jpg"
+                ]
+              },
+              "output_format": {
+                "type": "string",
+                "enum": [
+                  "rgba",
+                  "alpha",
+                  "zip"
+                ],
+                "title": "Output Format",
+                "description": "Output format",
+                "default": "rgba"
+              },
+              "sync_mode": {
+                "type": "boolean",
+                "default": true,
+                "title": "Sync Mode",
+                "description": "When true, return result as a data URL instead of uploading to storage"
+              }
+            }
+          },
+          "BackgroundRemovalOutput": {
+            "type": "object",
+            "title": "BgrmOutput",
+            "x-fal-order-properties": [
+              "image",
+              "file"
+            ],
+            "properties": {
+              "file": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Result file (for zip output format)"
+              },
+              "image": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Image"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Result image (for rgba/alpha output formats)",
+                "examples": [
+                  {
+                    "url": "https://cdn3.pixelcut.app/fal/background-remover/jewelry_result.png"
+                  },
+                  {
+                    "url": "https://cdn3.pixelcut.app/fal/background-remover/portrait_result.png"
+                  }
+                ]
+              }
+            }
+          },
+          "File": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "title": "File",
+            "x-fal-order-properties": [
+              "url",
+              "content_type",
+              "file_name",
+              "file_size"
+            ],
+            "properties": {
+              "file_size": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "File Size",
+                "description": "The size of the file in bytes.",
+                "examples": [
+                  4404019
+                ]
+              },
+              "url": {
+                "type": "string",
+                "title": "Url",
+                "description": "The URL where the file can be downloaded from."
+              },
+              "file_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "File Name",
+                "description": "The name of the file. It will be auto-generated if not provided.",
+                "examples": [
+                  "z9RV14K95DvU.png"
+                ]
+              },
+              "content_type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Content Type",
+                "description": "The mime type of the file.",
+                "examples": [
+                  "image/png"
+                ]
+              }
+            }
+          },
+          "Image": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "title": "Image",
+            "description": "Represents an image file.",
+            "x-fal-order-properties": [
+              "url",
+              "content_type",
+              "file_name",
+              "file_size",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "file_size": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "File Size",
+                "description": "The size of the file in bytes.",
+                "examples": [
+                  4404019
+                ]
+              },
+              "height": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Height",
+                "description": "The height of the image in pixels.",
+                "examples": [
+                  1024
+                ]
+              },
+              "url": {
+                "type": "string",
+                "title": "Url",
+                "description": "The URL where the file can be downloaded from."
+              },
+              "width": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Width",
+                "description": "The width of the image in pixels.",
+                "examples": [
+                  1024
+                ]
+              },
+              "file_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "File Name",
+                "description": "The name of the file. It will be auto-generated if not provided.",
+                "examples": [
+                  "z9RV14K95DvU.png"
+                ]
+              },
+              "content_type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Content Type",
+                "description": "The mime type of the file.",
+                "examples": [
+                  "image/png"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "image": null,
+      "file": {
+        "url": "https://example.org/result.zip",
+        "content_type": "application/zip"
+      }
+    }
+  },
+  {
+    "endpoint": "fal-ai/florence-2-large/ocr-with-region",
+    "sourceSha256": "f52c027e6a943d3437af89d1dab024453aa3592ea9554977936ad602b8738295",
+    "schema": {
+      "$ref": "#/components/schemas/Florence2LargeOcrWithRegionOutput",
+      "components": {
+        "schemas": {
+          "QueueStatus": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "IN_QUEUE",
+                  "IN_PROGRESS",
+                  "COMPLETED"
+                ]
+              },
+              "request_id": {
+                "type": "string",
+                "description": "The request id."
+              },
+              "response_url": {
+                "type": "string",
+                "description": "The response url."
+              },
+              "status_url": {
+                "type": "string",
+                "description": "The status url."
+              },
+              "cancel_url": {
+                "type": "string",
+                "description": "The cancel url."
+              },
+              "logs": {
+                "type": "object",
+                "description": "The logs.",
+                "additionalProperties": true
+              },
+              "metrics": {
+                "type": "object",
+                "description": "The metrics.",
+                "additionalProperties": true
+              },
+              "queue_position": {
+                "type": "integer",
+                "description": "The queue position."
+              }
+            },
+            "required": [
+              "status",
+              "request_id"
+            ]
+          },
+          "Florence2LargeOcrWithRegionInput": {
+            "type": "object",
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "title": "Image Url",
+                "examples": [
+                  "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg",
+                  "http://ecx.images-amazon.com/images/I/51UUzBDAMsL.jpg"
+                ],
+                "description": "The URL of the image to be processed."
+              }
+            },
+            "title": "ImageInput",
+            "x-fal-order-properties": [
+              "image_url"
+            ],
+            "required": [
+              "image_url"
+            ]
+          },
+          "Florence2LargeOcrWithRegionOutput": {
+            "type": "object",
+            "properties": {
+              "results": {
+                "description": "Results from the model",
+                "$ref": "#/components/schemas/OCRBoundingBox"
+              },
+              "image": {
+                "description": "Processed image",
+                "$ref": "#/components/schemas/Image"
+              }
+            },
+            "title": "OCRBoundingBoxOutputWithLabels",
+            "x-fal-order-properties": [
+              "results",
+              "image"
+            ],
+            "required": [
+              "results"
+            ]
+          },
+          "OCRBoundingBox": {
+            "type": "object",
+            "properties": {
+              "quad_boxes": {
+                "type": "array",
+                "title": "Quad Boxes",
+                "items": {
+                  "$ref": "#/components/schemas/OCRBoundingBoxSingle"
+                },
+                "description": "List of quadrilateral boxes"
+              }
+            },
+            "title": "OCRBoundingBox",
+            "x-fal-order-properties": [
+              "quad_boxes"
+            ],
+            "required": [
+              "quad_boxes"
+            ]
+          },
+          "Image": {
+            "type": "object",
+            "properties": {
+              "content_type": {
+                "title": "Content Type",
+                "examples": [
+                  "image/png"
+                ],
+                "description": "The mime type of the file.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "file_name": {
+                "title": "File Name",
+                "examples": [
+                  "z9RV14K95DvU.png"
+                ],
+                "description": "The name of the file. It will be auto-generated if not provided.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "width": {
+                "title": "Width",
+                "examples": [
+                  1024
+                ],
+                "description": "The width of the image in pixels.",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "height": {
+                "title": "Height",
+                "examples": [
+                  1024
+                ],
+                "description": "The height of the image in pixels.",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "file_size": {
+                "title": "File Size",
+                "examples": [
+                  4404019
+                ],
+                "description": "The size of the file in bytes.",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "url": {
+                "type": "string",
+                "title": "Url",
+                "description": "The URL where the file can be downloaded from."
+              }
+            },
+            "description": "Represents an image file.",
+            "x-fal-order-properties": [
+              "url",
+              "content_type",
+              "file_name",
+              "file_size",
+              "width",
+              "height"
+            ],
+            "title": "Image",
+            "required": [
+              "url"
+            ]
+          },
+          "OCRBoundingBoxSingle": {
+            "type": "object",
+            "properties": {
+              "h": {
+                "type": "number",
+                "title": "H",
+                "description": "Height of the bounding box"
+              },
+              "w": {
+                "type": "number",
+                "title": "W",
+                "description": "Width of the bounding box"
+              },
+              "y": {
+                "type": "number",
+                "title": "Y",
+                "description": "Y-coordinate of the top-left corner"
+              },
+              "label": {
+                "type": "string",
+                "title": "Label",
+                "description": "Label of the bounding box"
+              },
+              "x": {
+                "type": "number",
+                "title": "X",
+                "description": "X-coordinate of the top-left corner"
+              }
+            },
+            "title": "OCRBoundingBoxSingle",
+            "x-fal-order-properties": [
+              "x",
+              "y",
+              "w",
+              "h",
+              "label"
+            ],
+            "required": [
+              "x",
+              "y",
+              "w",
+              "h",
+              "label"
+            ]
+          }
+        }
+      }
+    },
+    "output": {
+      "results": {
+        "quad_boxes": []
+      }
+    }
+  }
+]

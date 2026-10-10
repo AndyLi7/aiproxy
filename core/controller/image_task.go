@@ -6,6 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/balance"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
+	"github.com/labring/aiproxy/core/common/imageprepayment"
+	"github.com/labring/aiproxy/core/common/nativetask"
+	"github.com/labring/aiproxy/core/common/ownedimage"
 	"math"
 	"net/http"
 	"regexp"
@@ -53,17 +58,40 @@ func imageTaskFingerprint(body []byte) (string, error) {
 
 func imageTaskHTTPError(c *gin.Context, status int, code string) {
 	middleware.SetRequestID(c, "image-trace-"+middleware.GenRequestID(time.Now()))
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": code}})
+	message := imageTaskErrorMessage(code)
+	if code == "group_balance_not_enough" {
+		middleware.SetOperationalFailure(c, model.FailureStageBalance, "insufficient_balance", "Your account balance is insufficient.")
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": gin.H{
+			"message": "Your account balance is insufficient.", "type": "insufficient_quota", "code": "insufficient_balance", "param": nil,
+		}})
+		return
+	}
+	kind := "api_error"
+	if status == http.StatusBadRequest || status == http.StatusConflict {
+		kind = "invalid_request_error"
+	} else if status == http.StatusNotFound {
+		kind = "not_found_error"
+	}
+	if code == "unsupported_image_execution" {
+		message = "This model does not support asynchronous image tasks. Check its published endpoint in the model catalog."
+	}
+	stage := model.FailureStageRouting
+	if status == http.StatusBadRequest || status == http.StatusConflict {
+		stage = model.FailureStageValidation
+	}
+	middleware.SetOperationalFailure(c, stage, code, message)
+	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message, "type": kind, "param": nil}})
 }
 
 func GetImageTask(c *gin.Context) {
 	middleware.SetRequestID(c, "image-poll-"+middleware.GenRequestID(time.Now()))
+	group, token := middleware.GetGroup(c).ID, middleware.GetToken(c).ID
+	if !nativetask.AllowCustomerRead(group, token) {
+		imageTaskHTTPError(c, 429, "rate_limit_exceeded")
+		return
+	}
 
-	task, err := model.GetImageTask(
-		c.Param("id"),
-		middleware.GetGroup(c).ID,
-		middleware.GetToken(c).ID,
-	)
+	task, err := model.GetImageTask(c.Param("id"), group, token)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		imageTaskHTTPError(c, 404, "task_not_found")
 		return
@@ -74,7 +102,10 @@ func GetImageTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, task)
+	// A poll only reads stored state. Billing sync runs when the task completes
+	// and in background recovery, so a polling loop cannot multiply wallet calls.
+	enrichCompletedImageTask(c.Request.Context(), task)
+	c.JSON(200, publicImageTask(c, task))
 }
 
 type imageTaskProvider struct {
@@ -87,9 +118,12 @@ func selectImageTaskAdapter(
 ) (*model.Channel, adaptor.ImageTaskExecutor) {
 	selected, err := getInitialChannel(c, middleware.GetRoutingModel(c), mode.ImagesGenerations)
 	if err != nil || selected == nil || selected.channel == nil {
+		common.GetLogger(c).Warnf("image channel selection failed: route=%s reason=%v", middleware.GetRoutingModel(c), err)
 		imageTaskHTTPError(c, 503, "channel_unavailable")
 		return nil, nil
 	}
+
+	c.Set("image_initial_channel", selected)
 
 	a, ok := adaptors.GetAdaptor(selected.channel.Type)
 	if !ok {
@@ -127,7 +161,7 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	mc := middleware.GetModelConfig(c)
-	// Async endpoints require a published Registry contract and reject demo transport IDs.
+	// Async endpoints require a published Registry contract, including private demo projections.
 	var wrapper struct {
 		ID       string `json:"entry_id"`
 		Contract struct {
@@ -151,12 +185,13 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
-	if middleware.OperationalFieldsFromContext(c).RequestSource == model.RequestSourceAdminDemo {
-		imageTaskHTTPError(c, 400, "unsupported_admin_image_execution")
+	group, token := middleware.GetGroup(c), middleware.GetToken(c)
+	adminDemo := middleware.OperationalFieldsFromContext(c).RequestSource == model.RequestSourceAdminDemo
+	if c.GetHeader(middleware.OperationalLogSourceHeader) == model.RequestSourceAdminDemo &&
+		group.Status != model.GroupStatusInternal {
+		imageTaskHTTPError(c, 403, "internal_admin_token_required")
 		return
 	}
-
-	group, token := middleware.GetGroup(c), middleware.GetToken(c)
 	if token.ID == 0 || group.ID == "" {
 		imageTaskHTTPError(c, 403, "customer_token_required")
 		return
@@ -181,7 +216,7 @@ func submitImageTask(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusAccepted, existing)
+		c.JSON(http.StatusAccepted, publicImageTask(c, existing))
 
 		return
 	}
@@ -237,7 +272,7 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	if price.HasImageBilling() &&
-		(imageAdapter.ImageAdapterName() != "fal-image" || price.ImageBilling == nil || len(price.ConditionalPrices) != 0) {
+		(!imagecapabilities.SupportsMeasuredBilling(imageAdapter.ImageAdapterName()) || price.ImageBilling == nil || len(price.ConditionalPrices) != 0) {
 		imageTaskHTTPError(c, 400, "measured_image_billing_not_supported_by_queue_adapter")
 		return
 	}
@@ -285,6 +320,32 @@ func submitImageTask(c *gin.Context) {
 		}
 	}
 
+	// Procurement costs are recorded by the application. Internal example tasks
+	// must never create a customer charge, even when a retail price is configured.
+	if adminDemo {
+		price = model.Price{}
+	}
+
+	quote, prepaymentJSON, quoteErr := mc.ImagePrepaymentQuote()
+	if quoteErr != nil {
+		imageTaskHTTPError(c, 503, "prepayment_quote_unavailable")
+		return
+	}
+	if adminDemo {
+		quote = nil
+		prepaymentJSON = ""
+	}
+	if quote != nil {
+		quote, prepaymentJSON, quoteErr = quote.ForMaximumOutputs(int64(metering.MaximumOutputs))
+		if quoteErr != nil {
+			imageTaskHTTPError(c, 503, "prepayment_quantity_unavailable")
+			return
+		}
+	}
+	if quote != nil && quote.Route(mt.Channel.ID, mt.ActualModel) == nil {
+		imageTaskHTTPError(c, 503, "prepayment_route_unavailable")
+		return
+	}
 	requestAt := time.Now()
 	// Queue image contracts expose a validated image count, so the known output
 	// charge can be checked before any paid work is reserved or submitted.
@@ -304,6 +365,7 @@ func submitImageTask(c *gin.Context) {
 			price,
 			metering.MaximumOutputs,
 			metering.InputCount,
+			metering.MaxOutputPixels,
 		)
 		if err != nil {
 			imageTaskHTTPError(c, 400, "invalid_image_price")
@@ -313,18 +375,22 @@ func submitImageTask(c *gin.Context) {
 		requiredBalance = math.Max(maximum, middleware.GetGroupMinimumBalance())
 	}
 
-	balanceConsumer := middleware.GetGroupBalanceConsumerFromContext(c)
-	if balanceConsumer == nil || balanceConsumer.CheckBalance == nil {
-		imageTaskHTTPError(c, 503, "balance_unavailable")
-		return
-	}
+	if !adminDemo && quote == nil {
+		balanceConsumer := middleware.GetGroupBalanceConsumerFromContext(c)
+		if balanceConsumer == nil || balanceConsumer.CheckBalance == nil {
+			imageTaskHTTPError(c, 503, "balance_unavailable")
+			return
+		}
 
-	if !balanceConsumer.CheckBalance(requiredBalance) {
-		imageTaskHTTPError(c, 403, "group_balance_not_enough")
-		return
+		if !balanceConsumer.CheckBalance(requiredBalance) {
+			imageTaskHTTPError(c, 403, "group_balance_not_enough")
+			return
+		}
 	}
 
 	info := &model.AsyncUsageInfo{
+		InternalImageTask:           adminDemo,
+		BillingOperationID:          mt.BillingOperationID,
 		RequestID:                   id,
 		RequestAt:                   requestAt,
 		UsageContext:                requestUsage.Context,
@@ -365,17 +431,21 @@ func submitImageTask(c *gin.Context) {
 
 	task, created, err := model.ReserveImageTask(
 		&model.ImageTask{
-			ID:                 id,
-			Model:              wrapper.ID,
-			RequestModel:       middleware.GetRequestedModel(c),
-			ValidationContract: string(rawWrapper.Contract),
-			GroupID:            group.ID,
-			TokenID:            token.ID,
-			Fingerprint:        fingerprint,
-			UpstreamModel:      mt.ActualModel,
-			ChannelType:        mt.Channel.Type,
-			KeyFingerprint:     model.ImageChannelKeyFingerprint(mt.Channel.Key),
-			ExpectedImages:     metering.MaximumOutputs,
+			ArchiveRequired:     ownedimage.Configured(),
+			PrepaymentQuoteJSON: prepaymentJSON,
+			BillingOperationID:  mt.BillingOperationID,
+			ID:                  id,
+			Model:               wrapper.ID,
+			RequestModel:        middleware.GetRequestedModel(c),
+			ValidationContract:  string(rawWrapper.Contract),
+			GroupID:             group.ID,
+			TokenID:             token.ID,
+			Fingerprint:         fingerprint,
+			UpstreamModel:       mt.ActualModel,
+			ChannelType:         mt.Channel.Type,
+			KeyFingerprint:      model.ImageChannelKeyFingerprint(mt.Channel.Key),
+			ExpectedImages:      metering.MaximumOutputs,
+			RequestSummary:      imageTaskLogRequestSummary(body),
 		},
 		info,
 		middleware.OperationalFieldsFromContext(c),
@@ -391,67 +461,50 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	if !created {
-		c.JSON(202, task)
+		c.JSON(202, publicImageTask(c, task))
 		return
 	}
 
-	dispatchReservedImageTask(c, task, imageAdapter, mt, mappedBody)
-}
-
-func dispatchReservedImageTask(
-	c *gin.Context,
-	task *model.ImageTask,
-	imageAdapter adaptor.ImageTaskExecutor,
-	mt *meta.Meta,
-	mappedBody []byte,
-) {
-	// One bounded submission; disconnects cannot cause a second paid invocation.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 50*time.Second)
-	defer cancel()
-
-	if syncAdapter, ok := imageAdapter.(adaptor.SyncImageTaskAdapter); ok {
-		dispatchSyncImageTask(c, ctx, task, syncAdapter, mt, mappedBody)
-		return
-	}
-
-	queueAdapter, ok := imageAdapter.(adaptor.ImageTaskAdapter)
-	if !ok {
-		imageTaskHTTPError(c, 503, "unsupported_image_adapter")
-		return
-	}
-
-	upstream, err := queueAdapter.SubmitImage(ctx, mt, mappedBody)
-	if err != nil {
-		status := "submission_unknown"
-
-		var taskError *model.ImageTaskError
-		if errors.Is(err, adaptor.ErrImageSubmissionRejected) {
-			status = "failed"
-			taskError = &model.ImageTaskError{
-				Code:    "submission_rejected",
-				Message: "Upstream rejected image submission",
+	if task.PrepaymentQuoteJSON != "" {
+		// Ambiguous wallet replies never authorize paid work. The reserved task and
+		// debit are recovered by their server operation ID; no upstream retry here.
+		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID); err != nil {
+			status, code, taskCode, taskMessage := 0, "", "", ""
+			switch {
+			case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):
+				status, code, taskCode, taskMessage = 402, "group_balance_not_enough", "insufficient_balance", "Insufficient balance"
+			case errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks):
+				status, code, taskCode, taskMessage = 429, "too_many_active_tasks", "too_many_active_tasks", "Too many active tasks"
+			case errors.Is(err, balance.ErrPrepaymentModelPaused):
+				status, code, taskCode, taskMessage = 503, "model_unavailable", "model_unavailable", "Model temporarily unavailable"
 			}
-		}
-
-		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
-			imageTaskHTTPError(c, 503, "task_store_unavailable")
+			if code == "" {
+				imageTaskHTTPError(c, 503, "prepayment_pending")
+				return
+			}
+			// The wallet refuses admission atomically and nothing has been sent
+			// to a provider, so releasing the reservation lets the same
+			// X-Request-Id and body succeed later without any risk of a double
+			// charge or a repeated provider call. It also leaves no unsettled
+			// task for billing recovery to revisit.
+			if releaseErr := model.ReleaseImageTaskReservation(task.ID); releaseErr != nil {
+				common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
+				if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: taskCode, Message: taskMessage}); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+				zero := int64(0)
+				task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
+				if err := model.SaveImageTaskBilling(task); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+			}
+			imageTaskHTTPError(c, status, code)
 			return
 		}
-
-		task.Status = status
-		task.Error = taskError
-		c.JSON(202, task)
-
-		return
 	}
-
-	if err = model.AcceptImageTask(task.ID, upstream); err != nil {
-		imageTaskHTTPError(c, 503, "task_store_unavailable")
-		return
-	}
-
-	task.Status = "queued"
-	c.JSON(202, task)
+	dispatchImageTaskWithFailover(c, task, imageAdapter, mt, mappedBody)
 }
 
 // Replays are authorized by token ownership and the reserved schema snapshot;
@@ -535,7 +588,7 @@ func replayImageTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(202, task)
+	c.JSON(202, publicImageTask(c, task))
 	c.Abort()
 }
 
@@ -548,16 +601,17 @@ func dispatchSyncImageTask(
 	body []byte,
 ) {
 	result, err := a.GenerateImage(ctx, mt, body, []byte(task.ValidationContract))
+	finishSyncImageTask(c, task, result, err)
+}
+
+func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.ImageTaskResult, err error) {
 	if err != nil {
 		status := "submission_unknown"
 
 		var taskError *model.ImageTaskError
 		if errors.Is(err, adaptor.ErrImageSubmissionRejected) {
 			status = "failed"
-			taskError = &model.ImageTaskError{
-				Code:    "submission_rejected",
-				Message: "Upstream rejected image submission",
-			}
+			taskError = adaptor.NotAcceptedTaskError(err)
 		}
 
 		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
@@ -567,7 +621,7 @@ func dispatchSyncImageTask(
 
 		task.Status = status
 		task.Error = taskError
-		c.JSON(202, task)
+		c.JSON(202, publicImageTask(c, task))
 
 		return
 	}
@@ -585,17 +639,23 @@ func dispatchSyncImageTask(
 
 		task.Status = "failed"
 		task.Error = taskError
-		c.JSON(202, task)
+		c.JSON(202, publicImageTask(c, task))
 
 		return
 	}
 
-	if model.CompleteSyncImageTask(task.ID, result.Data) != nil {
+	if model.CompleteSyncImageTask(task.ID, result.Data, result.Metadata) != nil {
 		imageTaskHTTPError(c, 503, "task_store_unavailable")
 		return
 	}
 
 	task.Status = "completed"
 	task.Data = result.Data
-	c.JSON(202, task)
+	task.ProviderMetadata = result.Metadata.ProviderMetadata
+	task.Seed = result.Metadata.Seed
+	task.SeedExact = result.Metadata.SeedExact
+	task.Prompt = result.Metadata.Prompt
+	task.Description = result.Metadata.Description
+	task.NumImages = result.Metadata.NumImages
+	c.JSON(202, publicImageTask(c, task))
 }

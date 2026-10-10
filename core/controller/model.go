@@ -33,13 +33,17 @@ type OpenAIModelPermission struct {
 }
 
 type OpenAIModels struct {
-	Parent     *string                 `json:"parent"`
-	ID         string                  `json:"id"`
-	Object     string                  `json:"object"`
-	OwnedBy    string                  `json:"owned_by"`
-	Root       string                  `json:"root"`
-	Permission []OpenAIModelPermission `json:"permission"`
-	Created    int                     `json:"created"`
+	Generation  map[string]any          `json:"generation,omitempty"`
+	API         map[string]any          `json:"api,omitempty"`
+	InputSchema map[string]any          `json:"input_schema,omitempty"`
+	SchemaURL   string                  `json:"schema_url,omitempty"`
+	Parent      *string                 `json:"-"`
+	ID          string                  `json:"id"`
+	Object      string                  `json:"object"`
+	OwnedBy     string                  `json:"owned_by"`
+	Root        string                  `json:"-"`
+	Permission  []OpenAIModelPermission `json:"-"`
+	Created     int                     `json:"created"`
 }
 
 type BuiltinModelConfig model.ModelConfig

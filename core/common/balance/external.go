@@ -69,7 +69,8 @@ type consumePricing struct {
 }
 
 // CtxRequestID is the context key used to pass the request id to
-// PostGroupConsume so the wallet backend can deduplicate retried charges.
+// PostGroupConsume for correlation and legacy task debit replay. New executions
+// additionally carry a server-owned billing operation ID.
 var CtxRequestID ctxKey
 
 // RequestIDFromContext returns the request id injected by the caller, or an
@@ -80,6 +81,19 @@ func RequestIDFromContext(ctx context.Context) string {
 		return requestID
 	}
 	return ""
+}
+
+type billingOperationContextKey struct{}
+
+// ContextWithBillingOperationID separates debit identity from client correlation.
+// Empty IDs retain legacy task replay semantics during additive rollout.
+func ContextWithBillingOperationID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, billingOperationContextKey{}, id)
+}
+
+func billingOperationIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(billingOperationContextKey{}).(string)
+	return id
 }
 
 // ContextWithPricing attaches the immutable retail-pricing provenance that
@@ -151,12 +165,13 @@ type externalBalanceResp struct {
 }
 
 type externalConsumeReq struct {
-	Group          string  `json:"group"`
-	TokenName      string  `json:"tokenName"`
-	Amount         float64 `json:"amount"`
-	RequestID      string  `json:"requestId,omitempty"`
-	Currency       string  `json:"currency,omitempty"`
-	PricingVersion string  `json:"pricingVersion,omitempty"`
+	Group              string  `json:"group"`
+	TokenName          string  `json:"tokenName"`
+	Amount             float64 `json:"amount"`
+	RequestID          string  `json:"requestId,omitempty"`
+	BillingOperationID string  `json:"billingOperationId,omitempty"`
+	Currency           string  `json:"currency,omitempty"`
+	PricingVersion     string  `json:"pricingVersion,omitempty"`
 }
 
 type externalConsumeResp struct {
@@ -335,7 +350,7 @@ func newExternalPostGroupConsumer(backend *ExternalHTTP, group string) *External
 }
 
 func (*ExternalPostGroupConsumer) CanReplayPostGroupConsume(ctx context.Context) bool {
-	return RequestIDFromContext(ctx) != ""
+	return billingOperationIDFromContext(ctx) != "" || RequestIDFromContext(ctx) != ""
 }
 
 func (c *ExternalPostGroupConsumer) PostGroupConsume(
@@ -387,12 +402,13 @@ func (e *ExternalHTTP) postConsume(
 	pricing consumePricing,
 ) (float64, error) {
 	reqBody, err := sonic.Marshal(externalConsumeReq{
-		Group:          group,
-		TokenName:      tokenName,
-		Amount:         amount,
-		RequestID:      requestID,
-		Currency:       pricing.currency,
-		PricingVersion: pricing.pricingVersion,
+		Group:              group,
+		TokenName:          tokenName,
+		Amount:             amount,
+		RequestID:          requestID,
+		BillingOperationID: billingOperationIDFromContext(ctx),
+		Currency:           pricing.currency,
+		PricingVersion:     pricing.pricingVersion,
 	})
 	if err != nil {
 		return 0, err

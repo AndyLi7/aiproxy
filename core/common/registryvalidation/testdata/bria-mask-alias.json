@@ -1,0 +1,2792 @@
+[
+  {
+    "endpoint": "bria/extract-object",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-3/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "default": false,
+            "type": "boolean",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "default": false,
+            "type": "boolean",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "default": "yellow hammer",
+            "type": "string",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+          },
+          "image_url": {
+            "default": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+            "type": "string",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "remove_background",
+          "autocrop",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "type": "boolean",
+            "title": "Remove Background",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "type": "boolean",
+            "title": "Autocrop",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'.",
+            "uiControl": "textarea"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix).",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "remove_background": false,
+        "autocrop": false,
+        "prompt": "yellow hammer",
+        "image_url": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "url_expires_at": {
+                          "type": "string",
+                          "description": "ISO 8601 expiry time of this signed asset URL."
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "mask_image"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "remove_background": "remove_background",
+            "autocrop": "autocrop",
+            "prompt": "prompt",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 2,
+              "primary": "image",
+              "fields": [
+                "mask"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "raw-base64",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/extract-object",
+            "revision": "audit",
+            "endpoint": "bria/extract-object",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/extract-object/requests/{request_id}",
+              "statusEndpoint": "bria/extract-object/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                }
+              },
+              "required": [
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "mask": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image",
+                "mask"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:935635411b6ab3559c46274927828b65e2c367dfd73637648e0632a028fdec20"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "remove_background": false,
+      "autocrop": false,
+      "prompt": "test",
+      "image_url": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XhU0AAAAASUVORK5CYII=",
+      "n": 1,
+      "model": "admission/model-3/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "mask": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "bria/extract-object",
+    "scenario": "required/inline/image_url-raw-base64",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-3/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "default": false,
+            "type": "boolean",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "default": false,
+            "type": "boolean",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "default": "yellow hammer",
+            "type": "string",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+          },
+          "image_url": {
+            "default": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+            "type": "string",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "remove_background",
+          "autocrop",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "type": "boolean",
+            "title": "Remove Background",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "type": "boolean",
+            "title": "Autocrop",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'.",
+            "uiControl": "textarea"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix).",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "remove_background": false,
+        "autocrop": false,
+        "prompt": "yellow hammer",
+        "image_url": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "url_expires_at": {
+                          "type": "string",
+                          "description": "ISO 8601 expiry time of this signed asset URL."
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "mask_image"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "remove_background": "remove_background",
+            "autocrop": "autocrop",
+            "prompt": "prompt",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 2,
+              "primary": "image",
+              "fields": [
+                "mask"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "raw-base64",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/extract-object",
+            "revision": "audit",
+            "endpoint": "bria/extract-object",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/extract-object/requests/{request_id}",
+              "statusEndpoint": "bria/extract-object/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                }
+              },
+              "required": [
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "mask": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image",
+                "mask"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:935635411b6ab3559c46274927828b65e2c367dfd73637648e0632a028fdec20"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "remove_background": false,
+      "autocrop": false,
+      "prompt": "test",
+      "image_url": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XhU0AAAAASUVORK5CYII=",
+      "n": 1,
+      "model": "admission/model-3/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "mask": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "bria/extract-object",
+    "scenario": "required/inline/image_url-url",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-3/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "default": false,
+            "type": "boolean",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "default": false,
+            "type": "boolean",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "default": "yellow hammer",
+            "type": "string",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+          },
+          "image_url": {
+            "default": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+            "type": "string",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "remove_background",
+          "autocrop",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "type": "boolean",
+            "title": "Remove Background",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "type": "boolean",
+            "title": "Autocrop",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'.",
+            "uiControl": "textarea"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix).",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "remove_background": false,
+        "autocrop": false,
+        "prompt": "yellow hammer",
+        "image_url": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "url_expires_at": {
+                          "type": "string",
+                          "description": "ISO 8601 expiry time of this signed asset URL."
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "mask_image"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "remove_background": "remove_background",
+            "autocrop": "autocrop",
+            "prompt": "prompt",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 2,
+              "primary": "image",
+              "fields": [
+                "mask"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "raw-base64",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/extract-object",
+            "revision": "audit",
+            "endpoint": "bria/extract-object",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/extract-object/requests/{request_id}",
+              "statusEndpoint": "bria/extract-object/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                }
+              },
+              "required": [
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "mask": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image",
+                "mask"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:935635411b6ab3559c46274927828b65e2c367dfd73637648e0632a028fdec20"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "remove_background": false,
+      "autocrop": false,
+      "prompt": "test",
+      "image_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-3/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "mask": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "bria/extract-object",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-3/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "default": false,
+            "type": "boolean",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "default": false,
+            "type": "boolean",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "default": "yellow hammer",
+            "type": "string",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+          },
+          "image_url": {
+            "default": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+            "type": "string",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "remove_background",
+          "autocrop",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "type": "boolean",
+            "title": "Remove Background",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "type": "boolean",
+            "title": "Autocrop",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'.",
+            "uiControl": "textarea"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix).",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "remove_background": false,
+        "autocrop": false,
+        "prompt": "yellow hammer",
+        "image_url": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "url_expires_at": {
+                          "type": "string",
+                          "description": "ISO 8601 expiry time of this signed asset URL."
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "mask_image"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "remove_background": "remove_background",
+            "autocrop": "autocrop",
+            "prompt": "prompt",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 2,
+              "primary": "image",
+              "fields": [
+                "mask"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "raw-base64",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/extract-object",
+            "revision": "audit",
+            "endpoint": "bria/extract-object",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/extract-object/requests/{request_id}",
+              "statusEndpoint": "bria/extract-object/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                }
+              },
+              "required": [
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "mask": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image",
+                "mask"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:935635411b6ab3559c46274927828b65e2c367dfd73637648e0632a028fdec20"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "remove_background": false,
+      "autocrop": false,
+      "prompt": "yellow hammer",
+      "image_url": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XhU0AAAAASUVORK5CYII=",
+      "n": 1,
+      "model": "admission/model-3/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "mask": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "bria/extract-object",
+    "scenario": "defaults/inline/image_url-raw-base64",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-3/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "default": false,
+            "type": "boolean",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "default": false,
+            "type": "boolean",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "default": "yellow hammer",
+            "type": "string",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+          },
+          "image_url": {
+            "default": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+            "type": "string",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "remove_background",
+          "autocrop",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "type": "boolean",
+            "title": "Remove Background",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "type": "boolean",
+            "title": "Autocrop",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'.",
+            "uiControl": "textarea"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix).",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "remove_background": false,
+        "autocrop": false,
+        "prompt": "yellow hammer",
+        "image_url": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "url_expires_at": {
+                          "type": "string",
+                          "description": "ISO 8601 expiry time of this signed asset URL."
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "mask_image"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "remove_background": "remove_background",
+            "autocrop": "autocrop",
+            "prompt": "prompt",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 2,
+              "primary": "image",
+              "fields": [
+                "mask"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "raw-base64",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/extract-object",
+            "revision": "audit",
+            "endpoint": "bria/extract-object",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/extract-object/requests/{request_id}",
+              "statusEndpoint": "bria/extract-object/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                }
+              },
+              "required": [
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "mask": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image",
+                "mask"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:935635411b6ab3559c46274927828b65e2c367dfd73637648e0632a028fdec20"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "remove_background": false,
+      "autocrop": false,
+      "prompt": "yellow hammer",
+      "image_url": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XhU0AAAAASUVORK5CYII=",
+      "n": 1,
+      "model": "admission/model-3/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "mask": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "bria/extract-object",
+    "scenario": "defaults/inline/image_url-url",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-3/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "default": false,
+            "type": "boolean",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "default": false,
+            "type": "boolean",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "default": "yellow hammer",
+            "type": "string",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+          },
+          "image_url": {
+            "default": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+            "type": "string",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "remove_background",
+          "autocrop",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "remove_background": {
+            "type": "boolean",
+            "title": "Remove Background",
+            "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+          },
+          "autocrop": {
+            "type": "boolean",
+            "title": "Autocrop",
+            "description": "Tighten the output canvas to the extracted object."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Natural-language description of the object to act on, e.g. 'the red car'.",
+            "uiControl": "textarea"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix).",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "remove_background": false,
+        "autocrop": false,
+        "prompt": "yellow hammer",
+        "image_url": "https://bria-datasets.s3.amazonaws.com/object-extraction/tools_construction_flatlay.jpg",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auxiliary_images": {
+                  "type": "object",
+                  "properties": {
+                    "mask_image": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "url_expires_at": {
+                          "type": "string",
+                          "description": "ISO 8601 expiry time of this signed asset URL."
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "mask_image"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Auxiliary assets associated with this primary image. Download the signed platform URLs before expiry. These assets do not increase the primary generated-image count."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "remove_background": "remove_background",
+            "autocrop": "autocrop",
+            "prompt": "prompt",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fextract-object",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "outputArtifacts": {
+              "version": 2,
+              "primary": "image",
+              "fields": [
+                "mask"
+              ]
+            },
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "nativeInlineImages": [
+                {
+                  "path": [
+                    "image_url"
+                  ],
+                  "encoding": "raw-base64",
+                  "maxDecodedBytes": 52428800,
+                  "mediaTypes": [],
+                  "mediaTypeValidation": "upstream",
+                  "allowUrl": true
+                }
+              ],
+              "version": 10,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/extract-object",
+            "revision": "audit",
+            "endpoint": "bria/extract-object",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/extract-object/requests/{request_id}",
+              "statusEndpoint": "bria/extract-object/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "remove_background": {
+                  "type": "boolean",
+                  "description": "When True, refine the cutout alpha with background removal (RMBG). When False (default), use the SAM segmentation mask as the cutout's alpha -- faster, with no salient-object matting (helpful when RMBG over-trims text, logos, or graphics)."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "autocrop": {
+                  "type": "boolean",
+                  "description": "Tighten the output canvas to the extracted object."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Natural-language description of the object to act on, e.g. 'the red car'."
+                },
+                "image_url": {
+                  "type": "string",
+                  "description": "Source image as a public URL or raw base64-encoded image bytes (no data-URI prefix)."
+                }
+              },
+              "required": [
+                "sync_mode"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                },
+                "mask": {
+                  "type": "object",
+                  "properties": {
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image",
+                "mask"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:935635411b6ab3559c46274927828b65e2c367dfd73637648e0632a028fdec20"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "remove_background": false,
+      "autocrop": false,
+      "prompt": "yellow hammer",
+      "image_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-3/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "mask": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  }
+]

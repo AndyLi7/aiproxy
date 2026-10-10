@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"math/big"
 	"slices"
 )
@@ -12,7 +13,7 @@ import (
 const (
 	ImageBillingMaxSafeInteger int64 = 9007199254740991
 	ImageBillingMaxTiers             = 64
-	ImageBillingMaxOutputs           = 1024
+	ImageBillingMaxOutputs           = imagecapabilities.MaxOutputs
 	ImageBillingMaxDimension   int64 = 10000000
 	ImageBillingMaxRules             = 256
 )
@@ -61,10 +62,11 @@ type ImageBillingTier struct {
 	UnitQuantity int64  `json:"unitQuantity"`
 }
 type ImageBillingPolicy struct {
-	Version          int                `json:"version"`
-	Scenario         string             `json:"scenario"`
-	Input            *ImageBillingInput `json:"input,omitempty"`
-	OutputPixelTiers []ImageBillingTier `json:"outputPixelTiers,omitempty"`
+	OutputPixels     *ImagePixelQuantity `json:"outputPixels,omitempty"`
+	Version          int                 `json:"version"`
+	Scenario         string              `json:"scenario"`
+	Input            *ImageBillingInput  `json:"input,omitempty"`
+	OutputPixelTiers []ImageBillingTier  `json:"outputPixelTiers,omitempty"`
 }
 type ImageUsageOutput struct {
 	Index  int64  `json:"index"`
@@ -81,12 +83,13 @@ type ImageUsage struct {
 	Outputs        []ImageUsageOutput `json:"outputs"`
 }
 type ImageBillingLine struct {
-	Kind          string           `json:"kind"`
-	TierIndex     *int             `json:"tierIndex"`
-	Quantity      int64            `json:"quantity"`
-	AmountMicros  int64            `json:"amountMicros"`
-	Rate          ImageBillingRate `json:"rate"`
-	OutputIndexes []int64          `json:"outputIndexes"`
+	Kind             string                 `json:"kind"`
+	TierIndex        *int                   `json:"tierIndex"`
+	Quantity         float64                `json:"quantity"`
+	QuantityFraction *ImageQuantityFraction `json:"quantityFraction,omitempty"`
+	AmountMicros     int64                  `json:"amountMicros"`
+	Rate             ImageBillingRate       `json:"rate"`
+	OutputIndexes    []int64                `json:"outputIndexes"`
 }
 type ImageBillingResult struct {
 	State        string             `json:"state"`
@@ -144,13 +147,33 @@ func strictImageObject(data []byte, keys, required []string) (map[string]json.Ra
 func (p *ImageBillingPolicy) UnmarshalJSON(data []byte) error {
 	obj, err := strictImageObject(
 		data,
-		[]string{"version", "scenario", "input", "outputPixelTiers"},
+		[]string{"version", "scenario", "input", "outputPixelTiers", "outputPixels"},
 		[]string{"version", "scenario"},
 	)
 	if err != nil {
 		return err
 	}
 
+	var version int
+	if err := json.Unmarshal(obj["version"], &version); err != nil {
+		return err
+	}
+	if version == 2 {
+		if _, ok := obj["input"]; ok {
+			return errors.New("pixel billing cannot include input billing")
+		}
+		if _, ok := obj["outputPixelTiers"]; ok {
+			return errors.New("pixel billing cannot include tiers")
+		}
+	} else if _, ok := obj["outputPixels"]; ok {
+		return errors.New("pixel quantity requires v2")
+	}
+	if v, ok := obj["outputPixels"]; ok {
+		keys := []string{"pixelsPerUnit", "rounding", "scope", "minimumUnits"}
+		if _, err := strictImageObject(v, keys, keys); err != nil {
+			return err
+		}
+	}
 	if v, ok := obj["input"]; ok {
 		var inputFields map[string]json.RawMessage
 		if json.Unmarshal(v, &inputFields) != nil {
@@ -220,7 +243,13 @@ func (p *ImageBillingPolicy) UnmarshalJSON(data []byte) error {
 }
 
 func (p *ImageBillingPolicy) Validate() error {
-	if p == nil || p.Version != 1 || !imageScenario(p.Scenario) {
+	if p != nil && p.Version == 2 {
+		if p.Scenario != "generation" || p.Input != nil || p.OutputPixelTiers != nil || p.OutputPixels == nil {
+			return errors.New("invalid pixel billing policy")
+		}
+		return p.OutputPixels.Validate()
+	}
+	if p == nil || p.Version != 1 || p.OutputPixels != nil || !imageScenario(p.Scenario) {
 		return errors.New("invalid image billing policy")
 	}
 
@@ -445,7 +474,7 @@ func EvaluateImageBilling(
 
 		return r
 	}
-	if err := usage.Validate(policy.OutputPixelTiers != nil); err != nil {
+	if err := usage.Validate(policy.Version == 2 || policy.OutputPixelTiers != nil); err != nil {
 		return terminal("pending", "invalid_usage"), nil
 	}
 
@@ -463,6 +492,10 @@ func EvaluateImageBilling(
 
 	if len(usage.Outputs) == 0 {
 		return terminal("complete", ""), nil
+	}
+
+	if policy.Version == 2 {
+		return evaluatePixelBilling(policy.OutputPixels, usage, defaultRate)
 	}
 
 	if policy.Input != nil && policy.Input.AmountMicros > 0 && usage.InputCount == nil {
@@ -490,7 +523,7 @@ func EvaluateImageBilling(
 			ImageBillingLine{
 				Kind:          kind,
 				TierIndex:     tier,
-				Quantity:      quantity,
+				Quantity:      float64(quantity),
 				AmountMicros:  amount,
 				Rate:          rate,
 				OutputIndexes: indexes,

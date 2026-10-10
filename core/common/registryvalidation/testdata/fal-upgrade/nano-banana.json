@@ -1,0 +1,510 @@
+{
+  "provider_contract_version": 1,
+  "entry_id": "google/nano-banana/text-to-image",
+  "validation_version": 1,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "output_format": {
+        "default": "png",
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "png",
+          "webp"
+        ],
+        "description": "The format of the generated image."
+      },
+      "n": {
+        "default": 1,
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4,
+        "description": "The number of images to generate."
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The seed for the random number generator."
+      },
+      "limit_generations": {
+        "default": true,
+        "type": "boolean",
+        "description": "Experimental parameter to limit the number of generations from each round of prompting to 1. Set to `True` to to disregard any instructions in the prompt regarding the number of images to generate."
+      },
+      "prompt": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 50000,
+        "description": "The text prompt to generate an image from."
+      },
+      "aspect_ratio": {
+        "default": "1:1",
+        "type": "string",
+        "enum": [
+          "21:9",
+          "16:9",
+          "3:2",
+          "4:3",
+          "5:4",
+          "1:1",
+          "4:5",
+          "3:4",
+          "2:3",
+          "9:16"
+        ],
+        "description": "The aspect ratio of the generated image."
+      },
+      "safety_tolerance": {
+        "default": "4",
+        "type": "string",
+        "enum": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "description": "The safety tolerance level for content moderation. 1 is the most strict (blocks most content), 6 is the least strict."
+      }
+    },
+    "required": [
+      "output_format",
+      "n",
+      "limit_generations",
+      "prompt",
+      "aspect_ratio",
+      "safety_tolerance"
+    ],
+    "additionalProperties": false
+  },
+  "parameter_schema": {
+    "type": "object",
+    "properties": {
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "png",
+          "webp"
+        ],
+        "title": "Output Format",
+        "description": "The format of the generated image.",
+        "uiControl": "select"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4,
+        "title": "Number of Images",
+        "description": "The number of images to generate."
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Seed",
+        "description": "The seed for the random number generator."
+      },
+      "limit_generations": {
+        "type": "boolean",
+        "title": "Limit Generations",
+        "description": "Experimental parameter to limit the number of generations from each round of prompting to 1. Set to `True` to to disregard any instructions in the prompt regarding the number of images to generate."
+      },
+      "prompt": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 50000,
+        "title": "Prompt",
+        "description": "The text prompt to generate an image from.",
+        "uiControl": "textarea"
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "enum": [
+          "21:9",
+          "16:9",
+          "3:2",
+          "4:3",
+          "5:4",
+          "1:1",
+          "4:5",
+          "3:4",
+          "2:3",
+          "9:16"
+        ],
+        "title": "Aspect Ratio",
+        "description": "The aspect ratio of the generated image.",
+        "uiControl": "select"
+      },
+      "safety_tolerance": {
+        "type": "string",
+        "enum": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "title": "Safety Tolerance",
+        "description": "The safety tolerance level for content moderation. 1 is the most strict (blocks most content), 6 is the least strict.",
+        "uiControl": "select"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "default_parameters": {
+    "output_format": "png",
+    "n": 1,
+    "limit_generations": true,
+    "aspect_ratio": "1:1",
+    "safety_tolerance": "4"
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "images": {
+        "minItems": 1,
+        "maxItems": 4,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "additionalProperties": {}
+  },
+  "providers": {
+    "fal": {
+      "adapter": "fal-image",
+      "parameterMapping": {
+        "output_format": "output_format",
+        "n": "num_images",
+        "seed": "seed",
+        "limit_generations": "limit_generations",
+        "prompt": "prompt",
+        "aspect_ratio": "aspect_ratio",
+        "safety_tolerance": "safety_tolerance"
+      },
+      "allowedPassthroughParameters": [],
+      "fixedParameters": {
+        "sync_mode": false
+      },
+      "billingBasis": {
+        "metric": "image",
+        "dimensions": [],
+        "minimumBillableUnits": 1,
+        "rounding": "none",
+        "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fnano-banana",
+        "verifiedAt": "2026-09-25",
+        "requiresUpstreamUsageBilling": true
+      },
+      "source": {
+        "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fnano-banana",
+        "verifiedAt": "2026-09-25",
+        "verifiedBy": "d34-local-acceptance"
+      },
+      "upstream": {
+        "metering": {
+          "nativeImagePaths": [],
+          "version": 7,
+          "outputCountParameter": "num_images"
+        },
+        "id": "fal:fal-ai/nano-banana",
+        "revision": "f780d51e-b105-42c9-8793-8445fa3e2a6a-2",
+        "endpoint": "fal-ai/nano-banana",
+        "execution": {
+          "mode": "async",
+          "resultEndpoint": "fal-ai/nano-banana/requests/{request_id}",
+          "statusEndpoint": "fal-ai/nano-banana/requests/{request_id}/status",
+          "supportsCancellation": true
+        },
+        "acceptedInputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "jpeg",
+                "png",
+                "webp"
+              ],
+              "description": "The format of the generated image."
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "description": "The number of images to generate."
+            },
+            "seed": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seed for the random number generator."
+            },
+            "limit_generations": {
+              "type": "boolean",
+              "description": "Experimental parameter to limit the number of generations from each round of prompting to 1. Set to `True` to to disregard any instructions in the prompt regarding the number of images to generate."
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 50000,
+              "description": "The text prompt to generate an image from."
+            },
+            "aspect_ratio": {
+              "type": "string",
+              "enum": [
+                "21:9",
+                "16:9",
+                "3:2",
+                "4:3",
+                "5:4",
+                "1:1",
+                "4:5",
+                "3:4",
+                "2:3",
+                "9:16"
+              ],
+              "description": "The aspect ratio of the generated image."
+            },
+            "safety_tolerance": {
+              "type": "string",
+              "enum": [
+                "1",
+                "2",
+                "3",
+                "4"
+              ],
+              "description": "The safety tolerance level for content moderation. 1 is the most strict (blocks most content), 6 is the least strict."
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        "inputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "jpeg",
+                "png",
+                "webp"
+              ],
+              "description": "The format of the generated image."
+            },
+            "num_images": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "description": "The number of images to generate."
+            },
+            "seed": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seed for the random number generator."
+            },
+            "limit_generations": {
+              "type": "boolean",
+              "description": "Experimental parameter to limit the number of generations from each round of prompting to 1. Set to `True` to to disregard any instructions in the prompt regarding the number of images to generate."
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 50000,
+              "description": "The text prompt to generate an image from."
+            },
+            "sync_mode": {
+              "type": "boolean",
+              "const": false
+            },
+            "aspect_ratio": {
+              "type": "string",
+              "enum": [
+                "21:9",
+                "16:9",
+                "3:2",
+                "4:3",
+                "5:4",
+                "1:1",
+                "4:5",
+                "3:4",
+                "2:3",
+                "9:16"
+              ],
+              "description": "The aspect ratio of the generated image."
+            },
+            "safety_tolerance": {
+              "type": "string",
+              "enum": [
+                "1",
+                "2",
+                "3",
+                "4"
+              ],
+              "description": "The safety tolerance level for content moderation. 1 is the most strict (blocks most content), 6 is the least strict."
+            }
+          },
+          "required": [
+            "prompt",
+            "sync_mode"
+          ],
+          "additionalProperties": false
+        },
+        "outputJsonSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "images": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The height of the image"
+                  },
+                  "file_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name of the file. It will be auto-generated if not provided."
+                  },
+                  "content_type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The mime type of the file."
+                  },
+                  "file_size": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The size of the file in bytes."
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "The URL where the file can be downloaded from."
+                  },
+                  "width": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The width of the image"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": {}
+              },
+              "description": "The generated images."
+            },
+            "description": {
+              "type": "string",
+              "description": "The description of the generated images."
+            }
+          },
+          "required": [
+            "images",
+            "description"
+          ],
+          "additionalProperties": {}
+        },
+        "contractHash": "sha256:dbd122ebe2d264efe5b9189f82434a395b46c96c54eb01b8ee816d221e276dea"
+      }
+    }
+  },
+  "execution": {
+    "mode": "async",
+    "endpoint": "/v1/images/tasks",
+    "statusEndpoint": "/v1/images/tasks/{task_id}",
+    "output": "image",
+    "supportsCancellation": false
+  }
+}

@@ -177,7 +177,7 @@ func TestResponseStreamHandlerForwardsErrorAfterDownstreamWrite(t *testing.T) {
 	require.Nil(t, err)
 	assert.Equal(t, "resp_123", result.UpstreamID)
 	assert.Contains(t, recorder.Body.String(), `"type":"error"`)
-	assert.Contains(t, recorder.Body.String(), `"message":"stream failed"`)
+	assert.Contains(t, recorder.Body.String(), `"message":"The service is temporarily unavailable. Please try again later."`)
 }
 
 func TestResponseStreamHandlerReturnsErrorBeforeRealOutputAfterLifecycleEvents(t *testing.T) {
@@ -451,7 +451,8 @@ func TestAdaptorDoResponseUsesResponsesFirstEventTimeout(t *testing.T) {
 	require.Nil(t, err)
 	assert.Equal(t, "resp_configured_timeout", result.UpstreamID)
 	assert.Contains(t, recorder.Body.String(), "response.created")
-	assert.Contains(t, recorder.Body.String(), "stream failed")
+	assert.NotContains(t, recorder.Body.String(), "stream failed")
+	assert.Contains(t, recorder.Body.String(), "temporarily unavailable")
 }
 
 func TestResponseHandlerWebSearchCountFromToolUsage(t *testing.T) {

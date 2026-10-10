@@ -379,7 +379,8 @@ func TestHandleRetryResultKeepsDesignatedChannelSemantics(t *testing.T) {
 			Error: relaymodel.NewOpenAIError(http.StatusBadGateway, relaymodel.OpenAIError{}),
 		},
 	}
-	assert.False(t, handleRetryResult(c, true, channel, permissionedState))
+	// Explicit channels are pinned and each candidate may be attempted only once.
+	assert.True(t, handleRetryResult(c, true, channel, permissionedState))
 
 	noPermissionState := &retryState{
 		designatedChannel: channel,
@@ -509,6 +510,9 @@ func TestSaveAsyncUsageInfoDoesNotStoreInitialUsage(t *testing.T) {
 
 	var captured model.AsyncUsageInfo
 	require.NoError(t, db.Where("upstream_id = ?", "video-123").First(&captured).Error)
+	require.NotEmpty(t, m.BillingOperationID)
+	require.Equal(t, m.BillingOperationID, captured.BillingOperationID)
+	require.Equal(t, m.RequestID, captured.RequestID)
 	require.Zero(t, captured.Usage.OutputTokens)
 	require.Zero(t, captured.Usage.TotalTokens)
 	require.Equal(t, "priority", captured.UsageContext.ServiceTier)
@@ -598,4 +602,45 @@ func TestBuildRequestDetailForLogDropsInvalidUTF8Bodies(t *testing.T) {
 	require.NotNil(t, detail)
 	assert.Empty(t, detail.RequestBody)
 	assert.Empty(t, detail.ResponseBody)
+}
+
+func TestUpstreamFailurePublicBoundary(t *testing.T) {
+	// Upstream 401/402/403/404 concern the provider account, so customers get a
+	// 502 instead of a status that blames their own key or balance.
+	for _, tc := range []struct {
+		upstream, status int
+		message          string
+	}{
+		{401, 502, "upstream provider could not process this request"},
+		{402, 502, "upstream provider could not process this request"},
+		{403, 502, "upstream provider could not process this request"},
+		{404, 502, "upstream provider could not process this request"},
+		{429, 429, "temporarily unavailable"},
+		{500, 500, "temporarily unavailable"},
+	} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		middleware.SetRequestID(c, "safe-request-id")
+		original := relaymodel.WrapperErrorWithMessage(mode.ChatCompletions, tc.upstream, "fal private-key upstream balance exhausted", relaymodel.WithType("private_provider_type"))
+		handleRelayResult(c, original, false, 0, time.Time{})
+		require.NotContains(t, w.Body.String(), "private-key")
+		require.NotContains(t, w.Body.String(), "fal")
+		require.NotContains(t, w.Body.String(), "balance")
+		require.Contains(t, w.Body.String(), tc.message)
+		require.Equal(t, tc.status, w.Code)
+		require.Contains(t, original.Error(), "private-key")
+	}
+}
+
+func TestWrittenStreamFailureNeverStartsRetryOrAppendsJSON(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	_, _ = c.Writer.Write([]byte("data: partial\n\n"))
+	c.Writer.Flush()
+	original := w.Body.String()
+	err := relaymodel.WrapperErrorWithMessage(mode.ChatCompletions, 502, "private upstream failure")
+	require.True(t, handleRelayResult(c, err, true, 3, time.Time{}))
+	require.Equal(t, original, w.Body.String())
 }

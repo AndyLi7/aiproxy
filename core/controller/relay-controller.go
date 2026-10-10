@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/conv"
+	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -227,6 +229,8 @@ func RelayHelper(
 	handel RelayHandler,
 ) (result *controller.HandleResult, retry bool) {
 	attempt := middleware.NextRequestTraceAttempt(c)
+	evidence := &failover.Attempt{}
+	c.Set(failover.AttemptContextKey, evidence)
 
 	handle := middleware.BeginRequestTraceStage(
 		c,
@@ -242,12 +246,41 @@ func RelayHelper(
 		handle.Finish(requestTraceResultStatus(c.Request.Context(), result))
 	}()
 
+	startedAt := time.Now()
 	result = handel(c, meta)
-	if result.Error == nil {
-		return result, false
+	failure := evidence.Observe(failover.FromError(result.Error))
+	if result.Error == nil || result.UpstreamID != "" {
+		failure.Acceptance = failover.Accepted
 	}
+	if result.Error != nil && !monitorplugin.ShouldRetry(result.Error) {
+		failure.Class = failover.InvalidRequest
+	}
+	p := failover.Policy{MaxRetries: -1}
+	if value, ok := c.Get("failover_policy"); ok {
+		p = value.(failover.Policy)
+	}
+	retries := c.GetInt("failover_attempt_count")
+	c.Set("failover_attempt_count", retries+1)
+	decision := failover.Decide(failure, p, failover.State{Retries: retries, Pinned: c.GetBool("failover_pinned"), Written: c.Writer.Written(), Cancelled: c.Request.Context().Err() != nil}, time.Now())
+	if result.Error == nil {
+		decision = failover.Decision{Reason: "success"}
+	}
+	fields := log.Fields{"channel_id": meta.Channel.ID, "acceptance": failure.Acceptance, "failure_class": failure.Class, "evidence": failure.Evidence, "duration_ms": time.Since(startedAt).Milliseconds(), "decision": decision.Reason, "retry": decision.Retry}
+	common.GetLogger(c).WithFields(fields).Info("channel_failover_decision")
+	// Only server-created attempts are appended; client metadata cannot forge them.
+	attempts, _ := c.Get("failover_attempts")
+	records, _ := attempts.([]log.Fields)
+	records = append(records, fields)
+	c.Set("failover_attempts", records)
+	encoded, _ := json.Marshal(records)
+	metadata := middleware.GetRequestMetadata(c)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["channel_failover_attempts"] = string(encoded)
+	c.Set(middleware.RequestMetadata, metadata)
+	return result, decision.Retry
 
-	return result, monitorplugin.ShouldRetry(result.Error)
 }
 
 func NewRelay(mode mode.Mode) func(c *gin.Context) {
@@ -280,21 +313,21 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 				statusCode = requestParamErr.StatusCode
 
 				errorCode = requestParamErr.Code
-				if middleware.IsPublicVideoRequest(c.Request.URL.Path, mode) {
-					middleware.AbortPublicVideoRequestError(
-						c,
-						model.FailureStageValidation,
-						statusCode,
-						errorCode,
-						requestParamErr.Message,
-						requestParamErr.Param,
-						requestParamErr.Value,
-						requestParamErr.AllowedValues,
-						requestParamErr.Expected,
-					)
+				// Parameter errors come only from the OpenAI-style image and video
+				// validators; clients need the code and the offending field.
+				middleware.AbortPublicVideoRequestError(
+					c,
+					model.FailureStageValidation,
+					statusCode,
+					errorCode,
+					requestParamErr.Message,
+					requestParamErr.Param,
+					requestParamErr.Value,
+					requestParamErr.AllowedValues,
+					requestParamErr.Expected,
+				)
 
-					return
-				}
+				return
 			}
 
 			middleware.AbortOperationallyWithCodeWithMode(mode, c,
@@ -416,6 +449,8 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		config.GetRetryBudget(),
 		upstreamStartedAt,
 	)
+	c.Set("failover_policy", failover.Policy{MaxRetries: retryTimes, Deadline: retryDeadline})
+	c.Set("failover_pinned", initialChannel.designatedChannel)
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
@@ -445,6 +480,9 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 		ErrorType:  upstreamErrorType,
 	})
 
+	if initialChannel.designatedChannel {
+		retry = false
+	}
 	if handleRelayResult(c, result.Error, retry, retryTimes, retryDeadline) {
 		recordResult(
 			c,
@@ -486,11 +524,13 @@ func recordResult(
 ) {
 	fields := middleware.OperationalFieldsFromContext(c)
 	if result.Error != nil {
+		// Log the code the customer receives; the upstream status stays in safe_error.
+		_, publicCode, _ := publicUpstreamError(result.Error.StatusCode())
 		failureFields := model.BuildOperationalFields(
 			fields.RequestSource,
 			model.FailureStageUpstream,
 			result.Error.Error(),
-			"upstream_error",
+			publicCode,
 		)
 		failureFields.RequestedModel = fields.RequestedModel
 		failureFields.PublicModel = fields.PublicModel
@@ -504,10 +544,14 @@ func recordResult(
 	middleware.MarkOperationalLogRecorded(c)
 
 	code := http.StatusOK
+	detailCode := http.StatusOK
 
 	content := ""
 	if result.Error != nil {
-		code = result.Error.StatusCode()
+		// The log shows the status the customer received; detail retention
+		// still follows the upstream status.
+		detailCode = result.Error.StatusCode()
+		code, _, _ = publicUpstreamError(detailCode)
 		respBody, _ := result.Error.MarshalJSON()
 		content = conv.BytesToString(respBody)
 	}
@@ -524,7 +568,7 @@ func recordResult(
 		detail = buildRequestDetailForLog(
 			result.BodyDetail,
 			meta.ModelConfig,
-			code,
+			detailCode,
 			forceSaveDetail,
 		)
 	}
@@ -619,6 +663,7 @@ func saveAsyncUsageInfo(
 
 	info := &model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
+		BillingOperationID:          meta.BillingOperationID,
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
 		Model:                       meta.OriginModel,
@@ -764,11 +809,14 @@ func handleRelayResult(
 		return true
 	}
 
+	if c.Writer.Written() {
+		return true
+	}
 	if !retry ||
 		retryTimes == 0 ||
 		(!retryDeadline.IsZero() && !time.Now().Before(retryDeadline)) ||
 		c.Request.Context().Err() != nil {
-		ErrorWithRequestID(c, bizErr)
+		writePublicUpstreamError(c, bizErr)
 		return true
 	}
 
@@ -872,6 +920,12 @@ func (s *retryState) remainingRelayDelay(
 }
 
 func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayController RelayHandler) {
+	// Keep every attempted channel excluded even if the selector resets a round.
+	if state.ignoreChannelIDs == nil {
+		state.ignoreChannelIDs = make(map[int64]struct{})
+	}
+	state.ignoreChannelIDs[int64(state.meta.Channel.ID)] = struct{}{}
+
 	log := common.GetLogger(c)
 
 	// The budget limits scheduling and backoff, while in-flight requests keep their own timeout.
@@ -896,6 +950,9 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		}
 
 		if err != nil {
+			if errors.Is(err, ErrChannelsExhausted) {
+				finishFailoverDecision(c, "no_candidates")
+			}
 			if !errors.Is(err, ErrChannelsExhausted) && ctx.Err() == nil {
 				log.Errorf("prepare retry failed: %+v", err)
 			}
@@ -939,6 +996,10 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 
 		var retry bool
 
+		if state.ignoreChannelIDs == nil {
+			state.ignoreChannelIDs = make(map[int64]struct{})
+		}
+		state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
 		state.result, retry = RelayHelper(c, state.meta, relayController)
 		i++
 
@@ -958,6 +1019,17 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		}
 	}
 
+	if state.result.Error != nil {
+		switch {
+		case c.Request.Context().Err() != nil:
+			finishFailoverDecision(c, "cancelled")
+		case !state.retryDeadline.IsZero() && !time.Now().Before(state.retryDeadline):
+			finishFailoverDecision(c, "time_budget")
+		case state.retryTimes >= 0 && i >= state.retryTimes:
+			finishFailoverDecision(c, "attempt_budget")
+		}
+	}
+
 	recordResult(
 		c,
 		state.meta,
@@ -968,8 +1040,8 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		middleware.GetRequestMetadata(c),
 	)
 
-	if state.result.Error != nil {
-		ErrorWithRequestID(c, state.result.Error)
+	if state.result.Error != nil && !c.Writer.Written() {
+		writePublicUpstreamError(c, state.result.Error)
 	}
 }
 
@@ -990,7 +1062,7 @@ func handleRetryResult(
 	newChannel *model.Channel,
 	state *retryState,
 ) (done bool) {
-	if ctx.Request.Context().Err() != nil {
+	if ctx.Writer.Written() || ctx.Request.Context().Err() != nil || state.designatedChannel != nil {
 		return true
 	}
 
@@ -1047,6 +1119,37 @@ func RelayNotImplemented(c *gin.Context) {
 			Code:    "api_not_implemented",
 		}),
 	)
+}
+
+// publicUpstreamError is the status, code and message a customer receives for an
+// upstream failure. Upstream 401/402/403/404 describe the provider account or
+// route, never the customer's key, balance or model, so they become a 502.
+func publicUpstreamError(upstreamStatus int) (int, string, string) {
+	switch upstreamStatus {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return upstreamStatus, "invalid_request",
+			"The request could not be processed. Please check the input parameters."
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound:
+		return http.StatusBadGateway, "upstream_unavailable",
+			"The upstream provider could not process this request. Retry later or contact support with the request ID."
+	default:
+		return upstreamStatus, "upstream_unavailable",
+			"The service is temporarily unavailable. Please try again later."
+	}
+}
+
+// Only called after upstream execution/retry decisions; original errors remain in audit logs.
+func writePublicUpstreamError(c *gin.Context, original adaptor.Error) {
+	status, code, message := publicUpstreamError(original.StatusCode())
+	safe := relaymodel.WrapperErrorWithMessage(middleware.GetMode(c), status, message,
+		relaymodel.WithType("api_error"), relaymodel.WithCode(code))
+	// Video envelopes already have their own public serializer. Avoid remapping
+	// upstream authentication/balance failures into customer permission errors.
+	if middleware.IsPublicVideoRequest(c.Request.URL.Path, middleware.GetMode(c)) {
+		c.JSON(status, safe)
+		return
+	}
+	ErrorWithRequestID(c, safe)
 }
 
 func ErrorWithRequestID(c *gin.Context, relayErr adaptor.Error) {
@@ -1158,6 +1261,7 @@ func recordMeasuredImageResult(
 	currency, version, _ := meta.ModelConfig.RetailPricingMetadata()
 	info := &model.AsyncUsageInfo{
 		RequestID:                   meta.RequestID,
+		BillingOperationID:          meta.BillingOperationID,
 		RequestAt:                   meta.RequestAt,
 		Mode:                        int(meta.Mode),
 		Model:                       meta.OriginModel,
@@ -1247,4 +1351,22 @@ func recordMeasuredImageResult(
 		downstreamResult,
 	)
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
+}
+
+// Final scheduling failures update the last attempt before its terminal log is saved.
+func finishFailoverDecision(c *gin.Context, reason string) {
+	value, _ := c.Get("failover_attempts")
+	records, _ := value.([]log.Fields)
+	if len(records) == 0 || records[len(records)-1]["retry"] != true {
+		return
+	}
+	records[len(records)-1]["decision"] = reason
+	records[len(records)-1]["retry"] = false
+	encoded, _ := json.Marshal(records)
+	metadata := middleware.GetRequestMetadata(c)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["channel_failover_attempts"] = string(encoded)
+	c.Set(middleware.RequestMetadata, metadata)
 }

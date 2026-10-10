@@ -34,7 +34,7 @@ func (r *Anthropic) Render(w http.ResponseWriter) error {
 		conv.StringToBytes(event),
 		nBytes,
 		dataBytes,
-		r.Data,
+		publicStreamData(r.Data, event, false),
 		nnBytes,
 	} {
 		// nosemgrep:

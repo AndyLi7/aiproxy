@@ -20,6 +20,12 @@ func SetAPIRouter(router *gin.Engine) {
 
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)
+	apiRouter.POST("/native-contract/validate", controller.ValidateNativeContract)
+	apiRouter.POST("/native-trials/:group/:token", controller.CreateNativeTrial)
+	apiRouter.GET("/native-trials/:group/:token/:id", controller.GetNativeTrial)
+	apiRouter.GET("/native-trials/:group/:token/:id/artifacts/:index", controller.GetNativeTrialArtifact)
+	apiRouter.GET("/native-tasks/:group/:id", controller.GetGroupNativeTask)
+	apiRouter.GET("/native-tasks/:group/:id/artifacts/:index", controller.GetGroupNativeTaskArtifact)
 	{
 		modelsRoute := apiRouter.Group("/models")
 		{
@@ -186,6 +192,8 @@ func SetAPIRouter(router *gin.Engine) {
 			logRoute.GET("/:group/search", controller.SearchGroupLogs)
 			logRoute.GET("/:group/detail/:log_id", controller.GetGroupLogDetail)
 		}
+
+		apiRouter.GET("/image_tasks/:group/:id", controller.GetGroupImageTask)
 
 		videoTasksRoute := apiRouter.Group("/video_tasks")
 		{

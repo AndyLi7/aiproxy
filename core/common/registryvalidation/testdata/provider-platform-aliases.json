@@ -1,0 +1,1280 @@
+[
+  {
+    "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-29/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "default": "auto_2K",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The text prompt used to generate the image"
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "image_size",
+          "prompt",
+          "n",
+          "max_images"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9",
+                  "auto_2K",
+                  "auto_3K",
+                  "auto_4K"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling.",
+            "default": "auto_2K"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The text prompt used to generate the image",
+            "uiControl": "textarea"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Num Images",
+            "description": "Number of separate model generations to be run with the prompt."
+          },
+          "max_images": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "Max Images",
+            "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "image_size": "auto_2K",
+        "n": 1,
+        "max_images": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 36,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "image_size": "image_size",
+            "prompt": "prompt",
+            "n": "num_images",
+            "max_images": "max_images"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "return_byteplus_urls": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance%2Fseedream%2Fv5%2Flite%2Ftext-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images",
+              "outputCountMultiplierParameter": "max_images"
+            },
+            "id": "fal:bytedance/seedream/v5/lite/text-to-image",
+            "revision": "audit",
+            "endpoint": "bytedance/seedream/v5/lite/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}",
+              "statusEndpoint": "bytedance/seedream/v5/lite/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "return_byteplus_urls": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "auto_2K",
+                        "auto_3K",
+                        "auto_4K"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image. Total pixels must be between 2560x1440 and 4096x4096. In case the image size does not fall within these parameters, the image size will be adjusted to by scaling."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The text prompt used to generate the image"
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "Number of separate model generations to be run with the prompt."
+                },
+                "max_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6,
+                  "description": "If set to a number greater than one, enables multi-image generation. The model will potentially return up to `max_images` images every generation, and in total, `num_images` generations will be carried out. In total, the number of images generated will be between `num_images` and `max_images*num_images`."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "return_byteplus_urls",
+                "prompt",
+                "sync_mode",
+                "enable_safety_checker"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Seed used for generation."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  "description": "Generated images"
+                }
+              },
+              "required": [
+                "seed",
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:30f6ecb4df4bf7b3ffaf16942ebced611eb335e4e06b1b6e750435e6b0e758dd"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "image_size": "auto_2K",
+      "prompt": "test",
+      "n": 1,
+      "max_images": 1,
+      "model": "admission/model-29/text-to-image"
+    },
+    "response": {
+      "seed": 0,
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "fal-ai/creative-upscaler",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-70/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "skip_ccsr": {
+            "default": false,
+            "type": "boolean",
+            "description": "\n            If set to true, the image will not be processed by the CCSR model before\n            being processed by the creativity model.\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The image to upscale."
+          },
+          "scale": {
+            "default": 2,
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "creativity": {
+            "default": 0.5,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "How much the output can deviate from the original"
+          },
+          "num_inference_steps": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          },
+          "shape_preservation": {
+            "default": 0.25,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3,
+            "description": "How much to preserve the shape of the original image"
+          },
+          "negative_prompt": {
+            "default": "blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy",
+            "type": "string",
+            "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+          },
+          "prompt_suffix": {
+            "default": " high quality, highly detailed, high resolution, sharp",
+            "type": "string",
+            "description": "The suffix to add to the prompt. This is useful to add a common ending to all prompts such as 'high quality' etc or embedding tokens."
+          },
+          "model_type": {
+            "default": "SD_1_5",
+            "type": "string",
+            "enum": [
+              "SD_1_5",
+              "SDXL"
+            ],
+            "description": "The type of model to use for the upscaling. Default is SD_1_5"
+          },
+          "additional_embedding_url": {
+            "type": "string",
+            "description": "The URL to the additional embeddings to use for the upscaling. Default is None"
+          },
+          "detail": {
+            "default": 1,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 5,
+            "description": "How much detail to add"
+          },
+          "additional_lora_scale": {
+            "default": 1,
+            "type": "number",
+            "description": "The scale of the additional LORA model to use for the upscaling. Default is 1.0"
+          },
+          "override_size_limits": {
+            "default": false,
+            "type": "boolean",
+            "description": "\n            Allow for large uploads that could take a very long time.\n        "
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results. If no prompt is provide BLIP2 will be used to generate a prompt."
+          },
+          "base_model_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The URL to the base model to use for the upscaling"
+          },
+          "additional_lora_url": {
+            "type": "string",
+            "description": "The URL to the additional LORA model to use for the upscaling. Default is None"
+          },
+          "guidance_scale": {
+            "default": 7.5,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16,
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "skip_ccsr",
+          "image_url",
+          "scale",
+          "creativity",
+          "num_inference_steps",
+          "shape_preservation",
+          "negative_prompt",
+          "prompt_suffix",
+          "model_type",
+          "detail",
+          "additional_lora_scale",
+          "override_size_limits",
+          "guidance_scale",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "skip_ccsr": {
+            "type": "boolean",
+            "title": "Skip Ccsr",
+            "description": "\n            If set to true, the image will not be processed by the CCSR model before\n            being processed by the creativity model.\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "The image to upscale."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "title": "Scale",
+            "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+          },
+          "creativity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "title": "Creativity",
+            "description": "How much the output can deviate from the original"
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "title": "Num Inference Steps",
+            "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          },
+          "shape_preservation": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3,
+            "title": "Shape Preservation",
+            "description": "How much to preserve the shape of the original image"
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+          },
+          "prompt_suffix": {
+            "type": "string",
+            "title": "Prompt Suffix",
+            "description": "The suffix to add to the prompt. This is useful to add a common ending to all prompts such as 'high quality' etc or embedding tokens."
+          },
+          "model_type": {
+            "type": "string",
+            "enum": [
+              "SD_1_5",
+              "SDXL"
+            ],
+            "title": "Model Type",
+            "description": "The type of model to use for the upscaling. Default is SD_1_5",
+            "uiControl": "select"
+          },
+          "additional_embedding_url": {
+            "type": "string",
+            "title": "Additional Embedding Url",
+            "description": "The URL to the additional embeddings to use for the upscaling. Default is None"
+          },
+          "detail": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 5,
+            "title": "Detail",
+            "description": "How much detail to add"
+          },
+          "additional_lora_scale": {
+            "type": "number",
+            "title": "Additional Lora Scale",
+            "description": "The scale of the additional LORA model to use for the upscaling. Default is 1.0"
+          },
+          "override_size_limits": {
+            "type": "boolean",
+            "title": "Override Size Limits",
+            "description": "\n            Allow for large uploads that could take a very long time.\n        "
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results. If no prompt is provide BLIP2 will be used to generate a prompt.",
+            "uiControl": "textarea"
+          },
+          "base_model_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Model Url",
+            "description": "The URL to the base model to use for the upscaling"
+          },
+          "additional_lora_url": {
+            "type": "string",
+            "title": "Additional Lora Url",
+            "description": "The URL to the additional LORA model to use for the upscaling. Default is None"
+          },
+          "guidance_scale": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16,
+            "title": "Guidance scale (CFG)",
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "skip_ccsr": false,
+        "scale": 2,
+        "creativity": 0.5,
+        "num_inference_steps": 20,
+        "shape_preservation": 0.25,
+        "negative_prompt": "blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy",
+        "prompt_suffix": " high quality, highly detailed, high resolution, sharp",
+        "model_type": "SD_1_5",
+        "detail": 1,
+        "additional_lora_scale": 1,
+        "override_size_limits": false,
+        "guidance_scale": 7.5,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "skip_ccsr": "skip_ccsr",
+            "image_url": "image_url",
+            "scale": "scale",
+            "creativity": "creativity",
+            "num_inference_steps": "num_inference_steps",
+            "seed": "seed",
+            "shape_preservation": "shape_preservation",
+            "negative_prompt": "negative_prompt",
+            "prompt_suffix": "prompt_suffix",
+            "model_type": "model_type",
+            "additional_embedding_url": "additional_embedding_url",
+            "detail": "detail",
+            "additional_lora_scale": "additional_lora_scale",
+            "override_size_limits": "override_size_limits",
+            "prompt": "prompt",
+            "base_model_url": "base_model_url",
+            "additional_lora_url": "additional_lora_url",
+            "guidance_scale": "guidance_scale"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "enable_safety_checks": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fcreative-upscaler",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fcreative-upscaler",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/creative-upscaler",
+            "revision": "audit",
+            "endpoint": "fal-ai/creative-upscaler",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/creative-upscaler/requests/{request_id}",
+              "statusEndpoint": "fal-ai/creative-upscaler/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "skip_ccsr": {
+                  "type": "boolean",
+                  "description": "\n            If set to true, the image will not be processed by the CCSR model before\n            being processed by the creativity model.\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to upscale."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 5,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "creativity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "How much the output can deviate from the original"
+                },
+                "num_inference_steps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 200,
+                  "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                },
+                "shape_preservation": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 3,
+                  "description": "How much to preserve the shape of the original image"
+                },
+                "negative_prompt": {
+                  "type": "string",
+                  "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+                },
+                "prompt_suffix": {
+                  "type": "string",
+                  "description": "The suffix to add to the prompt. This is useful to add a common ending to all prompts such as 'high quality' etc or embedding tokens."
+                },
+                "model_type": {
+                  "type": "string",
+                  "enum": [
+                    "SD_1_5",
+                    "SDXL"
+                  ],
+                  "description": "The type of model to use for the upscaling. Default is SD_1_5"
+                },
+                "additional_embedding_url": {
+                  "type": "string",
+                  "description": "The URL to the additional embeddings to use for the upscaling. Default is None"
+                },
+                "detail": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 5,
+                  "description": "How much detail to add"
+                },
+                "additional_lora_scale": {
+                  "type": "number",
+                  "description": "The scale of the additional LORA model to use for the upscaling. Default is 1.0"
+                },
+                "override_size_limits": {
+                  "type": "boolean",
+                  "description": "\n            Allow for large uploads that could take a very long time.\n        "
+                },
+                "prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results. If no prompt is provide BLIP2 will be used to generate a prompt."
+                },
+                "base_model_url": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URL to the base model to use for the upscaling"
+                },
+                "additional_lora_url": {
+                  "type": "string",
+                  "description": "The URL to the additional LORA model to use for the upscaling. Default is None"
+                },
+                "guidance_scale": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 16,
+                  "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "skip_ccsr": {
+                  "type": "boolean",
+                  "description": "\n            If set to true, the image will not be processed by the CCSR model before\n            being processed by the creativity model.\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to upscale."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 5,
+                  "description": "The scale of the output image. The higher the scale, the bigger the output image will be."
+                },
+                "creativity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "How much the output can deviate from the original"
+                },
+                "num_inference_steps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 200,
+                  "description": "\n            The number of inference steps to use for generating the image. The more steps\n            the better the image will be but it will also take longer to generate.\n        "
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                },
+                "shape_preservation": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 3,
+                  "description": "How much to preserve the shape of the original image"
+                },
+                "negative_prompt": {
+                  "type": "string",
+                  "description": "\n            The negative prompt to use.Use it to address details that you don't want\n            in the image. This could be colors, objects, scenery and even the small details\n            (e.g. moustache, blurry, low resolution).\n        "
+                },
+                "prompt_suffix": {
+                  "type": "string",
+                  "description": "The suffix to add to the prompt. This is useful to add a common ending to all prompts such as 'high quality' etc or embedding tokens."
+                },
+                "model_type": {
+                  "type": "string",
+                  "enum": [
+                    "SD_1_5",
+                    "SDXL"
+                  ],
+                  "description": "The type of model to use for the upscaling. Default is SD_1_5"
+                },
+                "additional_embedding_url": {
+                  "type": "string",
+                  "description": "The URL to the additional embeddings to use for the upscaling. Default is None"
+                },
+                "detail": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 5,
+                  "description": "How much detail to add"
+                },
+                "additional_lora_scale": {
+                  "type": "number",
+                  "description": "The scale of the additional LORA model to use for the upscaling. Default is 1.0"
+                },
+                "enable_safety_checks": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "override_size_limits": {
+                  "type": "boolean",
+                  "description": "\n            Allow for large uploads that could take a very long time.\n        "
+                },
+                "prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results. If no prompt is provide BLIP2 will be used to generate a prompt."
+                },
+                "base_model_url": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The URL to the base model to use for the upscaling"
+                },
+                "additional_lora_url": {
+                  "type": "string",
+                  "description": "The URL to the additional LORA model to use for the upscaling. Default is None"
+                },
+                "guidance_scale": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 16,
+                  "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+                }
+              },
+              "required": [
+                "image_url",
+                "enable_safety_checks"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                },
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "seed",
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:eaeb6d5f81ea9f092a2151c778dc3a76a83e92233011810be52466b55eb898f5"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "skip_ccsr": false,
+      "image_url": "https://example.com/reference.png",
+      "scale": 2,
+      "creativity": 0.5,
+      "num_inference_steps": 20,
+      "shape_preservation": 0.25,
+      "negative_prompt": "blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy",
+      "prompt_suffix": " high quality, highly detailed, high resolution, sharp",
+      "model_type": "SD_1_5",
+      "detail": 1,
+      "additional_lora_scale": 1,
+      "override_size_limits": false,
+      "guidance_scale": 7.5,
+      "n": 1,
+      "model": "admission/model-70/edit"
+    },
+    "response": {
+      "seed": 0,
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  }
+]

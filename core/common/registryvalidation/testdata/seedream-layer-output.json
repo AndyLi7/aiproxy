@@ -1,0 +1,286 @@
+{
+  "properties": {
+    "layers": {
+      "items": {
+        "properties": {
+          "z_index": {
+            "minimum": 0,
+            "maximum": 16,
+            "type": "integer",
+            "description": "Stacking order from bottom to top. The base image always has z_index 0.",
+            "title": "Z Index"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Detailed model-generated description of the layer. Omitted for the base image."
+          },
+          "bounding_box": {
+            "anyOf": [
+              {
+                "properties": {
+                  "normalized": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "type": "array",
+                    "description": "Layer bounds as [left, top, right, bottom] coordinates normalized to the integer range [0, 1000].",
+                    "title": "Normalized"
+                  },
+                  "absolute": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "type": "array",
+                    "description": "Layer bounds as [left, top, right, bottom] pixel coordinates in the output base image coordinate system.",
+                    "title": "Absolute"
+                  }
+                },
+                "type": "object",
+                "title": "SeedDream50ProLayerBoundingBox",
+                "required": [
+                  "absolute",
+                  "normalized"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The layer's position in the base image coordinate system. Omitted for the base image."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Model-generated label for the layer. Omitted for the base image."
+          },
+          "image": {
+            "properties": {
+              "content_type": {
+                "title": "Content Type",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  "image/png"
+                ],
+                "description": "The mime type of the file."
+              },
+              "height": {
+                "title": "Height",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  1024
+                ],
+                "description": "The height of the image in pixels."
+              },
+              "width": {
+                "title": "Width",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  1024
+                ],
+                "description": "The width of the image in pixels."
+              },
+              "file_size": {
+                "title": "File Size",
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  4404019
+                ],
+                "description": "The size of the file in bytes."
+              },
+              "file_name": {
+                "title": "File Name",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "examples": [
+                  "z9RV14K95DvU.png"
+                ],
+                "description": "The name of the file. It will be auto-generated if not provided."
+              },
+              "url": {
+                "type": "string",
+                "description": "The URL where the file can be downloaded from.",
+                "title": "Url"
+              }
+            },
+            "type": "object",
+            "description": "Represents an image file.",
+            "title": "Image",
+            "required": [
+              "url"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "SeedDream50ProLayer",
+        "required": [
+          "image",
+          "z_index"
+        ]
+      },
+      "type": "array",
+      "description": "The base image followed by up to 16 separated layers, ordered by increasing z_index.",
+      "title": "Layers"
+    },
+    "images": {
+      "items": {
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file."
+          },
+          "height": {
+            "title": "Height",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              1024
+            ],
+            "description": "The height of the image in pixels."
+          },
+          "width": {
+            "title": "Width",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              1024
+            ],
+            "description": "The width of the image in pixels."
+          },
+          "file_size": {
+            "title": "File Size",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes."
+          },
+          "file_name": {
+            "title": "File Name",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL where the file can be downloaded from.",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "description": "Represents an image file.",
+        "title": "Image",
+        "required": [
+          "url"
+        ]
+      },
+      "type": "array",
+      "description": "The same images as `layers`, in the same order, flattened for gallery rendering.",
+      "examples": [
+        [
+          {
+            "url": "https://v3b.fal.media/files/b/0aa54c02/95ZvKubW63JnC9ubRbDo2_74290e95fb6d4bd4bac756f3e2667317.png"
+          }
+        ]
+      ],
+      "title": "Images"
+    }
+  },
+  "type": "object",
+  "title": "SeedDream50ProLayerizeOutput",
+  "required": [
+    "images",
+    "layers"
+  ]
+}

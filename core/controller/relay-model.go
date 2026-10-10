@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,7 +19,7 @@ func publicModelsForToken(
 	enabledModelConfigsMap map[string]model.ModelConfig,
 ) []*OpenAIModels {
 	models := make(map[string]*OpenAIModels)
-	add := func(id string, owner model.ModelOwner) {
+	add := func(id string, mc model.ModelConfig) {
 		if id == "" {
 			return
 		}
@@ -27,14 +29,30 @@ func publicModelsForToken(
 			return
 		}
 
+		created := 0
+		if !mc.CreatedAt.IsZero() {
+			created = int(mc.CreatedAt.Unix())
+		}
 		models[key] = &OpenAIModels{
 			ID:         id,
 			Object:     "model",
-			Created:    1626777600,
-			OwnedBy:    string(owner),
+			Created:    created,
+			OwnedBy:    string(mc.Owner),
 			Root:       id,
 			Permission: permission,
 			Parent:     nil,
+		}
+		encoded, _ := json.Marshal(mc.Config["x_token_platform_capability_contract"])
+		var wrapper struct {
+			Contract json.RawMessage `json:"contract"`
+		}
+		if json.Unmarshal(encoded, &wrapper) == nil {
+			if discovery := registryvalidation.DiscoverImage(wrapper.Contract); discovery != nil {
+				models[key].Generation = discovery.Generation
+				models[key].API = discovery.API
+				models[key].InputSchema = discovery.InputSchema
+				models[key].SchemaURL = "/v1/models/" + id + "/schema"
+			}
 		}
 	}
 
@@ -45,12 +63,11 @@ func publicModelsForToken(
 		}
 
 		if metadata, capability := model.CapabilityRoutingMetadataFromConfig(mc); capability {
-			add(metadata.PublicModel, mc.Owner)
-			add(metadata.PublicCapabilityModel, mc.Owner)
+			add(metadata.PublicCapabilityModel, mc)
 			return true
 		}
 
-		add(modelName, mc.Owner)
+		add(modelName, mc)
 
 		return true
 	})
@@ -123,5 +140,13 @@ func RetrieveModel(c *gin.Context) {
 		return
 	}
 
+	if c.GetBool("model_schema_request") {
+		if found.InputSchema == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "schema_not_found", "type": "not_found_error", "message": "No public input schema is available for this model.", "param": "model"}})
+			return
+		}
+		c.JSON(http.StatusOK, found.InputSchema)
+		return
+	}
 	c.JSON(http.StatusOK, found)
 }

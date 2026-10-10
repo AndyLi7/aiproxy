@@ -93,7 +93,6 @@ func TestListModelsProjectsEntitledCapabilityModelsWithoutInternalIDs(t *testing
 	}
 
 	require.ElementsMatch(t, []string{
-		publicModel,
 		publicModel + "/text-to-video",
 		publicModel + "/image-to-video",
 		legacyModel,

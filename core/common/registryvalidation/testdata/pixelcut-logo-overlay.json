@@ -1,0 +1,1909 @@
+{
+  "endpoint": "pixelcut/product-photo",
+  "scenario": "required",
+  "contract": {
+    "provider_contract_version": 1,
+    "entry_id": "admission/model-569/edit",
+    "validation_version": 1,
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the product image to be processed."
+        },
+        "shadow": {
+          "type": "object",
+          "properties": {
+            "generative": {
+              "type": "object",
+              "properties": {
+                "light_source": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "size": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Apparent emitter size/softness. Higher = softer penumbra. Leave unset to auto-estimate the light from the image."
+                        },
+                        "position": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "minimum": -1,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Horizontal light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                            },
+                            "y": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "minimum": -1,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Vertical light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                            },
+                            "z": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 2
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Height above subject (0 to 2). Leave unset to auto-estimate the light from the image."
+                            }
+                          },
+                          "additionalProperties": {}
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Virtual light used to synthesize the shadow. When omitted, the light direction is estimated from the image."
+                },
+                "opacity": {
+                  "default": 0.2,
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Final composited shadow opacity (0\u20131)."
+                }
+              },
+              "additionalProperties": {},
+              "description": "Params for the generative AI shadow (used when shadow.type = 'generative')."
+            },
+            "drop": {
+              "type": "object",
+              "properties": {
+                "horizontal": {
+                  "default": 50,
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 100,
+                  "description": "Horizontal shadow offset strength (-100 to 100). Positive moves the shadow right, negative moves it left. 100 is the maximum offset, 10% of the canvas width."
+                },
+                "opacity": {
+                  "default": 0.25,
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Shadow opacity (0\u20131)."
+                },
+                "blur": {
+                  "default": 24,
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Shadow blur strength (0 to 100). 0 is a hard-edged shadow; 100 is the softest, a radius of 5% of the smaller canvas dimension."
+                },
+                "vertical": {
+                  "default": 8,
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 100,
+                  "description": "Vertical shadow offset strength (-100 to 100). Positive moves the shadow down, negative moves it up. 100 is the maximum offset, 10% of the canvas height."
+                },
+                "color": {
+                  "default": {
+                    "g": 0,
+                    "r": 0,
+                    "b": 0
+                  },
+                  "type": "object",
+                  "properties": {
+                    "g": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "r": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "b": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
+                  },
+                  "required": [
+                    "g",
+                    "r",
+                    "b"
+                  ],
+                  "additionalProperties": {},
+                  "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default."
+                }
+              },
+              "additionalProperties": {},
+              "description": "Params for the deterministic drop shadow (used when shadow.type = 'drop'),\nmirroring the web editor's drop shadow (offset + blur + color + opacity)."
+            },
+            "type": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Generative",
+                    "Drop"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shadow style: 'Generative' (generative AI shadow) or 'Drop' (deterministic drop shadow). Leave unset for no shadow."
+            }
+          },
+          "additionalProperties": {},
+          "description": "Shadow control: leave `type` unset for no shadow, or select 'generative' (AI) or\n'drop' (deterministic); set its params in the matching nested object."
+        },
+        "watermark": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "default": "bottom_right",
+                  "type": "string",
+                  "enum": [
+                    "top_left",
+                    "top_right",
+                    "bottom_left",
+                    "bottom_right",
+                    "center"
+                  ],
+                  "description": "Where to place the watermark."
+                },
+                "opacity": {
+                  "default": 1,
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Watermark opacity (0\u20131)."
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Logo/watermark image URL. If empty, no watermark is added."
+                },
+                "scale": {
+                  "default": 0.1,
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 1,
+                  "description": "Watermark width as a fraction of the canvas width."
+                },
+                "margin": {
+                  "default": "3%",
+                  "type": "string",
+                  "description": "Inset from the edge. '%' (0\u201349%) of the canvas, or 'px'."
+                },
+                "remove_background": {
+                  "default": false,
+                  "type": "boolean",
+                  "description": "Remove the watermark image's own background (via background removal) before overlaying it."
+                }
+              },
+              "additionalProperties": {},
+              "description": "A logo/watermark image overlaid on top of the output."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional logo/watermark image overlaid on top of the output. Off by default; omit for no watermark."
+        },
+        "image_size": {
+          "default": "square_hd",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 14142,
+                  "description": "The height of the generated image."
+                },
+                "width": {
+                  "default": 512,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 14142,
+                  "description": "The width of the generated image."
+                }
+              },
+              "additionalProperties": {}
+            },
+            {
+              "type": "string",
+              "enum": [
+                "square_hd",
+                "square",
+                "portrait_4_3",
+                "portrait_16_9",
+                "landscape_4_3",
+                "landscape_16_9"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Output canvas size. A preset (square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9) or a custom {width, height}. Defaults to square_hd (1024x1024)."
+        },
+        "background": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "default": "Color",
+              "type": "string",
+              "enum": [
+                "Transparent",
+                "Color",
+                "Image"
+              ],
+              "description": "'Color' fills with `color` (white by default); 'Transparent' leaves it transparent (always PNG); 'Image' composites onto `image_url`."
+            },
+            "image_fit": {
+              "default": "Cover",
+              "type": "string",
+              "enum": [
+                "Cover",
+                "Contain",
+                "Stretch"
+              ],
+              "description": "How the background image fills the canvas: 'Cover' fills and crops, 'Contain' fits and letterboxes onto `color`, 'Stretch' distorts to fit."
+            },
+            "image_url": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uri"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Background image URL. Required when mode is 'Image'."
+            },
+            "color": {
+              "default": {
+                "g": 255,
+                "r": 255,
+                "b": 255
+              },
+              "type": "object",
+              "properties": {
+                "g": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "r": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "b": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              },
+              "required": [
+                "g",
+                "r",
+                "b"
+              ],
+              "additionalProperties": {},
+              "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default."
+            }
+          },
+          "additionalProperties": {},
+          "description": "Output background: a solid color, transparent, or a background image."
+        },
+        "output_format": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpeg"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The format of the resultant image (PNG or JPEG). When not set, matches the input format. JPEG cannot be combined with a transparent background."
+        },
+        "margin": {
+          "type": "object",
+          "properties": {
+            "top": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Top-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            },
+            "right": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Right-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            },
+            "bottom": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bottom-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            },
+            "all": {
+              "default": "20%",
+              "type": "string",
+              "description": "Margin applied to all sides. '%' (0\u201349%) of the canvas dimension, or 'px' (>=0px)."
+            },
+            "left": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Left-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            }
+          },
+          "additionalProperties": {},
+          "description": "Canvas margin around the product. `all` applies to every side; a per-side value\noverrides `all` for that side. Each value is '%' (0\u201349%) of the canvas, or 'px' (>=0px)."
+        },
+        "n": {
+          "default": 1,
+          "type": "number",
+          "const": 1
+        }
+      },
+      "required": [
+        "image_url",
+        "image_size",
+        "n"
+      ],
+      "additionalProperties": false
+    },
+    "parameter_schema": {
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "title": "Image Url",
+          "description": "URL of the product image to be processed."
+        },
+        "shadow": {
+          "type": "object",
+          "properties": {
+            "generative": {
+              "type": "object",
+              "properties": {
+                "light_source": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "size": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Apparent emitter size/softness. Higher = softer penumbra. Leave unset to auto-estimate the light from the image."
+                        },
+                        "position": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "minimum": -1,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Horizontal light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                            },
+                            "y": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "minimum": -1,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Vertical light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                            },
+                            "z": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 2
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Height above subject (0 to 2). Leave unset to auto-estimate the light from the image."
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Virtual light used to synthesize the shadow. When omitted, the light direction is estimated from the image."
+                },
+                "opacity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 0.2,
+                  "description": "Final composited shadow opacity (0\u20131)."
+                }
+              },
+              "description": "Params for the generative AI shadow (used when shadow.type = 'generative')."
+            },
+            "drop": {
+              "type": "object",
+              "properties": {
+                "horizontal": {
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 100,
+                  "default": 50,
+                  "description": "Horizontal shadow offset strength (-100 to 100). Positive moves the shadow right, negative moves it left. 100 is the maximum offset, 10% of the canvas width."
+                },
+                "opacity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 0.25,
+                  "description": "Shadow opacity (0\u20131)."
+                },
+                "blur": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "default": 24,
+                  "description": "Shadow blur strength (0 to 100). 0 is a hard-edged shadow; 100 is the softest, a radius of 5% of the smaller canvas dimension."
+                },
+                "vertical": {
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 100,
+                  "default": 8,
+                  "description": "Vertical shadow offset strength (-100 to 100). Positive moves the shadow down, negative moves it up. 100 is the maximum offset, 10% of the canvas height."
+                },
+                "color": {
+                  "type": "object",
+                  "properties": {
+                    "g": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "r": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "b": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
+                  },
+                  "required": [
+                    "g",
+                    "r",
+                    "b"
+                  ],
+                  "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default.",
+                  "default": {
+                    "g": 0,
+                    "r": 0,
+                    "b": 0
+                  }
+                }
+              },
+              "description": "Params for the deterministic drop shadow (used when shadow.type = 'drop'),\nmirroring the web editor's drop shadow (offset + blur + color + opacity)."
+            },
+            "type": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Generative",
+                    "Drop"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shadow style: 'Generative' (generative AI shadow) or 'Drop' (deterministic drop shadow). Leave unset for no shadow."
+            }
+          },
+          "title": "Shadow",
+          "description": "Shadow control: leave `type` unset for no shadow, or select 'generative' (AI) or\n'drop' (deterministic); set its params in the matching nested object."
+        },
+        "watermark": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "string",
+                  "enum": [
+                    "top_left",
+                    "top_right",
+                    "bottom_left",
+                    "bottom_right",
+                    "center"
+                  ],
+                  "default": "bottom_right",
+                  "description": "Where to place the watermark."
+                },
+                "opacity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 1,
+                  "description": "Watermark opacity (0\u20131)."
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Logo/watermark image URL. If empty, no watermark is added."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 1,
+                  "default": 0.1,
+                  "description": "Watermark width as a fraction of the canvas width."
+                },
+                "margin": {
+                  "type": "string",
+                  "default": "3%",
+                  "description": "Inset from the edge. '%' (0\u201349%) of the canvas, or 'px'."
+                },
+                "remove_background": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Remove the watermark image's own background (via background removal) before overlaying it."
+                }
+              },
+              "description": "A logo/watermark image overlaid on top of the output."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "watermark",
+          "description": "Optional logo/watermark image overlaid on top of the output. Off by default; omit for no watermark."
+        },
+        "image_size": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "height": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 14142,
+                  "default": 512,
+                  "description": "The height of the generated image."
+                },
+                "width": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 14142,
+                  "default": 512,
+                  "description": "The width of the generated image."
+                }
+              }
+            },
+            {
+              "type": "string",
+              "enum": [
+                "square_hd",
+                "square",
+                "portrait_4_3",
+                "portrait_16_9",
+                "landscape_4_3",
+                "landscape_16_9"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Image Size",
+          "description": "Output canvas size. A preset (square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9) or a custom {width, height}. Defaults to square_hd (1024x1024).",
+          "default": "square_hd"
+        },
+        "background": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "Transparent",
+                "Color",
+                "Image"
+              ],
+              "default": "Color",
+              "description": "'Color' fills with `color` (white by default); 'Transparent' leaves it transparent (always PNG); 'Image' composites onto `image_url`."
+            },
+            "image_fit": {
+              "type": "string",
+              "enum": [
+                "Cover",
+                "Contain",
+                "Stretch"
+              ],
+              "default": "Cover",
+              "description": "How the background image fills the canvas: 'Cover' fills and crops, 'Contain' fits and letterboxes onto `color`, 'Stretch' distorts to fit."
+            },
+            "image_url": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uri"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Background image URL. Required when mode is 'Image'."
+            },
+            "color": {
+              "type": "object",
+              "properties": {
+                "g": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "r": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "b": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              },
+              "required": [
+                "g",
+                "r",
+                "b"
+              ],
+              "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default.",
+              "default": {
+                "g": 255,
+                "r": 255,
+                "b": 255
+              }
+            }
+          },
+          "title": "Background",
+          "description": "Output background: a solid color, transparent, or a background image."
+        },
+        "output_format": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpeg"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output Format",
+          "description": "The format of the resultant image (PNG or JPEG). When not set, matches the input format. JPEG cannot be combined with a transparent background."
+        },
+        "margin": {
+          "type": "object",
+          "properties": {
+            "top": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Top-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            },
+            "right": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Right-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            },
+            "bottom": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bottom-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            },
+            "all": {
+              "type": "string",
+              "default": "20%",
+              "description": "Margin applied to all sides. '%' (0\u201349%) of the canvas dimension, or 'px' (>=0px)."
+            },
+            "left": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Left-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+            }
+          },
+          "title": "Margin",
+          "description": "Canvas margin around the product. `all` applies to every side; a per-side value\noverrides `all` for that side. Each value is '%' (0\u201349%) of the canvas, or 'px' (>=0px)."
+        },
+        "n": {
+          "type": "number",
+          "title": "Number of images"
+        }
+      },
+      "required": [
+        "image_url"
+      ],
+      "additionalProperties": false
+    },
+    "default_parameters": {
+      "image_size": "square_hd",
+      "n": 1
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "images": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "images"
+      ],
+      "additionalProperties": {}
+    },
+    "providers": {
+      "fal": {
+        "adapter": "fal-image",
+        "parameterMapping": {
+          "image_url": "image_url",
+          "shadow": "shadow",
+          "watermark": "watermark",
+          "image_size": "image_size",
+          "background": "background",
+          "output_format": "output_format",
+          "margin": "margin"
+        },
+        "allowedPassthroughParameters": [],
+        "fixedParameters": {
+          "sync_mode": false
+        },
+        "billingBasis": {
+          "metric": "image",
+          "dimensions": [],
+          "minimumBillableUnits": 1,
+          "rounding": "none",
+          "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=pixelcut%2Fproduct-photo",
+          "verifiedAt": "2026-09-27",
+          "requiresUpstreamUsageBilling": true
+        },
+        "source": {
+          "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=pixelcut%2Fproduct-photo",
+          "verifiedAt": "2026-09-27",
+          "verifiedBy": "admission-audit"
+        },
+        "upstream": {
+          "metering": {
+            "nativeImagePaths": [
+              [
+                "image_url"
+              ],
+              [
+                "watermark",
+                "image_url"
+              ],
+              [
+                "background",
+                "image_url"
+              ]
+            ],
+            "version": 7,
+            "outputCountFixed": 1
+          },
+          "id": "fal:pixelcut/product-photo",
+          "revision": "audit",
+          "endpoint": "pixelcut/product-photo",
+          "execution": {
+            "mode": "async",
+            "resultEndpoint": "pixelcut/product-photo/requests/{request_id}",
+            "statusEndpoint": "pixelcut/product-photo/requests/{request_id}/status",
+            "supportsCancellation": true
+          },
+          "acceptedInputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL of the product image to be processed."
+              },
+              "shadow": {
+                "type": "object",
+                "properties": {
+                  "generative": {
+                    "type": "object",
+                    "properties": {
+                      "light_source": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "size": {
+                                "anyOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Apparent emitter size/softness. Higher = softer penumbra. Leave unset to auto-estimate the light from the image."
+                              },
+                              "position": {
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Horizontal light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                                  },
+                                  "y": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Vertical light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                                  },
+                                  "z": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 2
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Height above subject (0 to 2). Leave unset to auto-estimate the light from the image."
+                                  }
+                                },
+                                "additionalProperties": {}
+                              }
+                            },
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Virtual light used to synthesize the shadow. When omitted, the light direction is estimated from the image."
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Final composited shadow opacity (0\u20131)."
+                      }
+                    },
+                    "additionalProperties": {},
+                    "description": "Params for the generative AI shadow (used when shadow.type = 'generative')."
+                  },
+                  "drop": {
+                    "type": "object",
+                    "properties": {
+                      "horizontal": {
+                        "type": "number",
+                        "minimum": -100,
+                        "maximum": 100,
+                        "description": "Horizontal shadow offset strength (-100 to 100). Positive moves the shadow right, negative moves it left. 100 is the maximum offset, 10% of the canvas width."
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Shadow opacity (0\u20131)."
+                      },
+                      "blur": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Shadow blur strength (0 to 100). 0 is a hard-edged shadow; 100 is the softest, a radius of 5% of the smaller canvas dimension."
+                      },
+                      "vertical": {
+                        "type": "number",
+                        "minimum": -100,
+                        "maximum": 100,
+                        "description": "Vertical shadow offset strength (-100 to 100). Positive moves the shadow down, negative moves it up. 100 is the maximum offset, 10% of the canvas height."
+                      },
+                      "color": {
+                        "type": "object",
+                        "properties": {
+                          "g": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          },
+                          "r": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          },
+                          "b": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          }
+                        },
+                        "required": [
+                          "g",
+                          "r",
+                          "b"
+                        ],
+                        "additionalProperties": {},
+                        "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default."
+                      }
+                    },
+                    "additionalProperties": {},
+                    "description": "Params for the deterministic drop shadow (used when shadow.type = 'drop'),\nmirroring the web editor's drop shadow (offset + blur + color + opacity)."
+                  },
+                  "type": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Generative",
+                          "Drop"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Shadow style: 'Generative' (generative AI shadow) or 'Drop' (deterministic drop shadow). Leave unset for no shadow."
+                  }
+                },
+                "additionalProperties": {},
+                "description": "Shadow control: leave `type` unset for no shadow, or select 'generative' (AI) or\n'drop' (deterministic); set its params in the matching nested object."
+              },
+              "watermark": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "position": {
+                        "type": "string",
+                        "enum": [
+                          "top_left",
+                          "top_right",
+                          "bottom_left",
+                          "bottom_right",
+                          "center"
+                        ],
+                        "description": "Where to place the watermark."
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Watermark opacity (0\u20131)."
+                      },
+                      "image_url": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Logo/watermark image URL. If empty, no watermark is added."
+                      },
+                      "scale": {
+                        "type": "number",
+                        "minimum": 0.01,
+                        "maximum": 1,
+                        "description": "Watermark width as a fraction of the canvas width."
+                      },
+                      "margin": {
+                        "type": "string",
+                        "description": "Inset from the edge. '%' (0\u201349%) of the canvas, or 'px'."
+                      },
+                      "remove_background": {
+                        "type": "boolean",
+                        "description": "Remove the watermark image's own background (via background removal) before overlaying it."
+                      }
+                    },
+                    "additionalProperties": {},
+                    "description": "A logo/watermark image overlaid on top of the output."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Optional logo/watermark image overlaid on top of the output. Off by default; omit for no watermark."
+              },
+              "image_size": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 14142,
+                        "description": "The height of the generated image."
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 14142,
+                        "description": "The width of the generated image."
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "square_hd",
+                      "square",
+                      "portrait_4_3",
+                      "portrait_16_9",
+                      "landscape_4_3",
+                      "landscape_16_9"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Output canvas size. A preset (square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9) or a custom {width, height}. Defaults to square_hd (1024x1024)."
+              },
+              "background": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "Transparent",
+                      "Color",
+                      "Image"
+                    ],
+                    "description": "'Color' fills with `color` (white by default); 'Transparent' leaves it transparent (always PNG); 'Image' composites onto `image_url`."
+                  },
+                  "image_fit": {
+                    "type": "string",
+                    "enum": [
+                      "Cover",
+                      "Contain",
+                      "Stretch"
+                    ],
+                    "description": "How the background image fills the canvas: 'Cover' fills and crops, 'Contain' fits and letterboxes onto `color`, 'Stretch' distorts to fit."
+                  },
+                  "image_url": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Background image URL. Required when mode is 'Image'."
+                  },
+                  "color": {
+                    "type": "object",
+                    "properties": {
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255
+                      },
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255
+                      }
+                    },
+                    "required": [
+                      "g",
+                      "r",
+                      "b"
+                    ],
+                    "additionalProperties": {},
+                    "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default."
+                  }
+                },
+                "additionalProperties": {},
+                "description": "Output background: a solid color, transparent, or a background image."
+              },
+              "output_format": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "jpeg"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The format of the resultant image (PNG or JPEG). When not set, matches the input format. JPEG cannot be combined with a transparent background."
+              },
+              "margin": {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Top-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  },
+                  "right": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Right-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  },
+                  "bottom": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Bottom-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  },
+                  "all": {
+                    "type": "string",
+                    "description": "Margin applied to all sides. '%' (0\u201349%) of the canvas dimension, or 'px' (>=0px)."
+                  },
+                  "left": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Left-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  }
+                },
+                "additionalProperties": {},
+                "description": "Canvas margin around the product. `all` applies to every side; a per-side value\noverrides `all` for that side. Each value is '%' (0\u201349%) of the canvas, or 'px' (>=0px)."
+              },
+              "n": {
+                "type": "number",
+                "const": 1
+              }
+            },
+            "required": [
+              "image_url"
+            ],
+            "additionalProperties": false
+          },
+          "inputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL of the product image to be processed."
+              },
+              "shadow": {
+                "type": "object",
+                "properties": {
+                  "generative": {
+                    "type": "object",
+                    "properties": {
+                      "light_source": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "size": {
+                                "anyOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Apparent emitter size/softness. Higher = softer penumbra. Leave unset to auto-estimate the light from the image."
+                              },
+                              "position": {
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Horizontal light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                                  },
+                                  "y": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Vertical light position, normalized to image center (-1 to 1). Leave unset to auto-estimate the light from the image."
+                                  },
+                                  "z": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 2
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Height above subject (0 to 2). Leave unset to auto-estimate the light from the image."
+                                  }
+                                },
+                                "additionalProperties": {}
+                              }
+                            },
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Virtual light used to synthesize the shadow. When omitted, the light direction is estimated from the image."
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Final composited shadow opacity (0\u20131)."
+                      }
+                    },
+                    "additionalProperties": {},
+                    "description": "Params for the generative AI shadow (used when shadow.type = 'generative')."
+                  },
+                  "drop": {
+                    "type": "object",
+                    "properties": {
+                      "horizontal": {
+                        "type": "number",
+                        "minimum": -100,
+                        "maximum": 100,
+                        "description": "Horizontal shadow offset strength (-100 to 100). Positive moves the shadow right, negative moves it left. 100 is the maximum offset, 10% of the canvas width."
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Shadow opacity (0\u20131)."
+                      },
+                      "blur": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Shadow blur strength (0 to 100). 0 is a hard-edged shadow; 100 is the softest, a radius of 5% of the smaller canvas dimension."
+                      },
+                      "vertical": {
+                        "type": "number",
+                        "minimum": -100,
+                        "maximum": 100,
+                        "description": "Vertical shadow offset strength (-100 to 100). Positive moves the shadow down, negative moves it up. 100 is the maximum offset, 10% of the canvas height."
+                      },
+                      "color": {
+                        "type": "object",
+                        "properties": {
+                          "g": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          },
+                          "r": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          },
+                          "b": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          }
+                        },
+                        "required": [
+                          "g",
+                          "r",
+                          "b"
+                        ],
+                        "additionalProperties": {},
+                        "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default."
+                      }
+                    },
+                    "additionalProperties": {},
+                    "description": "Params for the deterministic drop shadow (used when shadow.type = 'drop'),\nmirroring the web editor's drop shadow (offset + blur + color + opacity)."
+                  },
+                  "type": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Generative",
+                          "Drop"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Shadow style: 'Generative' (generative AI shadow) or 'Drop' (deterministic drop shadow). Leave unset for no shadow."
+                  }
+                },
+                "additionalProperties": {},
+                "description": "Shadow control: leave `type` unset for no shadow, or select 'generative' (AI) or\n'drop' (deterministic); set its params in the matching nested object."
+              },
+              "watermark": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "position": {
+                        "type": "string",
+                        "enum": [
+                          "top_left",
+                          "top_right",
+                          "bottom_left",
+                          "bottom_right",
+                          "center"
+                        ],
+                        "description": "Where to place the watermark."
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Watermark opacity (0\u20131)."
+                      },
+                      "image_url": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Logo/watermark image URL. If empty, no watermark is added."
+                      },
+                      "scale": {
+                        "type": "number",
+                        "minimum": 0.01,
+                        "maximum": 1,
+                        "description": "Watermark width as a fraction of the canvas width."
+                      },
+                      "margin": {
+                        "type": "string",
+                        "description": "Inset from the edge. '%' (0\u201349%) of the canvas, or 'px'."
+                      },
+                      "remove_background": {
+                        "type": "boolean",
+                        "description": "Remove the watermark image's own background (via background removal) before overlaying it."
+                      }
+                    },
+                    "additionalProperties": {},
+                    "description": "A logo/watermark image overlaid on top of the output."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Optional logo/watermark image overlaid on top of the output. Off by default; omit for no watermark."
+              },
+              "sync_mode": {
+                "type": "boolean",
+                "const": false
+              },
+              "image_size": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 14142,
+                        "description": "The height of the generated image."
+                      },
+                      "width": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 14142,
+                        "description": "The width of the generated image."
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "square_hd",
+                      "square",
+                      "portrait_4_3",
+                      "portrait_16_9",
+                      "landscape_4_3",
+                      "landscape_16_9"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Output canvas size. A preset (square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9) or a custom {width, height}. Defaults to square_hd (1024x1024)."
+              },
+              "background": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "Transparent",
+                      "Color",
+                      "Image"
+                    ],
+                    "description": "'Color' fills with `color` (white by default); 'Transparent' leaves it transparent (always PNG); 'Image' composites onto `image_url`."
+                  },
+                  "image_fit": {
+                    "type": "string",
+                    "enum": [
+                      "Cover",
+                      "Contain",
+                      "Stretch"
+                    ],
+                    "description": "How the background image fills the canvas: 'Cover' fills and crops, 'Contain' fits and letterboxes onto `color`, 'Stretch' distorts to fit."
+                  },
+                  "image_url": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Background image URL. Required when mode is 'Image'."
+                  },
+                  "color": {
+                    "type": "object",
+                    "properties": {
+                      "g": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255
+                      },
+                      "r": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255
+                      },
+                      "b": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255
+                      }
+                    },
+                    "required": [
+                      "g",
+                      "r",
+                      "b"
+                    ],
+                    "additionalProperties": {},
+                    "description": "RGB color. `RGBColor` is the FAL naming convention that renders the color-picker\nswatch. The per-field default (e.g. white for the background) is carried on each field\nbelow; note the playground swatch initializes to black regardless (a FAL UI quirk \u2014 it\nignores the field-level default), but the server honors the field default."
+                  }
+                },
+                "additionalProperties": {},
+                "description": "Output background: a solid color, transparent, or a background image."
+              },
+              "output_format": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "jpeg"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The format of the resultant image (PNG or JPEG). When not set, matches the input format. JPEG cannot be combined with a transparent background."
+              },
+              "margin": {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Top-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  },
+                  "right": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Right-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  },
+                  "bottom": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Bottom-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  },
+                  "all": {
+                    "type": "string",
+                    "description": "Margin applied to all sides. '%' (0\u201349%) of the canvas dimension, or 'px' (>=0px)."
+                  },
+                  "left": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Left-side override of `all`. '%' (0\u201349%) or 'px' (>=0px)."
+                  }
+                },
+                "additionalProperties": {},
+                "description": "Canvas margin around the product. `all` applies to every side; a per-side value\noverrides `all` for that side. Each value is '%' (0\u201349%) of the canvas, or 'px' (>=0px)."
+              }
+            },
+            "required": [
+              "image_url",
+              "sync_mode"
+            ],
+            "additionalProperties": false
+          },
+          "outputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "image": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Catalog-ready product photo."
+              }
+            },
+            "additionalProperties": {}
+          },
+          "contractHash": "sha256:a77524b99ef3f2250476830fa24428fc27071e4e0ea34b53050ea50f424ee4ff"
+        }
+      }
+    },
+    "execution": {
+      "mode": "async",
+      "endpoint": "/v1/images/tasks",
+      "statusEndpoint": "/v1/images/tasks/{task_id}",
+      "output": "image",
+      "supportsCancellation": false
+    }
+  },
+  "request": {
+    "image_url": "https://example.com/reference.png",
+    "image_size": {},
+    "n": 1,
+    "model": "admission/model-569/edit"
+  },
+  "response": {}
+}

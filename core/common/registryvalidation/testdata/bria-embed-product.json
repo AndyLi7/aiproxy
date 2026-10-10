@@ -1,0 +1,507 @@
+{
+  "endpoint": "bria/embed-product",
+  "scenario": "required",
+  "contract": {
+    "provider_contract_version": 1,
+    "entry_id": "admission/model-2/edit",
+    "validation_version": 1,
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "seed": {
+          "default": 5555,
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Random seed for reproducibility."
+        },
+        "image_source": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the image."
+        },
+        "products": {
+          "minItems": 1,
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "image_source": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL of the image."
+              },
+              "coordinates": {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "number",
+                    "description": "Height of the product in the image."
+                  },
+                  "y": {
+                    "type": "number",
+                    "description": "Y coordinate of the product in the image."
+                  },
+                  "x": {
+                    "type": "number",
+                    "description": "X coordinate of the product in the image."
+                  },
+                  "width": {
+                    "type": "number",
+                    "description": "Width of the product in the image."
+                  }
+                },
+                "required": [
+                  "height",
+                  "y",
+                  "x",
+                  "width"
+                ],
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "image_source",
+              "coordinates"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "List of products to embed in the image."
+        },
+        "n": {
+          "default": 1,
+          "type": "number",
+          "const": 1
+        }
+      },
+      "required": [
+        "seed",
+        "image_source",
+        "n"
+      ],
+      "additionalProperties": false
+    },
+    "parameter_schema": {
+      "type": "object",
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "title": "Seed",
+          "description": "Random seed for reproducibility."
+        },
+        "image_source": {
+          "type": "string",
+          "format": "uri",
+          "title": "Image Source",
+          "description": "URL of the image."
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "image_source": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL of the image."
+              },
+              "coordinates": {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "number",
+                    "description": "Height of the product in the image."
+                  },
+                  "y": {
+                    "type": "number",
+                    "description": "Y coordinate of the product in the image."
+                  },
+                  "x": {
+                    "type": "number",
+                    "description": "X coordinate of the product in the image."
+                  },
+                  "width": {
+                    "type": "number",
+                    "description": "Width of the product in the image."
+                  }
+                },
+                "required": [
+                  "height",
+                  "y",
+                  "x",
+                  "width"
+                ]
+              }
+            },
+            "required": [
+              "image_source",
+              "coordinates"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 10,
+          "title": "Products",
+          "description": "List of products to embed in the image."
+        },
+        "n": {
+          "type": "number",
+          "title": "Number of images"
+        }
+      },
+      "required": [
+        "image_source"
+      ],
+      "additionalProperties": false
+    },
+    "default_parameters": {
+      "seed": 5555,
+      "n": 1
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "images": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "images"
+      ],
+      "additionalProperties": {}
+    },
+    "providers": {
+      "fal": {
+        "adapter": "fal-image",
+        "parameterMapping": {
+          "seed": "seed",
+          "image_source": "image_source",
+          "products": "products"
+        },
+        "allowedPassthroughParameters": [],
+        "fixedParameters": {
+          "sync_mode": false
+        },
+        "billingBasis": {
+          "metric": "image",
+          "dimensions": [],
+          "minimumBillableUnits": 1,
+          "rounding": "none",
+          "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fembed-product",
+          "verifiedAt": "2026-09-27",
+          "requiresUpstreamUsageBilling": true
+        },
+        "source": {
+          "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fembed-product",
+          "verifiedAt": "2026-09-27",
+          "verifiedBy": "admission-audit"
+        },
+        "upstream": {
+          "metering": {
+            "nativeImagePaths": [
+              [
+                "image_source"
+              ],
+              [
+                "products",
+                "*",
+                "image_source"
+              ]
+            ],
+            "version": 7,
+            "outputCountFixed": 1
+          },
+          "id": "fal:bria/embed-product",
+          "revision": "audit",
+          "endpoint": "bria/embed-product",
+          "execution": {
+            "mode": "async",
+            "resultEndpoint": "bria/embed-product/requests/{request_id}",
+            "statusEndpoint": "bria/embed-product/requests/{request_id}/status",
+            "supportsCancellation": true
+          },
+          "acceptedInputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "seed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Random seed for reproducibility."
+              },
+              "image_source": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL of the image."
+              },
+              "products": {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "image_source": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "URL of the image."
+                    },
+                    "coordinates": {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "number",
+                          "description": "Height of the product in the image."
+                        },
+                        "y": {
+                          "type": "number",
+                          "description": "Y coordinate of the product in the image."
+                        },
+                        "x": {
+                          "type": "number",
+                          "description": "X coordinate of the product in the image."
+                        },
+                        "width": {
+                          "type": "number",
+                          "description": "Width of the product in the image."
+                        }
+                      },
+                      "required": [
+                        "height",
+                        "y",
+                        "x",
+                        "width"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "image_source",
+                    "coordinates"
+                  ],
+                  "additionalProperties": {}
+                },
+                "description": "List of products to embed in the image."
+              },
+              "n": {
+                "type": "number",
+                "const": 1
+              }
+            },
+            "required": [
+              "image_source"
+            ],
+            "additionalProperties": false
+          },
+          "inputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "sync_mode": {
+                "type": "boolean",
+                "const": false
+              },
+              "seed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Random seed for reproducibility."
+              },
+              "image_source": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL of the image."
+              },
+              "products": {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "image_source": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "URL of the image."
+                    },
+                    "coordinates": {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "number",
+                          "description": "Height of the product in the image."
+                        },
+                        "y": {
+                          "type": "number",
+                          "description": "Y coordinate of the product in the image."
+                        },
+                        "x": {
+                          "type": "number",
+                          "description": "X coordinate of the product in the image."
+                        },
+                        "width": {
+                          "type": "number",
+                          "description": "Width of the product in the image."
+                        }
+                      },
+                      "required": [
+                        "height",
+                        "y",
+                        "x",
+                        "width"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "image_source",
+                    "coordinates"
+                  ],
+                  "additionalProperties": {}
+                },
+                "description": "List of products to embed in the image."
+              }
+            },
+            "required": [
+              "sync_mode",
+              "image_source"
+            ],
+            "additionalProperties": false
+          },
+          "outputJsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The height of the image in pixels."
+                  },
+                  "file_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name of the file. It will be auto-generated if not provided."
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "The URL where the file can be downloaded from."
+                  },
+                  "content_type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The mime type of the file."
+                  },
+                  "width": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The width of the image in pixels."
+                  },
+                  "file_size": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The size of the file in bytes."
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": {},
+                "description": "Represents an image file."
+              },
+              "seed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Seed used for generation."
+              }
+            },
+            "required": [
+              "image",
+              "seed"
+            ],
+            "additionalProperties": {}
+          },
+          "contractHash": "sha256:149a3dc4a6877cda480d68173e33f513c0de899e867fd4be9c084f11f5e94495"
+        }
+      }
+    },
+    "execution": {
+      "mode": "async",
+      "endpoint": "/v1/images/tasks",
+      "statusEndpoint": "/v1/images/tasks/{task_id}",
+      "output": "image",
+      "supportsCancellation": false
+    }
+  },
+  "request": {
+    "seed": 0,
+    "image_source": "https://example.com/reference.png",
+    "n": 1,
+    "model": "admission/model-2/edit"
+  },
+  "response": {
+    "image": {
+      "url": "https://example.com/reference.png"
+    },
+    "seed": 0
+  }
+}

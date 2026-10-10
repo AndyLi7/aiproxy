@@ -43,8 +43,8 @@ func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
 			wantStages: []requesttrace.Stage{
 				requesttrace.StageRequest,
 				requesttrace.StageAuthentication,
-				requesttrace.StageBalanceCheck,
 				requesttrace.StageModelResolution,
+				requesttrace.StageBalanceCheck,
 				requesttrace.StageValidation,
 				requesttrace.StageChannelSelection,
 				requesttrace.StageUpstreamAttempt,
@@ -70,8 +70,8 @@ func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
 			wantStages: []requesttrace.Stage{
 				requesttrace.StageRequest,
 				requesttrace.StageAuthentication,
-				requesttrace.StageBalanceCheck,
 				requesttrace.StageModelResolution,
+				requesttrace.StageBalanceCheck,
 				requesttrace.StageValidation,
 				requesttrace.StageChannelSelection,
 				requesttrace.StageUpstreamAttempt,
@@ -88,8 +88,8 @@ func TestRequestTraceCaptureRealGatewayRoutes(t *testing.T) {
 			wantStages: []requesttrace.Stage{
 				requesttrace.StageRequest,
 				requesttrace.StageAuthentication,
-				requesttrace.StageBalanceCheck,
 				requesttrace.StageModelResolution,
+				requesttrace.StageBalanceCheck,
 				requesttrace.StageValidation,
 				requesttrace.StageChannelSelection,
 				requesttrace.StageUpstreamAttempt,
@@ -260,12 +260,10 @@ func TestRequestTraceCaptureStopsBeforeUpstreamOnGatewayRejections(t *testing.T)
 			wantStages: []requesttrace.Stage{
 				requesttrace.StageRequest,
 				requesttrace.StageAuthentication,
-				requesttrace.StageBalanceCheck,
 				requesttrace.StageModelResolution,
 			},
 			wantStatuses: []requesttrace.Status{
 				requesttrace.StatusError,
-				requesttrace.StatusSuccess,
 				requesttrace.StatusSuccess,
 				requesttrace.StatusError,
 			},
@@ -289,12 +287,10 @@ func TestRequestTraceCaptureStopsBeforeUpstreamOnGatewayRejections(t *testing.T)
 			wantStages: []requesttrace.Stage{
 				requesttrace.StageRequest,
 				requesttrace.StageAuthentication,
-				requesttrace.StageBalanceCheck,
 				requesttrace.StageModelResolution,
 			},
 			wantStatuses: []requesttrace.Status{
 				requesttrace.StatusError,
-				requesttrace.StatusSuccess,
 				requesttrace.StatusSuccess,
 				requesttrace.StatusError,
 			},
@@ -334,7 +330,7 @@ func TestRequestTraceCaptureStopsBeforeUpstreamOnGatewayRejections(t *testing.T)
 	}
 }
 
-func TestRequestTraceCapturePreservesTwoRealRelayAttempts(t *testing.T) {
+func TestRequestTraceCaptureDoesNotRetryUnknownAcceptance(t *testing.T) {
 	fixture := newTraceCaptureFixture(t)
 	fixture.failFirst.Store(true)
 	require.NoError(
@@ -359,9 +355,8 @@ func TestRequestTraceCapturePreservesTwoRealRelayAttempts(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	fixture.engine.ServeHTTP(response, request)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	require.Equal(t, int32(2), fixture.providerCalls.Load())
-	fixture.awaitConsume(t, requestID)
+	require.Equal(t, http.StatusInternalServerError, response.Code, response.Body.String())
+	require.Equal(t, int32(1), fixture.providerCalls.Load())
 	fixture.flush(t)
 
 	page, err := fixture.store.FindRequests(
@@ -389,7 +384,7 @@ func TestRequestTraceCapturePreservesTwoRealRelayAttempts(t *testing.T) {
 		}
 	}
 
-	require.Len(t, attempts, 2)
+	require.Len(t, attempts, 1)
 
 	statusByAttempt := make(map[int]requesttrace.Status, 2)
 	for _, attempt := range attempts {
@@ -399,7 +394,7 @@ func TestRequestTraceCapturePreservesTwoRealRelayAttempts(t *testing.T) {
 
 	require.Equal(
 		t,
-		map[int]requesttrace.Status{1: requesttrace.StatusError, 2: requesttrace.StatusSuccess},
+		map[int]requesttrace.Status{1: requesttrace.StatusError},
 		statusByAttempt,
 	)
 }
@@ -550,7 +545,7 @@ func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testi
 	require.NoError(t, model.InitModelConfigAndChannelCache())
 
 	requestID := "shared-malicious-request"
-	for _, key := range []string{"trace-test-key", "trace-other-key"} {
+	for index, key := range []string{"trace-test-key", "trace-other-key"} {
 		request := httptest.NewRequestWithContext(context.Background(),
 			http.MethodPost,
 			"/v1/images/generations",
@@ -567,14 +562,18 @@ func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testi
 
 		response := httptest.NewRecorder()
 		fixture.engine.ServeHTTP(response, request)
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		expected := http.StatusOK
+		if index == 0 {
+			expected = http.StatusInternalServerError
+		}
+		require.Equal(t, expected, response.Code, response.Body.String())
 	}
 
 	require.Equal(
 		t,
-		int32(3),
+		int32(2),
 		fixture.providerCalls.Load(),
-		"the injected raw upstream error must be followed by one successful retry",
+		"unknown acceptance must not retry; the other owner submits independently",
 	)
 	require.Eventually(t, func() bool {
 		var count int64
@@ -583,7 +582,7 @@ func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testi
 			Where("request_id = ?", requestID).
 			Count(&count).
 			Error == nil &&
-			count == 2
+			count == 1
 	}, 3*time.Second, 10*time.Millisecond)
 	fixture.flush(t)
 
@@ -652,6 +651,7 @@ func newTraceCaptureFixture(t *testing.T) *traceCaptureFixture {
 		w.Header().Set("Content-Type", "application/json")
 
 		if f.failFirst.Load() && call == 1 {
+			// A server error does not prove that the provider rejected the task.
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write(
 				[]byte(

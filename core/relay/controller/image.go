@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -114,13 +113,17 @@ func getImagesRequestN(c *gin.Context) (int, bool, error) {
 }
 
 func getImagesRequest(c *gin.Context) (*relaymodel.ImageRequest, error) {
-	imageRequest, err := utils.UnmarshalImageRequest(c.Request)
-	if err != nil {
+	// Read failures stay gateway errors; only a body the client sent wrong is a 400.
+	if _, err := common.GetRequestBodyReusable(c.Request); err != nil {
 		return nil, err
 	}
 
-	if imageRequest.Prompt == "" {
-		return nil, errors.New("prompt is required")
+	imageRequest, err := utils.UnmarshalImageRequest(c.Request)
+	if err != nil {
+		return nil, NewCodedBadRequestParamError(
+			"invalid_request",
+			"The request body must be a valid JSON object with correctly typed fields: prompt, size, quality, style, response_format and user are strings, n is an integer.",
+		)
 	}
 
 	if imageRequest.N == 0 {
@@ -134,6 +137,18 @@ func ValidateImagesRequest(c *gin.Context, mc model.ModelConfig) error {
 	imageRequest, err := getImagesRequest(c)
 	if err != nil {
 		return err
+	}
+	// Legacy image endpoints require a prompt. Registry task endpoints validate
+	// their own schema; price and usage extraction must also allow image-only tasks.
+	if imageRequest.Prompt == "" {
+		return NewDetailedBadRequestParamError(
+			"invalid_parameter",
+			"prompt is required and must be a non-empty string.",
+			"prompt",
+			nil,
+			nil,
+			"non-empty string",
+		)
 	}
 
 	if err := validateSupportedImageResolution(imageRequest.Size, mc); err != nil {
@@ -288,6 +303,7 @@ func GetImagesRequestUsage(c *gin.Context, _ model.ModelConfig) (RequestUsage, e
 		Context: model.UsageContext{
 			Resolution: imageRequest.Size,
 			Quality:    imageRequest.Quality,
+			Style:      imageRequest.Style,
 		},
 	}, nil
 }

@@ -49,3 +49,25 @@ func TestRequestIDMiddlewareReplacesUnsafeInboundID(t *testing.T) {
 		t.Fatalf("request id = %q, want generated safe id", got)
 	}
 }
+
+func TestBillingOperationIDCannotBeChosenByClient(t *testing.T) {
+	var previous string
+	for range 2 {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+		c.Request.Header.Set(RequestIDHeader, "same-client-trace")
+		c.Request.Header.Set("X-Billing-Operation-ID", "same-client-trace")
+		RequestIDMiddleware(c)
+		id := GetBillingOperationID(c)
+		if id == "" || id == "same-client-trace" || id == previous {
+			t.Fatal("billing identity must be server owned and distinct per execution")
+		}
+		if GetBillingOperationID(c) != id {
+			t.Fatal("channel retries must reuse billing identity")
+		}
+		if GetRequestID(c) != "same-client-trace" {
+			t.Fatal("correlation id must be preserved")
+		}
+		previous = id
+	}
+}

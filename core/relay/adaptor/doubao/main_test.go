@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/ownedimage"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -587,7 +588,9 @@ func TestAdaptorConvertRequestImageGenerationMapsSequentialCount(t *testing.T) {
 func TestAdaptorDoResponseImageGenerationUsesDoubaoUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	adaptor := &Adaptor{}
+	adaptor := &Adaptor{imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
+		return "https://api.example.com/owned.png", ownedimage.Metadata{Width: 2048, Height: 2048, ContentType: "image/png"}, nil
+	}}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequestWithContext(
@@ -644,12 +647,12 @@ func TestAdaptorDoResponseImageGenerationUsesDoubaoUsage(t *testing.T) {
 	}
 
 	first, ok := data[0].(map[string]any)
-	if !ok || first["url"] != "https://example.com/image.png" {
+	if !ok || first["url"] != "https://api.example.com/owned.png" {
 		t.Fatalf("expected OpenAI image data, got %#v", payload["data"])
 	}
 
-	if _, ok := first["size"]; ok {
-		t.Fatalf("expected provider size field to be omitted, got %#v", first)
+	if first["size"] != "2048x2048" || first["width"] != float64(2048) || first["content_type"] != "image/png" {
+		t.Fatalf("expected actual image metadata, got %#v", first)
 	}
 
 	usagePayload, ok := payload["usage"].(map[string]any)
@@ -674,7 +677,9 @@ func TestAdaptorDoResponseImageGenerationUsesDoubaoUsage(t *testing.T) {
 func TestAdaptorDoResponseImageGenerationStreamConvertsDoubaoEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	adaptor := &Adaptor{}
+	adaptor := &Adaptor{imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
+		return "https://api.example.com/owned.png", ownedimage.Metadata{Width: 2048, Height: 2048, ContentType: "image/png"}, nil
+	}}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequestWithContext(
@@ -730,7 +735,7 @@ func TestAdaptorDoResponseImageGenerationStreamConvertsDoubaoEvents(t *testing.T
 		!strings.Contains(body, `"partial_image_index":0`) ||
 		!strings.Contains(body, "event: "+relaymodel.ImageStreamEventCompleted+"\n") ||
 		!strings.Contains(body, `"type":"`+relaymodel.ImageStreamEventCompleted+`"`) ||
-		!strings.Contains(body, `"url":"https://example.com/one.png"`) ||
+		!strings.Contains(body, `"url":"https://api.example.com/owned.png"`) ||
 		!strings.Contains(body, `"output_tokens":32768`) {
 		t.Fatalf("unexpected stream body: %s", body)
 	}
@@ -747,7 +752,9 @@ func TestAdaptorDoResponseImageGenerationStreamConvertsDoubaoEvents(t *testing.T
 func TestAdaptorDoResponseImageGenerationStreamFallsBackToCompletedImages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	adaptor := &Adaptor{}
+	adaptor := &Adaptor{imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
+		return "https://api.example.com/owned.png", ownedimage.Metadata{Width: 2048, Height: 2048, ContentType: "image/png"}, nil
+	}}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequestWithContext(

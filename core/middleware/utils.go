@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -120,7 +121,23 @@ func AbortWithMessageWithMode(
 	message string,
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
-	if IsPublicVideoRequest(c.Request.URL.Path, m) {
+	if stage, _ := c.Get(operationalFailureStageKey); stage == model.FailureStageBalance {
+		options := &relaymodel.WrapperErrorOption{}
+		for _, apply := range opts {
+			apply(options)
+		}
+		if statusCode == http.StatusForbidden && options.Type == GroupBalanceNotEnough {
+			statusCode = http.StatusPaymentRequired
+		}
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+			c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
+			c.Abort()
+			return
+		}
+		message = "Your account balance is insufficient."
+		opts = append(opts, relaymodel.WithType("insufficient_quota"), relaymodel.WithCode("insufficient_balance"))
+	} else if IsPublicVideoRequest(c.Request.URL.Path, m) ||
+		(strings.HasPrefix(c.Request.URL.Path, "/v1/") && (statusCode == 401 || statusCode >= 500)) {
 		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
 		c.Abort()
 		return
@@ -162,7 +179,23 @@ func AbortWithMessage(
 	message string,
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
-	if IsPublicVideoRequest(c.Request.URL.Path, GetMode(c)) {
+	if stage, _ := c.Get(operationalFailureStageKey); stage == model.FailureStageBalance {
+		options := &relaymodel.WrapperErrorOption{}
+		for _, apply := range opts {
+			apply(options)
+		}
+		if statusCode == http.StatusForbidden && options.Type == GroupBalanceNotEnough {
+			statusCode = http.StatusPaymentRequired
+		}
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+			c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
+			c.Abort()
+			return
+		}
+		message = "Your account balance is insufficient."
+		opts = append(opts, relaymodel.WithType("insufficient_quota"), relaymodel.WithCode("insufficient_balance"))
+	} else if IsPublicVideoRequest(c.Request.URL.Path, GetMode(c)) ||
+		(strings.HasPrefix(c.Request.URL.Path, "/v1/") && (statusCode == http.StatusUnauthorized || statusCode >= 500)) {
 		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
 		c.Abort()
 		return

@@ -275,3 +275,35 @@ func TestInitExternal(t *testing.T) {
 	require.Equal(t, "http://example.com", e.url)
 	require.Equal(t, "key", e.key)
 }
+
+func TestBillingOperationSurvivesWalletRetries(t *testing.T) {
+	setFastExternalRetries(t)
+	var requests []externalConsumeReq
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req externalConsumeReq
+		if err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		requests = append(requests, req)
+		if len(requests) == 1 {
+			w.WriteHeader(500)
+			return
+		}
+		writeExternalCharged(w, 1)
+	}))
+	defer srv.Close()
+	consumer := newExternalPostGroupConsumer(NewExternalHTTP(srv.URL, "key"), "billing-regression")
+	for _, id := range []string{"server-operation-one", "server-operation-two"} {
+		ctx := context.WithValue(t.Context(), CtxRequestID, "repeated-client-trace")
+		ctx = ContextWithBillingOperationID(ctx, id)
+		_, err := consumer.PostGroupConsume(ctx, "token", 1)
+		require.NoError(t, err)
+	}
+	require.Len(t, requests, 3)
+	require.Equal(t, requests[0].BillingOperationID, requests[1].BillingOperationID)
+	require.NotEqual(t, requests[1].BillingOperationID, requests[2].BillingOperationID)
+	for _, req := range requests {
+		require.Equal(t, "repeated-client-trace", req.RequestID)
+	}
+}

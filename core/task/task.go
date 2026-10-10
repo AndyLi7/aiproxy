@@ -284,6 +284,8 @@ var (
 )
 
 func AsyncUsagePollTask(ctx context.Context) {
+	go ImagePrepaymentRecoveryTask(ctx)
+	go UpstreamBillingRecoveryTask(ctx)
 	ticker := time.NewTicker(asyncUsagePollInterval)
 	defer ticker.Stop()
 
@@ -1055,7 +1057,7 @@ func consumeAsyncUsageGroupBalance(
 	info *model.AsyncUsageInfo,
 	amount float64,
 ) (bool, bool, error) {
-	if balance.Default == nil || info.GroupID == "" {
+	if info.InternalImageTask || balance.Default == nil || info.GroupID == "" {
 		return false, false, nil
 	}
 
@@ -1065,6 +1067,7 @@ func consumeAsyncUsageGroupBalance(
 	}
 
 	ctx = context.WithValue(ctx, balance.CtxRequestID, info.RequestID)
+	ctx = balance.ContextWithBillingOperationID(ctx, info.BillingOperationID)
 	ctx = balance.ContextWithPricing(ctx, info.PricingCurrency, info.PricingVersion)
 
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
@@ -1118,6 +1121,7 @@ func recordAsyncUsageConsumeError(
 		err.Error(),
 		amount,
 		info.TokenID,
+		info.BillingOperationID,
 	); err != nil {
 		log.Error("failed to create async usage consume error: " + err.Error())
 	}

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
+	relaymodel "github.com/labring/aiproxy/core/relay/model"
 	"github.com/sirupsen/logrus"
 )
 
@@ -140,7 +142,12 @@ func TokenAuth(c *gin.Context) {
 		tokenCache, err := model.GetAndValidateToken(key)
 		if err != nil {
 			oncall.AlertDBError("TokenAuth", err)
-			AbortLogWithMessage(c, http.StatusUnauthorized, err.Error())
+			if key != "" {
+				// Operators identify the key by its masked form; clients never see it.
+				log.Data["key"] = maskTokenKey(key)
+			}
+			abortTokenRejection(c, tokenRejectionFor(err), err)
+
 			return
 		}
 
@@ -154,20 +161,17 @@ func TokenAuth(c *gin.Context) {
 
 	if len(token.Subnets) > 0 {
 		if ok, err := network.IsIPInSubnets(c.ClientIP(), token.Subnets); err != nil {
-			AbortLogWithMessage(c, http.StatusInternalServerError, err.Error())
+			abortTokenRejection(c, tokenRejectionFor(model.ErrTokenUnavailable),
+				fmt.Errorf("token %d subnet check: %w", token.ID, err))
+
 			return
 		} else if !ok {
-			AbortLogWithMessage(
-				c,
-				http.StatusForbidden,
-				fmt.Sprintf(
-					"token (%s[%d]) can only be used in the specified subnets: %v, current ip: %s",
-					token.Name,
-					token.ID,
-					token.Subnets,
-					c.ClientIP(),
-				),
-			)
+			abortTokenRejection(c, tokenRejection{
+				status:  http.StatusForbidden,
+				code:    "api_key_ip_not_allowed",
+				kind:    "permission_error",
+				message: "This API key cannot be used from this network address. Check the key's allowed IP ranges.",
+			}, fmt.Errorf("token %d used outside its subnets", token.ID))
 
 			return
 		}
@@ -184,11 +188,8 @@ func TokenAuth(c *gin.Context) {
 	} else {
 		groupCache, err := model.CacheGetGroup(token.Group)
 		if err != nil {
-			AbortLogWithMessage(
-				c,
-				http.StatusInternalServerError,
-				fmt.Sprintf("failed to get group: %v", err),
-			)
+			abortTokenRejection(c, tokenRejectionFor(model.ErrTokenUnavailable),
+				fmt.Errorf("failed to get group: %w", err))
 
 			return
 		}
@@ -237,6 +238,63 @@ func TokenAuth(c *gin.Context) {
 	authTraceFinished = true
 
 	c.Next()
+}
+
+// tokenRejection is what an API client can act on after a failed key check.
+// Messages never include the key's name, ID, subnets or the caller's address.
+type tokenRejection struct {
+	status  int
+	code    string
+	kind    string
+	message string
+}
+
+func tokenRejectionFor(err error) tokenRejection {
+	switch {
+	case errors.Is(err, model.ErrTokenDisabled):
+		return tokenRejection{
+			status:  http.StatusForbidden,
+			code:    "api_key_disabled",
+			kind:    "permission_error",
+			message: "This API key is disabled. Enable it in the console or use another key.",
+		}
+	case errors.Is(err, model.ErrTokenQuotaExhausted):
+		// 429 rather than 402: 402 means the account balance is insufficient,
+		// which a top-up fixes; this is a limit set on the key itself.
+		return tokenRejection{
+			status:  http.StatusTooManyRequests,
+			code:    "api_key_quota_exhausted",
+			kind:    "insufficient_quota",
+			message: "This API key has reached its spending limit. Raise the key's limit, wait for its limit period to reset, or use another key.",
+		}
+	case errors.Is(err, model.ErrTokenUnavailable):
+		return tokenRejection{
+			status:  http.StatusServiceUnavailable,
+			code:    "auth_unavailable",
+			kind:    "api_error",
+			message: "API key verification is temporarily unavailable. Retry later with the same request.",
+		}
+	default:
+		return tokenRejection{
+			status:  http.StatusUnauthorized,
+			code:    "invalid_api_key",
+			kind:    "authentication_error",
+			message: "The API key is missing or invalid.",
+		}
+	}
+}
+
+// abortTokenRejection logs the same code it returns. The detail, which may name
+// the key's ID, stays in server logs only.
+func abortTokenRejection(c *gin.Context, rejection tokenRejection, detail error) {
+	SetOperationalFailure(c, model.FailureStageAuth, rejection.code, rejection.message)
+	common.GetLogger(c).Errorf("token rejected (%s): %v", rejection.code, detail)
+	c.JSON(rejection.status, relaymodel.NewOpenAIError(rejection.status, relaymodel.OpenAIError{
+		Code:    rejection.code,
+		Message: rejection.message,
+		Type:    rejection.kind,
+	}))
+	c.Abort()
 }
 
 func GetGroup(c *gin.Context) model.GroupCache {

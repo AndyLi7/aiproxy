@@ -25,6 +25,7 @@ type PriceCondition struct {
 	Timezone       string   `json:"timezone,omitempty"`         // IANA timezone for the daily time range
 	Resolution     []string `json:"resolution,omitempty"`
 	Quality        []string `json:"quality,omitempty"`
+	Style          []string `json:"style,omitempty"`
 	ServiceTier    string   `json:"service_tier,omitempty"`
 	InputMedia     *bool    `json:"input_media,omitempty"`
 	InputVideo     *bool    `json:"input_video,omitempty"`
@@ -277,6 +278,10 @@ func priceConditionSpecificity(condition PriceCondition) int {
 	}
 
 	if len(normalizeResolutionConditionValues(condition.Resolution)) > 0 {
+		specificity++
+	}
+
+	if len(condition.Style) > 0 {
 		specificity++
 	}
 
@@ -599,7 +604,8 @@ func (p *Price) ValidateConditionalPrices() error {
 			}
 
 			if !resolutionConditionValuesOverlap(condition.Resolution, otherCondition.Resolution) ||
-				!qualityConditionValuesOverlap(condition.Quality, otherCondition.Quality) {
+				!qualityConditionValuesOverlap(condition.Quality, otherCondition.Quality) ||
+				!styleConditionsOverlap(condition.Style, otherCondition.Style) {
 				continue
 			}
 
@@ -916,6 +922,7 @@ type UsageContext struct {
 	NativeResolution string      `gorm:"size:32"                       json:"native_resolution,omitempty"`
 	Seconds          int         `gorm:"column:seconds"                json:"seconds,omitempty"`
 	Quality          string      `gorm:"size:32"                       json:"quality,omitempty"`
+	Style            string      `gorm:"size:120"                      json:"style,omitempty"`
 	ServiceTier      string      `gorm:"size:32"                       json:"service_tier,omitempty"`
 	VideoSeconds     int64       `                                     json:"video_seconds,omitempty"`
 	InputMedia       *bool       `                                     json:"input_media,omitempty"`
@@ -952,6 +959,9 @@ func (c UsageContext) priceConditionMatches(
 		return false
 	}
 
+	if len(condition.Style) > 0 && !slices.Contains(condition.Style, c.Style) {
+		return false
+	}
 	if !qualityConditionValueMatches(condition.Quality, c.Quality) {
 		return false
 	}
@@ -994,6 +1004,9 @@ func (c UsageContext) WithFallback(fallback UsageContext) UsageContext {
 		c.Seconds = fallback.Seconds
 	}
 
+	if c.Style == "" {
+		c.Style = fallback.Style
+	}
 	if c.Quality == "" {
 		c.Quality = fallback.Quality
 	}
@@ -1143,4 +1156,17 @@ func (p Price) ImageBillingFallbackRate() (ImageBillingRate, error) {
 	rate := ImageBillingRate{AmountMicros: micros.IntPart(), UnitQuantity: unit}
 
 	return rate, rate.Validate()
+}
+
+// Style IDs are exact provider enum values, not normalized display labels.
+func styleConditionsOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	for _, value := range a {
+		if slices.Contains(b, value) {
+			return true
+		}
+	}
+	return false
 }

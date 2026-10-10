@@ -30,6 +30,8 @@ COPY --from=frontend-builder /aiproxy/web/dist/ /aiproxy/core/public/dist/
 
 RUN SWAG_VERSION=${SWAG_VERSION} sh scripts/swag.sh
 
+RUN sh scripts/test-image-contracts.sh
+
 RUN go build -trimpath -ldflags "-s -w" -o aiproxy
 
 FROM alpine:latest

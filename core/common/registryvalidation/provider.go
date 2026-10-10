@@ -19,12 +19,15 @@ type ProviderBinding struct {
 	ContractHash string `json:"contractHash"`
 }
 type ProviderSpec struct {
-	Metering     json.RawMessage `json:"metering,omitempty"`
-	ID           string          `json:"id"`
-	Revision     string          `json:"revision"`
-	ContractHash string          `json:"contractHash"`
-	Endpoint     string          `json:"endpoint"`
-	Execution    struct {
+	OutputArtifacts *OutputArtifactProjection `json:"outputArtifacts,omitempty"`
+	OutputImages    *OutputImageProjection    `json:"outputImages,omitempty"`
+	OutputMetadata  *OutputMetadataProjection `json:"outputMetadata,omitempty"`
+	Metering        json.RawMessage           `json:"metering,omitempty"`
+	ID              string                    `json:"id"`
+	Revision        string                    `json:"revision"`
+	ContractHash    string                    `json:"contractHash"`
+	Endpoint        string                    `json:"endpoint"`
+	Execution       struct {
 		Mode                 string `json:"mode"`
 		StatusEndpoint       string `json:"statusEndpoint"`
 		ResultEndpoint       string `json:"resultEndpoint"`
@@ -35,11 +38,12 @@ type ProviderSpec struct {
 	Output   map[string]any `json:"outputJsonSchema"`
 }
 type boundProvider struct {
-	Adapter     string            `json:"adapter"`
-	Mapping     map[string]string `json:"parameterMapping"`
-	Fixed       map[string]any    `json:"fixedParameters"`
-	Passthrough []string          `json:"allowedPassthroughParameters"`
-	Upstream    *ProviderSpec     `json:"upstream"`
+	Adapter         string            `json:"adapter"`
+	InputProjection string            `json:"inputProjection"`
+	Mapping         map[string]string `json:"parameterMapping"`
+	Fixed           map[string]any    `json:"fixedParameters"`
+	Passthrough     []string          `json:"allowedPassthroughParameters"`
+	Upstream        *ProviderSpec     `json:"upstream"`
 }
 
 var (
@@ -87,6 +91,15 @@ func bound(raw []byte, b ProviderBinding) (*boundProvider, error) {
 		s.ContractHash != b.ContractHash ||
 		s.Endpoint == "" {
 		return nil, ErrProviderContract
+	}
+	if err := validateOutputArtifactProjection(s); err != nil {
+		return nil, err
+	}
+	if err := validateOutputImageProjection(s); err != nil {
+		return nil, err
+	}
+	if err := validateOutputMetadataProjection(s); err != nil {
+		return nil, err
 	}
 
 	return &p, nil
@@ -174,11 +187,45 @@ func MapBoundProviderInput(
 	if schemaAccepts(s.Accepted, input) != nil {
 		return nil, ErrProviderContract
 	}
+	if p.InputProjection != "" {
+		if p.InputProjection != "seedream45_ark_single_v1" || adapter != "volcengine-ark-image" ||
+			len(p.Mapping) != 2 || p.Mapping["prompt"] != "prompt" || p.Mapping["image_size"] != "size" ||
+			len(p.Fixed) != 2 || p.Fixed["stream"] != false || p.Fixed["response_format"] != "url" ||
+			len(p.Passthrough) != 0 || len(input) != 4 || input["n"] != float64(1) || input["max_images"] != float64(1) {
+			return nil, ErrProviderContract
+		}
+		size, ok := input["image_size"].(string)
+		if !ok || (size != "auto_2K" && size != "auto_4K") {
+			return nil, ErrProviderContract
+		}
+		prompt, ok := input["prompt"].(string)
+		if !ok || prompt == "" {
+			return nil, ErrProviderContract
+		}
+		mapped := map[string]any{
+			"prompt": prompt, "size": strings.TrimPrefix(size, "auto_"),
+			"stream": false, "response_format": "url",
+		}
+		if schemaAccepts(s.Input, mapped) != nil {
+			return nil, ErrProviderContract
+		}
+		return json.Marshal(mapped)
+	}
 
 	mapped := map[string]any{}
 	for key, value := range input {
 		target, ok := p.Mapping[key]
 		if !ok {
+			// Fixed-count contracts keep n as a platform control, not an upstream field.
+			var metering ImageMetering
+			if key == "n" && json.Unmarshal(s.Metering, &metering) == nil &&
+				(metering.Version == 3 || metering.Version == 4 || metering.Version == 5 || metering.Version == 6 || metering.Version == 7 || (metering.Version == 8 || metering.Version == 9 || (metering.Version == 10 || (metering.Version == 11 || metering.Version == 12)))) && metering.OutputCountFixed != nil &&
+				*metering.OutputCountFixed == 1 {
+				if value != float64(1) {
+					return nil, ErrProviderContract
+				}
+				continue
+			}
 			if !slices.Contains(p.Passthrough, key) {
 				return nil, ErrProviderContract
 			}
@@ -267,8 +314,62 @@ func ValidateFrozenProviderOutput(raw, output []byte) error {
 	if json.Unmarshal(output, &value) != nil {
 		return ErrProviderContract
 	}
+	var metering ImageMetering
+	if len(p.Upstream.Metering) != 0 && json.Unmarshal(p.Upstream.Metering, &metering) != nil {
+		return ErrProviderContract
+	}
+	if metering.Version == 4 || (metering.Version == 5 && metering.MaxOutputPixels != nil) {
+		if metering.MaxOutputPixels == nil || *metering.MaxOutputPixels < 1 {
+			return ErrProviderContract
+		}
+		var images struct {
+			Images []struct {
+				Width  int64 `json:"width"`
+				Height int64 `json:"height"`
+			} `json:"images"`
+		}
+		if json.Unmarshal(output, &images) != nil || len(images.Images) == 0 {
+			return ErrProviderContract
+		}
+		for _, image := range images.Images {
+			if image.Width < 1 || image.Height < 1 || image.Width > *metering.MaxOutputPixels/image.Height {
+				return ErrProviderContract
+			}
+		}
+	}
 
 	return schemaAccepts(p.Upstream.Output, value)
+}
+
+// FrozenImagePixelLimit is read from the reservation snapshot during failover.
+func FrozenImagePixelLimit(raw []byte) (int64, error) {
+	if !HasProviderContracts(raw) {
+		return 0, nil
+	}
+	var frozen struct {
+		Binding ProviderBinding `json:"selected_provider_binding"`
+	}
+	if json.Unmarshal(raw, &frozen) != nil {
+		return 0, ErrProviderContract
+	}
+	p, err := bound(raw, frozen.Binding)
+	if err != nil {
+		return 0, err
+	}
+	var m ImageMetering
+	if len(p.Upstream.Metering) == 0 {
+		return 0, nil
+	}
+	if json.Unmarshal(p.Upstream.Metering, &m) != nil {
+		return 0, ErrProviderContract
+	}
+	if m.Version == 4 || (m.Version == 5 && m.MaxOutputPixels != nil) {
+		if m.MaxOutputPixels == nil || *m.MaxOutputPixels < 1 || *m.MaxOutputPixels > 100000000 {
+			return 0, ErrProviderContract
+		}
+		return *m.MaxOutputPixels, nil
+	}
+	return 0, nil
 }
 
 // Only paths within the pinned model (or the legacy application root) are allowed.

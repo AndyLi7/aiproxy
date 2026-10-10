@@ -354,7 +354,7 @@ func checkGroupBalance(c *gin.Context, group model.GroupCache) (ok bool) {
 		AbortOperationally(
 			c,
 			model.FailureStageBalance,
-			http.StatusForbidden,
+			http.StatusPaymentRequired,
 			fmt.Sprintf("group `%s` balance not enough", group.ID),
 			relaymodel.WithType(GroupBalanceNotEnough),
 		)
@@ -513,10 +513,6 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	group := GetGroup(c)
 	token := GetToken(c)
 
-	if !checkGroupBalance(c, group) {
-		return
-	}
-
 	routeStartedAt := time.Now()
 	traceStage := BeginRequestTraceStage(
 		c,
@@ -556,6 +552,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		group.Status == model.GroupStatusInternal && channelHeader != ""
 	publicModel := requestModel
 	routingModel := resolveImageCapability(c, mode, requestModel)
+	routingModel = resolveNativeCapability(c, mode, routingModel)
 
 	resolvedLocal := false
 	if isCapabilityCreateMode(mode) {
@@ -687,18 +684,28 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		requestModel,
 		mc.Config,
 	); validationErr != nil {
-		AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+		if validationErr.Status == http.StatusBadRequest {
+			code := validationErr.Code
+			if code == "" {
+				code = "invalid_parameter"
+			}
+			SetOperationalFailure(c, model.FailureStageValidation, code, validationErr.Error())
+			saveCustomerValidationDetail(c, validationErr)
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": validationErr.PublicError()})
+		} else {
+			AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+		}
+		return
+	}
+
+	// Resolve model access and validate the registry input before wallet lookup.
+	if !checkGroupBalance(c, group) {
 		return
 	}
 
 	user, err := getRequestUser(c, mode)
 	if err != nil {
-		AbortLogWithMessage(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-		)
-
+		abortRequestFieldError(c, mode, err)
 		return
 	}
 
@@ -707,12 +714,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	promptCacheKey, err := getPromptCacheKey(c, mode)
 	if err != nil {
-		AbortLogWithMessage(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-		)
-
+		abortRequestFieldError(c, mode, err)
 		return
 	}
 
@@ -721,12 +723,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	requestServiceTier, err := getRequestServiceTier(c, mode)
 	if err != nil {
-		AbortLogWithMessage(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-		)
-
+		abortRequestFieldError(c, mode, err)
 		return
 	}
 
@@ -735,12 +732,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 
 	metadata, err := getRequestMetadata(c, mode)
 	if err != nil {
-		AbortLogWithMessage(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-		)
-
+		abortRequestFieldError(c, mode, err)
 		return
 	}
 
@@ -997,6 +989,7 @@ func NewMetaByContext(c *gin.Context,
 		meta.WithVideoCapability(GetVideoCapability(c)),
 		meta.WithRequestAt(requestAt),
 		meta.WithRequestID(requestID),
+		meta.WithBillingOperationID(GetBillingOperationID(c)),
 		meta.WithGroup(group),
 		meta.WithToken(token),
 		meta.WithEndpoint(c.Request.URL.Path),
@@ -1031,9 +1024,14 @@ func getRequestBodyNode(c *gin.Context) (*ast.Node, error) {
 		return node, nil
 	}
 
-	node, err := common.UnmarshalRequest2NodeReusable(c.Request)
+	body, err := common.GetRequestBodyReusable(c.Request)
 	if err != nil {
 		return nil, err
+	}
+
+	node, err := common.GetJSONNodeNoCopy(body)
+	if err != nil {
+		return nil, errInvalidRequestBody()
 	}
 
 	c.Set(requestBodyNode, &node)
@@ -1051,6 +1049,77 @@ type publicVideoRequestValidationError struct {
 }
 
 func (e *publicVideoRequestValidationError) Error() string { return e.message }
+
+// Client body mistakes are 400s that name the field when one field is wrong;
+// they are never reported as gateway failures.
+func errInvalidRequestBody() error {
+	return &publicVideoRequestValidationError{
+		code:    "invalid_request",
+		message: "The request body must be a valid JSON object.",
+	}
+}
+
+func errInvalidRequestField(param, expected string) error {
+	return &publicVideoRequestValidationError{
+		code:     "invalid_parameter",
+		message:  param + " must be " + expected + ".",
+		param:    param,
+		expected: expected,
+	}
+}
+
+// abortRequestInputError writes a client body mistake as a 400 in the
+// endpoint's error envelope and logs the same code at the validation stage.
+func abortRequestInputError(
+	c *gin.Context,
+	m mode.Mode,
+	validationErr *publicVideoRequestValidationError,
+) {
+	errorType := ""
+	switch m {
+	case mode.Anthropic:
+		errorType = "invalid_request_error"
+	case mode.Gemini:
+		errorType = "INVALID_ARGUMENT"
+	}
+
+	if errorType != "" {
+		AbortOperationallyWithCodeWithMode(
+			m,
+			c,
+			model.FailureStageValidation,
+			validationErr.code,
+			http.StatusBadRequest,
+			validationErr.message,
+			relaymodel.WithType(errorType),
+			relaymodel.WithCode(validationErr.code),
+		)
+
+		return
+	}
+
+	AbortPublicVideoRequestError(
+		c,
+		model.FailureStageValidation,
+		http.StatusBadRequest,
+		validationErr.code,
+		validationErr.message,
+		validationErr.param,
+		validationErr.value,
+		validationErr.allowedValues,
+		validationErr.expected,
+	)
+}
+
+// abortRequestFieldError keeps genuine gateway failures as 500s.
+func abortRequestFieldError(c *gin.Context, m mode.Mode, err error) {
+	if validationErr, ok := errors.AsType[*publicVideoRequestValidationError](err); ok {
+		abortRequestInputError(c, m, validationErr)
+		return
+	}
+
+	AbortLogWithMessage(c, http.StatusInternalServerError, err.Error())
+}
 
 func clearRequestBodyNode(c *gin.Context) {
 	if c == nil {
@@ -1118,13 +1187,18 @@ func resolveCapabilityRequest(
 
 func getStringFieldFromNode(node *ast.Node, key, errMessage string) (string, error) {
 	field := node.Get(key)
+	if field != nil && field.TypeSafe() == ast.V_ERROR {
+		// Lazy parsing reports a malformed or non-object body on first access.
+		return "", errInvalidRequestBody()
+	}
+
 	if field == nil || !field.Exists() || field.TypeSafe() == ast.V_NULL {
 		return "", nil
 	}
 
 	value, err := field.String()
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", errMessage, err)
+		return "", fmt.Errorf("%s: %w", errMessage, errInvalidRequestField(key, "a string"))
 	}
 
 	return value, nil
@@ -1132,20 +1206,28 @@ func getStringFieldFromNode(node *ast.Node, key, errMessage string) (string, err
 
 func getMetadataFromNode(node *ast.Node) (map[string]string, error) {
 	field := node.Get("metadata")
+	if field != nil && field.TypeSafe() == ast.V_ERROR {
+		return nil, errInvalidRequestBody()
+	}
+
 	if field == nil || !field.Exists() || field.TypeSafe() == ast.V_NULL {
 		return nil, nil
 	}
 
+	invalid := errInvalidRequestField("metadata", "an object whose values are strings")
+
 	raw, err := field.Raw()
 	if err != nil {
-		return nil, fmt.Errorf("get request metadata failed: %w", err)
+		return nil, fmt.Errorf("get request metadata failed: %w", invalid)
 	}
 
 	var metadata map[string]string
 	if err := sonic.UnmarshalString(raw, &metadata); err != nil {
-		return nil, fmt.Errorf("get request metadata failed: %w", err)
+		return nil, fmt.Errorf("get request metadata failed: %w", invalid)
 	}
 
+	// Reserved server-generated audit data must never originate from the caller.
+	delete(metadata, "channel_failover_attempts")
 	return metadata, nil
 }
 
@@ -1738,7 +1820,10 @@ func getRequestUserFromNode(node *ast.Node, m mode.Mode) (string, error) {
 		if userIDNode != nil && userIDNode.Valid() && userIDNode.TypeSafe() != ast.V_NULL {
 			userID, err := userIDNode.String()
 			if err != nil {
-				return "", fmt.Errorf("get request user failed: %w", err)
+				return "", fmt.Errorf(
+					"get request user failed: %w",
+					errInvalidRequestField("metadata.user_id", "a string"),
+				)
 			}
 
 			if userID != "" {
@@ -1789,18 +1874,7 @@ func resolveRequestModel(
 	requestModel, err := getRequestModel(c, requestMode, groupID, tokenID)
 	if err != nil {
 		if validationErr, ok := errors.AsType[*publicVideoRequestValidationError](err); ok {
-			AbortPublicVideoRequestError(
-				c,
-				model.FailureStageValidation,
-				http.StatusBadRequest,
-				validationErr.code,
-				validationErr.message,
-				validationErr.param,
-				validationErr.value,
-				validationErr.allowedValues,
-				validationErr.expected,
-			)
-
+			abortRequestInputError(c, requestMode, validationErr)
 			return "", false
 		}
 		// Stored-mode routes (videos, video jobs, responses, native task
@@ -1831,6 +1905,14 @@ func resolveRequestModel(
 	}
 
 	if requestModel == "" {
+		if requestMode == mode.ImagesGenerations && (c.Request.URL.Path == "/v1/images/tasks" || c.Request.URL.Path == "/v1/images/generations") {
+			AbortPublicVideoRequestError(
+				c, model.FailureStageValidation, http.StatusBadRequest,
+				"missing_parameter", "model is required and must be a non-empty string",
+				"model", nil, nil, "non-empty string",
+			)
+			return "", false
+		}
 		if IsPublicVideoRequest(c.Request.URL.Path, requestMode) {
 			AbortPublicVideoRequestError(
 				c,

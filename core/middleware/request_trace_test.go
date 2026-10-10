@@ -304,7 +304,7 @@ func TestDistributeTracesBalanceAndFailedModelResolutionWithEmptyAttributes(t *t
 		}
 	}
 
-	require.Equal(t, requesttrace.StatusSuccess, completed[requesttrace.StageBalanceCheck].Status)
+	require.NotContains(t, completed, requesttrace.StageBalanceCheck)
 	require.Equal(t, requesttrace.StatusError, completed[requesttrace.StageModelResolution].Status)
 	require.Empty(t, completed[requesttrace.StageBalanceCheck].Attributes)
 	require.Empty(t, completed[requesttrace.StageModelResolution].Attributes)

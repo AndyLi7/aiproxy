@@ -1,0 +1,1333 @@
+[
+  {
+    "endpoint": "fal-ai/emu-3.5-image/edit-image",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-78/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "aspect_ratio": {
+            "default": "auto",
+            "type": "string",
+            "enum": [
+              "auto",
+              "21:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:21"
+            ],
+            "description": "The aspect ratio of the output image."
+          },
+          "output_format": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the output image."
+          },
+          "resolution": {
+            "default": "720p",
+            "type": "string",
+            "enum": [
+              "480p",
+              "720p"
+            ],
+            "description": "The resolution of the output image."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to edit the image."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seed for the inference."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The image to edit.",
+            "max_file_size": 104857600
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "aspect_ratio",
+          "output_format",
+          "resolution",
+          "prompt",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "21:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:21"
+            ],
+            "title": "Aspect Ratio",
+            "description": "The aspect ratio of the output image.",
+            "uiControl": "select"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the output image.",
+            "uiControl": "select"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "480p",
+              "720p"
+            ],
+            "title": "Resolution",
+            "description": "The resolution of the output image.",
+            "uiControl": "select"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to edit the image.",
+            "uiControl": "textarea"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "The seed for the inference."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image URL",
+            "description": "The image to edit."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "aspect_ratio": "auto",
+        "output_format": "png",
+        "resolution": "720p",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "aspect_ratio": "aspect_ratio",
+            "output_format": "output_format",
+            "resolution": "resolution",
+            "prompt": "prompt",
+            "seed": "seed",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Femu-3.5-image%2Fedit-image",
+            "verifiedAt": "2026-09-26",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Femu-3.5-image%2Fedit-image",
+            "verifiedAt": "2026-09-26",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/emu-3.5-image/edit-image",
+            "revision": "audit",
+            "endpoint": "fal-ai/emu-3.5-image/edit-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/emu-3.5-image/edit-image/requests/{request_id}",
+              "statusEndpoint": "fal-ai/emu-3.5-image/edit-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "21:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:21"
+                  ],
+                  "description": "The aspect ratio of the output image."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the output image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "480p",
+                    "720p"
+                  ],
+                  "description": "The resolution of the output image."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to edit the image."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The seed for the inference."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to edit.",
+                  "max_file_size": 104857600
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "prompt",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "21:9",
+                    "16:9",
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:21"
+                  ],
+                  "description": "The aspect ratio of the output image."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the output image."
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "480p",
+                    "720p"
+                  ],
+                  "description": "The resolution of the output image."
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to edit the image."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The seed for the inference."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The image to edit.",
+                  "max_file_size": 104857600
+                }
+              },
+              "required": [
+                "enable_safety_checker",
+                "prompt",
+                "sync_mode",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The seed for the inference."
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image"
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image"
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The edited image."
+                }
+              },
+              "required": [
+                "seed",
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:8e3e1300e7a7178939b7b0d743db452ad3f52c5b36d5a18ef6850c9e9d133b85"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "aspect_ratio": "auto",
+      "output_format": "jpeg",
+      "resolution": "480p",
+      "prompt": "test",
+      "image_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-78/edit"
+    },
+    "response": {
+      "seed": 0,
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "meta/muse-image/edit",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-555/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "The number of edited images to generate."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The text prompt used to generate or edit the image."
+          },
+          "image_urls": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Reference images used for the edit. Provide between 1 and 10 HTTP(S) or data URLs."
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+          },
+          "output_format": {
+            "default": "webp",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "n",
+          "prompt",
+          "image_urls",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "title": "Num Images",
+            "description": "The number of edited images to generate."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "The text prompt used to generate or edit the image.",
+            "uiControl": "textarea"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "title": "Image URLs",
+            "description": "Reference images used for the edit. Provide between 1 and 10 HTTP(S) or data URLs."
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio",
+            "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_urls"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "n": 1,
+        "output_format": "webp"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "n": "num_images",
+            "prompt": "prompt",
+            "image_urls": "image_urls",
+            "aspect_ratio": "aspect_ratio",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=meta%2Fmuse-image%2Fedit",
+            "verifiedAt": "2026-09-26",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=meta%2Fmuse-image%2Fedit",
+            "verifiedAt": "2026-09-26",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_urls",
+                  "*"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:meta/muse-image/edit",
+            "revision": "audit",
+            "endpoint": "meta/muse-image/edit",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "meta/muse-image/edit/requests/{request_id}",
+              "statusEndpoint": "meta/muse-image/edit/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "The number of edited images to generate."
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The text prompt used to generate or edit the image."
+                },
+                "image_urls": {
+                  "minItems": 1,
+                  "maxItems": 10,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "Reference images used for the edit. Provide between 1 and 10 HTTP(S) or data URLs."
+                },
+                "aspect_ratio": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "image_urls"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "The number of edited images to generate."
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The text prompt used to generate or edit the image."
+                },
+                "image_urls": {
+                  "minItems": 1,
+                  "maxItems": 10,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "description": "Reference images used for the edit. Provide between 1 and 10 HTTP(S) or data URLs."
+                },
+                "aspect_ratio": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "sync_mode",
+                "prompt",
+                "image_urls"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  "description": "The generated or edited images."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:6694e5a512028229d56d45e83fce6d635cec534156116302aaf4cc0c880ca1c3"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "n": 1,
+      "prompt": "test",
+      "image_urls": [
+        "https://example.com/reference.png"
+      ],
+      "output_format": "jpeg",
+      "model": "admission/model-555/edit"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  },
+  {
+    "endpoint": "meta/muse-image/text-to-image",
+    "scenario": "required",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-556/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "The number of images to generate."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The text prompt used to generate or edit the image."
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+          },
+          "output_format": {
+            "default": "webp",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          }
+        },
+        "required": [
+          "n",
+          "prompt",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "title": "Num Images",
+            "description": "The number of images to generate."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "The text prompt used to generate or edit the image.",
+            "uiControl": "textarea"
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio",
+            "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "n": 1,
+        "output_format": "webp"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "n": "num_images",
+            "prompt": "prompt",
+            "aspect_ratio": "aspect_ratio",
+            "output_format": "output_format"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=meta%2Fmuse-image%2Ftext-to-image",
+            "verifiedAt": "2026-09-26",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=meta%2Fmuse-image%2Ftext-to-image",
+            "verifiedAt": "2026-09-26",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:meta/muse-image/text-to-image",
+            "revision": "audit",
+            "endpoint": "meta/muse-image/text-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "meta/muse-image/text-to-image/requests/{request_id}",
+              "statusEndpoint": "meta/muse-image/text-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "The number of images to generate."
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The text prompt used to generate or edit the image."
+                },
+                "aspect_ratio": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "The number of images to generate."
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The text prompt used to generate or edit the image."
+                },
+                "aspect_ratio": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Any custom output aspect ratio as \"width:height\", for example \"16:9\", \"5:4\", or \"1920:1200\". Common presets are \"21:9\", \"16:9\", \"4:3\", \"3:2\", \"1:1\", \"2:3\", \"3:4\", \"9:16\", \"9:21\". The ratio must be between 1:16 and 16:1, the range Muse supports. Only the ratio is used: Muse renders it at its own fixed resolution of roughly 2.5 megapixels, so \"1920:1200\" and \"960:600\" both return the same 1920x1200 image. If omitted, Muse chooses the output dimensions automatically."
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                }
+              },
+              "required": [
+                "sync_mode",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The height of the image in pixels."
+                      },
+                      "content_type": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The mime type of the file."
+                      },
+                      "width": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The width of the image in pixels."
+                      },
+                      "file_size": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The size of the file in bytes."
+                      },
+                      "file_name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The name of the file. It will be auto-generated if not provided."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The URL where the file can be downloaded from."
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": {},
+                    "description": "Represents an image file."
+                  },
+                  "description": "The generated or edited images."
+                }
+              },
+              "required": [
+                "images"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:284ec826c7bf9b9025150276f911a9b499ac580096b4b162d769f7c4c112f53c"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "n": 1,
+      "prompt": "test",
+      "output_format": "jpeg",
+      "model": "admission/model-556/text-to-image"
+    },
+    "response": {
+      "images": [
+        {
+          "url": "https://example.com/reference.png"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,4156 @@
+[
+  {
+    "endpoint": "bria/increase-resolution",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-24/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "output_type": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "description": "Image format. JPEG carries no alpha, so preserve_alpha does not apply."
+          },
+          "preserve_alpha": {
+            "default": true,
+            "type": "boolean",
+            "description": "Reattach the source alpha channel to the result."
+          },
+          "preserve_color": {
+            "default": false,
+            "type": "boolean",
+            "description": "Correct the upscaled result's color cast against the source image."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to upscale."
+          },
+          "desired_increase": {
+            "default": 2,
+            "type": "number",
+            "enum": [
+              2,
+              4
+            ],
+            "description": "Upscale factor. Each factor is its own SwinIR checkpoint."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "output_type",
+          "preserve_alpha",
+          "preserve_color",
+          "image_url",
+          "desired_increase",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "output_type": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "title": "Output Type",
+            "description": "Image format. JPEG carries no alpha, so preserve_alpha does not apply.",
+            "uiControl": "select"
+          },
+          "preserve_alpha": {
+            "type": "boolean",
+            "title": "Preserve Alpha",
+            "description": "Reattach the source alpha channel to the result."
+          },
+          "preserve_color": {
+            "type": "boolean",
+            "title": "Preserve Color",
+            "description": "Correct the upscaled result's color cast against the source image."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to upscale."
+          },
+          "desired_increase": {
+            "type": "integer",
+            "enum": [
+              2,
+              4
+            ],
+            "title": "Desired Increase",
+            "description": "Upscale factor. Each factor is its own SwinIR checkpoint.",
+            "uiControl": "select"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "output_type": "png",
+        "preserve_alpha": true,
+        "preserve_color": false,
+        "desired_increase": 2,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "output_type": "output_type",
+            "preserve_alpha": "preserve_alpha",
+            "preserve_color": "preserve_color",
+            "image_url": "image_url",
+            "desired_increase": "desired_increase"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fincrease-resolution",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria%2Fincrease-resolution",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:bria/increase-resolution",
+            "revision": "audit",
+            "endpoint": "bria/increase-resolution",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "bria/increase-resolution/requests/{request_id}",
+              "statusEndpoint": "bria/increase-resolution/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "output_type": {
+                  "type": "string",
+                  "enum": [
+                    "png",
+                    "jpeg"
+                  ],
+                  "description": "Image format. JPEG carries no alpha, so preserve_alpha does not apply."
+                },
+                "preserve_alpha": {
+                  "type": "boolean",
+                  "description": "Reattach the source alpha channel to the result."
+                },
+                "preserve_color": {
+                  "type": "boolean",
+                  "description": "Correct the upscaled result's color cast against the source image."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to upscale."
+                },
+                "desired_increase": {
+                  "type": "number",
+                  "enum": [
+                    2,
+                    4
+                  ],
+                  "description": "Upscale factor. Each factor is its own SwinIR checkpoint."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "output_type": {
+                  "type": "string",
+                  "enum": [
+                    "png",
+                    "jpeg"
+                  ],
+                  "description": "Image format. JPEG carries no alpha, so preserve_alpha does not apply."
+                },
+                "preserve_alpha": {
+                  "type": "boolean",
+                  "description": "Reattach the source alpha channel to the result."
+                },
+                "preserve_color": {
+                  "type": "boolean",
+                  "description": "Correct the upscaled result's color cast against the source image."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to upscale."
+                },
+                "desired_increase": {
+                  "type": "number",
+                  "enum": [
+                    2,
+                    4
+                  ],
+                  "description": "Upscale factor. Each factor is its own SwinIR checkpoint."
+                }
+              },
+              "required": [
+                "sync_mode",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:48881f1e8c1660372543b1b369dadbb3e6c06789697b4aae37bcc0a3e53d3ce4"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "output_type": "png",
+      "preserve_alpha": true,
+      "preserve_color": false,
+      "image_url": "https://example.com/reference.png",
+      "desired_increase": 2,
+      "n": 1,
+      "model": "admission/model-24/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "fal-ai/aura-sr",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-35/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "default": "v1",
+            "type": "string",
+            "enum": [
+              "v1",
+              "v2"
+            ],
+            "description": "Checkpoint to use for upscaling. More coming soon."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to upscale."
+          },
+          "overlapping_tiles": {
+            "default": false,
+            "type": "boolean",
+            "description": "Whether to use overlapping tiles for upscaling. Setting this to true helps remove seams but doubles the inference time."
+          },
+          "upscale_factor": {
+            "default": 4,
+            "type": "number",
+            "const": 4,
+            "description": "Upscaling factor. More coming soon."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "checkpoint",
+          "image_url",
+          "overlapping_tiles",
+          "upscale_factor",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "type": "string",
+            "enum": [
+              "v1",
+              "v2"
+            ],
+            "title": "Checkpoint",
+            "description": "Checkpoint to use for upscaling. More coming soon.",
+            "uiControl": "select"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image URL",
+            "description": "URL of the image to upscale."
+          },
+          "overlapping_tiles": {
+            "type": "boolean",
+            "title": "Overlapping Tiles",
+            "description": "Whether to use overlapping tiles for upscaling. Setting this to true helps remove seams but doubles the inference time."
+          },
+          "upscale_factor": {
+            "type": "number",
+            "title": "Upscaling Factor (Xs)",
+            "description": "Upscaling factor. More coming soon."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "checkpoint": "v1",
+        "overlapping_tiles": false,
+        "upscale_factor": 4,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "checkpoint": "checkpoint",
+            "image_url": "image_url",
+            "overlapping_tiles": "overlapping_tiles",
+            "upscale_factor": "upscale_factor"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Faura-sr",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Faura-sr",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/aura-sr",
+            "revision": "audit",
+            "endpoint": "fal-ai/aura-sr",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/aura-sr/requests/{request_id}",
+              "statusEndpoint": "fal-ai/aura-sr/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "checkpoint": {
+                  "type": "string",
+                  "enum": [
+                    "v1",
+                    "v2"
+                  ],
+                  "description": "Checkpoint to use for upscaling. More coming soon."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to upscale."
+                },
+                "overlapping_tiles": {
+                  "type": "boolean",
+                  "description": "Whether to use overlapping tiles for upscaling. Setting this to true helps remove seams but doubles the inference time."
+                },
+                "upscale_factor": {
+                  "type": "number",
+                  "const": 4,
+                  "description": "Upscaling factor. More coming soon."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "checkpoint": {
+                  "type": "string",
+                  "enum": [
+                    "v1",
+                    "v2"
+                  ],
+                  "description": "Checkpoint to use for upscaling. More coming soon."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to upscale."
+                },
+                "overlapping_tiles": {
+                  "type": "boolean",
+                  "description": "Whether to use overlapping tiles for upscaling. Setting this to true helps remove seams but doubles the inference time."
+                },
+                "upscale_factor": {
+                  "type": "number",
+                  "const": 4,
+                  "description": "Upscaling factor. More coming soon."
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "description": "Timings for each step in the pipeline."
+                },
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "timings",
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:20f4e27658c7f070584f262fa10a9e486112f50da90afad9ac1b84a5aea819ca"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "checkpoint": "v1",
+      "image_url": "https://example.com/reference.png",
+      "overlapping_tiles": false,
+      "upscale_factor": 4,
+      "n": 1,
+      "model": "admission/model-35/edit"
+    },
+    "response": {
+      "timings": {},
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "fal-ai/drct-super-resolution",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-74/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "upscale_factor": {
+            "default": 4,
+            "type": "number",
+            "const": 4,
+            "description": "Upscaling factor."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to upscale."
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "upscale_factor",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "upscale_factor": {
+            "type": "number",
+            "title": "Upscaling Factor (Xs)",
+            "description": "Upscaling factor."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image URL",
+            "description": "URL of the image to upscale."
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "upscale_factor": 4,
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "upscale_factor": "upscale_factor",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fdrct-super-resolution",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fdrct-super-resolution",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/drct-super-resolution",
+            "revision": "audit",
+            "endpoint": "fal-ai/drct-super-resolution",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/drct-super-resolution/requests/{request_id}",
+              "statusEndpoint": "fal-ai/drct-super-resolution/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "upscale_factor": {
+                  "type": "number",
+                  "const": 4,
+                  "description": "Upscaling factor."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to upscale."
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "upscale_factor": {
+                  "type": "number",
+                  "const": 4,
+                  "description": "Upscaling factor."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to upscale."
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:d9873e669f7552f785ba442291ebf3857cc5843114911f693e380359f5bbcac4"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "upscale_factor": 4,
+      "image_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-74/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  },
+  {
+    "endpoint": "fal-ai/fast-lightning-sdxl",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-92/text-to-image",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "The number of images to generate."
+          },
+          "request_id": {
+            "default": "",
+            "type": "string",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+          },
+          "num_inference_steps": {
+            "default": 4,
+            "type": "number",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "description": "The number of inference steps to perform."
+          },
+          "format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "description": "The format of the generated image."
+          },
+          "embeddings": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "URL or the path to the embedding weights."
+                },
+                "tokens": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "The list of embeddings to use."
+          },
+          "expand_prompt": {
+            "default": false,
+            "type": "boolean",
+            "description": "If set to true, the prompt will be expanded with additional prompts."
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "description": "The size of the generated image."
+          },
+          "seed": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          }
+        },
+        "required": [
+          "n",
+          "request_id",
+          "prompt",
+          "num_inference_steps",
+          "format",
+          "embeddings",
+          "expand_prompt",
+          "image_size",
+          "seed"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "title": "Num Images",
+            "description": "The number of images to generate."
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results.",
+            "uiControl": "textarea"
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "title": "Num Inference Steps",
+            "description": "The number of inference steps to perform.",
+            "uiControl": "select"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "title": "Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          },
+          "embeddings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "URL or the path to the embedding weights."
+                },
+                "tokens": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        ",
+                  "default": null
+                }
+              },
+              "required": [
+                "path"
+              ]
+            },
+            "title": "Embeddings",
+            "description": "The list of embeddings to use.",
+            "default": []
+          },
+          "expand_prompt": {
+            "type": "boolean",
+            "title": "Expand Prompt",
+            "description": "If set to true, the prompt will be expanded with additional prompts."
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image.",
+            "default": "square_hd"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        ",
+            "default": null
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "n": 1,
+        "request_id": "",
+        "num_inference_steps": 4,
+        "format": "jpeg",
+        "embeddings": [],
+        "expand_prompt": false,
+        "image_size": "square_hd",
+        "seed": null
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "n": "num_images",
+            "request_id": "request_id",
+            "prompt": "prompt",
+            "num_inference_steps": "num_inference_steps",
+            "format": "format",
+            "embeddings": "embeddings",
+            "expand_prompt": "expand_prompt",
+            "image_size": "image_size",
+            "seed": "seed"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "safety_checker_version": "v1"
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffast-lightning-sdxl",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffast-lightning-sdxl",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:fal-ai/fast-lightning-sdxl",
+            "revision": "audit",
+            "endpoint": "fal-ai/fast-lightning-sdxl",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/fast-lightning-sdxl/requests/{request_id}",
+              "statusEndpoint": "fal-ai/fast-lightning-sdxl/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "The number of images to generate."
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_inference_steps": {
+                  "type": "number",
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8
+                  ],
+                  "description": "The number of inference steps to perform."
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "embeddings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "URL or the path to the embedding weights."
+                      },
+                      "tokens": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The list of embeddings to use."
+                },
+                "expand_prompt": {
+                  "type": "boolean",
+                  "description": "If set to true, the prompt will be expanded with additional prompts."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "The number of images to generate."
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_inference_steps": {
+                  "type": "number",
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8
+                  ],
+                  "description": "The number of inference steps to perform."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "embeddings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "URL or the path to the embedding weights."
+                      },
+                      "tokens": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The list of embeddings to use."
+                },
+                "expand_prompt": {
+                  "type": "boolean",
+                  "description": "If set to true, the prompt will be expanded with additional prompts."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                },
+                "safety_checker_version": {
+                  "type": "string",
+                  "const": "v1"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode",
+                "enable_safety_checker",
+                "safety_checker_version"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "content_type": {
+                        "default": "image/jpeg",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "height",
+                      "url",
+                      "width"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The generated image files info."
+                },
+                "has_nsfw_concepts": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "description": "Whether the generated images contain NSFW concepts."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt used for generating the image."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                }
+              },
+              "required": [
+                "timings",
+                "images",
+                "has_nsfw_concepts",
+                "prompt",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:e02949a2d55c57af8940e5058010c1afff39610bcfd24fed59a20dd98ea13a43"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "n": 1,
+      "request_id": "",
+      "prompt": "test",
+      "num_inference_steps": 4,
+      "format": "jpeg",
+      "embeddings": [],
+      "expand_prompt": false,
+      "image_size": "square_hd",
+      "seed": null,
+      "model": "admission/model-92/text-to-image"
+    },
+    "response": {
+      "timings": {},
+      "images": [
+        {
+          "height": 0,
+          "url": "https://example.com/reference.png",
+          "width": 0
+        }
+      ],
+      "has_nsfw_concepts": [
+        false
+      ],
+      "prompt": "test",
+      "seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/fast-lightning-sdxl/image-to-image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-93/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+          },
+          "num_inference_steps": {
+            "default": 4,
+            "type": "number",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "description": "The number of inference steps to perform."
+          },
+          "strength": {
+            "default": 0.95,
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 1,
+            "description": "determines how much the generated image resembles the initial image"
+          },
+          "embeddings": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "URL or the path to the embedding weights."
+                },
+                "tokens": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "The list of embeddings to use."
+          },
+          "expand_prompt": {
+            "default": false,
+            "type": "boolean",
+            "description": "If set to true, the prompt will be expanded with additional prompts."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "The number of images to generate."
+          },
+          "preserve_aspect_ratio": {
+            "default": false,
+            "type": "boolean",
+            "description": "\n        If set to true, the aspect ratio of the generated image will be preserved even\n        if the image size is too large. However, if the image is not a multiple of 32\n        in width or height, it will be resized to the nearest multiple of 32. By default,\n        this snapping to the nearest multiple of 32 will not preserve the aspect ratio.\n        Set crop_output to True, to crop the output to the proper aspect ratio\n        after generating.\n        "
+          },
+          "request_id": {
+            "default": "",
+            "type": "string",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "description": "The format of the generated image."
+          },
+          "crop_output": {
+            "default": false,
+            "type": "boolean",
+            "description": "\n        If set to true, the output cropped to the proper aspect ratio after generating.\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL of the image to use as a starting point for the generation."
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "description": "The size of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "num_inference_steps",
+          "strength",
+          "embeddings",
+          "expand_prompt",
+          "n",
+          "preserve_aspect_ratio",
+          "request_id",
+          "format",
+          "crop_output",
+          "image_url",
+          "image_size"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results.",
+            "uiControl": "textarea"
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "title": "Num Inference Steps",
+            "description": "The number of inference steps to perform.",
+            "uiControl": "select"
+          },
+          "strength": {
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 1,
+            "title": "Strength",
+            "description": "determines how much the generated image resembles the initial image"
+          },
+          "embeddings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "URL or the path to the embedding weights."
+                },
+                "tokens": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        ",
+                  "default": null
+                }
+              },
+              "required": [
+                "path"
+              ]
+            },
+            "title": "Embeddings",
+            "description": "The list of embeddings to use.",
+            "default": []
+          },
+          "expand_prompt": {
+            "type": "boolean",
+            "title": "Expand Prompt",
+            "description": "If set to true, the prompt will be expanded with additional prompts."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "title": "Num Images",
+            "description": "The number of images to generate."
+          },
+          "preserve_aspect_ratio": {
+            "type": "boolean",
+            "title": "Preserve Aspect Ratio",
+            "description": "\n        If set to true, the aspect ratio of the generated image will be preserved even\n        if the image size is too large. However, if the image is not a multiple of 32\n        in width or height, it will be resized to the nearest multiple of 32. By default,\n        this snapping to the nearest multiple of 32 will not preserve the aspect ratio.\n        Set crop_output to True, to crop the output to the proper aspect ratio\n        after generating.\n        "
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "title": "Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          },
+          "crop_output": {
+            "type": "boolean",
+            "title": "Crop Output",
+            "description": "\n        If set to true, the output cropped to the proper aspect ratio after generating.\n        "
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "The URL of the image to use as a starting point for the generation."
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image.",
+            "default": "square_hd"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "num_inference_steps": 4,
+        "strength": 0.95,
+        "embeddings": [],
+        "expand_prompt": false,
+        "n": 1,
+        "preserve_aspect_ratio": false,
+        "request_id": "",
+        "format": "jpeg",
+        "crop_output": false,
+        "image_size": "square_hd"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "num_inference_steps": "num_inference_steps",
+            "strength": "strength",
+            "embeddings": "embeddings",
+            "expand_prompt": "expand_prompt",
+            "seed": "seed",
+            "n": "num_images",
+            "preserve_aspect_ratio": "preserve_aspect_ratio",
+            "request_id": "request_id",
+            "format": "format",
+            "crop_output": "crop_output",
+            "image_url": "image_url",
+            "image_size": "image_size"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "safety_checker_version": "v1"
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffast-lightning-sdxl%2Fimage-to-image",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffast-lightning-sdxl%2Fimage-to-image",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:fal-ai/fast-lightning-sdxl/image-to-image",
+            "revision": "audit",
+            "endpoint": "fal-ai/fast-lightning-sdxl/image-to-image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/fast-lightning-sdxl/image-to-image/requests/{request_id}",
+              "statusEndpoint": "fal-ai/fast-lightning-sdxl/image-to-image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_inference_steps": {
+                  "type": "number",
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8
+                  ],
+                  "description": "The number of inference steps to perform."
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0.05,
+                  "maximum": 1,
+                  "description": "determines how much the generated image resembles the initial image"
+                },
+                "embeddings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "URL or the path to the embedding weights."
+                      },
+                      "tokens": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The list of embeddings to use."
+                },
+                "expand_prompt": {
+                  "type": "boolean",
+                  "description": "If set to true, the prompt will be expanded with additional prompts."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "The number of images to generate."
+                },
+                "preserve_aspect_ratio": {
+                  "type": "boolean",
+                  "description": "\n        If set to true, the aspect ratio of the generated image will be preserved even\n        if the image size is too large. However, if the image is not a multiple of 32\n        in width or height, it will be resized to the nearest multiple of 32. By default,\n        this snapping to the nearest multiple of 32 will not preserve the aspect ratio.\n        Set crop_output to True, to crop the output to the proper aspect ratio\n        after generating.\n        "
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "crop_output": {
+                  "type": "boolean",
+                  "description": "\n        If set to true, the output cropped to the proper aspect ratio after generating.\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The URL of the image to use as a starting point for the generation."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_inference_steps": {
+                  "type": "number",
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8
+                  ],
+                  "description": "The number of inference steps to perform."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0.05,
+                  "maximum": 1,
+                  "description": "determines how much the generated image resembles the initial image"
+                },
+                "embeddings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "URL or the path to the embedding weights."
+                      },
+                      "tokens": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The list of embeddings to use."
+                },
+                "expand_prompt": {
+                  "type": "boolean",
+                  "description": "If set to true, the prompt will be expanded with additional prompts."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "The number of images to generate."
+                },
+                "preserve_aspect_ratio": {
+                  "type": "boolean",
+                  "description": "\n        If set to true, the aspect ratio of the generated image will be preserved even\n        if the image size is too large. However, if the image is not a multiple of 32\n        in width or height, it will be resized to the nearest multiple of 32. By default,\n        this snapping to the nearest multiple of 32 will not preserve the aspect ratio.\n        Set crop_output to True, to crop the output to the proper aspect ratio\n        after generating.\n        "
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "crop_output": {
+                  "type": "boolean",
+                  "description": "\n        If set to true, the output cropped to the proper aspect ratio after generating.\n        "
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The URL of the image to use as a starting point for the generation."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                },
+                "safety_checker_version": {
+                  "type": "string",
+                  "const": "v1"
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode",
+                "enable_safety_checker",
+                "image_url",
+                "safety_checker_version"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "content_type": {
+                        "default": "image/jpeg",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "height",
+                      "url",
+                      "width"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The generated image files info."
+                },
+                "has_nsfw_concepts": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "description": "Whether the generated images contain NSFW concepts."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt used for generating the image."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                }
+              },
+              "required": [
+                "timings",
+                "images",
+                "has_nsfw_concepts",
+                "prompt",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:5c2f804612e00b37998ecb06f567bcf9eaaf483eb63cb515e9187d41714c7407"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "num_inference_steps": 4,
+      "strength": 0.95,
+      "embeddings": [],
+      "expand_prompt": false,
+      "n": 1,
+      "preserve_aspect_ratio": false,
+      "request_id": "",
+      "format": "jpeg",
+      "crop_output": false,
+      "image_url": "https://example.com/reference.png",
+      "image_size": "square_hd",
+      "model": "admission/model-93/edit"
+    },
+    "response": {
+      "timings": {},
+      "images": [
+        {
+          "height": 0,
+          "url": "https://example.com/reference.png",
+          "width": 0
+        }
+      ],
+      "has_nsfw_concepts": [
+        false
+      ],
+      "prompt": "test",
+      "seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/fast-lightning-sdxl/inpainting",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-94/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+          },
+          "num_inference_steps": {
+            "default": 4,
+            "type": "number",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "description": "The number of inference steps to perform."
+          },
+          "strength": {
+            "default": 0.95,
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 1,
+            "description": "determines how much the generated image resembles the initial image"
+          },
+          "embeddings": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "URL or the path to the embedding weights."
+                },
+                "tokens": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "The list of embeddings to use."
+          },
+          "expand_prompt": {
+            "default": false,
+            "type": "boolean",
+            "description": "If set to true, the prompt will be expanded with additional prompts."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          },
+          "n": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "The number of images to generate."
+          },
+          "mask_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL of the mask to use for inpainting."
+          },
+          "request_id": {
+            "default": "",
+            "type": "string",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "format": {
+            "default": "jpeg",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "description": "The format of the generated image."
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL of the image to use as a starting point for the generation."
+          },
+          "image_size": {
+            "default": "square_hd",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "default": 512,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "description": "The width of the generated image."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "description": "The size of the generated image."
+          }
+        },
+        "required": [
+          "prompt",
+          "num_inference_steps",
+          "strength",
+          "embeddings",
+          "expand_prompt",
+          "n",
+          "mask_url",
+          "request_id",
+          "format",
+          "image_url",
+          "image_size"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "The prompt to use for generating the image. Be as descriptive as possible for best results.",
+            "uiControl": "textarea"
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "title": "Num Inference Steps",
+            "description": "The number of inference steps to perform.",
+            "uiControl": "select"
+          },
+          "strength": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 1,
+            "title": "Strength",
+            "description": "determines how much the generated image resembles the initial image"
+          },
+          "embeddings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "URL or the path to the embedding weights."
+                },
+                "tokens": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        ",
+                  "default": null
+                }
+              },
+              "required": [
+                "path"
+              ]
+            },
+            "title": "Embeddings",
+            "description": "The list of embeddings to use.",
+            "default": []
+          },
+          "expand_prompt": {
+            "type": "boolean",
+            "title": "Expand Prompt",
+            "description": "If set to true, the prompt will be expanded with additional prompts."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "title": "Num Images",
+            "description": "The number of images to generate."
+          },
+          "mask_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Mask Url",
+            "description": "The URL of the mask to use for inpainting."
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "title": "Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "The URL of the image to use as a starting point for the generation."
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The height of the generated image."
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14142,
+                    "default": 512,
+                    "description": "The width of the generated image."
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ]
+              }
+            ],
+            "title": "Image Size",
+            "description": "The size of the generated image.",
+            "default": "square_hd"
+          }
+        },
+        "required": [
+          "prompt",
+          "mask_url",
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "num_inference_steps": 4,
+        "strength": 0.95,
+        "embeddings": [],
+        "expand_prompt": false,
+        "n": 1,
+        "request_id": "",
+        "format": "jpeg",
+        "image_size": "square_hd"
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "num_inference_steps": "num_inference_steps",
+            "strength": "strength",
+            "embeddings": "embeddings",
+            "expand_prompt": "expand_prompt",
+            "seed": "seed",
+            "n": "num_images",
+            "mask_url": "mask_url",
+            "request_id": "request_id",
+            "format": "format",
+            "image_url": "image_url",
+            "image_size": "image_size"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false,
+            "enable_safety_checker": true,
+            "safety_checker_version": "v1"
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffast-lightning-sdxl%2Finpainting",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffast-lightning-sdxl%2Finpainting",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "mask_url"
+                ],
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountParameter": "num_images"
+            },
+            "id": "fal:fal-ai/fast-lightning-sdxl/inpainting",
+            "revision": "audit",
+            "endpoint": "fal-ai/fast-lightning-sdxl/inpainting",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/fast-lightning-sdxl/inpainting/requests/{request_id}",
+              "statusEndpoint": "fal-ai/fast-lightning-sdxl/inpainting/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_inference_steps": {
+                  "type": "number",
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8
+                  ],
+                  "description": "The number of inference steps to perform."
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 1,
+                  "description": "determines how much the generated image resembles the initial image"
+                },
+                "embeddings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "URL or the path to the embedding weights."
+                      },
+                      "tokens": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The list of embeddings to use."
+                },
+                "expand_prompt": {
+                  "type": "boolean",
+                  "description": "If set to true, the prompt will be expanded with additional prompts."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                },
+                "n": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "The number of images to generate."
+                },
+                "mask_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The URL of the mask to use for inpainting."
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The URL of the image to use as a starting point for the generation."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                }
+              },
+              "required": [
+                "prompt",
+                "mask_url",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for generating the image. Be as descriptive as possible for best results."
+                },
+                "num_inference_steps": {
+                  "type": "number",
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8
+                  ],
+                  "description": "The number of inference steps to perform."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 1,
+                  "description": "determines how much the generated image resembles the initial image"
+                },
+                "embeddings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "URL or the path to the embedding weights."
+                      },
+                      "tokens": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "\n            The list of tokens to use for the embedding. When omitted, tokens\n            are generated as <s0>, <s1>, ... to match the number of vectors in\n            the embedding file.\n        "
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The list of embeddings to use."
+                },
+                "expand_prompt": {
+                  "type": "boolean",
+                  "description": "If set to true, the prompt will be expanded with additional prompts."
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "\n            The same seed and the same prompt given to the same version of Stable Diffusion\n            will output the same image every time.\n        "
+                },
+                "num_images": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "description": "The number of images to generate."
+                },
+                "mask_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The URL of the mask to use for inpainting."
+                },
+                "request_id": {
+                  "type": "string",
+                  "description": "\n            An id bound to a request, can be used with response to identify the request\n            itself.\n        "
+                },
+                "enable_safety_checker": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The URL of the image to use as a starting point for the generation."
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The height of the generated image."
+                        },
+                        "width": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 14142,
+                          "description": "The width of the generated image."
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ]
+                    }
+                  ],
+                  "description": "The size of the generated image."
+                },
+                "safety_checker_version": {
+                  "type": "string",
+                  "const": "v1"
+                }
+              },
+              "required": [
+                "prompt",
+                "sync_mode",
+                "mask_url",
+                "enable_safety_checker",
+                "image_url",
+                "safety_checker_version"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "timings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "content_type": {
+                        "default": "image/jpeg",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "height",
+                      "url",
+                      "width"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "description": "The generated image files info."
+                },
+                "has_nsfw_concepts": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "description": "Whether the generated images contain NSFW concepts."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt used for generating the image."
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "\n            Seed of the generated Image. It will be the same value of the one passed in the\n            input or the randomly generated that was used in case none was passed.\n        "
+                }
+              },
+              "required": [
+                "timings",
+                "images",
+                "has_nsfw_concepts",
+                "prompt",
+                "seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:0646e130a8e80c8dbbec6b114d5a657ffc244b704713673f742f7f25daf21072"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "num_inference_steps": 4,
+      "strength": 0.95,
+      "embeddings": [],
+      "expand_prompt": false,
+      "n": 1,
+      "mask_url": "https://example.com/reference.png",
+      "request_id": "",
+      "format": "jpeg",
+      "image_url": "https://example.com/reference.png",
+      "image_size": "square_hd",
+      "model": "admission/model-94/edit"
+    },
+    "response": {
+      "timings": {},
+      "images": [
+        {
+          "height": 0,
+          "url": "https://example.com/reference.png",
+          "width": 0
+        }
+      ],
+      "has_nsfw_concepts": [
+        false
+      ],
+      "prompt": "test",
+      "seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/sam2/image",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-480/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "box_prompts": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "x_max": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "X Max Coordinate of the prompt"
+                },
+                "y_max": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Y Max Coordinate of the prompt"
+                },
+                "y_min": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Y Min Coordinate of the box"
+                },
+                "x_min": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "X Min Coordinate of the box"
+                },
+                "frame_index": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The frame index to interact with."
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "Coordinates for boxes"
+          },
+          "output_format": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "description": "The format of the generated image."
+          },
+          "apply_mask": {
+            "default": false,
+            "type": "boolean",
+            "description": "Apply the mask on the image."
+          },
+          "prompts": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "default": 1,
+                  "type": "number",
+                  "enum": [
+                    0,
+                    1
+                  ],
+                  "description": "Label of the prompt. 1 for foreground, 0 for background"
+                },
+                "x": {
+                  "default": 305,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "X Coordinate of the prompt"
+                },
+                "frame_index": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The frame index to interact with."
+                },
+                "y": {
+                  "default": 350,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Y Coordinate of the prompt"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "List of prompts to segment the image"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to be segmented"
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "box_prompts",
+          "output_format",
+          "apply_mask",
+          "prompts",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "box_prompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "x_max": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "X Max Coordinate of the prompt"
+                },
+                "y_max": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "Y Max Coordinate of the prompt"
+                },
+                "y_min": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "Y Min Coordinate of the box"
+                },
+                "x_min": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "X Min Coordinate of the box"
+                },
+                "frame_index": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "The frame index to interact with."
+                }
+              }
+            },
+            "title": "Box Prompts",
+            "description": "Coordinates for boxes",
+            "default": []
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ],
+            "title": "Output Format",
+            "description": "The format of the generated image.",
+            "uiControl": "select"
+          },
+          "apply_mask": {
+            "type": "boolean",
+            "title": "Apply Mask",
+            "description": "Apply the mask on the image."
+          },
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "integer",
+                  "enum": [
+                    0,
+                    1
+                  ],
+                  "default": 1,
+                  "description": "Label of the prompt. 1 for foreground, 0 for background"
+                },
+                "x": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 305,
+                  "description": "X Coordinate of the prompt"
+                },
+                "frame_index": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "The frame index to interact with."
+                },
+                "y": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 350,
+                  "description": "Y Coordinate of the prompt"
+                }
+              }
+            },
+            "title": "Prompts",
+            "description": "List of prompts to segment the image",
+            "default": []
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to be segmented"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "box_prompts": [],
+        "output_format": "png",
+        "apply_mask": false,
+        "prompts": [],
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "box_prompts": "box_prompts",
+            "output_format": "output_format",
+            "apply_mask": "apply_mask",
+            "prompts": "prompts",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {
+            "sync_mode": false
+          },
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fsam2%2Fimage",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Fsam2%2Fimage",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/sam2/image",
+            "revision": "audit",
+            "endpoint": "fal-ai/sam2/image",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/sam2/image/requests/{request_id}",
+              "statusEndpoint": "fal-ai/sam2/image/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "box_prompts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Max Coordinate of the prompt"
+                      },
+                      "y_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Max Coordinate of the prompt"
+                      },
+                      "y_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Min Coordinate of the box"
+                      },
+                      "x_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Min Coordinate of the box"
+                      },
+                      "frame_index": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The frame index to interact with."
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "Coordinates for boxes"
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "apply_mask": {
+                  "type": "boolean",
+                  "description": "Apply the mask on the image."
+                },
+                "prompts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "number",
+                        "enum": [
+                          0,
+                          1
+                        ],
+                        "description": "Label of the prompt. 1 for foreground, 0 for background"
+                      },
+                      "x": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Coordinate of the prompt"
+                      },
+                      "frame_index": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The frame index to interact with."
+                      },
+                      "y": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Coordinate of the prompt"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "List of prompts to segment the image"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to be segmented"
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "box_prompts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Max Coordinate of the prompt"
+                      },
+                      "y_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Max Coordinate of the prompt"
+                      },
+                      "y_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Min Coordinate of the box"
+                      },
+                      "x_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Min Coordinate of the box"
+                      },
+                      "frame_index": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The frame index to interact with."
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "Coordinates for boxes"
+                },
+                "output_format": {
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png",
+                    "webp"
+                  ],
+                  "description": "The format of the generated image."
+                },
+                "sync_mode": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "apply_mask": {
+                  "type": "boolean",
+                  "description": "Apply the mask on the image."
+                },
+                "prompts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "number",
+                        "enum": [
+                          0,
+                          1
+                        ],
+                        "description": "Label of the prompt. 1 for foreground, 0 for background"
+                      },
+                      "x": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Coordinate of the prompt"
+                      },
+                      "frame_index": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The frame index to interact with."
+                      },
+                      "y": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Coordinate of the prompt"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "List of prompts to segment the image"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to be segmented"
+                }
+              },
+              "required": [
+                "sync_mode",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The height of the image in pixels."
+                    },
+                    "width": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The width of the image in pixels."
+                    },
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Represents an image file."
+                }
+              },
+              "required": [
+                "image"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:3372eedbf1d3da8afdca95f8b3b40de2bc5e56daf562d9aca566427137473490"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "box_prompts": [],
+      "output_format": "png",
+      "apply_mask": false,
+      "prompts": [],
+      "image_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-480/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      }
+    }
+  }
+]

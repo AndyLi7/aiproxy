@@ -19,6 +19,15 @@ const (
 	ErrTokenNotFound = "token"
 )
 
+// Token validation outcomes. Their messages never include a token's name or ID,
+// because callers may show them to API clients.
+var (
+	ErrTokenInvalid        = errors.New("invalid token")
+	ErrTokenDisabled       = errors.New("token is disabled")
+	ErrTokenQuotaExhausted = errors.New("token quota is exhausted")
+	ErrTokenUnavailable    = errors.New("token validation failed")
+)
+
 const (
 	PeriodTypeDaily   = "daily"
 	PeriodTypeWeekly  = "weekly"
@@ -439,22 +448,22 @@ func GetTokenByKey(key string) (*Token, error) {
 // This function is safe for concurrent use and handles period resets atomically
 func GetAndValidateToken(key string) (token *TokenCache, err error) {
 	if key == "" {
-		return nil, errors.New("no token provided")
+		return nil, fmt.Errorf("no token provided: %w", ErrTokenInvalid)
 	}
 
 	token, err = CacheGetTokenByKey(key)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("invalid token")
+			return nil, ErrTokenInvalid
 		}
 
 		log.Error("get token from cache failed: " + err.Error())
 
-		return nil, errors.New("token validation failed")
+		return nil, ErrTokenUnavailable
 	}
 
 	if token.Status == TokenStatusDisabled {
-		return nil, fmt.Errorf("token (%s[%d]) is disabled", token.Name, token.ID)
+		return nil, ErrTokenDisabled
 	}
 
 	// Convert TokenCache to Token for quota checking
@@ -470,15 +479,16 @@ func GetAndValidateToken(key string) (token *TokenCache, err error) {
 
 	totalExceeded, periodExceeded, err := tokenModel.GetEffectiveQuotaStatus()
 	if err != nil {
-		return nil, fmt.Errorf("token (%s[%d]) quota check failed: %w", token.Name, token.ID, err)
+		log.Errorf("token %d quota check failed: %v", token.ID, err)
+		return nil, ErrTokenUnavailable
 	}
 
 	if totalExceeded {
-		return nil, fmt.Errorf("token (%s[%d]) total quota is exhausted", token.Name, token.ID)
+		return nil, fmt.Errorf("total %w", ErrTokenQuotaExhausted)
 	}
 
 	if periodExceeded {
-		return nil, fmt.Errorf("token (%s[%d]) period quota is exhausted", token.Name, token.ID)
+		return nil, fmt.Errorf("period %w", ErrTokenQuotaExhausted)
 	}
 
 	return token, nil

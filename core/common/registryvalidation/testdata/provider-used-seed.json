@@ -1,0 +1,1220 @@
+[
+  {
+    "endpoint": "fal-ai/finegrain-eraser",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-104/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Text description of what to erase"
+          },
+          "mode": {
+            "default": "standard",
+            "type": "string",
+            "enum": [
+              "express",
+              "standard",
+              "premium"
+            ],
+            "description": "Erase quality mode"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducible generation"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to edit"
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "prompt",
+          "mode",
+          "image_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text description of what to erase",
+            "uiControl": "textarea"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "express",
+              "standard",
+              "premium"
+            ],
+            "title": "Mode",
+            "description": "Erase quality mode",
+            "uiControl": "select"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Random seed for reproducible generation"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to edit"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "mode": "standard",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "prompt": "prompt",
+            "mode": "mode",
+            "seed": "seed",
+            "image_url": "image_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffinegrain-eraser",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffinegrain-eraser",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/finegrain-eraser",
+            "revision": "audit",
+            "endpoint": "fal-ai/finegrain-eraser",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/finegrain-eraser/requests/{request_id}",
+              "statusEndpoint": "fal-ai/finegrain-eraser/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "Text description of what to erase"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "express",
+                    "standard",
+                    "premium"
+                  ],
+                  "description": "Erase quality mode"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to edit"
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "prompt",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "description": "Text description of what to erase"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "express",
+                    "standard",
+                    "premium"
+                  ],
+                  "description": "Erase quality mode"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to edit"
+                }
+              },
+              "required": [
+                "prompt",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {}
+                },
+                "used_seed": {
+                  "type": "number",
+                  "multipleOf": 1,
+                  "description": "Seed used for generation"
+                }
+              },
+              "required": [
+                "image",
+                "used_seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:a58261d8a9ae7444ab31e6b02c5de4ba335703bc4b7a36317f59f2371e9f7e6f"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "prompt": "test",
+      "mode": "standard",
+      "image_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-104/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "used_seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/finegrain-eraser/bbox",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-105/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "default": "standard",
+            "type": "string",
+            "enum": [
+              "express",
+              "standard",
+              "premium"
+            ],
+            "description": "Erase quality mode"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducible generation"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to edit"
+          },
+          "box_prompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "y_min": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Y Min Coordinate of the box"
+                },
+                "x_min": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "X Min Coordinate of the box"
+                },
+                "x_max": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "X Max Coordinate of the prompt"
+                },
+                "y_max": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Y Max Coordinate of the prompt"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "List of bounding box coordinates to erase (only one box prompt is supported)"
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "mode",
+          "image_url",
+          "box_prompts",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "express",
+              "standard",
+              "premium"
+            ],
+            "title": "Mode",
+            "description": "Erase quality mode",
+            "uiControl": "select"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Random seed for reproducible generation"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to edit"
+          },
+          "box_prompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "y_min": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "Y Min Coordinate of the box"
+                },
+                "x_min": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "X Min Coordinate of the box"
+                },
+                "x_max": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "X Max Coordinate of the prompt"
+                },
+                "y_max": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "default": 0,
+                  "description": "Y Max Coordinate of the prompt"
+                }
+              }
+            },
+            "title": "Box Prompts",
+            "description": "List of bounding box coordinates to erase (only one box prompt is supported)"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url",
+          "box_prompts"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "mode": "standard",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "mode": "mode",
+            "seed": "seed",
+            "image_url": "image_url",
+            "box_prompts": "box_prompts"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffinegrain-eraser%2Fbbox",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffinegrain-eraser%2Fbbox",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/finegrain-eraser/bbox",
+            "revision": "audit",
+            "endpoint": "fal-ai/finegrain-eraser/bbox",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/finegrain-eraser/bbox/requests/{request_id}",
+              "statusEndpoint": "fal-ai/finegrain-eraser/bbox/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "express",
+                    "standard",
+                    "premium"
+                  ],
+                  "description": "Erase quality mode"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to edit"
+                },
+                "box_prompts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "y_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Min Coordinate of the box"
+                      },
+                      "x_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Min Coordinate of the box"
+                      },
+                      "x_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Max Coordinate of the prompt"
+                      },
+                      "y_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Max Coordinate of the prompt"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "List of bounding box coordinates to erase (only one box prompt is supported)"
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url",
+                "box_prompts"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "express",
+                    "standard",
+                    "premium"
+                  ],
+                  "description": "Erase quality mode"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to edit"
+                },
+                "box_prompts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "y_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Min Coordinate of the box"
+                      },
+                      "x_min": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Min Coordinate of the box"
+                      },
+                      "x_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "X Max Coordinate of the prompt"
+                      },
+                      "y_max": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Y Max Coordinate of the prompt"
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "description": "List of bounding box coordinates to erase (only one box prompt is supported)"
+                }
+              },
+              "required": [
+                "image_url",
+                "box_prompts"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {}
+                },
+                "used_seed": {
+                  "type": "number",
+                  "multipleOf": 1,
+                  "description": "Seed used for generation"
+                }
+              },
+              "required": [
+                "image",
+                "used_seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:c32faa049a5fdabdc7778a4af613f54e8cef9a8a83d0cba2d901b7489d3cc30e"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "mode": "standard",
+      "image_url": "https://example.com/reference.png",
+      "box_prompts": [],
+      "n": 1,
+      "model": "admission/model-105/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "used_seed": 0
+    }
+  },
+  {
+    "endpoint": "fal-ai/finegrain-eraser/mask",
+    "scenario": "defaults",
+    "contract": {
+      "provider_contract_version": 1,
+      "entry_id": "admission/model-106/edit",
+      "validation_version": 1,
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "default": "standard",
+            "type": "string",
+            "enum": [
+              "express",
+              "standard",
+              "premium"
+            ],
+            "description": "Erase quality mode"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducible generation"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the image to edit"
+          },
+          "mask_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the mask image. Should be a binary mask where white (255) indicates areas to erase"
+          },
+          "n": {
+            "default": 1,
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": [
+          "mode",
+          "image_url",
+          "mask_url",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "parameter_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "express",
+              "standard",
+              "premium"
+            ],
+            "title": "Mode",
+            "description": "Erase quality mode",
+            "uiControl": "select"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Random seed for reproducible generation"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image Url",
+            "description": "URL of the image to edit"
+          },
+          "mask_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Mask Url",
+            "description": "URL of the mask image. Should be a binary mask where white (255) indicates areas to erase"
+          },
+          "n": {
+            "type": "number",
+            "title": "Number of images"
+          }
+        },
+        "required": [
+          "image_url",
+          "mask_url"
+        ],
+        "additionalProperties": false
+      },
+      "default_parameters": {
+        "mode": "standard",
+        "n": 1
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "images": {
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": {}
+      },
+      "providers": {
+        "fal": {
+          "adapter": "fal-image",
+          "parameterMapping": {
+            "mode": "mode",
+            "seed": "seed",
+            "image_url": "image_url",
+            "mask_url": "mask_url"
+          },
+          "allowedPassthroughParameters": [],
+          "fixedParameters": {},
+          "billingBasis": {
+            "metric": "image",
+            "dimensions": [],
+            "minimumBillableUnits": 1,
+            "rounding": "none",
+            "sourceUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffinegrain-eraser%2Fmask",
+            "verifiedAt": "2026-09-27",
+            "requiresUpstreamUsageBilling": true
+          },
+          "source": {
+            "url": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai%2Ffinegrain-eraser%2Fmask",
+            "verifiedAt": "2026-09-27",
+            "verifiedBy": "admission-audit"
+          },
+          "upstream": {
+            "metering": {
+              "nativeImagePaths": [
+                [
+                  "image_url"
+                ],
+                [
+                  "mask_url"
+                ]
+              ],
+              "version": 7,
+              "outputCountFixed": 1
+            },
+            "id": "fal:fal-ai/finegrain-eraser/mask",
+            "revision": "audit",
+            "endpoint": "fal-ai/finegrain-eraser/mask",
+            "execution": {
+              "mode": "async",
+              "resultEndpoint": "fal-ai/finegrain-eraser/mask/requests/{request_id}",
+              "statusEndpoint": "fal-ai/finegrain-eraser/mask/requests/{request_id}/status",
+              "supportsCancellation": true
+            },
+            "acceptedInputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "express",
+                    "standard",
+                    "premium"
+                  ],
+                  "description": "Erase quality mode"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to edit"
+                },
+                "mask_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the mask image. Should be a binary mask where white (255) indicates areas to erase"
+                },
+                "n": {
+                  "type": "number",
+                  "const": 1
+                }
+              },
+              "required": [
+                "image_url",
+                "mask_url"
+              ],
+              "additionalProperties": false
+            },
+            "inputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "express",
+                    "standard",
+                    "premium"
+                  ],
+                  "description": "Erase quality mode"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducible generation"
+                },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the image to edit"
+                },
+                "mask_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the mask image. Should be a binary mask where white (255) indicates areas to erase"
+                }
+              },
+              "required": [
+                "image_url",
+                "mask_url"
+              ],
+              "additionalProperties": false
+            },
+            "outputJsonSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The name of the file. It will be auto-generated if not provided."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL where the file can be downloaded from."
+                    },
+                    "content_type": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The mime type of the file."
+                    },
+                    "file_size": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The size of the file in bytes."
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": {}
+                },
+                "used_seed": {
+                  "type": "number",
+                  "multipleOf": 1,
+                  "description": "Seed used for generation"
+                }
+              },
+              "required": [
+                "image",
+                "used_seed"
+              ],
+              "additionalProperties": {}
+            },
+            "contractHash": "sha256:fd852d804e96054e4d1b942fa2a434213e6856a449e5e4cf8a770895c05ab12b"
+          }
+        }
+      },
+      "execution": {
+        "mode": "async",
+        "endpoint": "/v1/images/tasks",
+        "statusEndpoint": "/v1/images/tasks/{task_id}",
+        "output": "image",
+        "supportsCancellation": false
+      }
+    },
+    "request": {
+      "mode": "standard",
+      "image_url": "https://example.com/reference.png",
+      "mask_url": "https://example.com/reference.png",
+      "n": 1,
+      "model": "admission/model-106/edit"
+    },
+    "response": {
+      "image": {
+        "url": "https://example.com/reference.png"
+      },
+      "used_seed": 0
+    }
+  }
+]

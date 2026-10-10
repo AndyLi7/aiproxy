@@ -19,6 +19,10 @@ type NativeTaskLog struct {
 	RequestSource string
 	IP            string
 	Mode          int
+	// RequestedModel is the model ID the request used. The row's model and
+	// capability always come from the task's capability ID; a different
+	// requested ID (public_api_id or an alias) is kept as requested_model.
+	RequestedModel string
 }
 
 // nativeLogIdentity splits a frozen registry id such as
@@ -86,7 +90,15 @@ func RecordNativeTaskLog(db *gorm.DB, task *NativeTask, info NativeTaskLog) erro
 			currency, pricingVersion = quote.Currency, truncateNativeLogField("native:"+quote.QuoteVersion, 128)
 		}
 
+		var metadata map[string]string
+		if info.RequestedModel != "" && info.RequestedModel != task.Model {
+			metadata = map[string]string{
+				"requested_model": truncateNativeLogField(info.RequestedModel, MaxPublicModelIDLength),
+			}
+		}
+
 		return tx.Create(&Log{
+			Metadata:         metadata,
 			RequestID:        EmptyNullString(task.ID),
 			RequestAt:        requestAt,
 			GroupID:          task.GroupID,

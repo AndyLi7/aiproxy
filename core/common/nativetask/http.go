@@ -29,6 +29,9 @@ type HTTP struct {
 	Download      func(*http.Request, string) (*http.Response, error)
 	// OnError lets the gateway log the same code and message the client receives.
 	OnError func(status int, code, message string)
+	// PublicModel maps a task's model (the capability ID it was frozen with)
+	// to the ID customers call it by. Nil, or an unknown ID, keeps it.
+	PublicModel func(string) string
 	// limiter defaults to the process-wide customer read limits.
 	limiter *readLimiter
 }
@@ -49,7 +52,8 @@ var errorMessages = map[string]string{
 	"invalid_request_id":           "X-Request-Id must be 1-128 letters, digits, '_' or '-'. Use a unique ID for each new task and reuse it only for retries.",
 	"invalid_request":              "The request body must be valid JSON matching this model's input schema.",
 	"invalid_input":                "The input does not match this model's input schema. Check the model's API documentation.",
-	"native_model_unavailable":     "This model is not available for tasks on this endpoint. Check the model ID in the model catalog.",
+	"model_not_found":              "This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.",
+	"native_model_unavailable":     "This model is served on a different endpoint. Read its openapi_url in GET /v1/models; suggested_models lists the IDs to use there.",
 	"model_route_unavailable":      "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
 	"authentication_required":      "A valid API key is required.",
 	"insufficient_balance":         "Your balance does not cover this request's hold; see pricing.prepayment in /v1/models.",
@@ -108,11 +112,41 @@ func WriteError(w http.ResponseWriter, status int, code string) {
 		"code": code, "message": ErrorMessage(code), "type": errorType(status),
 	}})
 }
+
+// WriteErrorDetail writes the native error envelope with the parameter at
+// fault and, for model errors, suggested_models: listed IDs to use instead
+// (an empty list when there is none).
+func WriteErrorDetail(w http.ResponseWriter, status int, code, param string, suggestedModels []string) {
+	if suggestedModels == nil {
+		suggestedModels = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		"code": code, "message": ErrorMessage(code), "type": errorType(status),
+		"param": param, "suggested_models": suggestedModels,
+	}})
+}
+
+// NotNativeModelError is ErrNotNativeModel with the listed IDs of the model
+// on its own endpoint.
+type NotNativeModelError struct{ SuggestedModels []string }
+
+func (e *NotNativeModelError) Error() string { return ErrNotNativeModel.Error() }
+func (e *NotNativeModelError) Unwrap() error { return ErrNotNativeModel }
+
 func (h *HTTP) writeError(w http.ResponseWriter, status int, code string) {
 	if h != nil && h.OnError != nil {
 		h.OnError(status, code, ErrorMessage(code))
 	}
 	WriteError(w, status, code)
+}
+func (h *HTTP) writeErrorDetail(w http.ResponseWriter, status int, code, param string, suggestedModels []string) {
+	if h != nil && h.OnError != nil {
+		h.OnError(status, code, ErrorMessage(code))
+	}
+	WriteErrorDetail(w, status, code, param, suggestedModels)
 }
 func (h *HTTP) owner(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	if h == nil || h.Engine == nil || h.Engine.DB == nil || h.Identity == nil {
@@ -130,7 +164,22 @@ func (h *HTTP) owner(w http.ResponseWriter, r *http.Request) (string, int, bool)
 // WritePublic excludes all routing, upstream identity, credential and raw output
 // fields. A pending result never includes output; completed null remains null.
 func WritePublic(w http.ResponseWriter, status int, task *model.NativeTask) {
-	response := map[string]any{"id": task.ID, "model": task.Model, "status": task.Status}
+	writePublic(w, status, task, task.Model)
+}
+
+// writePublic reports the task under the callable ID (owner decision D2,
+// 2026-10-10): the stored task keeps its capability ID.
+func (h *HTTP) writePublic(w http.ResponseWriter, status int, task *model.NativeTask) {
+	publicModel := task.Model
+	if h != nil && h.PublicModel != nil {
+		if mapped := h.PublicModel(task.Model); mapped != "" {
+			publicModel = mapped
+		}
+	}
+	writePublic(w, status, task, publicModel)
+}
+func writePublic(w http.ResponseWriter, status int, task *model.NativeTask, publicModel string) {
+	response := map[string]any{"id": task.ID, "model": publicModel, "status": task.Status}
 	switch task.Status {
 	case "reserved", "submitting", "submission_unknown":
 		response["status"] = "queued"
@@ -186,7 +235,7 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 				h.writeError(w, 429, "rate_limit_exceeded")
 				return
 			}
-			WritePublic(w, 202, existing)
+			h.writePublic(w, 202, existing)
 			return
 		}
 	}
@@ -200,7 +249,12 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, provider, err := h.ResolvePlan(r, raw)
 	if errors.Is(err, ErrNotNativeModel) {
-		h.writeError(w, 400, "native_model_unavailable")
+		var suggested []string
+		var notNative *NotNativeModelError
+		if errors.As(err, &notNative) {
+			suggested = notNative.SuggestedModels
+		}
+		h.writeErrorDetail(w, 400, "native_model_unavailable", "model", suggested)
 		return
 	}
 	if err != nil {
@@ -234,7 +288,7 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 			}
 			if task != nil && task.Status != "reserved" {
 				log.WithFields(fields).Warn("native task create returned stored state after an error")
-				WritePublic(w, 202, task)
+				h.writePublic(w, 202, task)
 			} else {
 				log.WithFields(fields).Error("native task create unavailable")
 				h.writeError(w, 503, "native_execution_unavailable")
@@ -242,7 +296,7 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	WritePublic(w, 202, task)
+	h.writePublic(w, 202, task)
 }
 
 // Get only reads stored state. Polling the provider, archiving results and
@@ -266,7 +320,7 @@ func (h *HTTP) Get(w http.ResponseWriter, r *http.Request, id string) {
 		h.writeError(w, 503, "task_temporarily_unavailable")
 		return
 	}
-	WritePublic(w, 200, task)
+	h.writePublic(w, 200, task)
 }
 
 // Artifacts up to this size are verified in full before the first byte is sent.

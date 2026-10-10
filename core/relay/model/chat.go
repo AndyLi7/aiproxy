@@ -204,6 +204,8 @@ type OpenAIError struct {
 	Value         any       `json:"value,omitempty"`
 	AllowedValues *[]string `json:"allowed_values,omitempty"`
 	Expected      string    `json:"expected,omitempty"`
+	// SuggestedModels lists callable model IDs to use instead of the requested one.
+	SuggestedModels *[]string `json:"suggested_models,omitempty"`
 }
 
 func NewOpenAIError(statusCode int, err OpenAIError) adaptor.Error {

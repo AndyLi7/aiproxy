@@ -35,6 +35,11 @@ type Plan struct {
 	InputMeter json.RawMessage
 	// Log describes the request-log row recorded once the task is submitted.
 	Log *model.NativeTaskLog
+	// AcceptedModel is the request's model when the gateway resolved it to
+	// this contract by another accepted ID (public_api_id or an alias); "" when
+	// the request used the contract's own model. The task keeps the contract's
+	// model either way.
+	AcceptedModel string
 }
 type Engine struct {
 	DB       *gorm.DB
@@ -68,7 +73,7 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	if err != nil {
 		return nil, err
 	}
-	input, err := contract.ValidateRequest(body)
+	input, err := contract.ValidateRequestAs(body, p.AcceptedModel)
 	if err != nil {
 		return nil, err
 	}

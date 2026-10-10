@@ -93,3 +93,53 @@ never returned. The prepaid hold is refunded in full:
 Fields the platform sets itself (not in the model's input schema) are never
 listed. A rejection that names no other field keeps upstream_rejected (at
 submission) or upstream_result_rejected (after acceptance).
+
+## Model IDs
+
+The `model` of a request is an `id` from `GET /v1/models`. Image and video IDs
+end with the capability (`alibaba/wan-2.7/text-to-image`); an audio model's ID
+is the model ID (`elevenlabs/eleven-v4`). A model group ID (`group.id` when it
+differs from `id`) is not callable. Task responses (`POST` and
+`GET /v1/model-tasks`) return the callable ID as `model`, also when the request
+used an older ID that still calls the same model.
+
+`POST /v1/model-tasks` with an ID this API key cannot call returns 404 in the
+native envelope. Do not resend it: use an ID from `suggested_models` (callable
+IDs of the same model or group, at most 10, possibly empty) or an `id` from
+`GET /v1/models`:
+```json
+{"error":{"code":"model_not_found","type":"not_found_error","param":"model","message":"This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.","suggested_models":["alibaba/wan-2.7/image-to-image","alibaba/wan-2.7/text-to-image"]}}
+```
+When the ID names a model this key calls on another endpoint (for example an
+image model served by `/v1/images/generations`), it returns 400:
+```json
+{"error":{"code":"native_model_unavailable","type":"invalid_request_error","param":"model","message":"This model is served on a different endpoint. Read its openapi_url in GET /v1/models; suggested_models lists the IDs to use there.","suggested_models":["bytedance/seedream-4.5/text-to-image"]}}
+```
+A 404 when querying a task (`GET /v1/model-tasks/{id}`) is `task_not_found`,
+which is different: it concerns the task ID, not the model.
+
+The fingerprint of `X-Request-Id` covers the exact request body. Resending the
+same body is idempotent; resending the same `X-Request-Id` with another
+spelling of the model ID (an older ID instead of the listed one, or the
+reverse) returns 409 `request_id_conflict`.
+
+`POST /v1/images/generations` and `POST /v1/images/tasks` answer a model ID
+that calls nothing on them (unknown, retired, or another endpoint's model) with
+404 `model_not_found`, type `not_found_error`, param `model`. `suggested_models`
+lists the capability IDs of the requested model group the key may call, and is
+otherwise empty:
+```json
+{"error":{"code":"model_not_found","type":"not_found_error","param":"model","message":"This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.","suggested_models":[]}}
+```
+A model group ID (`bytedance/seedream-4.5`) still selects a capability by the
+request parameters until the gateway sets `DISABLE_IMAGE_GROUP_IDS=true` (owner
+decision D3). From then on it returns 404 with the group's capability IDs:
+```json
+{"error":{"code":"model_not_found","type":"not_found_error","param":"model","message":"This model ID names a group of capabilities and cannot be called. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.","suggested_models":["bytedance/seedream-4.5/text-to-image"]}}
+```
+The video endpoints keep accepting group IDs; an unknown video model returns
+400 `unsupported_by_model` with `allowed_values`.
+
+`GET /v1/models/{id}` accepts any ID that calls a listed model and returns that
+model's entry. An unknown ID returns 404 `model_not_found` with
+type `not_found_error` (the same type as the schema's `schema_not_found`).

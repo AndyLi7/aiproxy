@@ -325,6 +325,51 @@ func resolutionFromCandidate(requested string, candidate capabilityCandidate) Ca
 	}
 }
 
+// ResolveExactCapabilityModel resolves only a full capability ID
+// (public_capability_model). A model group ID selects nothing: the image
+// endpoints have no default capability (owner decision D3, 2026-10-10).
+func ResolveExactCapabilityModel(
+	requested string,
+	fields map[string]any,
+	configs []ModelConfig,
+) (CapabilityResolution, error) {
+	resolution, _, err := resolveExactCapabilityModel(
+		strings.TrimSpace(requested),
+		fields,
+		capabilityCandidates(configs),
+	)
+
+	return resolution, err
+}
+
+func resolveExactCapabilityModel(
+	requested string,
+	fields map[string]any,
+	candidates []capabilityCandidate,
+) (CapabilityResolution, bool, error) {
+	for _, candidate := range candidates {
+		if candidate.metadata.PublicCapabilityModel != requested {
+			continue
+		}
+
+		if !capabilitySchemaMatches(candidate.metadata.ParameterSchema, fields) {
+			return CapabilityResolution{}, true, &CapabilityRoutingError{
+				Code:    CapabilityParameterMismatch,
+				Message: "request parameters do not match the selected capability",
+			}
+		}
+
+		return resolutionFromCandidate(requested, candidate), true, nil
+	}
+
+	return CapabilityResolution{}, false, &CapabilityRoutingError{
+		Code:    CapabilityModelNotFound,
+		Message: fmt.Sprintf("the model %q does not exist or is not available", requested),
+	}
+}
+
+// ResolveCapabilityModel resolves a full capability ID, or a model group ID
+// by the request parameters (video endpoints only).
 func ResolveCapabilityModel(
 	requested string,
 	fields map[string]any,
@@ -333,19 +378,8 @@ func ResolveCapabilityModel(
 	requested = strings.TrimSpace(requested)
 
 	candidates := capabilityCandidates(configs)
-	for _, candidate := range candidates {
-		if candidate.metadata.PublicCapabilityModel != requested {
-			continue
-		}
-
-		if !capabilitySchemaMatches(candidate.metadata.ParameterSchema, fields) {
-			return CapabilityResolution{}, &CapabilityRoutingError{
-				Code:    CapabilityParameterMismatch,
-				Message: "request parameters do not match the selected capability",
-			}
-		}
-
-		return resolutionFromCandidate(requested, candidate), nil
+	if resolution, matched, err := resolveExactCapabilityModel(requested, fields, candidates); matched {
+		return resolution, err
 	}
 
 	baseCandidates := make([]capabilityCandidate, 0)

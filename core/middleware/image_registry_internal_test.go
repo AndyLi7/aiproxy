@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	gatewayconfig "github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
@@ -190,6 +192,10 @@ func TestImageRegistryGuardStopsDispatch(t *testing.T) {
 	}
 }
 
+// A model group ID the distributor resolved binds to its capability contract
+// while the image endpoints accept group IDs; with DISABLE_IMAGE_GROUP_IDS set
+// (owner decision D3) only the capability ID binds. Both keep the requested
+// identity in the body.
 func TestResolvedBaseImageRegistryPreservesRequestedIdentity(t *testing.T) {
 	const (
 		parent       = "vendor/image"
@@ -216,31 +222,40 @@ func TestResolvedBaseImageRegistryPreservesRequestedIdentity(t *testing.T) {
 			},
 		},
 	}
-	for _, requested := range []string{parent, capabilityID} {
-		t.Run(requested, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			body := mustMarshalJSON(t, map[string]any{"model": requested, "prompt": "A teapot"})
-			c.Request = httptest.NewRequestWithContext(context.Background(),
-				http.MethodPost,
-				"/v1/images/generations",
-				strings.NewReader(string(body)),
-			)
-			c.Request.Header.Set("Content-Type", "application/json")
-			c.Set(RequestedModel, requested)
-			c.Set(PublicModel, parent)
-			c.Set(PublicCapabilityModel, capabilityID)
-			c.Set(ResolvedCapability, "text-to-image")
-			require.Nil(
-				t,
-				validateImageRegistryRequest(c, mode.ImagesGenerations, requested, config),
-			)
-			raw, err := common.GetRequestBodyReusable(c.Request)
-			require.NoError(t, err)
+	original := gatewayconfig.DisableImageGroupIDs
+	t.Cleanup(func() { gatewayconfig.DisableImageGroupIDs = original })
 
-			var result map[string]any
-			require.NoError(t, json.Unmarshal(raw, &result))
-			require.Equal(t, requested, result["model"])
-		})
+	for _, refuseGroupIDs := range []bool{false, true} {
+		for _, requested := range []string{parent, capabilityID} {
+			t.Run(fmt.Sprintf("%s refuse=%t", requested, refuseGroupIDs), func(t *testing.T) {
+				gatewayconfig.DisableImageGroupIDs = refuseGroupIDs
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				body := mustMarshalJSON(t, map[string]any{"model": requested, "prompt": "A teapot"})
+				c.Request = httptest.NewRequestWithContext(context.Background(),
+					http.MethodPost,
+					"/v1/images/generations",
+					strings.NewReader(string(body)),
+				)
+				c.Request.Header.Set("Content-Type", "application/json")
+				c.Set(RequestedModel, requested)
+				c.Set(PublicModel, parent)
+				c.Set(PublicCapabilityModel, capabilityID)
+				c.Set(ResolvedCapability, "text-to-image")
+				validationErr := validateImageRegistryRequest(c, mode.ImagesGenerations, requested, config)
+				if requested == parent && refuseGroupIDs {
+					require.NotNil(t, validationErr)
+					require.Equal(t, http.StatusServiceUnavailable, validationErr.Status)
+					return
+				}
+				require.Nil(t, validationErr)
+				raw, err := common.GetRequestBodyReusable(c.Request)
+				require.NoError(t, err)
+
+				var result map[string]any
+				require.NoError(t, json.Unmarshal(raw, &result))
+				require.Equal(t, requested, result["model"])
+			})
+		}
 	}
 }
 

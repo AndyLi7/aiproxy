@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"net/http"
 	"sort"
@@ -18,9 +17,22 @@ func publicModelsForToken(
 	token model.TokenCache,
 	enabledModelConfigsMap map[string]model.ModelConfig,
 ) []*OpenAIModels {
+	listed, _ := publicModelIndexForToken(token, enabledModelConfigsMap)
+	return listed
+}
+
+// publicModelIndexForToken lists the models the key may call by the ID
+// customers call each by, and indexes every other ID that still calls a
+// listed entry (a capability ID behind a public_api_id, hidden aliases).
+// Internal route keys ("::") are never listed.
+func publicModelIndexForToken(
+	token model.TokenCache,
+	enabledModelConfigsMap map[string]model.ModelConfig,
+) ([]*OpenAIModels, map[string]*OpenAIModels) {
 	models := make(map[string]*OpenAIModels)
+	accepted := make(map[string]*OpenAIModels)
 	add := func(id string, mc model.ModelConfig) {
-		if id == "" {
+		if id == "" || strings.Contains(id, "::") {
 			return
 		}
 
@@ -56,21 +68,34 @@ func publicModelsForToken(
 		}
 	}
 
+	var identities []model.PublicCapabilityIdentity
 	token.Range(func(modelName string) bool {
 		mc, ok := enabledModelConfigsMap[modelName]
 		if !ok {
 			return true
 		}
 
-		if metadata, capability := model.CapabilityRoutingMetadataFromConfig(mc); capability {
-			add(metadata.PublicCapabilityModel, mc)
-			return true
+		if identity, ok := model.PublicCapabilityIdentityFromConfig(mc); ok {
+			identities = append(identities, identity)
 		}
 
-		add(modelName, mc)
+		add(model.ListedPublicModelID(mc), mc)
 
 		return true
 	})
+
+	for _, identity := range identities {
+		entry := models[strings.ToLower(identity.Callable())]
+		if entry == nil {
+			continue
+		}
+
+		for _, id := range identity.Accepted() {
+			if _, claimed := accepted[id]; !claimed {
+				accepted[id] = entry
+			}
+		}
+	}
 
 	result := make([]*OpenAIModels, 0, len(models))
 	for _, entry := range models {
@@ -81,7 +106,7 @@ func publicModelsForToken(
 		return result[i].ID < result[j].ID
 	})
 
-	return result
+	return result, accepted
 }
 
 // ListModels godoc
@@ -119,19 +144,26 @@ func RetrieveModel(c *gin.Context) {
 	modelName := c.Param("model")
 	enabledModelConfigsMap := middleware.GetModelCaches(c).EnabledModelConfigsMap
 
+	listed, accepted := publicModelIndexForToken(token, enabledModelConfigsMap)
+
 	var found *OpenAIModels
-	for _, candidate := range publicModelsForToken(token, enabledModelConfigsMap) {
+	for _, candidate := range listed {
 		if strings.EqualFold(candidate.ID, modelName) {
 			found = candidate
 			break
 		}
 	}
 
+	// Any other ID that calls a listed model (exact) returns that entry.
+	if found == nil {
+		found = accepted[modelName]
+	}
+
 	if found == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": &relaymodel.OpenAIError{
-				Message: fmt.Sprintf("the model '%s' does not exist", modelName),
-				Type:    "invalid_request_error",
+				Message: "No model with this ID is available to this API key. Use an `id` from GET /v1/models.",
+				Type:    "not_found_error",
 				Param:   "model",
 				Code:    "model_not_found",
 			},

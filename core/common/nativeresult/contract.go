@@ -84,6 +84,13 @@ func CompileTaskContract(raw []byte) (*CompiledTask, error) {
 // There is no client-supplied provider/credential/URL override. The returned input
 // is unchanged; omission, defaults, nested fields and exact numbers remain native.
 func (c *CompiledTask) ValidateRequest(raw []byte) (json.RawMessage, error) {
+	return c.ValidateRequestAs(raw, "")
+}
+
+// ValidateRequestAs is ValidateRequest that also accepts accepted as the
+// request's model: another ID the gateway resolved to this contract's model
+// (its public_api_id or an alias). The contract and the body are unchanged.
+func (c *CompiledTask) ValidateRequestAs(raw []byte, accepted string) (json.RawMessage, error) {
 	if c == nil {
 		return nil, ErrRequest
 	}
@@ -96,7 +103,7 @@ func (c *CompiledTask) ValidateRequest(raw []byte) (json.RawMessage, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&request) != nil || request.Model != c.model || len(request.Input) == 0 {
+	if d.Decode(&request) != nil || (request.Model != c.model && (accepted == "" || request.Model != accepted)) || len(request.Input) == 0 {
 		return nil, ErrRequest
 	}
 	if len(c.fixed) > 0 {

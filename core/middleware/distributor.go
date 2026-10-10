@@ -552,15 +552,32 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		group.Status == model.GroupStatusInternal && channelHeader != ""
 	publicModel := requestModel
 	routingModel := resolveImageCapability(c, mode, requestModel)
-	routingModel = resolveNativeCapability(c, mode, routingModel)
+
+	native, proceed := resolveNativeCapability(c, mode, token, routingModel)
+	if !proceed {
+		return
+	}
+
+	if native != nil {
+		routingModel = native.route
+		// The route-key check and the log row name the config's public model,
+		// whichever accepted ID the request used.
+		if native.publicModel != "" {
+			publicModel = native.publicModel
+		}
+	}
 
 	resolvedLocal := false
 	if isCapabilityCreateMode(mode) {
+		// A model group ID (a model ID without its capability) selects a
+		// capability by the request parameters, except on the image endpoints
+		// once DISABLE_IMAGE_GROUP_IDS is set (owner decision D3).
 		resolution, resolveErr := resolveCapabilityRequest(
 			c,
 			token,
 			GetModelCaches(c).EnabledModelConfigsMap,
 			requestModel,
+			acceptsCapabilityGroupID(mode),
 		)
 		if resolveErr == nil {
 			publicModel, routingModel = resolution.PublicModel, resolution.InternalModel
@@ -636,6 +653,16 @@ func distribute(c *gin.Context, mode mode.Mode) {
 	}
 
 	if !ok {
+		if isNativeTaskMode(mode) {
+			abortUnknownNativeModel(c, token, requestModel)
+			return
+		}
+
+		if isImagesGenerationsMode(mode) {
+			abortUnknownImageModel(c, token, requestModel)
+			return
+		}
+
 		AbortOperationally(
 			c,
 			model.FailureStageModel,
@@ -1168,6 +1195,7 @@ func resolveCapabilityRequest(
 	token model.TokenCache,
 	configs map[string]model.ModelConfig,
 	requested string,
+	allowGroupID bool,
 ) (model.CapabilityResolution, error) {
 	fields, err := capabilityRequestFields(c)
 	if err != nil {
@@ -1181,6 +1209,10 @@ func resolveCapabilityRequest(
 		}
 		return true
 	})
+
+	if !allowGroupID {
+		return model.ResolveExactCapabilityModel(requested, fields, entitled)
+	}
 
 	return model.ResolveCapabilityModel(requested, fields, entitled)
 }
@@ -1474,6 +1506,14 @@ func isVideosCreateMode(m mode.Mode) bool {
 
 func isCapabilityCreateMode(m mode.Mode) bool {
 	return isVideosCreateMode(m) || m == mode.ImagesGenerations
+}
+
+// acceptsCapabilityGroupID reports whether a capability-create endpoint still
+// resolves a model group ID by the request parameters. The video endpoints
+// always do (until the old video catalog is retired); the image endpoints stop
+// when DISABLE_IMAGE_GROUP_IDS is set (owner decision D3).
+func acceptsCapabilityGroupID(m mode.Mode) bool {
+	return m != mode.ImagesGenerations || !config.DisableImageGroupIDs
 }
 
 func isVideosStoredMode(m mode.Mode) bool {
@@ -1942,12 +1982,32 @@ func resolveRequestModel(
 	return requestModel, true
 }
 
+func isNativeTaskMode(m mode.Mode) bool {
+	return m == mode.NativeTasks
+}
+
+// isImagesGenerationsMode covers POST /v1/images/generations and
+// POST /v1/images/tasks.
+func isImagesGenerationsMode(m mode.Mode) bool {
+	return m == mode.ImagesGenerations
+}
+
 func abortUnavailableRequestModel(
 	c *gin.Context,
 	requestMode mode.Mode,
 	publicModel, requestModel string,
 	token model.TokenCache,
 ) {
+	if requestMode == mode.NativeTasks {
+		abortUnknownNativeModel(c, token, requestModel)
+		return
+	}
+
+	if requestMode == mode.ImagesGenerations {
+		abortUnknownImageModel(c, token, requestModel)
+		return
+	}
+
 	if IsPublicVideoRequest(c.Request.URL.Path, requestMode) {
 		if GetVideoCapability(c) != "" {
 			abortUnsupportedPublicVideoCapability(
@@ -2002,6 +2062,22 @@ func validateEffectiveRelayModel(
 	}
 
 	if !CheckRelayMode(requestMode, mc.Type) {
+		if requestMode == mode.NativeTasks {
+			abortUnknownNativeModel(c, GetToken(c), publicModel)
+			return false
+		}
+
+		if requestMode == mode.ImagesGenerations {
+			requested := GetRequestedModel(c)
+			if requested == "" {
+				requested = publicModel
+			}
+
+			abortUnknownImageModel(c, GetToken(c), requested)
+
+			return false
+		}
+
 		AbortOperationally(
 			c,
 			model.FailureStageModel,

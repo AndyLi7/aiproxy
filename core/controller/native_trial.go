@@ -75,6 +75,10 @@ type nativeTrialRequest struct {
 	CredentialScope string          `json:"credentialScope"`
 	KeyFingerprint  string          `json:"keyFingerprint"`
 	DeliveryBase    string          `json:"deliveryBase"`
+	// InputMeter has the shape of model.InputMeterConfigKey. Send it only
+	// while the gateway advertises native_input_meter_v1: older gateways
+	// refuse unknown trial fields.
+	InputMeter json.RawMessage `json:"inputMeter,omitempty"`
 }
 
 func (d nativeTrialDependencies) create(c *gin.Context) {
@@ -142,7 +146,7 @@ func (d nativeTrialDependencies) create(c *gin.Context) {
 	}
 	// Disabled shadow channels are deliberately eligible here, never public routing.
 	plan := nativetask.Plan{Contract: input.Contract, ChannelID: channel.ID, Endpoint: input.Endpoint,
-		CredentialScope: input.CredentialScope, KeyFingerprint: input.KeyFingerprint, DeliveryBase: input.DeliveryBase, QuoteJSON: string(input.Quote),
+		CredentialScope: input.CredentialScope, KeyFingerprint: input.KeyFingerprint, DeliveryBase: input.DeliveryBase, QuoteJSON: string(input.Quote), InputMeter: input.InputMeter,
 		Log: &model.NativeTaskLog{RequestAt: time.Now(), Endpoint: "POST /api/native-trials", RequestSource: model.RequestSourceAdminDemo,
 			IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}
 	// Trials are paid examples run by operators; log them as admin demos.

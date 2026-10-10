@@ -159,11 +159,21 @@ REDIS=redis://localhost:6379     # Redis 缓存
 BILLING_ENABLED=true           # 启用计费功能
 SAVE_ALL_LOG_DETAIL=true     # 记录所有请求详情
 REQUEST_TRACE_ENABLED=false  # 显式开启请求阶段 Trace 采集
+DISABLE_NATIVE_INPUT_METER=false  # true：原生任务一律按发布的单次最大额预扣
 ```
 
 请求阶段 Trace 采集默认关闭。开启后只会在网关配置的数据库中新建请求 Trace
 相关表；实际部署必须显式设置 `REQUEST_TRACE_ENABLED=true`。本地开发和测试应仅使用
 临时数据库，不应使用现有业务数据库。
+
+模型发布了 `x_token_platform_input_meter_v1` 计量配置时，原生任务按本次计量输入
+（例如语音合成 `text` 的字符数）预扣，`/api/status` 声明 `native_input_meter_v1`。
+计量无法使用时一律退回发布的最大额，不会拒绝请求。回滚：
+
+1. 设置 `DISABLE_NATIVE_INPUT_METER=true` 并重启网关：之后的新任务都按发布的最大额预扣，`/api/status` 不再声明 `native_input_meter_v1`。
+2. 用应用的 `scripts/republish-character-metered-models.ts` 重新发布按字计量的模型，让对客户的文案恢复为"最多预扣"。
+3. 恢复时去掉该变量、重启网关，再重新发布同一批模型。
+4. 应用回滚后再升级回来时，也要跑一次同一个脚本（先 dry-run，再 `--apply`）：旧版应用写的发布记录不包含哪些模型已按字计量，重新发布前，网关仍按字预扣的模型在文案上会显示"最多预扣"。
 
 ### 高级配置
 

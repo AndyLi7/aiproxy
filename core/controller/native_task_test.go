@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common/balance"
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -112,11 +113,21 @@ func TestNativeRuntimeFeatureNegotiation(t *testing.T) {
 	oldDB, oldWallet := model.LogDB, balance.Default
 	t.Cleanup(func() { model.LogDB = oldDB; balance.Default = oldWallet })
 	model.LogDB, balance.Default = db, nativeControllerWallet{}
+	oldMeterSwitch := config.DisableNativeInputMeter
+	t.Cleanup(func() { config.DisableNativeInputMeter = oldMeterSwitch })
+	config.DisableNativeInputMeter = false
 	t.Setenv("EXTERNAL_BALANCE_URL", "https://storage.example")
 	t.Setenv("EXTERNAL_BALANCE_KEY", "isolated-test-key")
 	require.Empty(t, nativeRuntimeFeatures())
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
-	require.ElementsMatch(t, []string{"native_task_v1", "native_prepayment_recovery_v1", "native_private_trial_v1", "native_owned_artifact_v1", "actual_cost_prepayment_v1"}, nativeRuntimeFeatures())
+	require.ElementsMatch(t, []string{"native_task_v1", "native_prepayment_recovery_v1", "native_private_trial_v1", "native_owned_artifact_v1", "actual_cost_prepayment_v1", "native_input_meter_v1"}, nativeRuntimeFeatures())
+	engine, _ := NativeTaskEngine()
+	require.True(t, engine.InputMeter)
+	// DISABLE_NATIVE_INPUT_METER=true: no advertisement and no metered holds.
+	config.DisableNativeInputMeter = true
+	require.NotContains(t, nativeRuntimeFeatures(), "native_input_meter_v1")
+	engine, _ = NativeTaskEngine()
+	require.False(t, engine.InputMeter)
 	t.Setenv("EXTERNAL_BALANCE_KEY", "")
 	require.NotContains(t, nativeRuntimeFeatures(), "native_owned_artifact_v1")
 	balance.Default = nil

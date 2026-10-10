@@ -160,6 +160,8 @@ BILLING_ENABLED=true           # 启用计费功能
 SAVE_ALL_LOG_DETAIL=true     # 记录所有请求详情
 REQUEST_TRACE_ENABLED=false  # 显式开启请求阶段 Trace 采集
 DISABLE_NATIVE_INPUT_METER=false  # true：原生任务一律按发布的单次最大额预扣
+DISABLE_PUBLIC_API_IDS=false      # true：不再声明 public_api_id_v1（已发布的 ID 照常解析）
+DISABLE_IMAGE_GROUP_IDS=false     # true：图片接口拒绝模型组 ID（404 model_not_found）
 ```
 
 请求阶段 Trace 采集默认关闭。开启后只会在网关配置的数据库中新建请求 Trace
@@ -174,6 +176,27 @@ DISABLE_NATIVE_INPUT_METER=false  # true：原生任务一律按发布的单次�
 2. 用应用的 `scripts/republish-character-metered-models.ts` 重新发布按字计量的模型，让对客户的文案恢复为"最多预扣"。
 3. 恢复时去掉该变量、重启网关，再重新发布同一批模型。
 4. 应用回滚后再升级回来时，也要跑一次同一个脚本（先 dry-run，再 `--apply`）：旧版应用写的发布记录不包含哪些模型已按字计量，重新发布前，网关仍按字预扣的模型在文案上会显示"最多预扣"。
+
+原生任务的模型配置可以声明 `public_api_id`，即客户调用该能力时用的 ID（只有等于
+`public_model` 时有效，例如音频模型 `elevenlabs/eleven-v4`；或等于
+`public_capability_model`），以及 `public_capability_aliases`，即仍可调用、但不公开的
+旧 ID。不合法的值会被忽略并写错误日志。网关只在该 API key 有权调用的配置里精确匹配这些
+ID；`/v1/models` 只列出可调用 ID（不列别名，也不列 `::` 路由键）；任务响应里的 `model`
+返回可调用 ID；`/api/status` 声明 `public_api_id_v1`。合约、原生任务、钱包和请求日志
+仍使用 `public_capability_model`，它永远可以调用。回滚：
+
+1. 设置 `DISABLE_PUBLIC_API_IDS=true` 并重启网关：`/api/status` 不再声明 `public_api_id_v1`，应用随之不再写这两个键。已经发布的键照常解析，所以此时不会出现 404。
+2. 紧接着在应用里重新发布相关模型。已部署的应用里，在后台模型页保存该模型的能力即可（每次保存都会重新发布这个模型；镜像里没有运行脚本用的 `tsx`）。`/api/status` 不声明 `public_api_id_v1` 期间，应用会撤下这些配置声明过的 ID，而不是拒绝发布，并在发布审计里记为 `idsDropped`：配置里去掉这两个键，目录恢复显示 `public_capability_model`。本地可以先用 `scripts/republish-public-model-ids.ts --select api-id-changes --env <环境名>` 列出相关模型，再加 `--apply --actor <用户 ID>` 逐个重新发布。
+3. 然后再换回旧版网关。如果跳过第 1、2 步直接换版本，`public_api_id` 声明的 ID 会返回 404，直到各模型下一次发布把它们撤下；`public_capability_model` 不受影响。
+
+图片接口（`POST /v1/images/generations` 和 `POST /v1/images/tasks`）收到调不通的模型 ID
+时，返回 404 `model_not_found`（`type` 为 `not_found_error`，`param` 为 `model`，
+`suggested_models` 列出该 key 有权调用的、所请求模型组的能力 ID，没有就是空数组）。模型组 ID
+（不带能力的模型 ID，例如 `bytedance/seedream-4.5`）在设置 `DISABLE_IMAGE_GROUP_IDS=true`
+之前仍按请求参数自动选能力（owner 决定 D3）；设置之后返回上述 404，并附该组的能力 ID。视频接口
+继续接受组 ID。这个开关要单独打开：先确认生产环境的应用已经不再把组 ID 当作可调用 ID 展示，
+再对请求日志做一次只读查询，确认过去 30 天没有图片请求的 `requested_model` 是组 ID（有的话先通知
+调用方）。撤销时去掉该变量并重启即可，没有其他依赖。
 
 ### 高级配置
 

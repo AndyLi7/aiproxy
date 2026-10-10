@@ -88,7 +88,37 @@ func nativeHTTP(c *gin.Context) (*nativetask.HTTP, bool) {
 		return middleware.GetGroup(c).ID, middleware.GetToken(c).ID, nil
 	}, ResolvePoller: nativetask.ResolveFalPoller(model.GetChannelByID), OnError: func(status int, code, message string) {
 		recordNativeFailure(c, status, code, message)
-	}}, true
+	}, PublicModel: nativePublicModel(c)}, true
+}
+
+// nativePublicModel reports tasks under the ID customers call the model by
+// (owner decision D2, 2026-10-10). GET /v1/model-tasks/:id bypasses the
+// distributor, so the mapping reads the model configs, not the route.
+func nativePublicModel(c *gin.Context) func(string) string {
+	caches := model.LoadModelCaches()
+	if value, ok := c.Get(middleware.ModelCaches); ok {
+		if typed, ok := value.(*model.ModelCaches); ok && typed != nil {
+			caches = typed
+		}
+	}
+	return func(capabilityModel string) string {
+		if caches == nil {
+			return capabilityModel
+		}
+		return model.NativeCallableModelID(capabilityModel, caches.EnabledModelConfigsMap)
+	}
+}
+
+// nativeAcceptedModel is the request's model when the distributor resolved
+// it to this config by public_api_id or an alias, so the contract accepts it
+// in place of its own capability ID; else "".
+func nativeAcceptedModel(c *gin.Context, mc model.ModelConfig) string {
+	requested := middleware.GetRequestedModel(c)
+	identity, ok := model.PublicCapabilityIdentityFromConfig(mc)
+	if !ok || requested == "" || requested == identity.CapabilityModel || !identity.Accepts(requested) {
+		return ""
+	}
+	return requested
 }
 func submitNativeTask(c *gin.Context) {
 	handler, ok := nativeHTTP(c)
@@ -100,7 +130,12 @@ func submitNativeTask(c *gin.Context) {
 		if mc.Config[NativeResultConfigKey] == nil {
 			// The model is not published for native tasks: the caller chose the
 			// wrong model or endpoint. Every later failure is a server-side route.
-			return nativetask.Plan{}, nil, nativetask.ErrNotNativeModel
+			// Suggest only the model's own IDs on its other endpoint.
+			var suggested []string
+			if suggestion := middleware.NativeModelSuggestions(c, middleware.GetRequestModel(c)); suggestion.OtherEndpoint {
+				suggested = suggestion.Models
+			}
+			return nativetask.Plan{}, nil, &nativetask.NotNativeModelError{SuggestedModels: suggested}
 		}
 		encoded, err := json.Marshal(mc.Config[NativeResultConfigKey])
 		if err != nil {
@@ -123,8 +158,10 @@ func submitNativeTask(c *gin.Context) {
 			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
 		}
 		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
+			AcceptedModel: nativeAcceptedModel(c, mc),
 			Log: &model.NativeTaskLog{RequestAt: middleware.GetRequestAt(c), TokenName: middleware.GetToken(c).Name, Endpoint: "POST /v1/model-tasks",
-				RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}, &fal.Client{Key: channel.Key}, nil
+				RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks),
+				RequestedModel: middleware.GetRequestedModel(c)}}, &fal.Client{Key: channel.Key}, nil
 	}
 	handler.Create(c.Writer, c.Request)
 }
@@ -195,6 +232,12 @@ func nativeRuntimeFeatures() []string {
 	// The application publishes input meters only while this is advertised.
 	if engine.InputMeter {
 		features = append(features, model.InputMeterFeature)
+	}
+	// The application writes public_api_id and aliases only while this is
+	// advertised. DISABLE_PUBLIC_API_IDS=true stops advertising; keys already
+	// written keep resolving, so a rollback has no window of 404s.
+	if !config.DisablePublicAPIIDs {
+		features = append(features, model.PublicAPIIDFeature)
 	}
 	return features
 }

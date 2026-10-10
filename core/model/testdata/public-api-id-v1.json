@@ -1,0 +1,120 @@
+{
+  "description": "Shared by the application (tests/fixtures/public-api-id-v1.json) and the gateway (core/model/testdata/public-api-id-v1.json); keep the two files byte-identical. configs are the identity part of the model configs the application publishes while the gateway advertises feature; the rest states what the gateway answers for them. An example with gateway_env holds only with that gateway environment variable set.",
+  "feature": "public_api_id_v1",
+  "config_keys": {
+    "public_api_id": "public_api_id",
+    "public_capability_aliases": "public_capability_aliases"
+  },
+  "modes": {
+    "native_tasks": 41,
+    "images_generations": 5
+  },
+  "configs": [
+    {
+      "model": "elevenlabs/eleven-v4::text-to-speech",
+      "type": 41,
+      "config": {
+        "capability_contract_version": 1,
+        "public_model": "elevenlabs/eleven-v4",
+        "public_capability_model": "elevenlabs/eleven-v4/text-to-speech",
+        "capability": "text-to-speech",
+        "public_api_id": "elevenlabs/eleven-v4"
+      }
+    },
+    {
+      "model": "alibaba/wan-2.7::text-to-image",
+      "type": 41,
+      "config": {
+        "capability_contract_version": 1,
+        "public_model": "alibaba/wan-2.7",
+        "public_capability_model": "alibaba/wan-2.7/text-to-image",
+        "capability": "text-to-image"
+      }
+    },
+    {
+      "model": "alibaba/wan-2.7::image-to-image",
+      "type": 41,
+      "config": {
+        "capability_contract_version": 1,
+        "public_model": "alibaba/wan-2.7",
+        "public_capability_model": "alibaba/wan-2.7/image-to-image",
+        "capability": "image-to-image"
+      }
+    },
+    {
+      "model": "bytedance/seedream-4.5::text-to-image",
+      "type": 5,
+      "config": {
+        "capability_contract_version": 1,
+        "public_model": "bytedance/seedream-4.5",
+        "public_capability_model": "bytedance/seedream-4.5/text-to-image",
+        "capability": "text-to-image"
+      }
+    }
+  ],
+  "listed": [
+    "alibaba/wan-2.7/image-to-image",
+    "alibaba/wan-2.7/text-to-image",
+    "bytedance/seedream-4.5/text-to-image",
+    "elevenlabs/eleven-v4"
+  ],
+  "native_routes": {
+    "elevenlabs/eleven-v4": "elevenlabs/eleven-v4::text-to-speech",
+    "elevenlabs/eleven-v4/text-to-speech": "elevenlabs/eleven-v4::text-to-speech",
+    "alibaba/wan-2.7/text-to-image": "alibaba/wan-2.7::text-to-image",
+    "alibaba/wan-2.7/image-to-image": "alibaba/wan-2.7::image-to-image",
+    "alibaba/wan-2.7": "",
+    "Elevenlabs/Eleven-V4": "",
+    "bytedance/seedream-4.5/text-to-image": ""
+  },
+  "response_models": {
+    "elevenlabs/eleven-v4/text-to-speech": "elevenlabs/eleven-v4",
+    "alibaba/wan-2.7/text-to-image": "alibaba/wan-2.7/text-to-image",
+    "elevenlabs/eleven-v3/text-to-speech": "elevenlabs/eleven-v3/text-to-speech"
+  },
+  "native_errors": [
+    {
+      "requested": "elevenlabs/eleven-v9",
+      "status": 404,
+      "body": {"error": {"code": "model_not_found", "type": "not_found_error", "param": "model", "message": "This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.", "suggested_models": []}}
+    },
+    {
+      "requested": "alibaba/wan-2.7",
+      "status": 404,
+      "body": {"error": {"code": "model_not_found", "type": "not_found_error", "param": "model", "message": "This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.", "suggested_models": ["alibaba/wan-2.7/image-to-image", "alibaba/wan-2.7/text-to-image"]}}
+    },
+    {
+      "requested": "Elevenlabs/Eleven-V4",
+      "status": 404,
+      "body": {"error": {"code": "model_not_found", "type": "not_found_error", "param": "model", "message": "This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.", "suggested_models": ["elevenlabs/eleven-v4"]}}
+    },
+    {
+      "requested": "elevenlabs/eleven-v4/text-to-speech-2",
+      "status": 404,
+      "body": {"error": {"code": "model_not_found", "type": "not_found_error", "param": "model", "message": "This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.", "suggested_models": ["elevenlabs/eleven-v4"]}}
+    },
+    {
+      "requested": "bytedance/seedream-4.5",
+      "status": 400,
+      "body": {"error": {"code": "native_model_unavailable", "type": "invalid_request_error", "param": "model", "message": "This model is served on a different endpoint. Read its openapi_url in GET /v1/models; suggested_models lists the IDs to use there.", "suggested_models": ["bytedance/seedream-4.5/text-to-image"]}}
+    },
+    {
+      "requested": "bytedance/seedream-4.5/text-to-image",
+      "status": 400,
+      "body": {"error": {"code": "native_model_unavailable", "type": "invalid_request_error", "param": "model", "message": "This model is served on a different endpoint. Read its openapi_url in GET /v1/models; suggested_models lists the IDs to use there.", "suggested_models": ["bytedance/seedream-4.5/text-to-image"]}}
+    }
+  ],
+  "image_errors": [
+    {
+      "requested": "bytedance/seedream-4.5",
+      "gateway_env": "DISABLE_IMAGE_GROUP_IDS=true",
+      "status": 404,
+      "body": {"error": {"code": "model_not_found", "type": "not_found_error", "param": "model", "message": "This model ID names a group of capabilities and cannot be called. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.", "suggested_models": ["bytedance/seedream-4.5/text-to-image"]}}
+    },
+    {
+      "requested": "bytedance/seedream-4.5/text-to-imag",
+      "status": 404,
+      "body": {"error": {"code": "model_not_found", "type": "not_found_error", "param": "model", "message": "This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `id` from GET /v1/models.", "suggested_models": []}}
+    }
+  ]
+}

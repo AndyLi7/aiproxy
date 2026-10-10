@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	gatewayconfig "github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -44,9 +45,12 @@ func validateImageRegistryRequest(
 		return unavailable
 	}
 	// Resolve base-model aliases only from distributor-owned context and the
-	// selected server configuration. Preserve the original body model below.
+	// selected server configuration, and only while the image endpoints accept
+	// model group IDs (DISABLE_IMAGE_GROUP_IDS unset; owner decision D3).
+	// Preserve the original body model below.
 	bindingID := publicID
-	if GetRequestedModel(c) == publicID && GetPublicModel(c) == publicID &&
+	if !gatewayconfig.DisableImageGroupIDs &&
+		GetRequestedModel(c) == publicID && GetPublicModel(c) == publicID &&
 		GetPublicCapabilityModel(c) != "" &&
 		config["public_capability_model"] == GetPublicCapabilityModel(c) &&
 		config["capability"] == GetResolvedCapability(c) {

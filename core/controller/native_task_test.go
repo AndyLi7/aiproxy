@@ -113,14 +113,21 @@ func TestNativeRuntimeFeatureNegotiation(t *testing.T) {
 	oldDB, oldWallet := model.LogDB, balance.Default
 	t.Cleanup(func() { model.LogDB = oldDB; balance.Default = oldWallet })
 	model.LogDB, balance.Default = db, nativeControllerWallet{}
-	oldMeterSwitch := config.DisableNativeInputMeter
-	t.Cleanup(func() { config.DisableNativeInputMeter = oldMeterSwitch })
-	config.DisableNativeInputMeter = false
+	oldMeterSwitch, oldPublicIDSwitch := config.DisableNativeInputMeter, config.DisablePublicAPIIDs
+	t.Cleanup(func() {
+		config.DisableNativeInputMeter, config.DisablePublicAPIIDs = oldMeterSwitch, oldPublicIDSwitch
+	})
+	config.DisableNativeInputMeter, config.DisablePublicAPIIDs = false, false
 	t.Setenv("EXTERNAL_BALANCE_URL", "https://storage.example")
 	t.Setenv("EXTERNAL_BALANCE_KEY", "isolated-test-key")
 	require.Empty(t, nativeRuntimeFeatures())
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
-	require.ElementsMatch(t, []string{"native_task_v1", "native_prepayment_recovery_v1", "native_private_trial_v1", "native_owned_artifact_v1", "actual_cost_prepayment_v1", "native_input_meter_v1"}, nativeRuntimeFeatures())
+	require.ElementsMatch(t, []string{"native_task_v1", "native_prepayment_recovery_v1", "native_private_trial_v1", "native_owned_artifact_v1", "actual_cost_prepayment_v1", "native_input_meter_v1", "public_api_id_v1"}, nativeRuntimeFeatures())
+	// DISABLE_PUBLIC_API_IDS=true: the application stops writing public IDs.
+	config.DisablePublicAPIIDs = true
+	require.NotContains(t, nativeRuntimeFeatures(), "public_api_id_v1")
+	require.Contains(t, nativeRuntimeFeatures(), "native_task_v1")
+	config.DisablePublicAPIIDs = false
 	engine, _ := NativeTaskEngine()
 	require.True(t, engine.InputMeter)
 	// DISABLE_NATIVE_INPUT_METER=true: no advertisement and no metered holds.

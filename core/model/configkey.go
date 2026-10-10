@@ -18,6 +18,14 @@ const (
 	ModelConfigCapabilityKey                ModelConfigKey = "capability"
 	ModelConfigParameterSchemaKey           ModelConfigKey = "parameter_schema"
 	ModelConfigDefaultParametersKey         ModelConfigKey = "default_parameters"
+	// ModelConfigPublicAPIIDKey is the ID customers call a native capability
+	// by when it differs from public_capability_model (for example an audio
+	// model called by its model ID). Valid only when it equals public_model or
+	// public_capability_model.
+	ModelConfigPublicAPIIDKey ModelConfigKey = "public_api_id"
+	// ModelConfigPublicCapabilityAliasesKey lists hidden IDs that still call a
+	// native capability (earlier IDs kept after a rename). Never listed.
+	ModelConfigPublicCapabilityAliasesKey ModelConfigKey = "public_capability_aliases"
 )
 
 type ModelConfigOption func(config map[ModelConfigKey]any)

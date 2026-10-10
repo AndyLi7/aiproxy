@@ -64,3 +64,35 @@ func TestCustomerIssuesDropPlatformControls(t *testing.T) {
 		t.Fatalf("kept a platform control %v", got)
 	}
 }
+
+// A request made with another accepted ID (public_api_id or an alias) passes
+// the same validation with an unchanged input; the contract keeps its model.
+func TestNativeTaskEnvelopeAcceptsResolvedPublicID(t *testing.T) {
+	c, err := CompileTaskContract([]byte(`{"version":1,"model":"brand/model/text-to-speech","input_schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false},"output_schema":{"type":"object"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{`{"model":"brand/model","input":{"text":"hi"}}`, `{"model":"brand/model/text-to-speech","input":{"text":"hi"}}`} {
+		got, err := c.ValidateRequestAs([]byte(raw), "brand/model")
+		if err != nil || !bytes.Equal(got, []byte(`{"text":"hi"}`)) {
+			t.Fatalf("%s: %s %v", raw, got, err)
+		}
+	}
+	for _, tc := range []struct{ raw, accepted string }{
+		// Without the gateway's resolution the other ID is refused.
+		{`{"model":"brand/model","input":{"text":"hi"}}`, ""},
+		// Only the one accepted ID, exactly.
+		{`{"model":"Brand/Model","input":{"text":"hi"}}`, "brand/model"},
+		{`{"model":"other/model","input":{"text":"hi"}}`, "brand/model"},
+		// The input is validated as before.
+		{`{"model":"brand/model","input":{"text":"hi","extra":1}}`, "brand/model"},
+		{`{"model":"brand/model","input":{}}`, "brand/model"},
+	} {
+		if _, err := c.ValidateRequestAs([]byte(tc.raw), tc.accepted); err == nil {
+			t.Fatalf("accepted %s as %q", tc.raw, tc.accepted)
+		}
+	}
+	if _, err := c.ValidateRequest([]byte(`{"model":"brand/model","input":{"text":"hi"}}`)); err == nil {
+		t.Fatal("ValidateRequest accepted another ID")
+	}
+}

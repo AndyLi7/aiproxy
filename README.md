@@ -159,6 +159,8 @@ BILLING_ENABLED=true           # Enable billing features
 SAVE_ALL_LOG_DETAIL=true     # Log all request details
 REQUEST_TRACE_ENABLED=false  # Opt in to request-stage trace capture
 DISABLE_NATIVE_INPUT_METER=false  # true: native tasks hold the published per-request maximum
+DISABLE_PUBLIC_API_IDS=false      # true: stop advertising public_api_id_v1 (published IDs keep resolving)
+DISABLE_IMAGE_GROUP_IDS=false     # true: image endpoints refuse model group IDs (404 model_not_found)
 ```
 
 Request-stage trace capture is disabled by default. Enabling it creates only the
@@ -176,6 +178,33 @@ published maximum; it never rejects a request. Rollback:
 2. Republish the metered models from the application (`scripts/republish-character-metered-models.ts`) so customer copy states the maximum hold again.
 3. To resume, unset the variable, restart, and republish the same models.
 4. After any application rollback and roll-forward, run the same script (dry run, then `--apply`): releases written by an older application do not record which models are metered, so customer copy may state the maximum for models the gateway still meters until they are republished.
+
+Native task model configs may declare `public_api_id`, the ID customers call a
+capability by (valid only when it equals `public_model`, for example an audio
+model called `elevenlabs/eleven-v4`, or `public_capability_model`), and
+`public_capability_aliases`, hidden IDs that still call it. Invalid values are
+ignored and logged. The gateway matches them exactly, only among the configs the
+API key may call; lists the callable ID (never an alias or a `::` route key) in
+`/v1/models`; returns it as `model` in task responses; and advertises
+`public_api_id_v1` in `/api/status`. Contracts, native tasks, wallet claims and
+request logs keep `public_capability_model`, which always stays callable. Rollback:
+
+1. Set `DISABLE_PUBLIC_API_IDS=true` and restart the gateway: `public_api_id_v1` disappears from `/api/status`, so the application stops writing the keys. Keys already published keep resolving, so no ID returns 404 yet.
+2. Immediately republish each affected model from the application. In a deployed application, save the model's capability in the admin model page (every save republishes the model; the image has no `tsx` for the scripts). While `/api/status` does not advertise `public_api_id_v1`, the application withdraws the IDs these configs declared instead of refusing the publication and records them as `idsDropped` in the release audit: the configs drop the keys and the catalog shows `public_capability_model` again. Locally, `scripts/republish-public-model-ids.ts --select api-id-changes --env <environment>` lists the affected models, and `--apply --actor <user id>` republishes them one by one.
+3. Then deploy the previous gateway build. Skipping steps 1 and 2 makes the IDs declared by `public_api_id` return 404 until each model's next publication withdraws them; `public_capability_model` keeps working.
+
+The image endpoints (`POST /v1/images/generations` and `POST /v1/images/tasks`)
+answer a model ID that calls nothing with 404 `model_not_found` (type
+`not_found_error`, param `model`, and `suggested_models`: the capability IDs of
+the requested model group this key may call, otherwise empty). A model group ID
+(a model ID without its capability, for example `bytedance/seedream-4.5`) still
+selects a capability by the request parameters until `DISABLE_IMAGE_GROUP_IDS=true`
+(owner decision D3); then it gets that 404 with the group's capability IDs. The
+video endpoints keep accepting group IDs. Turn the switch on as its own step:
+after the application no longer presents group IDs as callable in production,
+and after a read-only query of the request log finds no image request whose
+`requested_model` metadata is a group ID in the last 30 days (notify such callers
+first). To undo it, unset the variable and restart; nothing else depends on it.
 
 ### Advanced Configuration
 

@@ -144,3 +144,28 @@ func TestNativeTaskLogIsSkippedWithoutLogStorage(t *testing.T) {
 	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{}))
 	require.NoError(t, model.SaveNativeBillingTerminal(db, "no_logs", "g", 1, `{"status":"accepted"}`))
 }
+
+// A task requested by another accepted ID (public_api_id or an alias) is
+// still logged under its capability ID, split into model and capability; the
+// requested ID is kept as requested_model metadata. Billing reads the split.
+func TestNativeTaskLogKeepsCapabilityIdentityAndRequestedModel(t *testing.T) {
+	db := nativeLogDB(t)
+	task := submittedNativeTask(t, db, "requested_by_public_id")
+	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{
+		Endpoint: "POST /v1/model-tasks", Mode: int(mode.NativeTasks), RequestedModel: "alibaba/wan-2.2-5b",
+	}))
+	rows := nativeLogRows(t, db, "requested_by_public_id")
+	require.Len(t, rows, 1)
+	require.Equal(t, "alibaba/wan-2.2-5b", rows[0].Model)
+	require.Equal(t, "text-to-image", rows[0].Capability)
+	require.Equal(t, map[string]string{"requested_model": "alibaba/wan-2.2-5b"}, rows[0].Metadata)
+
+	// The capability ID itself adds no metadata.
+	task = submittedNativeTask(t, db, "requested_by_capability_id")
+	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{
+		Endpoint: "POST /v1/model-tasks", Mode: int(mode.NativeTasks), RequestedModel: task.Model,
+	}))
+	rows = nativeLogRows(t, db, "requested_by_capability_id")
+	require.Len(t, rows, 1)
+	require.Empty(t, rows[0].Metadata)
+}

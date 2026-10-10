@@ -318,7 +318,7 @@ func TestCapabilityRoutingResolvesEntitledPublicVideoModels(t *testing.T) {
 
 			requested, err := getRequestModel(ctx, mode.Videos, "group-1", 7)
 			require.NoError(t, err)
-			resolved, err := resolveCapabilityRequest(ctx, token, configs, requested)
+			resolved, err := resolveCapabilityRequest(ctx, token, configs, requested, true)
 			require.NoError(t, err)
 			assert.Equal(t, test.wantInternal, resolved.InternalModel)
 			assert.Equal(t, publicModel, resolved.PublicModel)

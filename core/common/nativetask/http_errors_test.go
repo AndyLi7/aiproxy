@@ -84,7 +84,7 @@ func TestNativeErrorsCarryCodeMessageAndType(t *testing.T) {
 			h.ResolvePlan = func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil }
 			h.Create(w, request(body))
 			h.Engine = e
-		}, 402, "insufficient_balance", "insufficient_quota", errorMessages["insufficient_balance"]},
+		}, 402, "insufficient_balance", "insufficient_quota", "Your balance does not cover this request's hold; see pricing.prepayment in /v1/models."},
 		{"too many active tasks", func(w *httptest.ResponseRecorder) {
 			h.Engine = &Engine{DB: e.DB, Wallet: &refusingWallet{err: balance.ErrPrepaymentTooManyActiveTasks}}
 			h.ResolvePlan = func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil }

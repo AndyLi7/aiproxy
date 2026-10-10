@@ -11,6 +11,16 @@ Clients should prompt for a balance top-up, not retry automatically or replace
 the API key. Internal account/group identifiers are retained in server logs,
 not included in this public balance response.
 
+`POST /v1/model-tasks` returns the same code and type when the balance does not
+cover the task's prepayment hold, with the message "Your balance does not cover
+this request's hold; see pricing.prepayment in /v1/models." When
+pricing.prepayment has `scales_with`, the hold is the price of the request's own
+metered input, at most `amount` (a request with an undeclared top-level field,
+another top-level text over 64 characters that is not an `enum` or `const`
+value, or more than 64 characters of text inside another top-level list or
+object, holds `amount`); otherwise it is `amount`. The refused request
+leaves nothing behind: after a top-up, retry with the same X-Request-Id.
+
 Model access/resolution and published image-contract validation run before
 the wallet lookup. Invalid model IDs or image-contract parameters therefore
 remain diagnosable with an empty balance. This does not move all provider-side

@@ -52,7 +52,7 @@ var errorMessages = map[string]string{
 	"native_model_unavailable":     "This model is not available for tasks on this endpoint. Check the model ID in the model catalog.",
 	"model_route_unavailable":      "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
 	"authentication_required":      "A valid API key is required.",
-	"insufficient_balance":         "Your account balance is insufficient.",
+	"insufficient_balance":         "Your balance does not cover this request's hold; see pricing.prepayment in /v1/models.",
 	"too_many_active_tasks":        "Too many of your tasks are generating at once. Wait for one to finish, then retry with the same X-Request-Id.",
 	"rate_limit_exceeded":          "Too many requests for this API key. Poll each task about every 5 seconds and download results a few at a time.",
 	"model_unavailable":            "This model is temporarily unavailable. Retry later with the same X-Request-Id.",

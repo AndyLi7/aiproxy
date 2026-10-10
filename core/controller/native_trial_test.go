@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -192,4 +193,83 @@ func TestNativeTrialListsRejectedParameters(t *testing.T) {
 	c, _ = gin.CreateTestContext(out)
 	writeNativeTrial(c, 200, task)
 	require.NotContains(t, out.Body.String(), "errorIssues")
+}
+
+type meterTrialWallet struct{ commands []balance.PrepaymentCommand }
+
+func (w *meterTrialWallet) Prepayment(_ context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+	w.commands = append(w.commands, c)
+	return balance.PrepaymentReceipt{ID: c.BillingOperationID, Claimed: true}, nil
+}
+
+// Private trials go through the same input meter as public tasks: the trial
+// request carries the meter next to its quote, and the engine flag applies.
+func TestNativePrivateTrialSizesHoldWithInputMeter(t *testing.T) {
+	quote := json.RawMessage(`{"currency":"USD","prepaidMicros":200000,"quoteVersion":"draft","routes":[{"channelId":9,"credentialScope":"scope","endpoint":"elevenlabs/tts/eleven-v4-turbo","estimatedMicros":200000,"prepaidMicros":200000,"provider":"fal","quantityMetric":"request","routeId":"turbo","rule":{"mode":"list_ratio","ratio":"1"}}],"settlementPolicy":"actual-cost-v1","version":1}`)
+	meter := json.RawMessage(`{"version":1,"metric":"characters","path":["text"],"routes":{"turbo":{"unitSize":1000,"unitMicros":40000,"maxQuantity":5000,"maxMicros":200000}}}`)
+	inline := json.RawMessage(`{"version":1,"model":"elevenlabs/tts/eleven-v4-turbo","input_schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string","maxLength":5000},"voice":{"type":"string"}}},"output_schema":{"type":"object"}}`)
+	// The contract the application publishes for Eleven v4 Turbo (a local
+	// $ref request schema) and today's 122-character production text, shared
+	// with the nativetask golden files.
+	imported, err := os.ReadFile(filepath.Join("..", "common", "nativetask", "testdata", "contract-turbo.json"))
+	require.NoError(t, err)
+	text122, err := os.ReadFile(filepath.Join("..", "common", "nativetask", "testdata", "metered-input-turbo-122.json"))
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name     string
+		meter    json.RawMessage
+		enabled  bool
+		hold     int64
+		contract json.RawMessage
+		input    json.RawMessage
+	}{
+		{"metered", meter, true, 200, inline, json.RawMessage(`{"text":"hello","voice":"Aria"}`)},
+		{"no meter sent", nil, true, 200000, inline, json.RawMessage(`{"text":"hello","voice":"Aria"}`)},
+		{"engine switch off", meter, false, 200000, inline, json.RawMessage(`{"text":"hello","voice":"Aria"}`)},
+		{"imported contract", meter, true, 4880, json.RawMessage(imported), json.RawMessage(text122)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database, err := model.OpenSQLite(filepath.Join(t.TempDir(), "trial.db"))
+			require.NoError(t, err)
+			require.NoError(t, database.AutoMigrate(&model.NativeTask{}))
+			sqlDB, err := database.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = sqlDB.Close() })
+			wallet, provider := &meterTrialWallet{}, &trialProvider{}
+			engine := &nativetask.Engine{DB: database, Wallet: wallet, InputMeter: tc.enabled}
+			channel := &model.Channel{ID: 9, Type: model.ChannelTypeFal, Status: model.ChannelStatusDisabled, Key: "trial-secret", BaseURL: "https://queue.fal.run"}
+			deps := nativeTrialDependencies{
+				engine: func() (*nativetask.Engine, bool) { return engine, true },
+				token: func(id int) (*model.Token, error) {
+					return &model.Token{ID: id, GroupID: "internal", Status: model.TokenStatusEnabled}, nil
+				},
+				group: func(string, bool) (*model.Group, error) {
+					return &model.Group{ID: "internal", Status: model.GroupStatusInternal}, nil
+				},
+				channel:  func(int) (*model.Channel, error) { return channel, nil },
+				provider: func(*model.Channel) nativetask.Provider { return provider },
+			}
+			router := gin.New()
+			router.POST("/api/native-trials/:group/:token", deps.create)
+			input := nativeTrialRequest{Contract: tc.contract, Input: tc.input, ChannelID: 9, Endpoint: "elevenlabs/tts/eleven-v4-turbo", CredentialScope: "scope",
+				KeyFingerprint: model.ImageChannelKeyFingerprint(channel.Key), DeliveryBase: "https://gateway.example", Quote: quote, InputMeter: tc.meter}
+			encoded, err := json.Marshal(input)
+			require.NoError(t, err)
+			require.Equal(t, tc.meter != nil, strings.Contains(string(encoded), `"inputMeter"`))
+			request := httptest.NewRequest("POST", "/api/native-trials/internal/7", strings.NewReader(string(encoded)))
+			request.Header.Set("X-Request-Id", "trial_meter")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			require.Equal(t, 202, response.Code, response.Body.String())
+			require.NotEmpty(t, wallet.commands)
+			admit := wallet.commands[0]
+			require.Equal(t, "admit", admit.Action)
+			require.Equal(t, tc.hold, *admit.PrepaidMicros)
+			require.Equal(t, tc.hold, *admit.EstimatedMicros)
+			if tc.hold == 200000 {
+				require.Equal(t, string(quote), admit.QuoteJSON, "an unmetered trial forwards its quote byte for byte")
+			}
+			require.Equal(t, 1, provider.calls)
+		})
+	}
 }

@@ -158,12 +158,24 @@ REDIS=redis://localhost:6379     # Redis for caching
 BILLING_ENABLED=true           # Enable billing features
 SAVE_ALL_LOG_DETAIL=true     # Log all request details
 REQUEST_TRACE_ENABLED=false  # Opt in to request-stage trace capture
+DISABLE_NATIVE_INPUT_METER=false  # true: native tasks hold the published per-request maximum
 ```
 
 Request-stage trace capture is disabled by default. Enabling it creates only the
 new request-trace tables in the configured gateway database; deployments must
 explicitly opt in with `REQUEST_TRACE_ENABLED=true`. Local development and tests
 should use a temporary database rather than an existing business database.
+
+Native tasks size their prepayment hold to the metered input (for example the
+characters of a text-to-speech `text`) when the model publishes an
+`x_token_platform_input_meter_v1` meter, and `/api/status` advertises
+`native_input_meter_v1`. A meter that cannot be applied always falls back to the
+published maximum; it never rejects a request. Rollback:
+
+1. Set `DISABLE_NATIVE_INPUT_METER=true` and restart the gateway: every new task holds the published maximum and `native_input_meter_v1` disappears from `/api/status`.
+2. Republish the metered models from the application (`scripts/republish-character-metered-models.ts`) so customer copy states the maximum hold again.
+3. To resume, unset the variable, restart, and republish the same models.
+4. After any application rollback and roll-forward, run the same script (dry run, then `--apply`): releases written by an older application do not record which models are metered, so customer copy may state the maximum for models the gateway still meters until they are republished.
 
 ### Advanced Configuration
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common/balance"
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/common/ownedartifact"
@@ -40,7 +41,7 @@ func NativeTaskEngine() (*nativetask.Engine, bool) {
 	if !ok || !model.NativeTaskStorageReady(model.LogDB) {
 		return nil, false
 	}
-	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet}, true
+	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet, InputMeter: !config.DisableNativeInputMeter}, true
 }
 
 // nativeFailureStage mirrors image tasks so native rejections are filtered and
@@ -121,7 +122,7 @@ func submitNativeTask(c *gin.Context) {
 		if err != nil || quote == nil {
 			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
 		}
-		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote,
+		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
 			Log: &model.NativeTaskLog{RequestAt: middleware.GetRequestAt(c), TokenName: middleware.GetToken(c).Name, Endpoint: "POST /v1/model-tasks",
 				RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}, &fal.Client{Key: channel.Key}, nil
 	}
@@ -183,12 +184,17 @@ func replayNativeTask(c *gin.Context) {
 // Runtime negotiation is separate from per-model execution/billing evidence.
 // Never advertise native execution on an unmigrated or non-prepayment runtime.
 func nativeRuntimeFeatures() []string {
-	if _, ok := NativeTaskEngine(); !ok {
+	engine, ok := NativeTaskEngine()
+	if !ok {
 		return nil
 	}
 	features := []string{"native_task_v1", "native_prepayment_recovery_v1", "native_private_trial_v1", "actual_cost_prepayment_v1"}
 	if ownedartifact.Configured() {
 		features = append(features, "native_owned_artifact_v1")
+	}
+	// The application publishes input meters only while this is advertised.
+	if engine.InputMeter {
+		features = append(features, model.InputMeterFeature)
 	}
 	return features
 }

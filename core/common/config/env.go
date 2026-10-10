@@ -27,6 +27,10 @@ var (
 	OnCallLarkAppID     string
 	OnCallLarkAppSecret string
 	OnCallLarkOpenIDs   []string // comma-separated open IDs
+
+	// DisableNativeInputMeter makes native tasks hold the published maximum
+	// and stops advertising native_input_meter_v1 (rollback switch).
+	DisableNativeInputMeter bool
 )
 
 func ReloadEnv() {
@@ -43,6 +47,7 @@ func ReloadEnv() {
 	InternalToken = os.Getenv("INTERNAL_TOKEN")
 	DisableModelConfig = env.Bool("DISABLE_MODEL_CONFIG", false)
 	EnableAdminBypassChannelModelCheck = env.Bool("ENABLE_ADMIN_BYPASS_CHANNEL_MODEL_CHECK", false)
+	DisableNativeInputMeter = env.Bool("DISABLE_NATIVE_INPUT_METER", false)
 	Redis = env.String("REDIS", os.Getenv("REDIS_CONN_STRING"))
 	RedisKeyPrefix = os.Getenv("REDIS_KEY_PREFIX")
 	ConfigFilePath = env.String("CONFIG_FILE_PATH", "./config.yaml")

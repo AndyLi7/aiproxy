@@ -30,6 +30,9 @@ type Plan struct {
 	ChannelID                            int
 	Endpoint, CredentialScope, QuoteJSON string
 	DeliveryBase                         string
+	// InputMeter is the model's raw input meter (model.InputMeterConfigKey),
+	// or nil. It is decoded per request; an unusable one holds the maximum.
+	InputMeter json.RawMessage
 	// Log describes the request-log row recorded once the task is submitted.
 	Log *model.NativeTaskLog
 }
@@ -37,6 +40,9 @@ type Engine struct {
 	DB       *gorm.DB
 	Wallet   Wallet
 	Provider Provider
+	// InputMeter sizes holds to the metered input. Off (env
+	// DISABLE_NATIVE_INPUT_METER=true), every request holds the published maximum.
+	InputMeter bool
 }
 
 var ErrUnavailable = errors.New("native execution unavailable")
@@ -77,6 +83,17 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	quote, err := model.ParseImagePrepaymentQuote(p.QuoteJSON)
 	if err != nil {
 		return nil, err
+	}
+	if e.InputMeter && len(p.InputMeter) > 0 {
+		// Sized from the body sent upstream, before anything is reserved, so
+		// the reservation, the wallet admission and every retry of the same
+		// body share one quote.
+		var meterErr error
+		p.QuoteJSON, quote, meterErr = sizeQuoteToInput(p.QuoteJSON, quote, p.InputMeter, frozen, input)
+		if meterErr != nil {
+			log.WithFields(log.Fields{"lane": "native", "task_id": id, "group": group, "model": frozen.Model, "reason": meterErr.Error()}).
+				Info("native input meter not applied; holding the published maximum")
+		}
 	}
 	route := quote.Route(p.ChannelID, p.Endpoint)
 	// Image-based quantities must first be resolved to a proven request total by

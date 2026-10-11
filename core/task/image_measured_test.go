@@ -60,7 +60,10 @@ func TestMeasuredSettlementReplayUsesImmutableSnapshot(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, model.CreateMeasuredImageSettlement(&model.Log{RequestID: "measured"}, info))
+	require.NoError(t, model.CreateMeasuredImageSettlement(
+		&model.Log{RequestID: "measured", GroupID: "measured", TokenID: 1},
+		info,
+	))
 	info.NextPollAt = time.Now().Add(-time.Second)
 	require.NoError(t, model.UpdateAsyncUsageInfo(info))
 	ok, err := model.TryClaimAsyncUsageInfo(info, "claim", time.Now().Add(time.Minute), time.Now())
@@ -114,7 +117,10 @@ func TestMeasuredWorkerNeverPollsForZeroOrIncomplete(t *testing.T) {
 		}
 		require.NoError(t, model.CreateAsyncUsageInfo(info))
 
-		entry := &model.Log{RequestID: model.EmptyNullString(state)}
+		entry := &model.Log{
+			RequestID:        model.EmptyNullString(state),
+			AsyncUsageStatus: model.AsyncUsageStatusPending,
+		}
 		require.NoError(t, db.Create(entry).Error)
 		info.LogID = entry.ID
 		require.NoError(t, model.UpdateAsyncUsageInfo(info))

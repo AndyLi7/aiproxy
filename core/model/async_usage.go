@@ -426,23 +426,61 @@ func updateClaimedAsyncUsageInfo(
 	return nil
 }
 
-func UpdateLogUsageByRequestID(
-	requestID string,
+// asyncUsageLogs selects the call row an async usage outbox settles. The request
+// id is caller-chosen (X-Request-ID) and unique neither across groups nor within
+// one, so the row is always narrowed to the identity the outbox captured from
+// the same request as the row: its group, token and mode. Like nativeTaskLogs,
+// rows without an async usage status (gateway rejections and failed submissions
+// that reused the request id) are never settlement targets. An outbox without a
+// token or mode keeps the remaining keys and never leaves its own group.
+// Accounting outboxes (measured images and image tasks) are bound to their own
+// row id; without one they select nothing, because every attempt of one
+// request shares the other keys.
+func asyncUsageLogs(info *AsyncUsageInfo) (*gorm.DB, bool) {
+	if info == nil || info.RequestID == "" {
+		return nil, false
+	}
+
+	if (info.MeasuredImage || info.ImageTaskID != "") && info.LogID <= 0 {
+		return nil, false
+	}
+
+	query := LogDB.Model(&Log{}).Where(
+		"request_id = ? AND group_id = ? AND async_usage_status <> ?",
+		info.RequestID,
+		info.GroupID,
+		AsyncUsageStatusNone,
+	)
+	if info.TokenID != 0 {
+		query = query.Where("token_id = ?", info.TokenID)
+	}
+
+	if info.Mode != 0 {
+		query = query.Where("mode = ?", info.Mode)
+	}
+
+	if info.LogID > 0 {
+		query = query.Where("id = ?", info.LogID)
+	}
+
+	return query, true
+}
+
+func UpdateAsyncUsageLogUsage(
+	info *AsyncUsageInfo,
 	usage Usage,
 	usageContext UsageContext,
 	price Price,
 	amount Amount,
 	currency string,
 	pricingVersion string,
-	logIDs ...int,
 ) error {
-	var logEntry Log
-
-	query := LogDB.Where("request_id = ?", requestID)
-	if len(logIDs) > 0 && logIDs[0] > 0 {
-		query = query.Where("id = ?", logIDs[0])
+	query, ok := asyncUsageLogs(info)
+	if !ok {
+		return NotFoundError("log")
 	}
 
+	var logEntry Log
 	if err := query.First(&logEntry).Error; err != nil {
 		return err
 	}
@@ -458,18 +496,20 @@ func UpdateLogUsageByRequestID(
 	return LogDB.Save(&logEntry).Error
 }
 
-func UpdateLogAsyncUsageStatusByRequestID(
-	requestID string,
+func UpdateAsyncUsageLogStatus(
+	info *AsyncUsageInfo,
 	status AsyncUsageStatus,
 ) error {
-	if requestID == "" {
+	if info == nil || info.RequestID == "" {
 		return nil
 	}
 
-	tx := LogDB.
-		Model(&Log{}).
-		Where("request_id = ?", requestID).
-		Update("async_usage_status", status)
+	query, ok := asyncUsageLogs(info)
+	if !ok {
+		return NotFoundError("log")
+	}
+
+	tx := query.Update("async_usage_status", status)
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -481,14 +521,14 @@ func UpdateLogAsyncUsageStatusByRequestID(
 	return nil
 }
 
-func UpdateLogAsyncUsageFailedByRequestID(requestID, message string, logIDs ...int) error {
-	if requestID == "" {
+func UpdateAsyncUsageLogFailed(info *AsyncUsageInfo, message string) error {
+	if info == nil || info.RequestID == "" {
 		return nil
 	}
 
-	query := LogDB.Model(&Log{}).Where("request_id = ?", requestID)
-	if len(logIDs) > 0 {
-		query = query.Where("id = ?", logIDs[0])
+	query, ok := asyncUsageLogs(info)
+	if !ok {
+		return NotFoundError("log")
 	}
 
 	tx := query.Updates(

@@ -253,6 +253,8 @@ func TestCompleteAsyncUsagePersistsFinalUsageBeforeBalanceCallback(t *testing.T)
 	)
 	require.NoError(t, db.Create(&model.Log{
 		RequestID:        model.EmptyNullString(requestID),
+		GroupID:          groupID,
+		TokenID:          1,
 		AsyncUsageStatus: model.AsyncUsageStatusPending,
 	}).Error)
 	require.NoError(t, model.CacheSetGroup(&model.GroupCache{

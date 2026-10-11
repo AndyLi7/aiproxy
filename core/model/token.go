@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/config"
@@ -72,8 +73,13 @@ func (t *Token) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// MaxTokenNameLength is the longest token name, in characters (the name
+// column is varchar(32), which counts characters, not bytes), so a name in
+// Chinese may use all 32 characters.
+const MaxTokenNameLength = 32
+
 func (t *Token) BeforeSave(_ *gorm.DB) error {
-	if len(t.Name) > 32 {
+	if utf8.RuneCountInString(string(t.Name)) > MaxTokenNameLength {
 		return errors.New("token name is too long")
 	}
 	return nil

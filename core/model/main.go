@@ -401,7 +401,10 @@ func preMigrationCleanupLogs(batchSize int) error {
 	for {
 		ids = ids[:0]
 
-		err := LogDB.Model(&Log{}).
+		// Same rule as the runtime cleanLog: keep the rows unsettled image
+		// accounting still points at.
+		err := preserveImageAccountingLogs(LogDB).
+			Model(&Log{}).
 			Select("id").
 			Where("created_at < ?", cutoffTime).
 			Limit(batchSize).
@@ -434,7 +437,10 @@ func preMigrationCleanupLogs(batchSize int) error {
 	return nil
 }
 
-// preMigrationCleanupRetryLogs cleans up expired logs using ID-based batch deletion
+// preMigrationCleanupRetryLogs cleans up expired retry logs using ID-based batch
+// deletion. Retry log ids are their own sequence, so they only ever address
+// retry_logs rows; the request log has its own retention in
+// preMigrationCleanupLogs.
 func preMigrationCleanupRetryLogs(batchSize int) error {
 	logStorageHours := config.GetRetryLogStorageHours()
 	if logStorageHours == 0 {
@@ -474,7 +480,7 @@ func preMigrationCleanupRetryLogs(batchSize int) error {
 		// Delete by IDs
 		err = LogDB.Where("id IN (?)", ids).
 			Session(&gorm.Session{SkipDefaultTransaction: true}).
-			Delete(&Log{}).Error
+			Delete(&RetryLog{}).Error
 		if err != nil {
 			return err
 		}

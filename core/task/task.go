@@ -801,15 +801,14 @@ func completeAsyncUsage(
 	// The provider callback may immediately calculate its own settlement from this
 	// log, so charging first exposes an incomplete usage snapshot and leaves that
 	// settlement pending even though the customer debit succeeds.
-	if err := model.UpdateLogUsageByRequestID(
-		info.RequestID,
+	if err := model.UpdateAsyncUsageLogUsage(
+		info,
 		usage,
 		usageContext,
 		selectedPrice,
 		amount,
 		info.PricingCurrency,
 		info.PricingVersion,
-		info.LogID,
 	); err != nil {
 		if requiresAccountingLog(info) || !errors.Is(err, gorm.ErrRecordNotFound) {
 			notify.ErrorThrottle(
@@ -1154,13 +1153,8 @@ func markAsyncUsageFailed(info *model.AsyncUsageInfo, errMsg string) {
 		return
 	}
 
-	var logIDs []int
-	if info.MeasuredImage {
-		logIDs = []int{info.LogID}
-	}
-
 	if err := model.IgnoreNotFound(
-		model.UpdateLogAsyncUsageFailedByRequestID(info.RequestID, errMsg, logIDs...),
+		model.UpdateAsyncUsageLogFailed(info, errMsg),
 	); err != nil {
 		notify.ErrorThrottle(
 			"asyncUsageUpdateLogStatus",

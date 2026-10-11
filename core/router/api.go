@@ -183,6 +183,7 @@ func SetAPIRouter(router *gin.Engine) {
 			logsRoute.GET("/search", controller.SearchLogs)
 			logsRoute.GET("/consume_error", controller.SearchConsumeError)
 			logsRoute.GET("/detail/:log_id", controller.GetLogDetail)
+			logsRoute.POST("/last_api_request", controller.GetGroupsLastAPIRequest)
 		}
 
 		logRoute := apiRouter.Group("/log")

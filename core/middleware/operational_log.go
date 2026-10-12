@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/mode"
 )
 
 const OperationalLogSourceHeader = "X-Token-Platform-Source"
@@ -17,7 +18,36 @@ const (
 	operationalErrorCodeKey    = "operational_error_code"
 	operationalSafeErrorKey    = "operational_safe_error"
 	operationalLogRecordedKey  = "operational_log_recorded"
+	operationalLogIdentityKey  = "operational_log_identity"
 )
+
+// operationalLogIdentity names the key TokenAuth identified, for the request
+// log only. It is kept apart from Token and Group so nothing downstream treats
+// a rejected key as authenticated.
+type operationalLogIdentity struct {
+	tokenID   int
+	tokenName string
+	groupID   string
+}
+
+func setOperationalLogIdentity(c *gin.Context, tokenID int, tokenName, groupID string) {
+	c.Set(operationalLogIdentityKey, operationalLogIdentity{
+		tokenID:   tokenID,
+		tokenName: tokenName,
+		groupID:   groupID,
+	})
+}
+
+func operationalLogIdentityFromContext(c *gin.Context) (operationalLogIdentity, bool) {
+	value, ok := c.Get(operationalLogIdentityKey)
+	if !ok {
+		return operationalLogIdentity{}, false
+	}
+
+	identity, ok := value.(operationalLogIdentity)
+
+	return identity, ok
+}
 
 var recordOperationalLog = model.RecordOperationalLog
 
@@ -38,6 +68,12 @@ func SetOperationalFailure(
 
 func MarkOperationalLogRecorded(c *gin.Context) {
 	c.Set(operationalLogRecordedKey, true)
+}
+
+// ClearOperationalLogRecorded hands the request's log row back to the
+// middleware, for example after the row a handler wrote was released.
+func ClearOperationalLogRecorded(c *gin.Context) {
+	c.Set(operationalLogRecordedKey, false)
 }
 
 func operationalLogRecorded(c *gin.Context) bool {
@@ -113,12 +149,19 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		fields.ResolvedCapability,
 	)
 
+	relayMode := GetMode(c)
+	if relayMode == mode.Unknown {
+		if routeMode, ok := ReadRouteMode(c); ok {
+			relayMode = routeMode
+		}
+	}
+
 	entry := &model.Log{
 		RequestID: model.EmptyNullString(GetRequestID(c)),
 		RequestAt: requestAt,
 		CreatedAt: now,
 		Code:      c.Writer.Status(),
-		Mode:      int(GetMode(c)),
+		Mode:      int(relayMode),
 		IP:        model.EmptyNullString(maskOperationalIP(c.ClientIP())),
 		ChannelID: GetChannelID(c),
 		Endpoint: model.EmptyNullString(
@@ -134,6 +177,8 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		Metadata:      metadata,
 	}
 
+	identity, identified := operationalLogIdentityFromContext(c)
+
 	if value, ok := c.Get(Token); ok {
 		switch token := value.(type) {
 		case model.TokenCache:
@@ -143,12 +188,19 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 			entry.TokenID = token.ID
 			entry.TokenName = token.Name
 		}
+	} else if identified {
+		// A key that TokenAuth identified but rejected still owns the row, so
+		// the rejection counts as that key's call.
+		entry.TokenID = identity.tokenID
+		entry.TokenName = identity.tokenName
 	}
 
 	if value, ok := c.Get(Group); ok {
 		if group, ok := value.(model.GroupCache); ok {
 			entry.GroupID = group.ID
 		}
+	} else if identified {
+		entry.GroupID = identity.groupID
 	}
 
 	if value, ok := c.Get(customerValidationDetailKey); ok {

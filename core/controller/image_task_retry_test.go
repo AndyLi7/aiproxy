@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -153,4 +154,52 @@ func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int,
 	require.Equal(t, 1, providerCalls)
 	require.Len(t, admits, 2)
 	require.EqualValues(t, 1, count(&model.ImageTask{}))
+}
+
+// TokenAuth names the rejected key in its log row so the rejection counts as
+// that key's call. The error tells the client to use another key; a retry with
+// the same X-Request-Id on that key must still be reserved, not refused as
+// request_id_conflict.
+func TestImageTaskRetryOnAnotherKeyAfterTokenAuthRejection(t *testing.T) {
+	h := newImageCallLogHarness(t, http.StatusOK)
+	h.requestID = "key-switch"
+
+	oldRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedis })
+
+	disabledKey := model.TokenCache{ID: 2, Key: "key-a-disabled", Name: "key-a", Group: "g", Status: model.TokenStatusDisabled}
+	require.NoError(t, model.CacheSetToken(&disabledKey))
+	t.Cleanup(func() { require.NoError(t, model.CacheDeleteToken(disabledKey.Key)) })
+
+	// Step 1: the real rejection row, written by the middleware chain.
+	engine := gin.New()
+	engine.Use(middleware.RequestIDMiddleware, middleware.OperationalLogMiddleware())
+	engine.POST("/v1/images/tasks", middleware.TokenAuth, func(c *gin.Context) {
+		t.Fatal("a disabled key must not reach the image task handler")
+	})
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/tasks",
+		bytes.NewBufferString(`{"model":"image","prompt":"hi","n":1}`))
+	request.Header.Set("Authorization", "Bearer "+disabledKey.Key)
+	request.Header.Set(middleware.RequestIDHeader, "key-switch")
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, request)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+
+	var rejection model.Log
+	require.NoError(t, h.db.Where("request_id = ?", "key-switch").First(&rejection).Error)
+	require.Equal(t, 2, rejection.TokenID)
+	require.Equal(t, "g", rejection.GroupID)
+	require.Equal(t, model.FailureStageAuth, rejection.FailureStage)
+
+	// Step 2: the same request id on key B (token 1) is reserved and submitted.
+	w = h.submit()
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Equal(t, 1, h.providerCalls)
+
+	var tasks int64
+	require.NoError(t, h.db.Model(&model.ImageTask{}).Count(&tasks).Error)
+	require.EqualValues(t, 1, tasks)
 }

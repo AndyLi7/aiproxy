@@ -104,12 +104,100 @@ func TestMeasuredFailedAttemptCannotChargeReturnedImages(t *testing.T) {
 
 		recordResult(c, m, price, result, 0, downstream, nil)
 
-		var entry model.Log
-		require.NoError(t, db.Where("request_id = ?", m.RequestID).First(&entry).Error)
-		require.Equal(t, model.AsyncUsageStatusFailed, entry.AsyncUsageStatus)
-		require.Zero(t, entry.Amount.UsedAmount)
-		require.Equal(t, "failed", entry.UsageContext.ImageUsage.State)
+		var info model.AsyncUsageInfo
+		require.NoError(t, db.Where("request_id = ?", m.RequestID).First(&info).Error)
+		require.Equal(t, model.AsyncUsageStatusFailed, info.Status)
+		require.Zero(t, info.Amount.UsedAmount)
+		require.Equal(t, "failed", info.UsageContext.ImageUsage.State)
+
+		var entries []model.Log
+		require.NoError(t, db.Where("request_id = ?", m.RequestID).Find(&entries).Error)
+
+		if !downstream {
+			// A non-final attempt is evidence only: no request-log row, no charge.
+			require.Empty(t, entries)
+			require.Zero(t, info.LogID)
+
+			continue
+		}
+
+		require.Len(t, entries, 1)
+		require.Equal(t, entries[0].ID, info.LogID)
+		require.Equal(t, model.AsyncUsageStatusFailed, entries[0].AsyncUsageStatus)
+		require.Zero(t, entries[0].Amount.UsedAmount)
+		require.Equal(t, "failed", entries[0].UsageContext.ImageUsage.State)
 	}
+}
+
+// One HTTP request is one call row. A failed attempt that is retried on another
+// channel used to write its own logs row, so the request counted twice.
+func TestMeasuredRetryWritesOneCallRow(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.AsyncUsageInfo{}, &model.RetryLog{}))
+
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+
+	oldRetryHours := config.GetRetryLogStorageHours()
+	config.SetRetryLogStorageHours(24)
+	t.Cleanup(func() { config.SetRetryLogStorageHours(oldRetryHours) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/generations", nil)
+
+	price := model.Price{
+		OutputPrice:     1,
+		OutputPriceUnit: 1,
+		ImageBilling:    &model.ImageBillingPolicy{Version: 1, Scenario: "generation"},
+	}
+	side := int64(10)
+	attempt := func(channelID int, downstream bool, failure error) {
+		m := &meta.Meta{
+			RequestID:   "measured-retry",
+			OriginModel: "image",
+			Group:       model.GroupCache{ID: "g"},
+			Token:       model.TokenCache{ID: 3, Name: "prod"},
+			Channel:     meta.ChannelMeta{ID: channelID},
+		}
+		result := &relaycontroller.HandleResult{
+			UsageContext: model.UsageContext{ImageUsage: &model.ImageUsage{
+				Version:  1,
+				State:    "complete",
+				Scenario: "generation",
+				Outputs:  []model.ImageUsageOutput{{Index: 0, Width: &side, Height: &side}},
+			}},
+		}
+		if failure != nil {
+			result.Error = relaymodel.WrapperOpenAIError(failure, "upstream_failed", http.StatusBadGateway)
+		}
+
+		recordResult(c, m, price, result, channelID-1, downstream, nil)
+	}
+
+	attempt(1, false, errors.New("first channel failed"))
+	attempt(2, true, nil)
+
+	var entries []model.Log
+	require.NoError(t, db.Where("request_id = ?", "measured-retry").Find(&entries).Error)
+	require.Len(t, entries, 1, "one HTTP request must write one call row")
+	require.Equal(t, http.StatusOK, entries[0].Code)
+	require.Equal(t, 2, entries[0].ChannelID)
+	require.True(t, entries[0].IsCall())
+
+	var infos []model.AsyncUsageInfo
+	require.NoError(t, db.Where("request_id = ?", "measured-retry").Order("id").Find(&infos).Error)
+	require.Len(t, infos, 2)
+	require.Zero(t, infos[0].LogID)
+	require.Equal(t, model.AsyncUsageStatusFailed, infos[0].Status)
+	require.Zero(t, infos[0].Amount.UsedAmount)
+	require.Equal(t, entries[0].ID, infos[1].LogID)
+
+	var retries []model.RetryLog
+	require.NoError(t, db.Where("request_id = ?", "measured-retry").Find(&retries).Error)
+	require.Len(t, retries, 1)
+	require.Equal(t, 1, retries[0].ChannelID)
 }
 
 func TestMeasuredLogsPreserveConfiguredDetailsAndRetention(t *testing.T) {

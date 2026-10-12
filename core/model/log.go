@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -94,6 +95,10 @@ type Log struct {
 	// https://platform.openai.com/docs/guides/safety-best-practices#end-user-ids
 	User     EmptyNullString   `gorm:"type:text"                     json:"user,omitempty"`
 	Metadata map[string]string `gorm:"serializer:fastjson;type:text" json:"metadata,omitempty"`
+
+	// callStatus is the status a list response classified at its own instant.
+	// Unexported, so it is never persisted or migrated.
+	callStatus CallStatus
 }
 
 func PublicLogIdentity(
@@ -184,17 +189,24 @@ func (l *Log) BeforeCreate(_ *gorm.DB) (err error) {
 func (l *Log) MarshalJSON() ([]byte, error) {
 	type Alias Log
 
+	status := l.callStatus
+	if status == "" {
+		status = l.CallStatus(time.Now())
+	}
+
 	a := &struct {
 		*Alias
-		CreatedAt  int64   `json:"created_at"`
-		RequestAt  int64   `json:"request_at"`
-		RetryAt    int64   `json:"retry_at,omitempty"`
-		UsedAmount float64 `json:"used_amount,omitempty"`
+		CreatedAt  int64      `json:"created_at"`
+		RequestAt  int64      `json:"request_at"`
+		RetryAt    int64      `json:"retry_at,omitempty"`
+		UsedAmount float64    `json:"used_amount,omitempty"`
+		Status     CallStatus `json:"status"`
 	}{
 		Alias:      (*Alias)(l),
 		CreatedAt:  l.CreatedAt.UnixMilli(),
 		RequestAt:  l.RequestAt.UnixMilli(),
 		UsedAmount: l.Amount.UsedAmount,
+		Status:     status,
 	}
 	if !l.RetryAt.IsZero() {
 		a.RetryAt = l.RetryAt.UnixMilli()
@@ -503,6 +515,7 @@ type GetGroupLogsResult struct {
 }
 
 func buildGetLogsQuery(
+	db *gorm.DB,
 	group string,
 	startTimestamp time.Time,
 	endTimestamp time.Time,
@@ -518,7 +531,7 @@ func buildGetLogsQuery(
 	user string,
 	operationalFilter OperationalLogFilter,
 ) *gorm.DB {
-	tx := LogDB.Model(&Log{})
+	tx := db.Model(&Log{})
 
 	if requestID != "" {
 		tx = tx.Where("request_id = ?", requestID)
@@ -579,6 +592,215 @@ func buildGetLogsQuery(
 	return applyOperationalLogFilter(tx, operationalFilter)
 }
 
+// GroupLogKind selects calls, reads or every row of a group (§1.2 of the key
+// usage P1 plan).
+type GroupLogKind string
+
+const (
+	GroupLogKindAll   GroupLogKind = "all"
+	GroupLogKindCalls GroupLogKind = "calls"
+	GroupLogKindReads GroupLogKind = "reads"
+)
+
+func (k GroupLogKind) Valid() bool {
+	switch k {
+	case "", GroupLogKindAll, GroupLogKindCalls, GroupLogKindReads:
+		return true
+	default:
+		return false
+	}
+}
+
+// GroupLogQuery reads one group's request log.
+//
+// Window mode (Windowed) selects request_at in [Start, End) with no maximum
+// span; created_at >= Start is added as a lower bound for idx_group_creat,
+// because every writer sets created_at at or after request_at. Without a
+// window, LogID alone is a primary-key lookup at any age. Otherwise the legacy
+// created_at range StartTimestamp..EndTimestamp applies, which callers cap at
+// 7 days. StartTimestamp..EndTimestamp also bound the model and key-name
+// summaries when no window is given.
+type GroupLogQuery struct {
+	Group string
+
+	Windowed bool
+	Start    time.Time
+	End      time.Time
+
+	StartTimestamp time.Time
+	EndTimestamp   time.Time
+
+	LogID         int
+	ModelName     string
+	ModelID       string
+	RequestID     string
+	UpstreamID    string
+	TokenID       int
+	TokenName     string
+	ExcludedModes []int
+	Status        CallStatus
+	Kind          GroupLogKind
+	Order         string
+	CodeType      CodeType
+	Code          int
+	WithBody      bool
+	IP            string
+	User          string
+	Page          int
+	PerPage       int
+
+	// Now is the one instant the filter, the row statuses and the response use.
+	Now time.Time
+}
+
+func (q GroupLogQuery) legacyCreatedRange() (time.Time, time.Time) {
+	if q.Windowed || q.LogID > 0 {
+		return time.Time{}, time.Time{}
+	}
+
+	return q.StartTimestamp, q.EndTimestamp
+}
+
+func (q GroupLogQuery) summaryRange() (time.Time, time.Time) {
+	if q.Windowed {
+		return q.Start, q.End
+	}
+
+	return q.StartTimestamp, q.EndTimestamp
+}
+
+// splitModelID splits a callable model ID at its last "/" into the logged
+// model and capability, so "vendor/model/text-to-image" matches rows stored as
+// model "vendor/model" with capability "text-to-image".
+func splitModelID(modelID string) (string, string, bool) {
+	index := strings.LastIndex(modelID, "/")
+	if index <= 0 || index == len(modelID)-1 {
+		return "", "", false
+	}
+
+	return modelID[:index], modelID[index+1:], true
+}
+
+func buildGroupLogsQuery(db *gorm.DB, q GroupLogQuery) *gorm.DB {
+	startTimestamp, endTimestamp := q.legacyCreatedRange()
+
+	tx := buildGetLogsQuery(
+		db,
+		q.Group,
+		startTimestamp,
+		endTimestamp,
+		q.ModelName,
+		q.RequestID,
+		q.UpstreamID,
+		q.TokenID,
+		q.TokenName,
+		0,
+		q.CodeType,
+		q.Code,
+		q.IP,
+		q.User,
+		OperationalLogFilter{
+			Status:        q.Status,
+			ExcludedModes: q.ExcludedModes,
+			Now:           q.Now,
+		},
+	)
+
+	if q.Windowed {
+		tx = tx.Where(
+			"request_at >= ? AND request_at < ? AND created_at >= ?",
+			q.Start,
+			q.End,
+			q.Start,
+		)
+	}
+
+	if q.LogID > 0 {
+		tx = tx.Where("id = ?", q.LogID)
+	}
+
+	if q.ModelID != "" {
+		if prefix, suffix, ok := splitModelID(q.ModelID); ok {
+			tx = tx.Where(
+				"((model = ? AND COALESCE(capability, '') = '') OR (model = ? AND capability = ?))",
+				q.ModelID,
+				prefix,
+				suffix,
+			)
+		} else {
+			tx = tx.Where("model = ? AND COALESCE(capability, '') = ''", q.ModelID)
+		}
+	}
+
+	switch q.Kind {
+	case GroupLogKindCalls:
+		callSQL, callArgs := isCallExpr()
+		tx = tx.Where("("+callSQL+")", callArgs...)
+	case GroupLogKindReads:
+		callSQL, callArgs := isCallExpr()
+		tx = tx.Where("NOT ("+callSQL+")", callArgs...)
+	}
+
+	return tx
+}
+
+// groupLogOrder keeps offset pages stable: window mode orders by request time
+// by default, and every order ends with the primary key.
+func groupLogOrder(q GroupLogQuery) string {
+	if !q.Windowed {
+		return getLogOrder(q.Order)
+	}
+
+	if q.Order == "" {
+		return "request_at desc, id desc"
+	}
+
+	order := getLogOrder(q.Order)
+	if strings.HasPrefix(order, "id ") {
+		return order
+	}
+
+	return order + ", id desc"
+}
+
+func getGroupLogs(db *gorm.DB, q GroupLogQuery) (int64, []*Log, error) {
+	var (
+		total int64
+		logs  []*Log
+	)
+
+	g := new(errgroup.Group)
+
+	g.Go(func() error {
+		return buildGroupLogsQuery(db, q).Count(&total).Error
+	})
+
+	g.Go(func() error {
+		query := buildGroupLogsQuery(db, q)
+		if q.WithBody {
+			query = query.Preload("RequestDetail")
+		} else {
+			query = query.Preload("RequestDetail", func(db *gorm.DB) *gorm.DB {
+				return db.Select("id", "log_id")
+			})
+		}
+
+		limit, offset := toLimitOffset(q.Page, q.PerPage)
+
+		return query.
+			Order(groupLogOrder(q)).
+			Limit(limit).
+			Offset(offset).
+			Find(&logs).Error
+	})
+
+	if err := g.Wait(); err != nil {
+		return 0, nil, err
+	}
+
+	return total, logs, nil
+}
+
 func getLogs(
 	group string,
 	startTimestamp time.Time,
@@ -608,6 +830,7 @@ func getLogs(
 
 	g.Go(func() error {
 		return buildGetLogsQuery(
+			LogDB,
 			group,
 			startTimestamp,
 			endTimestamp,
@@ -627,6 +850,7 @@ func getLogs(
 
 	g.Go(func() error {
 		query := buildGetLogsQuery(
+			LogDB,
 			group,
 			startTimestamp,
 			endTimestamp,
@@ -683,6 +907,10 @@ func GetLogs(
 	page int,
 	perPage int,
 ) (*GetLogsResult, error) {
+	if operationalFilter.Now.IsZero() {
+		operationalFilter.Now = time.Now()
+	}
+
 	var (
 		total    int64
 		logs     []*Log
@@ -729,6 +957,8 @@ func GetLogs(
 		return nil, err
 	}
 
+	SetLogsCallStatus(logs, operationalFilter.Now)
+
 	result := &GetLogsResult{
 		Logs:     logs,
 		Total:    total,
@@ -738,28 +968,17 @@ func GetLogs(
 	return result, nil
 }
 
-func GetGroupLogs(
-	group string,
-	startTimestamp time.Time,
-	endTimestamp time.Time,
-	modelName string,
-	requestID string,
-	upstreamID string,
-	tokenID int,
-	tokenName string,
-	excludedModes []int,
-	order string,
-	codeType CodeType,
-	code int,
-	withBody bool,
-	ip string,
-	user string,
-	page int,
-	perPage int,
-) (*GetGroupLogsResult, error) {
-	if group == "" {
+func GetGroupLogs(ctx context.Context, q GroupLogQuery) (*GetGroupLogsResult, error) {
+	if q.Group == "" {
 		return nil, errors.New("group is required")
 	}
+
+	if q.Now.IsZero() {
+		q.Now = time.Now()
+	}
+
+	db := LogDB.WithContext(ctx)
+	summaryStart, summaryEnd := q.summaryRange()
 
 	var (
 		total      int64
@@ -773,25 +992,21 @@ func GetGroupLogs(
 	g.Go(func() error {
 		var err error
 
-		total, logs, err = getLogs(
-			group,
-			startTimestamp,
-			endTimestamp,
-			modelName,
-			requestID,
-			upstreamID,
-			tokenID,
-			tokenName,
-			0,
-			order,
-			codeType,
-			code,
-			withBody,
-			ip,
-			user,
-			OperationalLogFilter{ExcludedModes: excludedModes},
-			page,
-			perPage,
+		total, logs, err = getGroupLogs(db, q)
+
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		tokenNames, err = getGroupLogGroupByValues[string](
+			db,
+			"token_name",
+			q.Group,
+			"",
+			summaryStart,
+			summaryEnd,
 		)
 
 		return err
@@ -800,20 +1015,23 @@ func GetGroupLogs(
 	g.Go(func() error {
 		var err error
 
-		tokenNames, err = GetGroupUsedTokenNames(group, startTimestamp, endTimestamp)
-		return err
-	})
+		models, err = getGroupLogGroupByValues[string](
+			db,
+			"model",
+			q.Group,
+			q.TokenName,
+			summaryStart,
+			summaryEnd,
+		)
 
-	g.Go(func() error {
-		var err error
-
-		models, err = GetGroupUsedModels(group, tokenName, startTimestamp, endTimestamp)
 		return err
 	})
 
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+
+	SetLogsCallStatus(logs, q.Now)
 
 	return &GetGroupLogsResult{
 		GetLogsResult: GetLogsResult{
@@ -846,6 +1064,7 @@ func exportLogs(
 	var logs []*Log
 
 	query := buildGetLogsQuery(
+		LogDB,
 		group,
 		startTimestamp,
 		endTimestamp,
@@ -895,6 +1114,7 @@ func exportLogsRange(
 	var logs []*Log
 
 	query := buildGetLogsQuery(
+		LogDB,
 		group,
 		time.Time{},
 		time.Time{},
@@ -1330,6 +1550,10 @@ func SearchLogs(
 	page int,
 	perPage int,
 ) (*GetLogsResult, error) {
+	if operationalFilter.Now.IsZero() {
+		operationalFilter.Now = time.Now()
+	}
+
 	var (
 		total    int64
 		logs     []*Log
@@ -1384,6 +1608,8 @@ func SearchLogs(
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+
+	SetLogsCallStatus(logs, operationalFilter.Now)
 
 	result := &GetLogsResult{
 		Logs:     logs,

@@ -100,4 +100,17 @@ const (
 	ResponsesCompact
 	AlphaSearch
 	NativeTasks
+	// modeEnd is one past the last mode. New modes go above it so All() and
+	// the call classifier's completeness test see them.
+	modeEnd
 )
+
+// All returns every relay mode in id order.
+func All() []Mode {
+	modes := make([]Mode, 0, int(modeEnd))
+	for m := Unknown; m < modeEnd; m++ {
+		modes = append(modes, m)
+	}
+
+	return modes
+}

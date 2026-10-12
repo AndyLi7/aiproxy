@@ -451,7 +451,13 @@ func GetTokenByKey(key string) (*Token, error) {
 }
 
 // GetAndValidateToken validates a token and checks quota limits
-// This function is safe for concurrent use and handles period resets atomically
+// This function is safe for concurrent use and handles period resets atomically.
+//
+// When the key exists but cannot be used (disabled, limit reached, or its limit
+// cannot be checked), the token is returned together with the error so the
+// rejection can be attributed in the request log. It is for attribution only
+// and never authorizes the request. A missing key or a cache/database failure
+// returns nil.
 func GetAndValidateToken(key string) (token *TokenCache, err error) {
 	if key == "" {
 		return nil, fmt.Errorf("no token provided: %w", ErrTokenInvalid)
@@ -469,7 +475,7 @@ func GetAndValidateToken(key string) (token *TokenCache, err error) {
 	}
 
 	if token.Status == TokenStatusDisabled {
-		return nil, ErrTokenDisabled
+		return token, ErrTokenDisabled
 	}
 
 	// Convert TokenCache to Token for quota checking
@@ -486,15 +492,15 @@ func GetAndValidateToken(key string) (token *TokenCache, err error) {
 	totalExceeded, periodExceeded, err := tokenModel.GetEffectiveQuotaStatus()
 	if err != nil {
 		log.Errorf("token %d quota check failed: %v", token.ID, err)
-		return nil, ErrTokenUnavailable
+		return token, ErrTokenUnavailable
 	}
 
 	if totalExceeded {
-		return nil, fmt.Errorf("total %w", ErrTokenQuotaExhausted)
+		return token, fmt.Errorf("total %w", ErrTokenQuotaExhausted)
 	}
 
 	if periodExceeded {
-		return nil, fmt.Errorf("period %w", ErrTokenQuotaExhausted)
+		return token, fmt.Errorf("period %w", ErrTokenQuotaExhausted)
 	}
 
 	return token, nil

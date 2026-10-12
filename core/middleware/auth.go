@@ -141,6 +141,11 @@ func TokenAuth(c *gin.Context) {
 	} else {
 		tokenCache, err := model.GetAndValidateToken(key)
 		if err != nil {
+			if tokenCache != nil {
+				// Attribution only: the request stays rejected.
+				setOperationalLogIdentity(c, tokenCache.ID, tokenCache.Name, tokenCache.Group)
+			}
+
 			oncall.AlertDBError("TokenAuth", err)
 			if key != "" {
 				// Operators identify the key by its masked form; clients never see it.
@@ -155,6 +160,10 @@ func TokenAuth(c *gin.Context) {
 		oncall.ClearDBError("TokenAuth")
 
 		token = *tokenCache
+
+		// The subnet and group checks below may still reject the key; their
+		// rows are attributed to it.
+		setOperationalLogIdentity(c, token.ID, token.Name, token.Group)
 	}
 
 	SetLogTokenFields(log.Data, token, useInternalToken)
@@ -204,12 +213,10 @@ func TokenAuth(c *gin.Context) {
 	SetLogGroupFields(log.Data, group)
 
 	if group.Status != model.GroupStatusEnabled && group.Status != model.GroupStatusInternal {
-		AbortOperationally(
-			c,
-			model.FailureStageEntitlement,
-			http.StatusForbidden,
-			"group is disabled",
-		)
+		// Every TokenAuth rejection is stage auth: the request never got past
+		// the key check. The response and error code are unchanged.
+		SetOperationalFailure(c, model.FailureStageAuth, "access_denied", "group is disabled")
+		AbortLogWithMessage(c, http.StatusForbidden, "group is disabled")
 
 		return
 	}

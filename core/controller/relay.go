@@ -2,7 +2,6 @@ package controller
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/middleware"
@@ -751,16 +750,7 @@ func GetResponseInputItems() []gin.HandlerFunc {
 func GeminiByPath() []gin.HandlerFunc {
 	return []gin.HandlerFunc{
 		func(c *gin.Context) {
-			relayMode := mode.Gemini
-			modelPath := c.Param("model")
-			action := geminiPathAction(modelPath)
-
-			switch {
-			case geminiPathIsFile(modelPath):
-				relayMode = mode.GeminiFiles
-			case action == "predictLongRunning":
-				relayMode = mode.GeminiVideo
-			}
+			relayMode := middleware.GeminiPathRelayMode(c.Param("model"))
 
 			middleware.NewDistribute(relayMode)(c)
 
@@ -796,22 +786,4 @@ func GeminiOperation() []gin.HandlerFunc {
 		middleware.NewDistribute(mode.GeminiVideoOperations),
 		NewRelay(mode.GeminiVideoOperations),
 	}
-}
-
-func geminiPathAction(modelPath string) string {
-	modelPath = strings.TrimPrefix(modelPath, "/")
-
-	_, action, ok := strings.Cut(modelPath, ":")
-	if !ok {
-		return ""
-	}
-
-	return action
-}
-
-func geminiPathIsFile(modelPath string) bool {
-	modelPath = strings.TrimPrefix(modelPath, "/")
-	fileID, ok := strings.CutSuffix(modelPath, ":download")
-
-	return ok && fileID != "" && !strings.Contains(fileID, "/")
 }

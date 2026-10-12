@@ -228,8 +228,8 @@ func TestParseOperationalLogFilterAcceptsStatusAndChannels(t *testing.T) {
 		t.Fatalf("parse operational filter: %v", err)
 	}
 
-	if filter.Status != model.OperationalStatusRejected {
-		t.Fatalf("status = %q, want %q", filter.Status, model.OperationalStatusRejected)
+	if filter.Status != model.CallStatusRejected {
+		t.Fatalf("status = %q, want %q", filter.Status, model.CallStatusRejected)
 	}
 
 	if len(filter.ChannelIDs) != 2 || filter.ChannelIDs[0] != 10 || filter.ChannelIDs[1] != 12 {
@@ -238,6 +238,33 @@ func TestParseOperationalLogFilterAcceptsStatusAndChannels(t *testing.T) {
 
 	if filter.Source != model.RequestSourceAdminDemo {
 		t.Fatalf("source = %q, want %q", filter.Source, model.RequestSourceAdminDemo)
+	}
+}
+
+// The admin app and app versions deployed before P1 still send "success".
+func TestParseOperationalLogFilterAcceptsCallStatusesAndSuccessAlias(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for raw, want := range map[string]model.CallStatus{
+		"success":    model.CallStatusSucceeded,
+		"succeeded":  model.CallStatusSucceeded,
+		"failed":     model.CallStatusFailed,
+		"rejected":   model.CallStatusRejected,
+		"processing": model.CallStatusProcessing,
+		"unknown":    model.CallStatusUnknown,
+	} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = &http.Request{URL: &url.URL{RawQuery: "status=" + raw}}
+
+		filter, err := parseOperationalLogFilter(c)
+		if err != nil {
+			t.Fatalf("status=%s: %v", raw, err)
+		}
+
+		if filter.Status != want {
+			t.Fatalf("status=%s parsed as %q, want %q", raw, filter.Status, want)
+		}
 	}
 }
 
@@ -262,7 +289,8 @@ func TestParseOperationalLogFilterRejectsInvalidValues(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []string{
-		"status=unknown",
+		"status=pending",
+		"status=SUCCESS",
 		"request_source=unknown",
 		"channels=10,invalid",
 		"channels=0",

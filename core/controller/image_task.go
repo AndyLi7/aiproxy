@@ -152,9 +152,63 @@ func selectImageTaskAdapter(
 	return selected.channel, imageAdapter
 }
 
+// Package hooks so tests can inject store failures after a reservation.
+var (
+	releaseImageTaskReservation = model.ReleaseImageTaskReservation
+	updateImageTaskCallLog      = model.UpdateImageTaskCallLog
+)
+
+// finishReservedImageCall keeps one HTTP request at one log row. Once
+// ReserveImageTask has written the 202 row, an error answer updates that row
+// with the code the customer received instead of letting the middleware add a
+// second row. Only the wallet's explicit refusals keep their gate stage
+// (rejected); every other error after reservation is ours (failed). Reading
+// the status from the writer covers future error branches too. If the update
+// fails, the middleware writes its fallback row so the call is never lost.
+func finishReservedImageCall(c *gin.Context, logID int, requestID, groupID string, gateRejection bool) {
+	if logID <= 0 {
+		return
+	}
+
+	status := c.Writer.Status()
+	if status < http.StatusBadRequest {
+		return
+	}
+
+	fields := middleware.OperationalFieldsFromContext(c)
+
+	stage := model.FailureStageNone
+	if gateRejection {
+		stage = fields.FailureStage
+	}
+
+	if err := updateImageTaskCallLog(
+		logID,
+		requestID,
+		groupID,
+		status,
+		stage,
+		fields.ErrorCode,
+		fields.SafeError,
+	); err != nil {
+		common.GetLogger(c).Errorf("update image task call log %d: %v", logID, err)
+		middleware.ClearOperationalLogRecorded(c)
+	}
+}
+
 //nolint:gocyclo // Admission combines authentication, contract, pricing and idempotency gates.
 func submitImageTask(c *gin.Context) {
 	id := c.GetHeader("X-Request-Id")
+
+	var (
+		callLogID     int
+		callGroupID   string
+		gateRejection bool
+	)
+	defer func() {
+		finishReservedImageCall(c, callLogID, id, callGroupID, gateRejection)
+	}()
+
 	if !imageRequestID.MatchString(id) {
 		imageTaskHTTPError(c, 400, "invalid_request_id")
 		return
@@ -465,6 +519,10 @@ func submitImageTask(c *gin.Context) {
 		return
 	}
 
+	// The reservation row is this request's call row from here on.
+	callLogID, callGroupID = info.LogID, group.ID
+	middleware.MarkOperationalLogRecorded(c)
+
 	if task.PrepaymentQuoteJSON != "" {
 		// Ambiguous wallet replies never authorize paid work. The reserved task and
 		// debit are recovered by their server operation ID; no upstream retry here.
@@ -487,7 +545,7 @@ func submitImageTask(c *gin.Context) {
 			// X-Request-Id and body succeed later without any risk of a double
 			// charge or a repeated provider call. It also leaves no unsettled
 			// task for billing recovery to revisit.
-			if releaseErr := model.ReleaseImageTaskReservation(task.ID); releaseErr != nil {
+			if releaseErr := releaseImageTaskReservation(task.ID); releaseErr != nil {
 				common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
 				if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: taskCode, Message: taskMessage}); err != nil {
 					imageTaskHTTPError(c, 503, "task_store_unavailable")
@@ -499,7 +557,13 @@ func submitImageTask(c *gin.Context) {
 					imageTaskHTTPError(c, 503, "task_store_unavailable")
 					return
 				}
+			} else {
+				// The release deleted the reservation row; the middleware writes
+				// the single rejection row, as for any gate refusal.
+				callLogID = 0
+				middleware.ClearOperationalLogRecorded(c)
 			}
+			gateRejection = true
 			imageTaskHTTPError(c, status, code)
 			return
 		}

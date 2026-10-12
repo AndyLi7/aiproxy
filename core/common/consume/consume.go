@@ -184,32 +184,19 @@ func Summary(
 	)
 }
 
+// checkNeedRecordConsume logs every result except successful reads. The read
+// modes come from the call classifier (model.IsReadMode), so the rows it keeps
+// and the rows the classifier counts cannot drift apart.
 func checkNeedRecordConsume(code int, meta *meta.Meta) bool {
-	if meta == nil {
+	if meta == nil || !model.IsReadMode(meta.Mode) {
 		return true
 	}
 
-	switch meta.Mode {
-	case mode.VideoGenerationsGetJobs,
-		mode.VideoGenerationsContent,
-		mode.VideosGet,
-		mode.VideosContent,
-		mode.VideosDelete,
-		mode.GeminiFiles,
-		mode.GeminiVideoOperations,
-		mode.AliVideoTasks,
-		mode.DoubaoVideoTasks,
-		mode.ResponsesGet,
-		mode.ResponsesDelete,
-		mode.ResponsesCancel,
-		mode.ResponsesInputItems,
-		mode.AlphaSearch:
-		return code != http.StatusOK
-	case mode.DoubaoVideoTasksDelete:
-		return code != http.StatusOK && code != http.StatusNoContent
-	default:
-		return true
+	if meta.Mode == mode.DoubaoVideoTasksDelete && code == http.StatusNoContent {
+		return false
 	}
+
+	return code != http.StatusOK
 }
 
 func NeedRecordConsumeForTest(code int, meta *meta.Meta) bool {

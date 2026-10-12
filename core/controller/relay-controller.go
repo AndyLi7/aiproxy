@@ -20,6 +20,7 @@ import (
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/conv"
 	"github.com/labring/aiproxy/core/common/failover"
+	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -623,6 +624,8 @@ func recordResult(
 	asyncUsageStatus := model.AsyncUsageStatusNone
 	if downstreamResult && result.Error == nil && result.AsyncUsage {
 		asyncUsageStatus = model.AsyncUsageStatusPending
+
+		alertUnexpectedAsyncUsage(c, meta.Mode)
 	}
 
 	consume.AsyncConsume(
@@ -646,6 +649,29 @@ func recordResult(
 	if asyncUsageStatus == model.AsyncUsageStatusPending {
 		saveAsyncUsageInfo(c, meta, price, result)
 	}
+}
+
+// alertUnexpectedAsyncUsage reports a producer the call classifier does not
+// expect: on a sync-call mode a pending row reads as succeeded and never as
+// processing or unknown. The row is still written as pending, so billing is
+// unchanged; the mode must be reviewed and classified.
+func alertUnexpectedAsyncUsage(c *gin.Context, relayMode mode.Mode) {
+	if model.AsyncUsageExpected(relayMode) {
+		return
+	}
+
+	message := fmt.Sprintf(
+		"relay mode %s (%d) returned async usage but is not classified as async-submit",
+		relayMode,
+		int(relayMode),
+	)
+	common.GetLogger(c).Error(message)
+	notify.ErrorThrottle(
+		"async-usage-mode-"+relayMode.String(),
+		time.Hour,
+		"Unclassified async usage mode",
+		message,
+	)
 }
 
 func saveAsyncUsageInfo(
@@ -1324,7 +1350,19 @@ func recordMeasuredImageResult(
 		entry.TTFBMilliseconds = model.ZeroNullInt64(firstByteAt.Sub(meta.RequestAt).Milliseconds())
 	}
 
-	if err := model.CreateMeasuredImageSettlement(entry, info); err != nil {
+	if !downstreamResult {
+		// A non-final attempt writes no request-log row: one HTTP request is one
+		// call row, written by the final attempt.
+		if err := recordMeasuredImageAttempt(meta, info, code, retryTimes, firstByteAt, detail); err != nil {
+			log.Errorf(
+				"persist measured image attempt failed, request_id=%s: %v",
+				meta.RequestID,
+				err,
+			)
+
+			return
+		}
+	} else if err := model.CreateMeasuredImageSettlement(entry, info); err != nil {
 		log.Errorf(
 			"persist measured image settlement failed, request_id=%s: %v",
 			meta.RequestID,
@@ -1351,6 +1389,48 @@ func recordMeasuredImageResult(
 		downstreamResult,
 	)
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
+}
+
+// recordMeasuredImageAttempt stores a non-final attempt's evidence in the
+// outbox only (never chargeable) and, like relay retries, in retry_logs.
+func recordMeasuredImageAttempt(
+	meta *meta.Meta,
+	info *model.AsyncUsageInfo,
+	code int,
+	retryTimes int,
+	firstByteAt time.Time,
+	detail *model.RequestDetail,
+) error {
+	if err := model.CreateMeasuredImageAttemptEvidence(info); err != nil {
+		return err
+	}
+
+	if code == http.StatusTooManyRequests || config.GetLogStorageHours() < 0 ||
+		config.GetRetryLogStorageHours() <= 0 {
+		return nil
+	}
+
+	if detail == nil {
+		detail = &model.RequestDetail{}
+	}
+
+	if err := model.RecordRetryLog(
+		meta.RequestID,
+		time.Now(),
+		meta.RequestAt,
+		meta.RetryAt,
+		firstByteAt,
+		code,
+		meta.Channel.ID,
+		meta.OriginModel,
+		int(meta.Mode),
+		retryTimes,
+		detail,
+	); err != nil {
+		log.Errorf("record measured image retry log failed, request_id=%s: %v", meta.RequestID, err)
+	}
+
+	return nil
 }
 
 // Final scheduling failures update the last attempt before its terminal log is saved.

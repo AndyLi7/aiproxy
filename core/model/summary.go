@@ -952,11 +952,11 @@ func GetUsedModels(channelID int, start, end time.Time) ([]string, error) {
 }
 
 func GetGroupUsedModels(group, tokenName string, start, end time.Time) ([]string, error) {
-	return getGroupLogGroupByValues[string]("model", group, tokenName, start, end)
+	return getGroupLogGroupByValues[string](LogDB, "model", group, tokenName, start, end)
 }
 
 func GetGroupUsedTokenNames(group string, start, end time.Time) ([]string, error) {
-	return getGroupLogGroupByValues[string]("token_name", group, "", start, end)
+	return getGroupLogGroupByValues[string](LogDB, "token_name", group, "", start, end)
 }
 
 func getLogGroupByValues[T cmp.Ordered](
@@ -1021,6 +1021,7 @@ func getLogGroupByValues[T cmp.Ordered](
 }
 
 func getGroupLogGroupByValues[T cmp.Ordered](
+	db *gorm.DB,
 	field, group, tokenName string,
 	start, end time.Time,
 ) ([]T, error) {
@@ -1032,7 +1033,7 @@ func getGroupLogGroupByValues[T cmp.Ordered](
 
 	var results []Result
 
-	query := LogDB.
+	query := db.
 		Model(&GroupSummary{})
 	if group != "" {
 		query = query.Where("group_id = ?", group)

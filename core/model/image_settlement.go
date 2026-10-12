@@ -15,21 +15,13 @@ func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
 		return errors.New("missing measured image settlement")
 	}
 
-	info.MeasuredImage = true
-
-	info.Status = AsyncUsageStatusPending
-	switch info.Amount.ImageBillingResult.State {
-	case "pending":
-		info.Status = AsyncUsageStatusMeasurementPending
-	case "failed":
-		info.Status = AsyncUsageStatusFailed
-	case "complete":
-		if info.Amount.UsedAmount == 0 {
-			info.Status = AsyncUsageStatusCompleted
-		}
-	default:
-		return errors.New("invalid measured settlement state")
+	status, err := measuredImageSettlementStatus(info)
+	if err != nil {
+		return err
 	}
+
+	info.MeasuredImage = true
+	info.Status = status
 
 	entry.AsyncUsageStatus = info.Status
 	entry.Price = info.Price
@@ -47,6 +39,49 @@ func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
 
 		return tx.Create(info).Error
 	})
+}
+
+func measuredImageSettlementStatus(info *AsyncUsageInfo) (AsyncUsageStatus, error) {
+	switch info.Amount.ImageBillingResult.State {
+	case "pending":
+		return AsyncUsageStatusMeasurementPending, nil
+	case "failed":
+		return AsyncUsageStatusFailed, nil
+	case "complete":
+		if info.Amount.UsedAmount == 0 {
+			return AsyncUsageStatusCompleted, nil
+		}
+
+		return AsyncUsageStatusPending, nil
+	default:
+		return AsyncUsageStatusNone, errors.New("invalid measured settlement state")
+	}
+}
+
+// CreateMeasuredImageAttemptEvidence stores a non-final attempt's audit
+// evidence without a request-log row (LogID 0), so one HTTP request keeps one
+// call row. The outbox claims only pending rows and evidence must never be
+// charged, so a pending status is stored as failed.
+func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
+	if info == nil || info.Amount.ImageBillingResult == nil {
+		return errors.New("missing measured image attempt evidence")
+	}
+
+	status, err := measuredImageSettlementStatus(info)
+	if err != nil {
+		return err
+	}
+
+	if status == AsyncUsageStatusPending {
+		status = AsyncUsageStatusFailed
+	}
+
+	info.MeasuredImage = true
+	info.Status = status
+	info.LogID = 0
+	info.NextPollAt = time.Now().Add(AsyncUsageDefaultPollDelay)
+
+	return LogDB.Create(info).Error
 }
 
 func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {

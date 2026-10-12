@@ -3,17 +3,9 @@ package model
 import (
 	"regexp"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
-)
-
-type OperationalStatus string
-
-const (
-	OperationalStatusProcessing OperationalStatus = "processing"
-	OperationalStatusSuccess    OperationalStatus = "success"
-	OperationalStatusFailed     OperationalStatus = "failed"
-	OperationalStatusRejected   OperationalStatus = "rejected"
 )
 
 type FailureStage string
@@ -50,28 +42,17 @@ type OperationalFields struct {
 }
 
 type OperationalLogFilter struct {
-	Status        OperationalStatus
+	Status        CallStatus
 	Source        string
 	ChannelIDs    []int
 	ExcludedModes []int
+	// Now is the instant the status filter classifies at; zero means time.Now().
+	Now time.Time
 }
 
 func ValidRequestSource(source string) bool {
 	switch source {
 	case "", RequestSourceAPI, RequestSourcePlayground, RequestSourceAdminDemo:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s OperationalStatus) Valid() bool {
-	switch s {
-	case "",
-		OperationalStatusProcessing,
-		OperationalStatusSuccess,
-		OperationalStatusFailed,
-		OperationalStatusRejected:
 		return true
 	default:
 		return false
@@ -166,26 +147,6 @@ func (s FailureStage) Valid() bool {
 	}
 }
 
-func (l *Log) OperationalStatus() OperationalStatus {
-	if l.AsyncUsageStatus == AsyncUsageStatusFailed {
-		return OperationalStatusFailed
-	}
-
-	if l.Code == 200 {
-		if l.AsyncUsageStatus == AsyncUsageStatusPending {
-			return OperationalStatusProcessing
-		}
-
-		return OperationalStatusSuccess
-	}
-
-	if l.FailureStage != FailureStageNone && l.FailureStage != FailureStageUpstream {
-		return OperationalStatusRejected
-	}
-
-	return OperationalStatusFailed
-}
-
 func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.DB {
 	if filter.Source != "" {
 		tx = tx.Where("request_source = ?", filter.Source)
@@ -199,26 +160,14 @@ func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.D
 		tx = tx.Where("mode IS NULL OR mode NOT IN ?", filter.ExcludedModes)
 	}
 
-	switch filter.Status {
-	case OperationalStatusProcessing:
-		tx = tx.Where("code = 200 AND async_usage_status = ?", AsyncUsageStatusPending)
-	case OperationalStatusSuccess:
-		tx = tx.Where(
-			"code = 200 AND async_usage_status != ? AND async_usage_status != ?",
-			AsyncUsageStatusPending,
-			AsyncUsageStatusFailed,
-		)
-	case OperationalStatusFailed:
-		tx = tx.Where(
-			"async_usage_status = ? OR (code != 200 AND (failure_stage = '' OR failure_stage = ?))",
-			AsyncUsageStatusFailed,
-			FailureStageUpstream,
-		)
-	case OperationalStatusRejected:
-		tx = tx.Where(
-			"code != 200 AND failure_stage != '' AND failure_stage != ?",
-			FailureStageUpstream,
-		)
+	if filter.Status != "" {
+		now := filter.Now
+		if now.IsZero() {
+			now = time.Now()
+		}
+
+		statusSQL, statusArgs := callStatusExpr(now)
+		tx = tx.Where("("+statusSQL+") = ?", append(statusArgs, string(filter.Status))...)
 	}
 
 	return tx

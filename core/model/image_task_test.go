@@ -270,6 +270,18 @@ func TestImageReservationAfterEndpointRejection(t *testing.T) {
 		{"unauthenticated", func(l *model.Log) {
 			l.GroupID, l.TokenID, l.Code, l.ErrorCode, l.FailureStage = "", 0, 401, "invalid_api_key", model.FailureStageAuth
 		}, true},
+		// TokenAuth attributes key-check rejections to the rejected key. The
+		// error tells the client to use another key, so the same X-Request-Id
+		// must still be reservable by that other key.
+		{"key-check rejection of another key", func(l *model.Log) {
+			l.TokenID, l.Code, l.ErrorCode, l.FailureStage = 2, 403, "api_key_disabled", model.FailureStageAuth
+		}, true},
+		{"key-check rejection of another group's key", func(l *model.Log) {
+			l.GroupID, l.TokenID, l.Code, l.ErrorCode, l.FailureStage = "other", 2, 403, "api_key_disabled", model.FailureStageAuth
+		}, true},
+		{"validation rejection of another key", func(l *model.Log) {
+			l.TokenID, l.Code, l.FailureStage = 2, 400, model.FailureStageValidation
+		}, false},
 		{"successful request", func(l *model.Log) { l.Code, l.ErrorCode, l.FailureStage = 200, "", "" }, false},
 		{"upstream attempted", func(l *model.Log) { l.ChannelID = 1 }, false},
 		{"upstream accepted", func(l *model.Log) { l.UpstreamID = "accepted" }, false},

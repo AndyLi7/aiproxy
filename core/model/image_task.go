@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -230,20 +231,53 @@ func ReserveImageTask(
 // a generation: the gateway rejected it (for example invalid input, missing
 // balance or a rate limit) before any provider was selected or paid. Such rows
 // keep their audit value but must not stop the same caller from retrying the
-// same X-Request-Id. Unauthenticated rejections carry no owner and are treated
-// the same way, so a request first sent with a wrong key can be retried. Rows
-// owned by another key, successful rows and rows that reached a provider still
-// conflict.
+// same X-Request-Id. Rejections at the key check (stage auth) are treated as
+// ownerless for reservation, although they name the rejected key for counting:
+// a request first sent with a wrong, disabled or exhausted key can be retried
+// with another key. Rows owned by another key at a later stage, successful rows
+// and rows that reached a provider still conflict.
 func gatewayOnlyImageRejection(previous Log, task *ImageTask) bool {
 	sameOwner := previous.GroupID == task.GroupID && previous.TokenID == task.TokenID
-	unauthenticated := previous.GroupID == "" && previous.TokenID == 0
+	ownerless := (previous.GroupID == "" && previous.TokenID == 0) ||
+		previous.FailureStage == FailureStageAuth
 
-	return (sameOwner || unauthenticated) &&
+	return (sameOwner || ownerless) &&
 		previous.Code >= 400 &&
 		previous.FailureStage != FailureStageUpstream &&
 		previous.ChannelID == 0 &&
 		previous.UpstreamID == "" &&
 		previous.Amount.UsedAmount == 0
+}
+
+// UpdateImageTaskCallLog records the error answer a customer received on the
+// image task's reservation row, so the request keeps exactly one log row. The
+// async usage status is left alone: SetImageTaskResult may already have set it.
+func UpdateImageTaskCallLog(
+	logID int,
+	requestID string,
+	groupID string,
+	code int,
+	stage FailureStage,
+	errorCode string,
+	safeError string,
+) error {
+	result := LogDB.Model(&Log{}).
+		Where("id = ? AND request_id = ? AND group_id = ?", logID, requestID, groupID).
+		Updates(map[string]any{
+			"code":          code,
+			"failure_stage": string(stage),
+			"error_code":    errorCode,
+			"safe_error":    safeError,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("image task log %d not found for request %s", logID, requestID)
+	}
+
+	return nil
 }
 
 // ReleaseImageTaskReservation frees a reservation whose wallet admission was

@@ -79,11 +79,13 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		require.Equal(t, int64(300000), *receipt.ChargedMicros)
 	}
 
+	// Owner rules 2026-10-02 and 2026-10-08: a failed task is refunded in full
+	// at once, even after the provider accepted it. A bill that arrives later
+	// is platform loss and never reaches the customer.
 	for _, tc := range []struct {
-		id       string
-		total    string
-		expected int64
-	}{{"invalid-free", "0", 0}, {"failed-billed", "0.2", 200000}} {
+		id    string
+		total string
+	}{{"invalid-free", "0"}, {"failed-billed", "0.2"}} {
 		failed := makeTask(tc.id)
 		require.NoError(t, Admit(ctx, failed, 7, model.UsageIdentity{}))
 		claimed, err := Begin(ctx, failed, 7, "fal-ai/test", 0)
@@ -96,15 +98,17 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		require.NoError(t, db.Save(failed).Error)
 		receipt, err := Sync(ctx, failed)
 		require.NoError(t, err)
-		require.Nil(t, receipt.ChargedMicros)
-		require.NotEqual(t, "refunded", receipt.Status)
+		require.Equal(t, "refunded", receipt.Status)
+		require.NotNil(t, receipt.ChargedMicros)
+		require.Zero(t, *receipt.ChargedMicros)
 		post("/_test/bill", map[string]any{"provider": "fal", "requestId": failed.UpstreamID, "endpoint": "fal-ai/test", "currency": "USD", "subtotal": tc.total, "total": tc.total})
 		require.NoError(t, client.RecoverPrepayments(ctx))
 		for range 2 {
 			receipt, err = Sync(ctx, failed)
 			require.NoError(t, err)
+			require.Equal(t, "refunded", receipt.Status)
 			require.NotNil(t, receipt.ChargedMicros)
-			require.Equal(t, tc.expected, *receipt.ChargedMicros)
+			require.Zero(t, *receipt.ChargedMicros, "a late bill never charges a failed task")
 		}
 	}
 	unknown := makeTask("unknown-case")
@@ -126,7 +130,7 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 	for _, tc := range []struct {
 		id  string
 		net int64
-	}{{"server-completed-case", -300000}, {"server-unknown-case", 0}, {"server-invalid-free", 0}, {"server-failed-billed", -200000}} {
+	}{{"server-completed-case", -300000}, {"server-unknown-case", 0}, {"server-invalid-free", 0}, {"server-failed-billed", 0}} {
 		count := 0
 		net := int64(0)
 		for _, row := range rows {

@@ -326,6 +326,11 @@ func TestInputMeterInsufficientBalanceReleasesReservation(t *testing.T) {
 	_, err := e.Submit(context.Background(), "req", "g", 1, body, plan)
 	require.ErrorIs(t, err, balance.ErrPrepaymentInsufficientBalance)
 	require.EqualValues(t, 4880, *admission(t, refusing.commands).PrepaidMicros)
+	// The refusal carries the sized hold, which the 402 message names.
+	var refusal *HoldRefusal
+	require.ErrorAs(t, err, &refusal)
+	require.EqualValues(t, 4880, refusal.HoldMicros)
+	require.True(t, WalletRefusal(err))
 	_, err = model.GetNativeTask(e.DB, "req", "g", 1)
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	require.Zero(t, p.calls)

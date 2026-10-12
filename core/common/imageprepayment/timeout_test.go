@@ -37,9 +37,9 @@ func (w *fakeWallet) serve(t *testing.T) *httptest.Server {
 	}))
 }
 
-// A generation timeout refunds the hold in full as platform_failure in one
-// wallet call. Provider failures keep the actual-cost path and other failures
-// keep the plain refund.
+// Every failed task is refunded in full as platform_failure in one wallet
+// call, whatever its error code (owner rules 2026-10-02 and 2026-10-08):
+// accepted provider failures included, and never after execution_finished.
 func TestSyncRefundsGenerationTimeoutInOneCall(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
@@ -50,7 +50,8 @@ func TestSyncRefundsGenerationTimeoutInOneCall(t *testing.T) {
 
 	for code, want := range map[string][]string{
 		model.AsyncGenerationTimeoutCode: {"accept_attempt", "settle:failed/platform_failure", "get"},
-		"upstream_failed":                {"accept_attempt", "execution_finished", "get"},
+		"upstream_failed":                {"accept_attempt", "settle:failed/platform_failure", "get"},
+		"invalid_parameters":             {"accept_attempt", "settle:failed/platform_failure", "get"},
 		"archive_size_exceeded":          {"accept_attempt", "settle:failed/platform_failure", "get"},
 	} {
 		t.Run(code, func(t *testing.T) {

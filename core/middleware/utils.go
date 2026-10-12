@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
@@ -122,21 +123,10 @@ func AbortWithMessageWithMode(
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
 	if stage, _ := c.Get(operationalFailureStageKey); stage == model.FailureStageBalance {
-		options := &relaymodel.WrapperErrorOption{}
-		for _, apply := range opts {
-			apply(options)
-		}
-		if statusCode == http.StatusForbidden && options.Type == GroupBalanceNotEnough {
-			statusCode = http.StatusPaymentRequired
-		}
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
-			c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
-			c.Abort()
-			return
-		}
-		message = "Your account balance is insufficient."
-		opts = append(opts, relaymodel.WithType("insufficient_quota"), relaymodel.WithCode("insufficient_balance"))
-	} else if IsPublicVideoRequest(c.Request.URL.Path, m) ||
+		abortBalanceFailure(m, c, statusCode, opts)
+		return
+	}
+	if IsPublicVideoRequest(c.Request.URL.Path, m) ||
 		(strings.HasPrefix(c.Request.URL.Path, "/v1/") && (statusCode == 401 || statusCode >= 500)) {
 		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
 		c.Abort()
@@ -147,6 +137,64 @@ func AbortWithMessageWithMode(
 		relaymodel.WrapperErrorWithMessage(m, statusCode, message, opts...),
 	)
 	c.Abort()
+}
+
+// abortBalanceFailure writes a balance failure without the internal message:
+// a group refusal becomes 402 insufficient_quota / insufficient_balance. On
+// /v1/ it is the public error body. A balance below zero (already loaded by
+// the distributor) names the amount owed; any other balance failure keeps
+// the generic sentence. Status, type and code never depend on the balance.
+func abortBalanceFailure(
+	m mode.Mode,
+	c *gin.Context,
+	statusCode int,
+	opts []relaymodel.WrapperErrorOptionFunc,
+) {
+	options := &relaymodel.WrapperErrorOption{}
+	for _, apply := range opts {
+		apply(options)
+	}
+	if statusCode == http.StatusForbidden && options.Type == GroupBalanceNotEnough {
+		statusCode = http.StatusPaymentRequired
+	}
+	negative, belowZero := negativeBalanceMessage(c, statusCode)
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+		if belowZero {
+			c.JSON(statusCode, relaymodel.NewOpenAIError(statusCode, relaymodel.OpenAIError{
+				Message: negative,
+				Type:    "insufficient_quota",
+				Code:    "insufficient_balance",
+			}))
+		} else {
+			c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
+		}
+		c.Abort()
+		return
+	}
+	message := "Your account balance is insufficient."
+	if belowZero {
+		message = negative
+	}
+	opts = append(opts, relaymodel.WithType("insufficient_quota"), relaymodel.WithCode("insufficient_balance"))
+	c.JSON(statusCode, relaymodel.WrapperErrorWithMessage(m, statusCode, message, opts...))
+	c.Abort()
+}
+
+// negativeBalanceMessage is the 402 text for a group whose balance is below
+// zero, or false when the refusal is not a 402 or the balance is not negative.
+func negativeBalanceMessage(c *gin.Context, statusCode int) (string, bool) {
+	if statusCode != http.StatusPaymentRequired {
+		return "", false
+	}
+	value, ok := c.Get(GroupBalance)
+	if !ok {
+		return "", false
+	}
+	gbc, ok := value.(*GroupBalanceConsumer)
+	if !ok || gbc == nil || !(gbc.balance < 0) {
+		return "", false
+	}
+	return balance.NegativeBalanceMessage(gbc.balance), true
 }
 
 func AbortLogWithMessage(
@@ -180,21 +228,10 @@ func AbortWithMessage(
 	opts ...relaymodel.WrapperErrorOptionFunc,
 ) {
 	if stage, _ := c.Get(operationalFailureStageKey); stage == model.FailureStageBalance {
-		options := &relaymodel.WrapperErrorOption{}
-		for _, apply := range opts {
-			apply(options)
-		}
-		if statusCode == http.StatusForbidden && options.Type == GroupBalanceNotEnough {
-			statusCode = http.StatusPaymentRequired
-		}
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
-			c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
-			c.Abort()
-			return
-		}
-		message = "Your account balance is insufficient."
-		opts = append(opts, relaymodel.WithType("insufficient_quota"), relaymodel.WithCode("insufficient_balance"))
-	} else if IsPublicVideoRequest(c.Request.URL.Path, GetMode(c)) ||
+		abortBalanceFailure(GetMode(c), c, statusCode, opts)
+		return
+	}
+	if IsPublicVideoRequest(c.Request.URL.Path, GetMode(c)) ||
 		(strings.HasPrefix(c.Request.URL.Path, "/v1/") && (statusCode == http.StatusUnauthorized || statusCode >= 500)) {
 		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
 		c.Abort()

@@ -139,6 +139,10 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 				log.Errorf("release refused native reservation %s: %v", id, releaseErr)
 			}
 		}
+		if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) {
+			// The 402 names the hold this request asked for (the sized quote).
+			err = &HoldRefusal{HoldMicros: quote.PrepaidMicros, Err: err}
+		}
 		return task, err
 	}
 	if p.Log != nil && admitted.UsageAtMs != nil {
@@ -214,6 +218,17 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	_, err = call(balance.PrepaymentCommand{Action: "accept_attempt", AttemptID: attemptID, UpstreamTaskID: upstreamID})
 	return task, err
 }
+
+// HoldRefusal is the wallet's insufficient-balance refusal of one request's
+// hold. HoldMicros is the hold the admission asked for, after any input
+// sizing. errors.Is still matches balance.ErrPrepaymentInsufficientBalance.
+type HoldRefusal struct {
+	HoldMicros int64
+	Err        error
+}
+
+func (e *HoldRefusal) Error() string { return e.Err.Error() }
+func (e *HoldRefusal) Unwrap() error { return e.Err }
 
 // WalletRefusal reports the wallet's three explicit admission refusals. The
 // wallet refuses atomically, so it holds nothing and the reservation is
@@ -320,12 +335,12 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 		}
 	}
 	if failedAfterAcceptance(task) {
-		if _, err := call(balance.PrepaymentCommand{Action: "execution_finished"}); err != nil {
-			return err
-		}
 		// Owner decision 2026-10-02 (option A): the customer received nothing, so
-		// refund in full. Any later provider bill is booked as platform loss.
-		// fal bills nothing when it rejects the input after acceptance.
+		// refund in full in one wallet call, reason platform_failure. Any later
+		// provider bill is booked as platform loss. fal bills nothing when it
+		// rejects the input after acceptance. As in the timeout branch below,
+		// execution_finished is not sent: between it and the settle, a provider
+		// bill could be settled as an actual charge.
 		if _, err := call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
 			return err
 		}

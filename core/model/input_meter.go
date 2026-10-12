@@ -136,7 +136,8 @@ func (r InputMeterRoute) price(quantity int64) int64 {
 
 // Hold is the price of max(quantity, 1) units rounded up to one micro-USD and
 // capped at maxMicros. There is no margin (owner decision 2026-10-10): a rare
-// higher bill is debited from the remaining balance at settlement.
+// higher bill is debited in full at settlement, even below zero (owner
+// decision 2026-10-12).
 func (r InputMeterRoute) Hold(quantity int64) int64 {
 	if r.UnitSize < 1 || r.UnitMicros < 1 || quantity > r.MaxQuantity {
 		return r.MaxMicros

@@ -47,6 +47,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 
 	if task.Status == "failed" {
 		markAsyncUsageFailed(info, "image generation failed")
+		refundFailedImageTask(ctx, info, task)
 		return
 	}
 
@@ -116,6 +117,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		completeImageTaskUsage(ctx, info, saved.Data)
 	case "failed":
 		markAsyncUsageFailed(info, "image generation failed")
+		refundFailedImageTask(ctx, info, saved)
 	default:
 		touchAsyncUsagePollCursor(info)
 	}
@@ -241,6 +243,30 @@ func expireImageGeneration(
 	}
 
 	markAsyncUsageFailed(info, "image generation timed out")
+}
+
+// refundFailedImageTask refunds a failed prepaid task as soon as the failure is
+// saved, instead of waiting for prepayment recovery. imageprepayment.Sync
+// settles every failed task in one wallet call, failed/platform_failure (owner
+// rule 2026-10-02: failed = not charged; a later provider bill is platform
+// loss). The call is detached and time-limited like the timeout refund: claim
+// renewal stops once the outbox is failed, and a shutting-down worker should
+// still finish it. task is the durable row the caller just read. A refund
+// that fails here stays unsettled and ImagePrepaymentRecoveryTask retries it.
+func refundFailedImageTask(ctx context.Context, info *model.AsyncUsageInfo, task *model.ImageTask) {
+	if task.Status != "failed" || task.PrepaymentQuoteJSON == "" || task.BillingSettled {
+		return
+	}
+	if _, ok := balance.Default.(*balance.ExternalHTTP); !ok {
+		return
+	}
+	refundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imageTimeoutRefundTimeout)
+	_, err := imageprepayment.Sync(refundCtx, task)
+	cancel()
+	if err != nil {
+		log.WithField("task_id", task.ID).WithField("channel_id", info.ChannelID).WithError(err).
+			Warn("image task failed; refund deferred to prepayment recovery")
+	}
 }
 
 // unconfirmedImageBatch bounds one pass of expireUnconfirmedImageSubmissions.

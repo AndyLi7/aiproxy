@@ -35,4 +35,9 @@ func TestImageTaskRetryGuidanceMessages(t *testing.T) {
 	require.Equal(t,
 		"No image task with this ID exists for this API key. If your POST may not have reached us (timeout or network error), resend the same body with the same X-Request-Id; it is idempotent and is not charged twice. Do not keep polling an ID that returns 404.",
 		imageTaskErrorMessage("task_not_found"))
+	// A delivered result may still be awaiting its final charge and counts
+	// toward the per-account limit until it is billed (owner decision 2026-10-12).
+	require.Equal(t,
+		"Too many of your tasks are generating or still being billed. Wait a moment for one to finish, then retry with the same X-Request-Id.",
+		imageTaskErrorMessage("too_many_active_tasks"))
 }

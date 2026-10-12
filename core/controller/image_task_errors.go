@@ -28,7 +28,7 @@ func imageTaskErrorMessage(code string) string {
 	case "balance_unavailable":
 		return "Your account balance could not be checked. Please retry later."
 	case "too_many_active_tasks":
-		return "Too many of your tasks are generating at once. Wait for one to finish, then retry with the same X-Request-Id."
+		return "Too many of your tasks are generating or still being billed. Wait a moment for one to finish, then retry with the same X-Request-Id."
 	case "model_unavailable":
 		return "This model is temporarily unavailable. Retry later with the same X-Request-Id."
 	case "rate_limit_exceeded":

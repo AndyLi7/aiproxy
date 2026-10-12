@@ -88,6 +88,11 @@ func nativeHTTP(c *gin.Context) (*nativetask.HTTP, bool) {
 		return middleware.GetGroup(c).ID, middleware.GetToken(c).ID, nil
 	}, ResolvePoller: nativetask.ResolveFalPoller(model.GetChannelByID), OnError: func(status int, code, message string) {
 		recordNativeFailure(c, status, code, message)
+	}, OnReserved: func(billingOperationID string) {
+		// A rejection row written after the reservation carries the op: the
+		// wallet may hold money for it, so the call failed rather than being
+		// refused at a gate (key usage P2).
+		middleware.SetCallBillingOperationID(c, billingOperationID)
 	}, PublicModel: nativePublicModel(c)}, true
 }
 
@@ -159,11 +164,18 @@ func submitNativeTask(c *gin.Context) {
 		}
 		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
 			AcceptedModel: nativeAcceptedModel(c, mc),
-			Log: &model.NativeTaskLog{RequestAt: middleware.GetRequestAt(c), TokenName: middleware.GetToken(c).Name, Endpoint: "POST /v1/model-tasks",
-				RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks),
-				RequestedModel: middleware.GetRequestedModel(c)}}, &fal.Client{Key: channel.Key}, nil
+			Log:           nativeTaskLogInfo(c)}, &fal.Client{Key: channel.Key}, nil
 	}
 	handler.Create(c.Writer, c.Request)
+}
+
+// nativeTaskLogInfo is the call row of a public native submission: the
+// request start and the source derived from the authenticated key. The wallet
+// admission may restamp both with the hold's (an admit replay).
+func nativeTaskLogInfo(c *gin.Context) *model.NativeTaskLog {
+	return &model.NativeTaskLog{RequestAt: middleware.GetRequestAt(c), TokenName: middleware.GetToken(c).Name, Endpoint: "POST /v1/model-tasks",
+		RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks),
+		RequestedModel: middleware.GetRequestedModel(c)}
 }
 func GetNativeTask(c *gin.Context) {
 	if handler, ok := nativeHTTP(c); ok {

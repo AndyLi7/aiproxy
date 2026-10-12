@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"time"
 
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/failover"
@@ -65,6 +66,12 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	if e == nil || e.DB == nil || e.Wallet == nil || e.Provider == nil || !taskID.MatchString(id) {
 		return nil, ErrUnavailable
 	}
+	if p.Log != nil {
+		// The admission below may restamp the row's time and source; never
+		// change the caller's plan.
+		logInfo := *p.Log
+		p.Log = &logInfo
+	}
 	fingerprint, fingerprintErr := hex.DecodeString(p.KeyFingerprint)
 	if fingerprintErr != nil || len(fingerprint) != 32 {
 		return nil, ErrUnavailable
@@ -119,8 +126,13 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		command.BillingOperationID = task.BillingOperationID
 		return e.Wallet.Prepayment(ctx, command)
 	}
-	if _, err = call(balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON}); err != nil {
-		if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) || errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks) || errors.Is(err, balance.ErrPrepaymentModelPaused) {
+	admit := balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON}
+	if p.Log != nil {
+		admit = admit.WithUsage(model.NativeUsageIdentity(task, *p.Log))
+	}
+	admitted, err := call(admit)
+	if err != nil {
+		if WalletRefusal(err) {
 			// The wallet refused before holding anything. Drop the reservation so a
 			// refused request leaves no row behind; the same request may be retried.
 			if _, releaseErr := model.ReleaseNativeReservation(e.DB, id, group, token, task.UpdatedAt); releaseErr != nil {
@@ -128,6 +140,17 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 			}
 		}
 		return task, err
+	}
+	if p.Log != nil && admitted.UsageAtMs != nil {
+		// The call row takes the hold's time and source: a retry of a reserved
+		// task (an admit replay) stamps the first admission, so the row and
+		// every money movement of the operation share one usage time. An
+		// application without key usage P2 returns neither; the request start
+		// is kept.
+		p.Log.RequestAt = time.UnixMilli(*admitted.UsageAtMs).UTC()
+		if model.ValidUsageSource(admitted.UsageSource) {
+			p.Log.RequestSource = admitted.UsageSource
+		}
 	}
 	attemptID := task.BillingOperationID + ":1"
 	receipt, err := call(balance.PrepaymentCommand{Action: "begin_attempt", RouteID: route.RouteID, AttemptID: attemptID})
@@ -190,6 +213,15 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	task.UpstreamID = upstreamID
 	_, err = call(balance.PrepaymentCommand{Action: "accept_attempt", AttemptID: attemptID, UpstreamTaskID: upstreamID})
 	return task, err
+}
+
+// WalletRefusal reports the wallet's three explicit admission refusals. The
+// wallet refuses atomically, so it holds nothing and the reservation is
+// released; every other error after the reservation may leave a hold.
+func WalletRefusal(err error) bool {
+	return errors.Is(err, balance.ErrPrepaymentInsufficientBalance) ||
+		errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks) ||
+		errors.Is(err, balance.ErrPrepaymentModelPaused)
 }
 
 // rejectedIssues are the fields an input rejection named, when the adaptor's

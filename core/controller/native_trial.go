@@ -144,15 +144,21 @@ func (d nativeTrialDependencies) create(c *gin.Context) {
 		middleware.ErrorResponse(c, 400, "trial channel changed or unavailable")
 		return
 	}
+	// One usage time per operation: the request start, like every other call.
+	requestAt := middleware.GetRequestAt(c)
+	if requestAt.IsZero() {
+		requestAt = time.Now()
+	}
 	// Disabled shadow channels are deliberately eligible here, never public routing.
 	plan := nativetask.Plan{Contract: input.Contract, ChannelID: channel.ID, Endpoint: input.Endpoint,
 		CredentialScope: input.CredentialScope, KeyFingerprint: input.KeyFingerprint, DeliveryBase: input.DeliveryBase, QuoteJSON: string(input.Quote), InputMeter: input.InputMeter,
-		Log: &model.NativeTaskLog{RequestAt: time.Now(), Endpoint: "POST /api/native-trials", RequestSource: model.RequestSourceAdminDemo,
+		Log: &model.NativeTaskLog{RequestAt: requestAt, Endpoint: "POST /api/native-trials", RequestSource: model.RequestSourceAdminDemo,
 			IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}
 	// Trials are paid examples run by operators; log them as admin demos.
 	if owner, tokenErr := d.token(token); tokenErr == nil && owner != nil {
 		plan.Log.TokenName = string(owner.Name)
 	}
+	plan.Log.RequestSource = model.UsageSource(plan.Log.TokenName, true, model.RequestSourceAdminDemo)
 	requestEngine := *engine
 	requestEngine.Provider = d.provider(channel)
 	task, err := requestEngine.Submit(c.Request.Context(), id, group, token, body, plan)

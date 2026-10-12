@@ -208,36 +208,6 @@ func TestConsumeAsyncUsagePassesPricingProvenance(t *testing.T) {
 	require.Equal(t, "21", consumer.version)
 }
 
-func TestCompleteAsyncUsageIgnoresMissingLog(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.AsyncUsageInfo{}))
-
-	oldLogDB := model.LogDB
-	model.LogDB = db
-	t.Cleanup(func() {
-		model.LogDB = oldLogDB
-	})
-
-	info := &model.AsyncUsageInfo{
-		RequestID:       "missing_log",
-		RequestAt:       time.Now(),
-		Status:          model.AsyncUsageStatusPending,
-		Model:           "gpt-5.4",
-		ProcessingToken: "claim-token",
-	}
-	require.NoError(t, model.CreateAsyncUsageInfo(info))
-
-	usage := model.Usage{
-		InputTokens: 10,
-		TotalTokens: 10,
-	}
-
-	require.NoError(t, completeAsyncUsage(context.Background(), info, usage, model.UsageContext{}))
-	require.Equal(t, model.AsyncUsageStatusCompleted, info.Status)
-	require.Equal(t, usage.InputTokens, info.Usage.InputTokens)
-}
-
 func TestCompleteAsyncUsagePersistsFinalUsageBeforeBalanceCallback(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -363,6 +333,7 @@ func TestCompleteAsyncUsageRecordsBalanceConsumeErrorWithoutRetry(t *testing.T) 
 		ProcessingToken: "balance-error-claim",
 	}
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+	ageAsyncUsageInfoPastLogGrace(info)
 
 	err = completeAsyncUsage(context.Background(), info, model.Usage{
 		InputTokens: 10,
@@ -430,6 +401,7 @@ func TestCompleteAsyncUsageDoesNotReplaySuccessfulNonIdempotentDebitWhenMarkerWr
 	t.Cleanup(func() { require.NoError(t, model.CacheDeleteGroup(groupID)) })
 	require.NoError(t, db.Create(&model.Log{
 		RequestID:        model.EmptyNullString(requestID),
+		GroupID:          groupID,
 		AsyncUsageStatus: model.AsyncUsageStatusPending,
 	}).Error)
 	info := &model.AsyncUsageInfo{
@@ -471,6 +443,7 @@ func TestCompleteAsyncUsageDoesNotReplaySuccessfulNonIdempotentDebitWhenMarkerWr
 	const parkedRequestID = "non_idempotent_completion_failure"
 	require.NoError(t, db.Create(&model.Log{
 		RequestID:        model.EmptyNullString(parkedRequestID),
+		GroupID:          groupID,
 		AsyncUsageStatus: model.AsyncUsageStatusPending,
 	}).Error)
 	parked := &model.AsyncUsageInfo{
@@ -555,6 +528,7 @@ func TestCompleteAsyncUsageRetriesPreChargeBalanceError(t *testing.T) {
 		ProcessingToken: "pre-charge-error-claim",
 	}
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+	ageAsyncUsageInfoPastLogGrace(info)
 
 	err = completeAsyncUsage(context.Background(), info, model.Usage{
 		InputTokens: 10,
@@ -743,6 +717,7 @@ func TestCompleteAsyncUsageReplaysAmbiguousIdempotentDebitExactlyOnce(t *testing
 		ProcessingToken: "claim-token",
 	}
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+	ageAsyncUsageInfoPastLogGrace(info)
 
 	usage := model.Usage{OutputTokens: 4, TotalTokens: 4}
 
@@ -949,6 +924,7 @@ func TestCompleteAsyncUsagePersistsBalanceConsumed(t *testing.T) {
 		ProcessingToken: "claim-token",
 	}
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+	ageAsyncUsageInfoPastLogGrace(info)
 
 	require.NoError(t, completeAsyncUsage(context.Background(), info, model.Usage{
 		OutputTokens: 4,
@@ -1145,4 +1121,11 @@ func TestMarkAsyncUsageFailedWritesLogMessage(t *testing.T) {
 	var failed model.AsyncUsageInfo
 	require.NoError(t, db.First(&failed, info.ID).Error)
 	require.Equal(t, string(model.ModelCapabilityImageToVideo), failed.Capability)
+}
+
+// ageAsyncUsageInfoPastLogGrace makes an outbox without a call row older than
+// the missing-row grace (key usage P2, plan C5), so its settlement proceeds
+// without the row as before. Tests that are not about the row use it.
+func ageAsyncUsageInfoPastLogGrace(info *model.AsyncUsageInfo) {
+	info.CreatedAt = time.Now().Add(-asyncUsageLogMissingGrace - time.Minute)
 }

@@ -270,6 +270,13 @@ const (
 	asyncUsageBatchSize       = 50
 	asyncUsageConcurrency     = 10
 	asyncUsageMaxRetry        = 10
+	// asyncUsageLogMissingGrace is how long an outbox without an accounting
+	// log waits for its call row before it charges anyway (key usage P2, plan
+	// C5). The row is written by the same request, seconds before.
+	asyncUsageLogMissingGrace = 15 * time.Minute
+	// measuredZeroReceiptWindow is how long the outbox retries a measured-zero
+	// receipt the wallet did not confirm, counted from the request.
+	measuredZeroReceiptWindow = 24 * time.Hour
 )
 
 var (
@@ -820,6 +827,16 @@ func completeAsyncUsage(
 
 			return fmt.Errorf("update async usage log: %w", err)
 		}
+
+		if err := waitForAsyncUsageLog(info); err != nil {
+			return err
+		}
+	}
+
+	if measuredZeroReceiptDue(info, amount) {
+		if err := reportMeasuredZero(ctx, info); err != nil {
+			return err
+		}
 	}
 
 	if amount.UsedAmount > 0 && !info.BalanceConsumed {
@@ -938,6 +955,101 @@ func completeAsyncUsage(
 		usageContext.ServiceTier,
 		model.IsClaudeLongContextSummary(info.Model, usage),
 	)
+
+	return nil
+}
+
+// waitForAsyncUsageLog decides what an outbox without an accounting log does
+// when its call row is missing. The row is written by the same request, so a
+// young outbox retries (errAsyncUsageSettlementPending, every 3 minutes) and
+// the settlement then updates the row. After asyncUsageLogMissingGrace it
+// alerts and charges as before, without touching any row. Without log storage
+// no row is ever written, so it never waits.
+func waitForAsyncUsageLog(info *model.AsyncUsageInfo) error {
+	if config.GetLogStorageHours() < 0 {
+		return nil
+	}
+
+	if !info.CreatedAt.IsZero() && time.Since(info.CreatedAt) < asyncUsageLogMissingGrace {
+		return fmt.Errorf(
+			"%w: call log row of request %s not found yet",
+			errAsyncUsageSettlementPending,
+			info.RequestID,
+		)
+	}
+
+	message := fmt.Sprintf(
+		"async usage call log missing after %s, settling without it: id=%d request_id=%s group=%s billing_operation_id=%s",
+		asyncUsageLogMissingGrace,
+		info.ID,
+		info.RequestID,
+		info.GroupID,
+		info.BillingOperationID,
+	)
+	log.Error(message)
+	notify.ErrorThrottle("asyncUsageLogMissing", time.Minute*5, "async usage call log missing", message)
+
+	return nil
+}
+
+// measuredZeroReceiptDue reports a measured image whose complete bill is zero
+// (plan C3 stores it Pending): the wallet gets a measured-zero receipt in
+// place of a debit. Admin image tasks never bill a customer.
+func measuredZeroReceiptDue(info *model.AsyncUsageInfo, amount model.Amount) bool {
+	result := amount.ImageBillingResult
+
+	return info.MeasuredImage &&
+		!info.InternalImageTask &&
+		result != nil &&
+		result.State == "complete" &&
+		result.AmountMicros != nil &&
+		*result.AmountMicros == 0
+}
+
+// reportMeasuredZero asks the wallet for the measured-zero receipt of the
+// outbox's call, with its op and attribution. The receipt key is idempotent,
+// so a failure retries the same request every 3 minutes until
+// measuredZeroReceiptWindow after the request; then the outbox completes with
+// an alert and the application's catch-up writes the receipt.
+func reportMeasuredZero(ctx context.Context, info *model.AsyncUsageInfo) error {
+	reporter, ok := balance.Default.(balance.MeasuredZeroReporter)
+	if !ok || info.GroupID == "" {
+		return nil
+	}
+
+	usage, _ := info.UsageIdentity()
+
+	_, err := reporter.MeasuredZero(ctx, balance.MeasuredZeroRequest{
+		Group:              info.GroupID,
+		RequestID:          info.RequestID,
+		BillingOperationID: info.BillingOperationID,
+		PricingVersion:     info.PricingVersion,
+		TokenName:          info.TokenName,
+		Usage:              usage,
+	})
+	if err == nil {
+		return nil
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
+	if info.RequestAt.IsZero() || time.Since(info.RequestAt) < measuredZeroReceiptWindow {
+		return fmt.Errorf("%w: measured-zero receipt: %s", errAsyncUsageSettlementPending, err.Error())
+	}
+
+	message := fmt.Sprintf(
+		"measured-zero receipt not confirmed within %s, completing without it: id=%d request_id=%s group=%s billing_operation_id=%s err=%v",
+		measuredZeroReceiptWindow,
+		info.ID,
+		info.RequestID,
+		info.GroupID,
+		info.BillingOperationID,
+		err,
+	)
+	log.Error(message)
+	notify.ErrorThrottle("asyncUsageMeasuredZero", time.Minute*5, "measured-zero receipt unavailable", message)
 
 	return nil
 }
@@ -1068,6 +1180,10 @@ func consumeAsyncUsageGroupBalance(
 	ctx = context.WithValue(ctx, balance.CtxRequestID, info.RequestID)
 	ctx = balance.ContextWithBillingOperationID(ctx, info.BillingOperationID)
 	ctx = balance.ContextWithPricing(ctx, info.PricingCurrency, info.PricingVersion)
+	// Infos created before key usage P2 carry no attribution and send none.
+	if usage, ok := info.UsageIdentity(); ok {
+		ctx = balance.ContextWithUsageIdentity(ctx, usage)
+	}
 
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
 	if err != nil {

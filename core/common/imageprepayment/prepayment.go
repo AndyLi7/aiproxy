@@ -23,7 +23,11 @@ func Call(ctx context.Context, task *model.ImageTask, command balance.Prepayment
 func AttemptID(task *model.ImageTask, index int) string {
 	return task.BillingOperationID + ":" + strconv.Itoa(index+1)
 }
-func Admit(ctx context.Context, task *model.ImageTask, channelID int) error {
+
+// Admit holds the task's prepayment. usage is the call's attribution (the
+// reservation row's identity); the hold and every settlement row of the
+// operation carry it. An incomplete identity sends none.
+func Admit(ctx context.Context, task *model.ImageTask, channelID int, usage model.UsageIdentity) error {
 	q, err := model.ParseImagePrepaymentQuote(task.PrepaymentQuoteJSON)
 	if err != nil {
 		return err
@@ -32,7 +36,8 @@ func Admit(ctx context.Context, task *model.ImageTask, channelID int) error {
 	if route == nil {
 		return errors.New("unquoted image route")
 	}
-	_, err = Call(ctx, task, balance.PrepaymentCommand{Action: "admit", TaskID: task.ID, ModelID: task.Model, Currency: "USD", PrepaidMicros: &q.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: task.PrepaymentQuoteJSON})
+	command := balance.PrepaymentCommand{Action: "admit", TaskID: task.ID, ModelID: task.Model, Currency: "USD", PrepaidMicros: &q.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: task.PrepaymentQuoteJSON}
+	_, err = Call(ctx, task, command.WithUsage(usage))
 	return err
 }
 func Begin(ctx context.Context, task *model.ImageTask, channelID int, endpoint string, index int) (bool, error) {

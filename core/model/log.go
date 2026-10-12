@@ -11,6 +11,8 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/config"
+	"github.com/labring/aiproxy/core/common/notify"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
@@ -96,6 +98,14 @@ type Log struct {
 	User     EmptyNullString   `gorm:"type:text"                     json:"user,omitempty"`
 	Metadata map[string]string `gorm:"serializer:fastjson;type:text" json:"metadata,omitempty"`
 
+	// BillingOperationID is the call's server-owned billing operation (key
+	// usage P2): every money movement of the call carries the same id. NULL on
+	// rows that cannot move money (rejections before a hold, reads) and on
+	// rows written before P2. Added by migrations/usage-attribution-v1, never
+	// by AutoMigrate in production; varchar(200) because a native op is
+	// "native:" + a 128-character request id.
+	BillingOperationID EmptyNullString `gorm:"type:varchar(200)" json:"billing_operation_id,omitempty"`
+
 	// callStatus is the status a list response classified at its own instant.
 	// Unexported, so it is never persisted or migrated.
 	callStatus CallStatus
@@ -137,6 +147,10 @@ func CreateLogIndexes(db *gorm.DB) error {
 			// used by search group logs
 			"CREATE INDEX IF NOT EXISTS idx_group_token_model_creat ON logs (group_id, token_name, model, created_at DESC)",
 		}
+		// Key usage P2 (migrations/usage-attribution-v1). SQLite is development
+		// only, so startup may build them; a production LogDB gets them from
+		// the reviewed SQL, built CONCURRENTLY.
+		indexes = append(indexes, usageAttributionSQLiteIndexes...)
 	} else {
 		indexes = []string{
 			// used by global search logs
@@ -163,7 +177,76 @@ func CreateLogIndexes(db *gorm.DB) error {
 		}
 	}
 
+	if !common.UsingSQLite && db.Dialector.Name() == "postgres" {
+		warnMissingUsageIndexes(db)
+	}
+
 	return nil
+}
+
+// usageAttributionIndexNames are the logs indexes of
+// migrations/usage-attribution-v1.
+var usageAttributionIndexNames = []string{
+	"idx_logs_group_reqat",
+	"idx_logs_group_token_reqat",
+	"idx_logs_group_billing_op",
+}
+
+var usageAttributionSQLiteIndexes = []string{
+	"CREATE INDEX IF NOT EXISTS idx_logs_group_reqat ON logs (group_id, request_at DESC, id DESC)",
+	"CREATE INDEX IF NOT EXISTS idx_logs_group_token_reqat ON logs (group_id, token_id, request_at DESC, id DESC)",
+	"CREATE INDEX IF NOT EXISTS idx_logs_group_billing_op ON logs (group_id, billing_operation_id) WHERE billing_operation_id IS NOT NULL",
+}
+
+// MissingUsageIndexes lists the usage-attribution indexes a Postgres LogDB
+// lacks or holds invalid (an interrupted CREATE INDEX CONCURRENTLY).
+func MissingUsageIndexes(db *gorm.DB) ([]string, error) {
+	var present []struct {
+		Name  string
+		Valid bool
+	}
+	if err := db.Raw(
+		"SELECT c.relname AS name, i.indisvalid AS valid FROM pg_index i"+
+			" JOIN pg_class c ON c.oid = i.indexrelid"+
+			" WHERE i.indrelid = to_regclass('logs') AND c.relname IN ?",
+		usageAttributionIndexNames,
+	).Scan(&present).Error; err != nil {
+		return nil, err
+	}
+
+	valid := make(map[string]bool, len(present))
+	for _, index := range present {
+		valid[index.Name] = index.Valid
+	}
+
+	var missing []string
+	for _, name := range usageAttributionIndexNames {
+		if !valid[name] {
+			missing = append(missing, name)
+		}
+	}
+
+	return missing, nil
+}
+
+// warnMissingUsageIndexes never builds an index at startup: on a large
+// production table a plain CREATE INDEX would block inserts. The reviewed SQL
+// builds them CONCURRENTLY; this only reports what is missing.
+func warnMissingUsageIndexes(db *gorm.DB) {
+	missing, err := MissingUsageIndexes(db)
+	if err != nil {
+		log.Warnf("check usage attribution indexes: %v", err)
+		return
+	}
+
+	if len(missing) == 0 {
+		return
+	}
+
+	message := "missing or invalid logs indexes " + strings.Join(missing, ", ") +
+		": apply migrations/usage-attribution-v1/postgres.sql step 2"
+	log.Warn(message)
+	notify.ErrorThrottle("usageAttributionIndexes", time.Hour, "Usage attribution indexes missing", message)
 }
 
 const (
@@ -432,13 +515,7 @@ func RecordConsumeLog(
 		upstreamID = upstreamID[:maxUpstreamIDLength]
 	}
 
-	if operationalFields.PublicModel != "" || operationalFields.ResolvedCapability != "" {
-		modelName, capability = PublicLogIdentity(
-			modelName,
-			operationalFields.PublicModel,
-			operationalFields.ResolvedCapability,
-		)
-	}
+	modelName, capability = CallLogModel(modelName, capability, operationalFields)
 
 	log := &Log{
 		RequestID:        EmptyNullString(requestID),
@@ -474,6 +551,9 @@ func RecordConsumeLog(
 		FailureStage:     operationalFields.FailureStage,
 		ErrorCode:        operationalFields.ErrorCode,
 		SafeError:        operationalFields.SafeError,
+		BillingOperationID: EmptyNullString(
+			operationalFields.BillingOperationID,
+		),
 	}
 
 	return LogDB.Create(log).Error

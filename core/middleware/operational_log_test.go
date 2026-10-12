@@ -40,6 +40,8 @@ func TestOperationalLogMiddlewareRecordsRejectedRequestOnce(t *testing.T) {
 	router.Use(func(c *gin.Context) {
 		SetRequestID(c, "req_rejected_123")
 		SetRequestAt(c, time.Unix(10, 0))
+		// The website Playground's hidden credential defines the source (D4).
+		c.Set(Token, model.TokenCache{ID: 2, Name: model.PlaygroundCredentialName, Group: "u_1"})
 		c.Next()
 	})
 	router.Use(OperationalLogMiddleware())
@@ -231,7 +233,7 @@ func TestNewMetaByContextCarriesOperationalSource(t *testing.T) {
 	)
 	c.Request.Header.Set(OperationalLogSourceHeader, model.RequestSourcePlayground)
 	c.Set(Group, model.GroupCache{ID: "group-1"})
-	c.Set(Token, model.TokenCache{ID: 2, Name: "playground"})
+	c.Set(Token, model.TokenCache{ID: 2, Name: model.PlaygroundCredentialName})
 	c.Set(RequestModel, "video-model")
 	c.Set(ModelConfig, model.ModelConfig{})
 	SetRequestAt(c, time.Unix(10, 0))

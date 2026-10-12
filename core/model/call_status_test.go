@@ -62,6 +62,11 @@ func TestCallStatusRules(t *testing.T) {
 		{"prepaid image task delivered, bill not yet charged", Log{Mode: int(mode.ImagesGenerations), Code: 202, AsyncUsageStatus: AsyncUsageStatusPending, RequestAt: stale}, CallStatusUnknown},
 		{"TokenAuth rejection: 403, stage auth, token 7", Log{Code: 403, FailureStage: FailureStageAuth, TokenID: 7, GroupID: "g"}, CallStatusRejected},
 		{"native task failed after acceptance", Log{Mode: int(mode.NativeTasks), Code: 502, AsyncUsageStatus: AsyncUsageStatusFailed}, CallStatusFailed},
+		// Key usage P2: a row with an op is one where money may be held, so a
+		// gate stage alone no longer makes it a rejection. Old: rejected.
+		{"503 routing with op", Log{Mode: int(mode.NativeTasks), Code: 503, FailureStage: FailureStageRouting, BillingOperationID: "native:t"}, CallStatusFailed},
+		{"409 validation with op (lost reserved->submitting race)", Log{Mode: int(mode.NativeTasks), Code: 409, FailureStage: FailureStageValidation, BillingOperationID: "native:t"}, CallStatusFailed},
+		{"402 balance without op", Log{Mode: int(mode.NativeTasks), Code: 402, FailureStage: FailureStageBalance}, CallStatusRejected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, tc.log.CallStatus(now))
@@ -143,7 +148,7 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 		FailureStageBalance,
 	}
 
-	rows := make([]Log, 0, 56000)
+	rows := make([]Log, 0, 112000)
 	for _, code := range []int{200, 202, 400, 402, 429, 502, 503} {
 		for async := AsyncUsageStatusNone; async <= AsyncUsageStatusMeasurementPending; async++ {
 			for _, stage := range stages {
@@ -152,18 +157,21 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 						for _, requestAt := range requestTimes {
 							for _, source := range []string{RequestSourceAPI, RequestSourceAdminDemo} {
 								for _, tokenID := range []int{0, 7} {
-									rows = append(rows, Log{
-										GroupID:          "g",
-										TokenID:          tokenID,
-										Code:             code,
-										AsyncUsageStatus: async,
-										FailureStage:     stage,
-										Mode:             relayMode,
-										Endpoint:         endpoint,
-										RequestAt:        requestAt,
-										CreatedAt:        requestAt,
-										RequestSource:    source,
-									})
+									for _, op := range []EmptyNullString{"", "op"} {
+										rows = append(rows, Log{
+											GroupID:            "g",
+											TokenID:            tokenID,
+											Code:               code,
+											AsyncUsageStatus:   async,
+											FailureStage:       stage,
+											Mode:               relayMode,
+											Endpoint:           endpoint,
+											RequestAt:          requestAt,
+											CreatedAt:          requestAt,
+											RequestSource:      source,
+											BillingOperationID: op,
+										})
+									}
 								}
 							}
 						}
@@ -176,7 +184,7 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.CreateInBatches(&rows, 300).Error)
 
 	// NULL columns from historical rows must classify like their zero values.
-	for _, column := range []string{"mode", "group_id", "token_id", "request_source", "failure_stage", "endpoint"} {
+	for _, column := range []string{"mode", "group_id", "token_id", "request_source", "failure_stage", "endpoint", "billing_operation_id"} {
 		values := map[string]any{
 			"group_id":           "g",
 			"token_id":           7,
@@ -188,6 +196,12 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 			"failure_stage":      "",
 			"request_at":         now,
 			"created_at":         now,
+			// A gate rejection with an op: NULL op must classify as no op.
+			"billing_operation_id": "op",
+		}
+		if column == "billing_operation_id" {
+			values["code"] = 402
+			values["failure_stage"] = string(FailureStageBalance)
 		}
 		values[column] = nil
 		require.NoError(t, db.Table("logs").Create(values).Error, column)

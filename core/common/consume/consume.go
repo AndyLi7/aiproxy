@@ -404,6 +404,7 @@ func processGroupConsume(
 ) float64 {
 	ctx = context.WithValue(ctx, balance.CtxRequestID, meta.RequestID)
 	ctx = balance.ContextWithBillingOperationID(ctx, meta.BillingOperationID)
+	ctx = balance.ContextWithUsageIdentity(ctx, RelayUsageIdentity(meta))
 	if currency, version, ok := meta.ModelConfig.RetailPricingMetadata(); ok {
 		ctx = balance.ContextWithPricing(ctx, currency, version)
 	}
@@ -430,6 +431,28 @@ func processGroupConsume(
 	}
 
 	return consumedAmount
+}
+
+// RelayUsageIdentity is the usage identity of a relay call: the same key,
+// model, source and request start its call row stores (RecordConsumeLog).
+func RelayUsageIdentity(meta *meta.Meta) model.UsageIdentity {
+	if meta == nil {
+		return model.UsageIdentity{}
+	}
+
+	logModel, capability := model.CallLogModel(
+		meta.OriginModel,
+		meta.VideoCapability,
+		meta.OperationalFields,
+	)
+
+	return model.NewUsageIdentity(
+		meta.Token.ID,
+		logModel,
+		capability,
+		meta.OperationalFields.RequestSource,
+		meta.RequestAt,
+	)
 }
 
 // CalculateMeasuredImageAmount never falls back to token or image-count pricing.

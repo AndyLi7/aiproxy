@@ -19,6 +19,7 @@ const (
 	operationalSafeErrorKey    = "operational_safe_error"
 	operationalLogRecordedKey  = "operational_log_recorded"
 	operationalLogIdentityKey  = "operational_log_identity"
+	callBillingOperationKey    = "call_billing_operation_id"
 )
 
 // operationalLogIdentity names the key TokenAuth identified, for the request
@@ -80,14 +81,54 @@ func operationalLogRecorded(c *gin.Context) bool {
 	return c.GetBool(operationalLogRecordedKey)
 }
 
+// SetCallBillingOperationID records the billing operation a request's
+// rejection row carries: a handler calls it once money may be held for the
+// request (key usage P2), for example after a native task's reservation.
+func SetCallBillingOperationID(c *gin.Context, billingOperationID string) {
+	c.Set(callBillingOperationKey, billingOperationID)
+}
+
+// GetCallBillingOperationID returns the operation set by
+// SetCallBillingOperationID, or "".
+func GetCallBillingOperationID(c *gin.Context) string {
+	return c.GetString(callBillingOperationKey)
+}
+
+// operationalTokenName is the name of the key the request authenticated with,
+// or of the key TokenAuth identified before rejecting it.
+func operationalTokenName(c *gin.Context) string {
+	if value, ok := c.Get(Token); ok {
+		switch token := value.(type) {
+		case model.TokenCache:
+			return token.Name
+		case *model.TokenCache:
+			if token != nil {
+				return token.Name
+			}
+		}
+	}
+
+	if identity, ok := operationalLogIdentityFromContext(c); ok {
+		return identity.tokenName
+	}
+
+	return ""
+}
+
+// OperationalFieldsFromContext reads the request's log fields. The source comes
+// from authenticated state only (model.UsageSource): the website Playground's
+// hidden credential, or admin_demo for internal groups. The
+// X-Token-Platform-Source header can no longer label another key's call as
+// playground.
 func OperationalFieldsFromContext(c *gin.Context) model.OperationalFields {
 	stage, _ := c.Get(operationalFailureStageKey)
 	failureStage, _ := stage.(model.FailureStage)
 
-	requestSource := c.GetHeader(OperationalLogSourceHeader)
-	if requestSource == model.RequestSourceAdminDemo && !isInternalGroupContext(c) {
-		requestSource = model.RequestSourceAPI
-	}
+	requestSource := model.UsageSource(
+		operationalTokenName(c),
+		isInternalGroupContext(c),
+		c.GetHeader(OperationalLogSourceHeader),
+	)
 
 	fields := model.BuildOperationalFields(
 		requestSource,
@@ -175,6 +216,8 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 		ErrorCode:     fields.ErrorCode,
 		SafeError:     fields.SafeError,
 		Metadata:      metadata,
+		// Set only once money may be held for this request; NULL otherwise.
+		BillingOperationID: model.EmptyNullString(GetCallBillingOperationID(c)),
 	}
 
 	identity, identified := operationalLogIdentityFromContext(c)

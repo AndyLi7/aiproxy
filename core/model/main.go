@@ -214,6 +214,12 @@ func migrateLogDBBackend(batchSize int) {
 }
 
 func migrateLogDB(batchSize int) error {
+	// The usage attribution columns reach an established LogDB only through
+	// the reviewed SQL (migrations/usage-attribution-v1), never AutoMigrate.
+	if err := checkUsageAttributionMigration(LogDB); err != nil {
+		return err
+	}
+
 	// Pre-migration cleanup to remove expired data
 	err := preMigrationCleanup(batchSize)
 	if err != nil {

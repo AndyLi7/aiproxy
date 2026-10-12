@@ -39,6 +39,10 @@ type OperationalFields struct {
 	PublicModel           string
 	PublicCapabilityModel string
 	ResolvedCapability    string
+	// BillingOperationID is the op a call row records (key usage P2). The
+	// relay sets it on every row except reads; rows that cannot move money
+	// leave it empty (NULL).
+	BillingOperationID string
 }
 
 type OperationalLogFilter struct {

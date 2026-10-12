@@ -29,6 +29,11 @@ type HTTP struct {
 	Download      func(*http.Request, string) (*http.Response, error)
 	// OnError lets the gateway log the same code and message the client receives.
 	OnError func(status int, code, message string)
+	// OnReserved receives the task's billing operation when a submission fails
+	// after its reservation, before the error is written, unless the wallet
+	// explicitly refused the hold. The gateway puts it on the request's
+	// rejection row: money may be held for that operation (key usage P2).
+	OnReserved func(billingOperationID string)
 	// PublicModel maps a task's model (the capability ID it was frozen with)
 	// to the ID customers call it by. Nil, or an unknown ID, keeps it.
 	PublicModel func(string) string
@@ -267,8 +272,11 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	engine.Provider = provider
 	task, err := engine.Submit(r.Context(), id, group, token, raw, plan)
 	if err != nil {
+		if task != nil && !WalletRefusal(err) && h.OnReserved != nil {
+			h.OnReserved(task.BillingOperationID)
+		}
 		switch {
-		case errors.Is(err, model.ErrNativeTaskConflict):
+		case errors.Is(err, model.ErrNativeTaskConflict) && (task == nil || task.Status == "reserved"):
 			h.writeError(w, 409, "request_id_conflict")
 		case errors.Is(err, nativeresult.ErrRequest), errors.Is(err, nativeresult.ErrInvalid):
 			h.writeError(w, 400, "invalid_input")
@@ -281,6 +289,10 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		default:
 			// Never swallow this error: a pending or wallet-blocked task looks
 			// queued to the customer, so the log is the only trace of why.
+			// A conflict after the reserved->submitting transition lands here
+			// too (plan C9): another writer owns the submission, which may
+			// already be accepted and charged, so the request answers the
+			// stored state and keeps its one 202 row.
 			fields := log.Fields{"lane": "native", "task_id": id, "group": group, "error": err.Error()}
 			if task != nil {
 				fields["task_status"] = task.Status

@@ -2,8 +2,10 @@ package model
 
 import (
 	"encoding/json"
-	"gorm.io/gorm"
+	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ClaimNativeRecovery leases one bounded page. It never returns a new submission
@@ -40,6 +42,12 @@ func ReleaseNativeRecovery(db *gorm.DB, id, owner string, next time.Time) error 
 	}
 	return nil
 }
+
+// SaveNativeBillingTerminal stores the billing flag of a wallet receipt and
+// mirrors the task into its call row. It first reads the task under its row
+// lock: the status before this sync decides whether a missing call row may be
+// inserted (a refunded reservation is flipped to failed below, but never had
+// a 202 answer), and the lock serialises it with RecordNativeTaskLog.
 func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt string) error {
 	var parsed struct {
 		Status string `json:"status"`
@@ -48,7 +56,19 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 		return ErrNativeTaskConflict
 	}
 	terminal := parsed.Status == "settled" || parsed.Status == "refunded" || parsed.Status == "estimated"
+	// Read outside the transaction: the key's name lives in the main database.
+	tokenName := ""
+	if NativeRecoveryRowNeeded(db, id, group, token, receipt) {
+		tokenName = nativeRecoveryTokenName(token)
+	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		locked, err := lockNativeTask(tx, id, group, token)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNativeTaskConflict
+		}
+		if err != nil {
+			return err
+		}
 		result := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ?", id, group, token).Update("billing_settled", terminal)
 		if result.Error != nil {
 			return result.Error
@@ -61,6 +81,6 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 				return err
 			}
 		}
-		return syncNativeTaskLog(tx, id, group, token, receipt)
+		return syncNativeTaskLog(tx, id, group, token, receipt, locked, tokenName)
 	})
 }

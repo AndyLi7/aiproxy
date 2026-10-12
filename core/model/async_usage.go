@@ -67,6 +67,13 @@ type AsyncUsageInfo struct {
 	UpdatedAt                   time.Time        `json:"updated_at"`
 	LogID                       int              `json:"-"`
 	ImageTaskID                 string           `json:"-"                                        gorm:"size:128;index"`
+	// Key usage P2 attribution (migrations/usage-attribution-v1). Every info a
+	// P2 binary creates sets all three (SetUsageIdentity); NULL marks an info
+	// created by an earlier binary. usage_at_ms is the request start; request_at
+	// stays the pricing instant (plan C8).
+	UsageModelID EmptyNullString `json:"-" gorm:"type:varchar(256)"`
+	UsageSource  EmptyNullString `json:"-" gorm:"type:varchar(16)"`
+	UsageAtMs    ZeroNullInt64   `json:"-" gorm:"type:bigint"`
 }
 
 func CreateAsyncUsageInfo(info *AsyncUsageInfo) error {
@@ -426,22 +433,22 @@ func updateClaimedAsyncUsageInfo(
 	return nil
 }
 
-// asyncUsageLogs selects the call row an async usage outbox settles. The request
-// id is caller-chosen (X-Request-ID) and unique neither across groups nor within
-// one, so the row is always narrowed to the identity the outbox captured from
-// the same request as the row: its group, token and mode. Like nativeTaskLogs,
-// rows without an async usage status (gateway rejections and failed submissions
-// that reused the request id) are never settlement targets. An outbox without a
-// token or mode keeps the remaining keys and never leaves its own group.
-// Accounting outboxes (measured images and image tasks) are bound to their own
-// row id; without one they select nothing, because every attempt of one
-// request shares the other keys.
+// asyncUsageLogs selects the call row an async usage outbox settles by the
+// pre-P2 key. The request id is caller-chosen (X-Request-ID) and unique neither
+// across groups nor within one, so the row is always narrowed to the identity
+// the outbox captured from the same request as the row: its group, token and
+// mode. Like nativeTaskLogs, rows without an async usage status (gateway
+// rejections and failed submissions that reused the request id) are never
+// settlement targets. An outbox without a token or mode keeps the remaining
+// keys and never leaves its own group. Accounting outboxes (measured images and
+// image tasks) are bound to their own row id; without one they select nothing,
+// because every attempt of one request shares the other keys.
 func asyncUsageLogs(info *AsyncUsageInfo) (*gorm.DB, bool) {
 	if info == nil || info.RequestID == "" {
 		return nil, false
 	}
 
-	if (info.MeasuredImage || info.ImageTaskID != "") && info.LogID <= 0 {
+	if requiresAsyncUsageLogID(info) && info.LogID <= 0 {
 		return nil, false
 	}
 
@@ -466,6 +473,72 @@ func asyncUsageLogs(info *AsyncUsageInfo) (*gorm.DB, bool) {
 	return query, true
 }
 
+func requiresAsyncUsageLogID(info *AsyncUsageInfo) bool {
+	return info.MeasuredImage || info.ImageTaskID != ""
+}
+
+// resolveAsyncUsageLog finds the one call row an outbox settles; every update
+// then targets that row id only (key usage P2, plan §1.6).
+//
+//  1. An outbox with an op finds the row that carries the same op in its group.
+//  2. Only an info created before P2 (no usage columns) falls back to the
+//     pre-P2 key, and then only to a row without an op: a pre-P2 row in flight
+//     at the switch still settles, and another op's row is never touched.
+//  3. A P2 info never falls back. Its own row always carries the op, so a miss
+//     is gorm.ErrRecordNotFound: the pre-P2 key also matches completed rows of
+//     an older call that reused the X-Request-Id, and settling onto one would
+//     overwrite that call's usage and amount.
+func resolveAsyncUsageLog(info *AsyncUsageInfo) (int, error) {
+	if info == nil || (info.RequestID == "" && info.BillingOperationID == "") {
+		return 0, NotFoundError("log")
+	}
+
+	if requiresAsyncUsageLogID(info) && info.LogID <= 0 {
+		return 0, NotFoundError("log")
+	}
+
+	var ids []int
+
+	if info.BillingOperationID != "" {
+		query := LogDB.Model(&Log{}).Where(
+			"group_id = ? AND billing_operation_id = ? AND async_usage_status <> ?",
+			info.GroupID,
+			info.BillingOperationID,
+			AsyncUsageStatusNone,
+		)
+		if info.LogID > 0 {
+			query = query.Where("id = ?", info.LogID)
+		}
+
+		if err := query.Order("id").Limit(1).Pluck("id", &ids).Error; err != nil {
+			return 0, err
+		}
+
+		if len(ids) == 1 {
+			return ids[0], nil
+		}
+	}
+
+	if _, p2 := info.UsageIdentity(); p2 {
+		return 0, NotFoundError("log")
+	}
+
+	query, ok := asyncUsageLogs(info)
+	if !ok {
+		return 0, NotFoundError("log")
+	}
+
+	if err := query.Where("billing_operation_id IS NULL").Order("id").Limit(1).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+
+	if len(ids) != 1 {
+		return 0, NotFoundError("log")
+	}
+
+	return ids[0], nil
+}
+
 func UpdateAsyncUsageLogUsage(
 	info *AsyncUsageInfo,
 	usage Usage,
@@ -475,13 +548,13 @@ func UpdateAsyncUsageLogUsage(
 	currency string,
 	pricingVersion string,
 ) error {
-	query, ok := asyncUsageLogs(info)
-	if !ok {
-		return NotFoundError("log")
+	logID, err := resolveAsyncUsageLog(info)
+	if err != nil {
+		return err
 	}
 
 	var logEntry Log
-	if err := query.First(&logEntry).Error; err != nil {
+	if err := LogDB.Where("id = ?", logID).First(&logEntry).Error; err != nil {
 		return err
 	}
 
@@ -504,12 +577,12 @@ func UpdateAsyncUsageLogStatus(
 		return nil
 	}
 
-	query, ok := asyncUsageLogs(info)
-	if !ok {
-		return NotFoundError("log")
+	logID, err := resolveAsyncUsageLog(info)
+	if err != nil {
+		return err
 	}
 
-	tx := query.Update("async_usage_status", status)
+	tx := LogDB.Model(&Log{}).Where("id = ?", logID).Update("async_usage_status", status)
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -526,12 +599,12 @@ func UpdateAsyncUsageLogFailed(info *AsyncUsageInfo, message string) error {
 		return nil
 	}
 
-	query, ok := asyncUsageLogs(info)
-	if !ok {
-		return NotFoundError("log")
+	logID, err := resolveAsyncUsageLog(info)
+	if err != nil {
+		return err
 	}
 
-	tx := query.Updates(
+	tx := LogDB.Model(&Log{}).Where("id = ?", logID).Updates(
 		map[string]any{"async_usage_status": AsyncUsageStatusFailed, "content": message},
 	)
 

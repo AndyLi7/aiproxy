@@ -54,8 +54,8 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 	}
 	ctx := context.Background()
 	task := makeTask("completed-case")
-	require.NoError(t, Admit(ctx, task, 7))
-	require.NoError(t, Admit(ctx, task, 7))
+	require.NoError(t, Admit(ctx, task, 7, model.UsageIdentity{}))
+	require.NoError(t, Admit(ctx, task, 7, model.UsageIdentity{}))
 	claimed, err := Begin(ctx, task, 7, "fal-ai/test", 0)
 	require.NoError(t, err)
 	require.True(t, claimed)
@@ -85,7 +85,7 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		expected int64
 	}{{"invalid-free", "0", 0}, {"failed-billed", "0.2", 200000}} {
 		failed := makeTask(tc.id)
-		require.NoError(t, Admit(ctx, failed, 7))
+		require.NoError(t, Admit(ctx, failed, 7, model.UsageIdentity{}))
 		claimed, err := Begin(ctx, failed, 7, "fal-ai/test", 0)
 		require.NoError(t, err)
 		require.True(t, claimed)
@@ -108,7 +108,7 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		}
 	}
 	unknown := makeTask("unknown-case")
-	require.NoError(t, Admit(ctx, unknown, 7))
+	require.NoError(t, Admit(ctx, unknown, 7, model.UsageIdentity{}))
 	claimed, err = Begin(ctx, unknown, 7, "fal-ai/test", 0)
 	require.NoError(t, err)
 	require.True(t, claimed)

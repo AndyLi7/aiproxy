@@ -96,7 +96,9 @@ func TestSECWalletIntegration(t *testing.T) {
 		for range 2 {
 			c := contextFor("sec-video-repeat")
 			m := controller.NewMetaByContext(c, &model.Channel{ID: 1}, mode.Videos)
-			entry := &model.Log{RequestID: model.EmptyNullString(m.RequestID), AsyncUsageStatus: model.AsyncUsageStatusPending}
+			// The call row the relay wrote for this outbox (same group): since key
+			// usage P2 an outbox waits for its row before it charges.
+			entry := &model.Log{RequestID: model.EmptyNullString(m.RequestID), GroupID: group, TokenID: 1, AsyncUsageStatus: model.AsyncUsageStatusPending}
 			require.NoError(t, db.Create(entry).Error)
 			info := &model.AsyncUsageInfo{RequestID: m.RequestID, BillingOperationID: m.BillingOperationID, GroupID: group, TokenID: 1, TokenName: "sec-test", PricingCurrency: "USD", PricingVersion: "sec-test", Price: model.Price{PerRequestPrice: 0.2}, LogID: entry.ID}
 			require.NoError(t, model.CreateAsyncUsageInfo(info))
@@ -132,7 +134,7 @@ func TestSECWalletIntegration(t *testing.T) {
 				_, e = consumer.PostGroupConsume(ctx, "sec-test", 0.4)
 				require.NoError(t, e)
 			}
-			entry := &model.Log{RequestID: model.EmptyNullString(trace), AsyncUsageStatus: model.AsyncUsageStatusPending}
+			entry := &model.Log{RequestID: model.EmptyNullString(trace), GroupID: group, AsyncUsageStatus: model.AsyncUsageStatusPending}
 			require.NoError(t, db.Create(entry).Error)
 			info := &model.AsyncUsageInfo{RequestID: trace, GroupID: group, TokenName: "sec-test", PricingCurrency: "USD", PricingVersion: "sec-test", Price: model.Price{PerRequestPrice: 0.4}, LogID: entry.ID}
 			require.NoError(t, model.CreateAsyncUsageInfo(info))

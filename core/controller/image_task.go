@@ -461,6 +461,16 @@ func submitImageTask(c *gin.Context) {
 		Price:                       price,
 		DisableResolutionFuzzyMatch: mc.DisableResolutionFuzzyMatch,
 	}
+	// requestAt above stays the pricing instant (info.RequestAt, plan C8). The
+	// call's usage time is the request start: the reservation row, the
+	// outbox's usage_at_ms and the admit identity all use it.
+	callAt := middleware.GetRequestAt(c)
+	if callAt.IsZero() {
+		callAt = requestAt
+	}
+	operational := middleware.OperationalFieldsFromContext(c)
+	logModel, logCapability := model.CallLogModel(info.Model, info.Capability, operational)
+	info.SetUsageIdentity(model.NewUsageIdentity(token.ID, logModel, logCapability, operational.RequestSource, callAt))
 
 	var rawWrapper struct {
 		Contract json.RawMessage `json:"contract"`
@@ -502,7 +512,7 @@ func submitImageTask(c *gin.Context) {
 			RequestSummary:      imageTaskLogRequestSummary(body),
 		},
 		info,
-		middleware.OperationalFieldsFromContext(c),
+		operational,
 	)
 	if errors.Is(err, model.ErrImageTaskConflict) {
 		imageTaskHTTPError(c, 409, "request_id_conflict")
@@ -526,7 +536,8 @@ func submitImageTask(c *gin.Context) {
 	if task.PrepaymentQuoteJSON != "" {
 		// Ambiguous wallet replies never authorize paid work. The reserved task and
 		// debit are recovered by their server operation ID; no upstream retry here.
-		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID); err != nil {
+		usage, _ := info.UsageIdentity()
+		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID, usage); err != nil {
 			status, code, taskCode, taskMessage := 0, "", "", ""
 			switch {
 			case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):

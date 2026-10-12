@@ -166,31 +166,34 @@ func ReserveImageTask(
 			}
 		}
 
+		// The call row's time is the request start (usage_at_ms) when the
+		// handler recorded one; info.RequestAt stays the pricing instant (C8).
+		requestAt := info.RequestAt
+		if info.UsageAtMs > 0 {
+			requestAt = time.UnixMilli(int64(info.UsageAtMs)).UTC()
+		}
 		entry := &Log{
-			RequestID:        EmptyNullString(task.ID),
-			RequestAt:        info.RequestAt,
-			GroupID:          info.GroupID,
-			TokenID:          info.TokenID,
-			TokenName:        info.TokenName,
-			Model:            info.Model,
-			ChannelID:        info.ChannelID,
-			Mode:             info.Mode,
-			Code:             202,
-			Endpoint:         "/v1/images/tasks",
-			RequestSource:    RequestSourceAPI,
-			Currency:         info.PricingCurrency,
-			PricingVersion:   info.PricingVersion,
-			Price:            info.Price,
-			AsyncUsageStatus: AsyncUsageStatusPending,
+			RequestID:          EmptyNullString(task.ID),
+			RequestAt:          requestAt,
+			GroupID:            info.GroupID,
+			TokenID:            info.TokenID,
+			TokenName:          info.TokenName,
+			Model:              info.Model,
+			ChannelID:          info.ChannelID,
+			Mode:               info.Mode,
+			Code:               202,
+			Endpoint:           "/v1/images/tasks",
+			RequestSource:      RequestSourceAPI,
+			Currency:           info.PricingCurrency,
+			PricingVersion:     info.PricingVersion,
+			Price:              info.Price,
+			AsyncUsageStatus:   AsyncUsageStatusPending,
+			BillingOperationID: EmptyNullString(task.BillingOperationID),
 		}
 		if len(operational) > 0 {
 			fields := operational[0]
 			entry.RequestSource = fields.RequestSource
-			entry.Model, entry.Capability = PublicLogIdentity(
-				info.Model,
-				fields.PublicModel,
-				fields.ResolvedCapability,
-			)
+			entry.Model, entry.Capability = CallLogModel(info.Model, info.Capability, fields)
 		}
 		if err := tx.Create(entry).Error; err != nil {
 			return err
@@ -252,6 +255,11 @@ func gatewayOnlyImageRejection(previous Log, task *ImageTask) bool {
 // UpdateImageTaskCallLog records the error answer a customer received on the
 // image task's reservation row, so the request keeps exactly one log row. The
 // async usage status is left alone: SetImageTaskResult may already have set it.
+//
+// A gate stage is passed only for the wallet's explicit refusals, which hold
+// nothing (the wallet refuses atomically). The row then drops its billing
+// operation, so it stays a rejection: a row with an op is one where money may
+// be held, and classifies as failed (plan C10).
 func UpdateImageTaskCallLog(
 	logID int,
 	requestID string,
@@ -261,14 +269,19 @@ func UpdateImageTaskCallLog(
 	errorCode string,
 	safeError string,
 ) error {
+	updates := map[string]any{
+		"code":          code,
+		"failure_stage": string(stage),
+		"error_code":    errorCode,
+		"safe_error":    safeError,
+	}
+	if stage != FailureStageNone && stage != FailureStageUpstream {
+		updates["billing_operation_id"] = nil
+	}
+
 	result := LogDB.Model(&Log{}).
 		Where("id = ? AND request_id = ? AND group_id = ?", logID, requestID, groupID).
-		Updates(map[string]any{
-			"code":          code,
-			"failure_stage": string(stage),
-			"error_code":    errorCode,
-			"safe_error":    safeError,
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}

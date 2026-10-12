@@ -2,6 +2,8 @@
 package task
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -96,6 +98,25 @@ func TestMeasuredSettlementReplayUsesImmutableSnapshot(t *testing.T) {
 	require.Len(t, entry.UsageContext.ImageUsage.Outputs, 1)
 }
 
+// zeroReceiptBalance records measured-zero receipts and fails any debit.
+type zeroReceiptBalance struct {
+	balance.GroupBalance
+
+	receipts *[]string
+}
+
+func (b zeroReceiptBalance) MeasuredZero(_ context.Context, request balance.MeasuredZeroRequest) (string, error) {
+	*b.receipts = append(*b.receipts, request.RequestID)
+	return "created", nil
+}
+
+func (zeroReceiptBalance) GetGroupRemainBalance(context.Context, model.GroupCache) (float64, balance.PostGroupConsumer, error) {
+	return 0, nil, errors.New("a zero or incomplete measured bill must never be debited")
+}
+
+// The worker never polls an upstream for a measured image: a complete zero
+// bill reports a measured-zero receipt instead of a debit (key usage P2), and
+// incomplete evidence is parked.
 func TestMeasuredWorkerNeverPollsForZeroOrIncomplete(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -105,10 +126,17 @@ func TestMeasuredWorkerNeverPollsForZeroOrIncomplete(t *testing.T) {
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
 
+	var receipts []string
+
+	oldBalance := balance.Default
+	balance.Default = zeroReceiptBalance{receipts: &receipts}
+	t.Cleanup(func() { balance.Default = oldBalance })
+
 	for _, state := range []string{"complete", "pending"} {
 		z := int64(0)
 		info := &model.AsyncUsageInfo{
 			RequestID:       state,
+			GroupID:         "measured-zero-group",
 			MeasuredImage:   true,
 			ProcessingToken: "claim",
 			Amount: model.Amount{
@@ -119,6 +147,7 @@ func TestMeasuredWorkerNeverPollsForZeroOrIncomplete(t *testing.T) {
 
 		entry := &model.Log{
 			RequestID:        model.EmptyNullString(state),
+			GroupID:          "measured-zero-group",
 			AsyncUsageStatus: model.AsyncUsageStatusPending,
 		}
 		require.NoError(t, db.Create(entry).Error)
@@ -135,6 +164,8 @@ func TestMeasuredWorkerNeverPollsForZeroOrIncomplete(t *testing.T) {
 			require.Equal(t, model.AsyncUsageStatusMeasurementPending, got.Status)
 		}
 	}
+
+	require.Equal(t, []string{"complete"}, receipts)
 }
 
 func TestMeasuredFailureOnlyUpdatesPairedLog(t *testing.T) {

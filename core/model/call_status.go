@@ -209,11 +209,14 @@ func (l *Log) isTaskRow() bool {
 	return l.Code == http.StatusAccepted || IsAsyncSubmitMode(mode.Mode(l.Mode))
 }
 
-// CallStatus classifies the row at now. P1 has no billing operation column, so
-// rejected and failed are told apart by the failure stage only.
+// CallStatus classifies the row at now. An error is rejected only when a gate
+// refused it (a failure stage other than none or upstream) and the row carries
+// no billing operation: a row with an op is one where money may be held (key
+// usage P2, spec §4.3), so its error is ours and the call failed.
 func (l *Log) CallStatus(now time.Time) CallStatus {
 	if l.Code >= http.StatusBadRequest {
-		if l.FailureStage == FailureStageNone || l.FailureStage == FailureStageUpstream {
+		if l.FailureStage == FailureStageNone || l.FailureStage == FailureStageUpstream ||
+			l.BillingOperationID != "" {
 			return CallStatusFailed
 		}
 
@@ -256,7 +259,8 @@ func SetLogsCallStatus(logs []*Log, now time.Time) {
 func callStatusExpr(now time.Time) (string, []any) {
 	taskRow := "(code = ? OR mode IN ?)"
 	sql := "CASE" +
-		" WHEN code >= ? THEN CASE WHEN COALESCE(failure_stage, '') IN ? THEN 'failed' ELSE 'rejected' END" +
+		" WHEN code >= ? THEN CASE WHEN COALESCE(failure_stage, '') IN ? OR COALESCE(billing_operation_id, '') <> ''" +
+		" THEN 'failed' ELSE 'rejected' END" +
 		" WHEN " + taskRow + " AND async_usage_status = ? THEN 'failed'" +
 		" WHEN " + taskRow + " AND async_usage_status = ? AND request_at < ? THEN 'unknown'" +
 		" WHEN " + taskRow + " AND async_usage_status = ? THEN 'processing'" +

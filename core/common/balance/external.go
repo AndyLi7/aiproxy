@@ -96,6 +96,51 @@ func billingOperationIDFromContext(ctx context.Context) string {
 	return id
 }
 
+type usageIdentityContextKey struct{}
+
+// ContextWithUsageIdentity attaches the call's usage attribution (key usage
+// P2) to a consume, like ContextWithBillingOperationID, so PostGroupConsumer
+// keeps its signature. Only a complete identity is ever sent.
+func ContextWithUsageIdentity(ctx context.Context, identity model.UsageIdentity) context.Context {
+	return context.WithValue(ctx, usageIdentityContextKey{}, identity)
+}
+
+// UsageIdentityFromContext returns the identity attached with
+// ContextWithUsageIdentity, or false when there is none or it is incomplete.
+func UsageIdentityFromContext(ctx context.Context) (model.UsageIdentity, bool) {
+	identity, ok := ctx.Value(usageIdentityContextKey{}).(model.UsageIdentity)
+	if !ok || !identity.Complete() {
+		return model.UsageIdentity{}, false
+	}
+
+	return identity, true
+}
+
+// usageFields are the optional attribution fields of consume, admit and
+// measured-zero bodies. They are set all together or not at all.
+type usageFields struct {
+	APIKeyID     *int   `json:"apiKeyId,omitempty"`
+	UsageModelID string `json:"usageModelId,omitempty"`
+	Source       string `json:"source,omitempty"`
+	UsageAtMs    *int64 `json:"usageAtMs,omitempty"`
+}
+
+func newUsageFields(identity model.UsageIdentity) usageFields {
+	if !identity.Complete() {
+		return usageFields{}
+	}
+
+	keyID := identity.APIKeyID
+	usageAt := identity.UsageAtMs()
+
+	return usageFields{
+		APIKeyID:     &keyID,
+		UsageModelID: identity.ModelID,
+		Source:       identity.Source,
+		UsageAtMs:    &usageAt,
+	}
+}
+
 // ContextWithPricing attaches the immutable retail-pricing provenance that
 // the external wallet records alongside a debit.
 func ContextWithPricing(ctx context.Context, currency, pricingVersion string) context.Context {
@@ -172,6 +217,7 @@ type externalConsumeReq struct {
 	BillingOperationID string  `json:"billingOperationId,omitempty"`
 	Currency           string  `json:"currency,omitempty"`
 	PricingVersion     string  `json:"pricingVersion,omitempty"`
+	usageFields
 }
 
 type externalConsumeResp struct {
@@ -401,6 +447,8 @@ func (e *ExternalHTTP) postConsume(
 	requestID string,
 	pricing consumePricing,
 ) (float64, error) {
+	identity, _ := UsageIdentityFromContext(ctx)
+
 	reqBody, err := sonic.Marshal(externalConsumeReq{
 		Group:              group,
 		TokenName:          tokenName,
@@ -409,6 +457,7 @@ func (e *ExternalHTTP) postConsume(
 		BillingOperationID: billingOperationIDFromContext(ctx),
 		Currency:           pricing.currency,
 		PricingVersion:     pricing.pricingVersion,
+		usageFields:        newUsageFields(identity),
 	})
 	if err != nil {
 		return 0, err

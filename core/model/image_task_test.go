@@ -485,3 +485,51 @@ func TestImageReservationIsNotReleasedOnceItMayHaveReachedAProvider(t *testing.T
 		})
 	}
 }
+
+// Plan C10: the wallet's explicit refusals hold nothing, so a reservation row
+// updated with their gate stage drops its billing operation and stays a
+// rejection. Any other update keeps the op. Old: the op stayed, and with the
+// op rule the refusal read as failed.
+func TestUpdateImageTaskCallLogClearsOperationOnGateRejection(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "gate.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+
+	old := model.LogDB
+	model.LogDB = db
+	t.Cleanup(func() { model.LogDB = old })
+
+	reserve := func(id string) *model.Log {
+		row := &model.Log{
+			RequestID: model.EmptyNullString(id), GroupID: "g", TokenID: 1, Code: 202,
+			Endpoint: "/v1/images/tasks", AsyncUsageStatus: model.AsyncUsageStatusPending,
+			BillingOperationID: "op-" + model.EmptyNullString(id),
+		}
+		require.NoError(t, db.Create(row).Error)
+
+		return row
+	}
+
+	refused := reserve("refused")
+	require.NoError(t, model.UpdateImageTaskCallLog(refused.ID, "refused", "g", 402,
+		model.FailureStageBalance, "insufficient_balance", "Insufficient balance"))
+
+	var got model.Log
+	require.NoError(t, db.First(&got, refused.ID).Error)
+	require.Empty(t, got.BillingOperationID)
+	require.Equal(t, model.FailureStageBalance, got.FailureStage)
+	require.Equal(t, model.CallStatusRejected, got.CallStatus(time.Now()))
+
+	var nulls int64
+	require.NoError(t, db.Model(&model.Log{}).Where("id = ? AND billing_operation_id IS NULL", refused.ID).Count(&nulls).Error)
+	require.EqualValues(t, 1, nulls)
+
+	ours := reserve("ours")
+	require.NoError(t, model.UpdateImageTaskCallLog(ours.ID, "ours", "g", 503,
+		model.FailureStageNone, "task_store_unavailable", "Task storage is temporarily unavailable."))
+
+	got = model.Log{}
+	require.NoError(t, db.First(&got, ours.ID).Error)
+	require.Equal(t, model.EmptyNullString("op-ours"), got.BillingOperationID)
+	require.Equal(t, model.CallStatusFailed, got.CallStatus(time.Now()))
+}

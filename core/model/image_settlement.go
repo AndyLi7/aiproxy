@@ -20,6 +20,14 @@ func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
 		return err
 	}
 
+	// A complete zero bill is Pending too (key usage P2, plan C3): the outbox
+	// then reports it to the wallet as a measured-zero receipt instead of a
+	// customer read writing it. Only the final row's outbox; evidence below
+	// keeps the old switch.
+	if status == AsyncUsageStatusCompleted {
+		status = AsyncUsageStatusPending
+	}
+
 	info.MeasuredImage = true
 	info.Status = status
 

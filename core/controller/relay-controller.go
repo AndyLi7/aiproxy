@@ -540,6 +540,13 @@ func recordResult(
 		fields = failureFields
 	}
 
+	// The call row carries the request's billing operation, the same id its
+	// consume or outbox sends (key usage P2). Reads (polls, downloads) never
+	// move money and keep NULL.
+	if !model.IsReadMode(meta.Mode) {
+		fields.BillingOperationID = meta.BillingOperationID
+	}
+
 	meta.OperationalFields = fields
 
 	middleware.MarkOperationalLogRecorded(c)
@@ -706,6 +713,8 @@ func saveAsyncUsageInfo(
 		UsageContext:                result.UsageContext.WithFallback(meta.RequestUsageContext),
 		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
 	}
+	// The outbox's attribution equals the submit row the same request wrote.
+	info.SetUsageIdentity(consume.RelayUsageIdentity(meta))
 	if err := model.CreateAsyncUsageInfo(info); err != nil {
 		log.Errorf("failed to save async usage info: %v", err)
 		return
@@ -1305,6 +1314,9 @@ func recordMeasuredImageResult(
 		Amount:                      amount,
 		DisableResolutionFuzzyMatch: meta.ModelConfig.DisableResolutionFuzzyMatch,
 	}
+	// Final and evidence infos alike carry the call's attribution, so an info
+	// without it was created by an earlier binary.
+	info.SetUsageIdentity(consume.RelayUsageIdentity(meta))
 	fields := meta.OperationalFields
 	entry := &model.Log{
 		RequestDetail: detail,
@@ -1339,13 +1351,12 @@ func recordMeasuredImageResult(
 		FailureStage:   fields.FailureStage,
 		ErrorCode:      fields.ErrorCode,
 		SafeError:      fields.SafeError,
+		BillingOperationID: model.EmptyNullString(
+			fields.BillingOperationID,
+		),
 	}
 
-	entry.Model, entry.Capability = model.PublicLogIdentity(
-		entry.Model,
-		fields.PublicModel,
-		fields.ResolvedCapability,
-	)
+	entry.Model, entry.Capability = model.CallLogModel(entry.Model, entry.Capability, fields)
 	if !firstByteAt.IsZero() {
 		entry.TTFBMilliseconds = model.ZeroNullInt64(firstByteAt.Sub(meta.RequestAt).Milliseconds())
 	}
@@ -1372,8 +1383,9 @@ func recordMeasuredImageResult(
 		return
 	}
 
-	// Request counters are recorded once here. A positive outbox adds usage and
-	// amount on settlement; terminal zero/failure/pending evidence has no debit worker.
+	// Request counters are recorded once here. A pending outbox (a positive or,
+	// since key usage P2, a complete zero bill) adds usage and amount on
+	// settlement; failure and pending evidence have no settlement worker.
 	summaryUsage := result.Usage
 	if info.Status == model.AsyncUsageStatusPending {
 		summaryUsage = model.Usage{}

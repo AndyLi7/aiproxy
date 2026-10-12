@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,6 +28,19 @@ type imageCallLogHarness struct {
 	providerCalls int
 	requestID     string
 	submit        func() *httptest.ResponseRecorder
+	// requestStart, when set, is the request start the global log middleware
+	// records (middleware.SetRequestAt).
+	requestStart time.Time
+	// commands are the wallet prepayment bodies, in order.
+	commands []map[string]any
+}
+
+// imageHarnessOptions selects a prepaid channel (a wallet whose admit answer
+// is admitStatus) or an unprepaid one priced by price.
+type imageHarnessOptions struct {
+	admitStatus int
+	unprepaid   bool
+	price       model.Price
 }
 
 // newImageCallLogHarness runs submitImageTask behind the operational log
@@ -34,13 +48,27 @@ type imageCallLogHarness struct {
 // answer is admitStatus.
 func newImageCallLogHarness(t *testing.T, admitStatus int) *imageCallLogHarness {
 	t.Helper()
+
+	return newImageHarness(t, imageHarnessOptions{admitStatus: admitStatus})
+}
+
+func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHarness {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	h := &imageCallLogHarness{requestID: imageCallLogRequestID}
+	admitStatus := options.admitStatus
 
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(raw, &body))
+		h.commands = append(h.commands, body)
+
 		var command balance.PrepaymentCommand
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&command))
+		require.NoError(t, json.Unmarshal(raw, &command))
 
 		if command.Action == "admit" && admitStatus != http.StatusOK {
 			w.WriteHeader(admitStatus)
@@ -97,9 +125,23 @@ func newImageCallLogHarness(t *testing.T, admitStatus int) *imageCallLogHarness 
 	var quote map[string]any
 	require.NoError(t, json.Unmarshal([]byte(`{"version":1,"quoteVersion":"test-1","currency":"USD","prepaidMicros":2000000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":1000000,"prepaidMicros":2000000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`), &quote))
 
+	price := model.Price{PerRequestPrice: 1}
+	config := map[model.ModelConfigKey]any{
+		"x_token_platform_capability_contract": map[string]any{"entry_id": "image", "contract": contract},
+		"x_token_platform_pricing":             map[string]any{"currency": "USD", "pricing_version": "v1"},
+		model.ImagePrepaymentConfigKey:         quote,
+	}
+	if options.unprepaid {
+		price = options.price
+		delete(config, model.ImagePrepaymentConfigKey)
+	}
+
 	engine := gin.New()
 	engine.Use(middleware.OperationalLogMiddleware())
 	engine.POST("/v1/images/tasks", func(c *gin.Context) {
+		if !h.requestStart.IsZero() {
+			middleware.SetRequestAt(c, h.requestStart)
+		}
 		// An internal group may pin the channel with the Aiproxy-Channel header.
 		c.Set(middleware.Group, model.GroupCache{ID: "g", Status: model.GroupStatusInternal})
 		c.Set(middleware.Token, model.TokenCache{ID: 1, Name: "prod", Group: "g"})
@@ -107,13 +149,9 @@ func newImageCallLogHarness(t *testing.T, admitStatus int) *imageCallLogHarness 
 		c.Set(middleware.RoutingModel, "image")
 		c.Set(middleware.RequestedModel, "image")
 		c.Set(middleware.ModelCaches, &model.ModelCaches{ChannelsByID: map[int]*model.Channel{7: channel}})
-		c.Set(middleware.ModelConfig, model.ModelConfig{
-			Price: model.Price{PerRequestPrice: 1},
-			Config: map[model.ModelConfigKey]any{
-				"x_token_platform_capability_contract": map[string]any{"entry_id": "image", "contract": contract},
-				"x_token_platform_pricing":             map[string]any{"currency": "USD", "pricing_version": "v1"},
-				model.ImagePrepaymentConfigKey:         quote,
-			},
+		c.Set(middleware.ModelConfig, model.ModelConfig{Price: price, Config: config})
+		c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{
+			Group: "g", CheckBalance: func(float64) bool { return true },
 		})
 		submitImageTask(c)
 	})

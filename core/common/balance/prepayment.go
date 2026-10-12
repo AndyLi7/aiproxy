@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/labring/aiproxy/core/model"
 )
 
 var ErrPrepaymentInsufficientBalance = errors.New("insufficient prepayment balance")
@@ -38,7 +40,32 @@ type PrepaymentCommand struct {
 	EstimatedMicros    *int64             `json:"estimatedMicros,omitempty"`
 	QuoteJSON          string             `json:"quoteJson,omitempty"`
 	Outcome            *PrepaymentOutcome `json:"outcome,omitempty"`
+	// Key usage P2 attribution, sent on admit only (WithUsage). The
+	// application must accept these keys before a gateway sends them: its
+	// admit schema is strict.
+	APIKeyID     *int   `json:"apiKeyId,omitempty"`
+	UsageModelID string `json:"usageModelId,omitempty"`
+	Source       string `json:"source,omitempty"`
+	UsageAtMs    *int64 `json:"usageAtMs,omitempty"`
 }
+
+// WithUsage sets the call's attribution on an admit command when it is
+// complete; an incomplete identity leaves the command unchanged. ModelID keeps
+// its own meaning (the registry entry or contract id the hold is for).
+func (c PrepaymentCommand) WithUsage(identity model.UsageIdentity) PrepaymentCommand {
+	if !identity.Complete() {
+		return c
+	}
+
+	fields := newUsageFields(identity)
+	c.APIKeyID = fields.APIKeyID
+	c.UsageModelID = fields.UsageModelID
+	c.Source = fields.Source
+	c.UsageAtMs = fields.UsageAtMs
+
+	return c
+}
+
 type PrepaymentOutcome struct {
 	Kind           string `json:"kind"`
 	CustomerMicros *int64 `json:"customerMicros,omitempty"`
@@ -54,6 +81,20 @@ type PrepaymentReceipt struct {
 	ChargedMicros      *int64 `json:"chargedMicros"`
 	RefundMicros       *int64 `json:"refundMicros"`
 	PlatformLossMicros *int64 `json:"platformLossMicros"`
+	// The hold's usage time and source (key usage P2), read by the wallet from
+	// the hold row. Absent for holds admitted without attribution and from an
+	// application without P2; a value <= 0 or an unknown source is dropped.
+	UsageAtMs   *int64 `json:"usageAtMs,omitempty"`
+	UsageSource string `json:"usageSource,omitempty"`
+}
+
+// normalizeUsage drops a receipt's attribution unless both fields are usable,
+// so callers either have the hold's time and source or neither.
+func (r *PrepaymentReceipt) normalizeUsage() {
+	if r.UsageAtMs == nil || *r.UsageAtMs <= 0 || !model.ValidUsageSource(r.UsageSource) {
+		r.UsageAtMs = nil
+		r.UsageSource = ""
+	}
 }
 
 func (e *ExternalHTTP) Prepayment(ctx context.Context, command PrepaymentCommand) (PrepaymentReceipt, error) {
@@ -142,6 +183,8 @@ func (e *ExternalHTTP) Prepayment(ctx context.Context, command PrepaymentCommand
 			}
 		}
 	}
+	envelope.Data.normalizeUsage()
+
 	return envelope.Data, nil
 }
 

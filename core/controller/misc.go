@@ -1,11 +1,70 @@
 package controller
 
 import (
+	"net/http"
+	"sync"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
+
+// usageAttributionRecheck bounds how often an unready LogDB is probed.
+const usageAttributionRecheck = 10 * time.Second
+
+// storageReadiness caches model.UsageAttributionStorageReady for /api/status.
+// Once true it stays true: the reviewed SQL adds the columns and nothing drops
+// them. While false it probes at most every usageAttributionRecheck.
+type storageReadiness struct {
+	mu        sync.Mutex
+	db        *gorm.DB
+	readyOnce bool
+	checkedAt time.Time
+	check     func(*gorm.DB) bool
+	now       func() time.Time
+}
+
+var usageAttributionStorage = &storageReadiness{
+	check: model.UsageAttributionStorageReady,
+	now:   time.Now,
+}
+
+func (s *storageReadiness) ready(db *gorm.DB) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db != db {
+		// Another database handle (tests swap LogDB): forget the old answer.
+		s.db, s.readyOnce, s.checkedAt = db, false, time.Time{}
+	}
+
+	if s.readyOnce {
+		return true
+	}
+
+	now := s.now()
+	if !s.checkedAt.IsZero() && now.Sub(s.checkedAt) < usageAttributionRecheck {
+		return false
+	}
+
+	s.checkedAt = now
+	if s.check(db) {
+		s.readyOnce = true
+		return true
+	}
+
+	message := "LogDB lacks logs.billing_operation_id or async_usage_infos.usage_model_id/usage_source/usage_at_ms:" +
+		" apply migrations/usage-attribution-v1 before this binary serves traffic"
+	log.Error(message)
+	notify.ErrorThrottle("usageAttributionStorage", 5*time.Minute, "Usage attribution storage missing", message)
+
+	return false
+}
 
 type StatusData struct {
 	StartTime int64    `json:"startTime"`
@@ -21,6 +80,13 @@ type StatusData struct {
 //	@Success		200	{object}	middleware.APIResponse{data=StatusData}
 //	@Router			/api/status [get]
 func GetStatus(c *gin.Context) {
+	if !usageAttributionStorage.ready(model.LogDB) {
+		// Railway health-checks this route: a binary ahead of the LogDB schema
+		// never receives traffic, and the previous binary keeps serving.
+		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "usage_attribution_storage_missing")
+		return
+	}
+
 	status := &StatusData{
 		StartTime: common.StartTime,
 		Features: []string{

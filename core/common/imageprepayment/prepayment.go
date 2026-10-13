@@ -74,22 +74,13 @@ func Sync(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt
 			}
 		}
 	}
-	if task.Status == "failed" && task.UpstreamID != "" && task.Error != nil && (task.Error.Code == "invalid_parameters" || task.Error.Code == "upstream_failed") {
-		// An accepted provider failure is not evidence of a free request.
-		// Start the same bill-reconciliation window as a completed execution.
-		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "execution_finished"}); err != nil {
-			return balance.PrepaymentReceipt{}, err
-		}
-	} else if task.Status == "failed" && task.Error != nil && task.Error.Code == model.AsyncGenerationTimeoutCode {
-		// Owner rule 2026-10-08: the provider did not finish, or never
-		// confirmed the submission, within AsyncGenerationDeadline. Refund in
-		// full in one wallet call, reason platform_failure; a later bill is
-		// platform loss. execution_finished is not sent: between it and the
-		// settle, a provider bill could be settled as an actual charge.
-		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
-			return balance.PrepaymentReceipt{}, err
-		}
-	} else if task.Status == "failed" {
+	if task.Status == "failed" {
+		// Every failed task, whatever its error code, is refunded in full in
+		// one wallet call, reason platform_failure. Owner rule 2026-10-02:
+		// failed = not charged, and a provider bill that arrives later is
+		// platform loss. Owner rule 2026-10-08: execution_finished is never
+		// sent first, because between it and the settle a provider bill could
+		// be settled as an actual charge.
 		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
 			return balance.PrepaymentReceipt{}, err
 		}

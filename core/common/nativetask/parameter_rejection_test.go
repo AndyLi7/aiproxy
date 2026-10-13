@@ -130,7 +130,8 @@ func falQueue(t *testing.T, status int, result string) *fal.Client {
 // Owner decision 2026-10-09, after-acceptance path: fal accepted the request,
 // the queue completed and the result GET answers 422 with a named field. The
 // task fails as invalid_parameters and is refunded like
-// upstream_result_rejected (execution_finished, then platform_failure).
+// upstream_result_rejected: one platform_failure settle, never preceded by
+// execution_finished.
 func TestNativePollRejectionNamesFieldsAndRefundsPlatformFailure(t *testing.T) {
 	hook := captureLogs(t)
 	e, plan, wallet, _ := setup(t)
@@ -146,9 +147,8 @@ func TestNativePollRejectionNamesFieldsAndRefundsPlatformFailure(t *testing.T) {
 	require.Equal(t, "invalid_parameters", task.ErrorCode)
 	require.Equal(t, "upstream-1", task.UpstreamID)
 	actions := walletActions(wallet)
-	require.Equal(t, 1, countAction(actions, "execution_finished"))
+	require.Zero(t, countAction(actions, "execution_finished"))
 	require.Equal(t, 1, countAction(actions, "settle:failed/platform_failure"))
-	require.Less(t, lastIndex(actions, "execution_finished"), lastIndex(actions, "settle:failed/platform_failure"))
 	require.Zero(t, countAction(actions, "reject_attempt"))
 	require.Zero(t, countAction(actions, "settle:failed/not_accepted"))
 
@@ -159,7 +159,7 @@ func TestNativePollRejectionNamesFieldsAndRefundsPlatformFailure(t *testing.T) {
 	// Recovery replays the same refund.
 	wallet.commands = nil
 	require.NoError(t, e.SyncBilling(context.Background(), task))
-	require.Equal(t, []string{"accept_attempt", "execution_finished", "settle:failed/platform_failure", "get"}, walletActions(wallet))
+	require.Equal(t, []string{"accept_attempt", "settle:failed/platform_failure", "get"}, walletActions(wallet))
 
 	entry := logEntry(t, hook, "native task failed at the provider")
 	require.Equal(t, "req", entry.Data["task_id"])

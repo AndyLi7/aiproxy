@@ -62,7 +62,7 @@ var errorMessages = map[string]string{
 	"model_route_unavailable":      "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
 	"authentication_required":      "A valid API key is required.",
 	"insufficient_balance":         "Your balance does not cover this request's hold; see pricing.prepayment in /v1/models.",
-	"too_many_active_tasks":        "Too many of your tasks are generating at once. Wait for one to finish, then retry with the same X-Request-Id.",
+	"too_many_active_tasks":        "Too many of your tasks are generating or still being billed. Wait a moment for one to finish, then retry with the same X-Request-Id.",
 	"rate_limit_exceeded":          "Too many requests for this API key. Poll each task about every 5 seconds and download results a few at a time.",
 	"model_unavailable":            "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
 	"task_store_unavailable":       "Task storage is temporarily unavailable. Retry querying the same task before submitting another task.",
@@ -110,12 +110,22 @@ func errorType(status int) string {
 // WriteError writes the native error envelope: every error has a code, a
 // message and a type.
 func WriteError(w http.ResponseWriter, status int, code string) {
+	writeErrorEnvelope(w, status, code, ErrorMessage(code))
+}
+
+func writeErrorEnvelope(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
-		"code": code, "message": ErrorMessage(code), "type": errorType(status),
+		"code": code, "message": message, "type": errorType(status),
 	}})
+}
+
+// holdRefusalMessage names the hold a refused request asked for (D7).
+func holdRefusalMessage(holdMicros int64) string {
+	return "This request reserves " + balance.MicrosText(holdMicros) +
+		" and your balance does not cover it; see pricing.prepayment in /v1/models."
 }
 
 // WriteErrorDetail writes the native error envelope with the parameter at
@@ -146,6 +156,14 @@ func (h *HTTP) writeError(w http.ResponseWriter, status int, code string) {
 		h.OnError(status, code, ErrorMessage(code))
 	}
 	WriteError(w, status, code)
+}
+
+// writeErrorMessage is writeError with a message specific to this request.
+func (h *HTTP) writeErrorMessage(w http.ResponseWriter, status int, code, message string) {
+	if h != nil && h.OnError != nil {
+		h.OnError(status, code, message)
+	}
+	writeErrorEnvelope(w, status, code, message)
 }
 func (h *HTTP) writeErrorDetail(w http.ResponseWriter, status int, code, param string, suggestedModels []string) {
 	if h != nil && h.OnError != nil {
@@ -281,7 +299,12 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, nativeresult.ErrRequest), errors.Is(err, nativeresult.ErrInvalid):
 			h.writeError(w, 400, "invalid_input")
 		case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):
-			h.writeError(w, 402, "insufficient_balance")
+			var refusal *HoldRefusal
+			if errors.As(err, &refusal) && refusal.HoldMicros > 0 {
+				h.writeErrorMessage(w, 402, "insufficient_balance", holdRefusalMessage(refusal.HoldMicros))
+			} else {
+				h.writeError(w, 402, "insufficient_balance")
+			}
 		case errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks):
 			h.writeError(w, 429, "too_many_active_tasks")
 		case errors.Is(err, balance.ErrPrepaymentModelPaused):

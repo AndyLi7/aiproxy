@@ -79,6 +79,17 @@ enabled. Provider answers that reject the customer's input (400, 413, 422, 451)
 keep their existing codes. Every other /v1/images/tasks failure is still
 reported as generation_failed.
 
+On /v1/model-tasks, a submission that failed on the platform before it was sent
+to any provider (for example a lost reply from billing) answers 503
+native_execution_unavailable ("Retry within a few minutes with the same request
+ID."). If it cannot be resumed, about 5 minutes later the task fails with
+error.code = not_started and the prepaid hold is refunded in full; a retry with
+the same X-Request-Id then returns this failed task, so submit again with a new
+one:
+```json
+{"status":"failed","error":{"code":"not_started","message":"This task was not started because of a temporary platform error. You were not charged; submit a new task with a new X-Request-Id."}}
+```
+
 On /v1/model-tasks, when the provider rejects the input and names the fields,
 at submission or after accepting the task, the task fails with error.code =
 invalid_parameters and up to 8 issues. Each issue has only a parameter path

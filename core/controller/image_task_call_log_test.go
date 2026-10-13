@@ -41,6 +41,10 @@ type imageHarnessOptions struct {
 	admitStatus int
 	unprepaid   bool
 	price       model.Price
+	// edgeFailures answers the first edgeFailures[action] commands of an
+	// action 502 from the platform edge (no application envelope), without
+	// passing them to the wallet.
+	edgeFailures map[string]int
 }
 
 // newImageCallLogHarness runs submitImageTask behind the operational log
@@ -58,6 +62,10 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 	h := &imageCallLogHarness{requestID: imageCallLogRequestID}
 	admitStatus := options.admitStatus
+	edgeFailures := map[string]int{}
+	for action, count := range options.edgeFailures {
+		edgeFailures[action] = count
+	}
 
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
@@ -69,6 +77,14 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 		var command balance.PrepaymentCommand
 		require.NoError(t, json.Unmarshal(raw, &command))
+
+		if edgeFailures[command.Action] > 0 {
+			edgeFailures[command.Action]--
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`<html>Application failed to respond</html>`))
+
+			return
+		}
 
 		if command.Action == "admit" && admitStatus != http.StatusOK {
 			w.WriteHeader(admitStatus)
@@ -338,4 +354,62 @@ func TestFinishReservedImageCall(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.Log{}).Count(&count).Error)
 	require.EqualValues(t, 2, count)
+}
+
+// R1 (2026-10-13): an admission the platform edge answered with a 502 page
+// (no application envelope, for example while the application restarts) is
+// sent again with the same body inside the request, so the task proceeds
+// instead of answering prepayment_pending. The resend is safe because a
+// replayed admit returns the existing hold.
+func TestImageTaskAdmissionResendsAfterAnEdge502(t *testing.T) {
+	h := newImageHarness(t, imageHarnessOptions{admitStatus: http.StatusOK, edgeFailures: map[string]int{"admit": 1}})
+
+	w := h.submit()
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Equal(t, 1, h.providerCalls)
+	require.GreaterOrEqual(t, len(h.commands), 3)
+	require.Equal(t, "admit", h.commands[0]["action"])
+	require.Equal(t, h.commands[0], h.commands[1], "the retry resends the same command")
+	require.Equal(t, "begin_attempt", h.commands[2]["action"])
+}
+
+// R1 for the first attempt claim: an edge 502 in answer to the first
+// begin_attempt is resent with the same body, and the task is submitted once.
+// A replayed claim answers claimed:false, so the resend never authorizes a
+// second provider call.
+func TestImageTaskFirstClaimResendsAfterAnEdge502(t *testing.T) {
+	h := newImageHarness(t, imageHarnessOptions{admitStatus: http.StatusOK, edgeFailures: map[string]int{"begin_attempt": 1}})
+
+	w := h.submit()
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Equal(t, 1, h.providerCalls)
+	require.GreaterOrEqual(t, len(h.commands), 3)
+	require.Equal(t, "admit", h.commands[0]["action"])
+	require.Equal(t, "begin_attempt", h.commands[1]["action"])
+	require.Equal(t, h.commands[1], h.commands[2], "the resend repeats the same claim")
+}
+
+// The admission and the first claim share one wallet budget. When admission
+// left the claim less than its full request timeout, no claim is sent (a claim
+// cut short could be recorded after the request gave up, the 2026-10-13
+// incident). The task is answered like a claim that failed: submitting, with
+// no attempt and no provider call; the generation deadline later fails it and
+// refunds the hold in full.
+func TestImageTaskSkipsTheFirstClaimWhenTheWalletBudgetIsShort(t *testing.T) {
+	budget := imageSubmitWalletBudget
+	t.Cleanup(func() { imageSubmitWalletBudget = budget })
+	imageSubmitWalletBudget = 4 * time.Second
+	h := newImageHarness(t, imageHarnessOptions{admitStatus: http.StatusOK})
+
+	w := h.submit()
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Zero(t, h.providerCalls)
+	require.Len(t, h.commands, 1, "only the admission is sent")
+	require.Equal(t, "admit", h.commands[0]["action"])
+
+	var task model.ImageTask
+	require.NoError(t, h.db.First(&task, "id = ?", imageCallLogRequestID).Error)
+	require.Equal(t, "submitting", task.Status)
+	require.Empty(t, task.Attempts)
+	require.Empty(t, task.UpstreamID)
 }

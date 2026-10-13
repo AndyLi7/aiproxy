@@ -41,7 +41,8 @@ func NativeTaskEngine() (*nativetask.Engine, bool) {
 	if !ok || !model.NativeTaskStorageReady(model.LogDB) {
 		return nil, false
 	}
-	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet, InputMeter: !config.DisableNativeInputMeter}, true
+	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet, InputMeter: !config.DisableNativeInputMeter,
+		AbandonReservations: !config.DisableNativeReservationStopLoss}, true
 }
 
 // nativeFailureStage mirrors image tasks so native rejections are filtered and

@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -166,6 +168,78 @@ func (h *nativeAttributionHarness) submit(t *testing.T, id string) *httptest.Res
 	return response
 }
 
+// edgeWallet puts the harness wallet behind the real wallet client, the way
+// production reaches the application, and keeps every command body sent.
+type edgeWallet struct {
+	mu     sync.Mutex
+	bodies []string
+	// edge answers the first edge[action] commands of an action 502 from the
+	// platform edge (no application envelope) without passing them on.
+	edge map[string]int
+}
+
+func (e *edgeWallet) actions(t *testing.T) []string {
+	t.Helper()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	actions := make([]string, 0, len(e.bodies))
+	for _, raw := range e.bodies {
+		var command balance.PrepaymentCommand
+		require.NoError(t, json.Unmarshal([]byte(raw), &command))
+		actions = append(actions, command.Action)
+	}
+
+	return actions
+}
+
+func (h *nativeAttributionHarness) overHTTP(t *testing.T, edge map[string]int) *edgeWallet {
+	t.Helper()
+
+	front := &edgeWallet{edge: edge}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		var command balance.PrepaymentCommand
+		if err := json.Unmarshal(raw, &command); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		front.mu.Lock()
+		front.bodies = append(front.bodies, string(raw))
+		edgeAnswer := front.edge[command.Action] > 0
+		if edgeAnswer {
+			front.edge[command.Action]--
+		}
+		front.mu.Unlock()
+
+		if edgeAnswer {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`<html><body>Application failed to respond</body></html>`))
+
+			return
+		}
+
+		receipt, err := h.wallet.Prepayment(r.Context(), command)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": -1, "message": err.Error()})
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": receipt})
+	}))
+	t.Cleanup(server.Close)
+
+	balance.Default = balance.NewExternalHTTP(server.URL, "local-only")
+
+	return front
+}
+
 func (h *nativeAttributionHarness) rows(t *testing.T, id string) []model.Log {
 	t.Helper()
 
@@ -185,7 +259,8 @@ func (h *nativeAttributionHarness) setTask(t *testing.T, id string, changes map[
 // wallet's three refusals hold nothing and stay rejected; after the
 // reserved->submitting transition the only answer is 202 and the only row is
 // the task's own. Old: no op on any rejection row (rejected), and a later
-// conflict answered 409 with a second row.
+// conflict answered 409 with a second row. A request that loses the
+// transition itself answers the stored state too (stop-loss S3, 2026-10-13).
 func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
 	start := time.Date(2026, 10, 12, 1, 2, 3, 456_789_000, time.UTC)
 
@@ -288,14 +363,22 @@ func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
 		require.Equal(t, rows[0].BillingOperationID, rows[1].BillingOperationID)
 	})
 
-	t.Run("lost reserved->submitting race answers 409 with the op", func(t *testing.T) {
+	// Stop-loss S3 (2026-10-13): the request that lost the transition answers
+	// the stored state like a replay, never 409; the request that won it
+	// records the task's 202 row. Old: 409 request_id_conflict with a row.
+	t.Run("lost reserved->submitting race answers the stored state", func(t *testing.T) {
 		h := newNativeAttributionHarness(t)
 		h.start = start
 		h.wallet.onBegin = func() { h.setTask(t, "race", map[string]any{"status": "submitting"}) }
+		h.provider.submit = func() (string, error) {
+			t.Error("the request that lost the transition must not call the provider")
+			return "", nil
+		}
 
 		response := h.submit(t, "race")
-		require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
-		requireOneFailedRowWithOp(t, h, "race", http.StatusConflict, "request_id_conflict")
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+		require.Contains(t, response.Body.String(), `"status":"queued"`)
+		require.Empty(t, h.rows(t, "race"), "a replay of the stored state adds no row")
 	})
 
 	for name, submit := range map[string]func(h *nativeAttributionHarness) func() (string, error){
@@ -324,6 +407,46 @@ func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
 			require.Len(t, rows, 1, "one request, one row: the task's own 202 row")
 			require.Equal(t, 202, rows[0].Code)
 			require.Equal(t, model.EmptyNullString("native:late"), rows[0].BillingOperationID)
+		})
+	}
+}
+
+// R1 in the native lane (2026-10-13): when the platform edge answers the first
+// admit or the first begin_attempt with a 502 page (no application envelope),
+// the submission sends the same command again and the request is accepted with
+// one provider call instead of a 503. The resend is safe because both commands
+// replay idempotently: a replayed admit returns the existing hold, a replayed
+// begin_attempt answers claimed:false.
+func TestNativeSubmissionResendsAfterAnEdge502(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		sent   []string
+	}{
+		{"begin_attempt", []string{"admit", "begin_attempt", "begin_attempt", "accept_attempt"}},
+		{"admit", []string{"admit", "admit", "begin_attempt", "accept_attempt"}},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			h := newNativeAttributionHarness(t)
+			h.start = time.Date(2026, 10, 13, 11, 21, 0, 0, time.UTC)
+			calls := 0
+			h.provider.submit = func() (string, error) {
+				calls++
+				return "upstream-1", nil
+			}
+			front := h.overHTTP(t, map[string]int{tc.action: 1})
+
+			response := h.submit(t, "edge")
+			require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), `"status":"queued"`)
+			require.Equal(t, 1, calls, "exactly one provider call")
+			require.Equal(t, tc.sent, front.actions(t))
+
+			index := slices.Index(tc.sent, tc.action)
+			require.Equal(t, front.bodies[index], front.bodies[index+1], "the resend repeats the same body")
+
+			rows := h.rows(t, "edge")
+			require.Len(t, rows, 1)
+			require.Equal(t, 202, rows[0].Code)
 		})
 	}
 }

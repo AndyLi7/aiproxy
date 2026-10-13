@@ -84,7 +84,7 @@ func lockNativeTask(tx *gorm.DB, id, group string, token int) (*NativeTask, erro
 	var task NativeTask
 
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "status", "group_id", "token_id", "model", "channel_id", "prepayment_quote_json", "billing_operation_id").
+		Select("id", "status", "error_code", "group_id", "token_id", "model", "channel_id", "prepayment_quote_json", "billing_operation_id").
 		Where("id = ? AND group_id = ? AND token_id = ?", id, group, token).
 		First(&task).Error
 	if err != nil {
@@ -222,7 +222,8 @@ func nativeRecoveryTokenName(token int) string {
 //   - the task was not reserved before this sync: some request already
 //     received the 202 for this submission (a refunded reservation that never
 //     reached a provider is flipped to failed by the same sync and must not
-//     gain a row);
+//     gain a row), nor failed by recovery while reserved (NotStartedCode):
+//     that task never reached a provider either;
 //   - the task has no own row (request id, key, mode, async status);
 //   - the receipt carries the hold's time and source (pre-P2 holds are left to
 //     the P3 backfill).
@@ -235,7 +236,7 @@ func insertMissingNativeTaskLog(
 	receipt nativeReceiptUsage,
 	tokenName string,
 ) error {
-	if task == nil || priorStatus == "reserved" || !receipt.usable() {
+	if task == nil || priorStatus == "reserved" || task.ErrorCode == NotStartedCode || !receipt.usable() {
 		return nil
 	}
 

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"github.com/labring/aiproxy/core/common/imageprepayment"
 	"time"
@@ -20,6 +21,14 @@ import (
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/sirupsen/logrus"
 )
+
+// imageWalletDeadlineKey holds the end of a submission's wallet budget
+// (imageSubmitWalletBudget), set before its admission.
+const imageWalletDeadlineKey = "image_wallet_deadline"
+
+// imageSubmitWalletBudget is imageprepayment.SubmitWalletBudget; a variable
+// so tests can shrink it.
+var imageSubmitWalletBudget = imageprepayment.SubmitWalletBudget
 
 func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, executor adaptor.ImageTaskExecutor, mt *meta.Meta, body []byte) {
 	if len(task.Attempts) > 0 {
@@ -46,7 +55,35 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 	for {
 		expected := len(task.Attempts)
 		if task.PrepaymentQuoteJSON != "" {
-			claimed, err := imageprepayment.Begin(ctx, task, mt.Channel.ID, mt.ActualModel, expected)
+			claimCtx, cancelClaim := ctx, context.CancelFunc(func() {})
+			if expected == 0 {
+				// The first claim may be resent after a failed connection or an
+				// edge 5xx (R1; a replayed claim answers claimed:false), within
+				// the budget it shares with the admission. A failover claim
+				// follows a provider call and is sent once.
+				walletDeadline := time.Now().Add(imageSubmitWalletBudget)
+				if value, ok := c.Get(imageWalletDeadlineKey); ok {
+					if deadline, ok := value.(time.Time); ok {
+						walletDeadline = deadline
+					}
+				}
+				claimCtx, cancelClaim = context.WithDeadline(balance.WithSubmitRetry(ctx), walletDeadline)
+				if !balance.FullRequestLeft(claimCtx) {
+					// Admission used most of the budget. A claim cut short could
+					// still be recorded after this request gave up (incident
+					// 2026-10-13), so none is sent. The task is answered like a
+					// claim that failed: submitting, with no attempt and nothing
+					// sent to a provider; the generation deadline fails it and
+					// refunds the hold in full (not_submitted, no pause).
+					cancelClaim()
+					common.GetLogger(c).WithFields(logrus.Fields{"lane": "image", "task_id": task.ID, "channel_id": mt.Channel.ID, "attempt": 1}).
+						Warn("image task wallet budget too short for the attempt claim; nothing claimed or submitted")
+					c.JSON(202, publicImageTask(c, task))
+					return
+				}
+			}
+			claimed, err := imageprepayment.Begin(claimCtx, task, mt.Channel.ID, mt.ActualModel, expected)
+			cancelClaim()
 			if err != nil || !claimed {
 				entry := common.GetLogger(c).WithFields(logrus.Fields{"lane": "image", "task_id": task.ID, "channel_id": mt.Channel.ID, "attempt": expected + 1, "claimed": claimed})
 				if err != nil {

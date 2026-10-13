@@ -162,6 +162,7 @@ REQUEST_TRACE_ENABLED=false  # 显式开启请求阶段 Trace 采集
 DISABLE_NATIVE_INPUT_METER=false  # true：原生任务一律按发布的单次最大额预扣
 DISABLE_PUBLIC_API_IDS=false      # true：不再声明 public_api_id_v1（已发布的 ID 照常解析）
 DISABLE_IMAGE_GROUP_IDS=false     # true：图片接口拒绝模型组 ID（404 model_not_found）
+DISABLE_NATIVE_RESERVATION_STOP_LOSS=false  # true：恢复程序不再把从未提交的原生任务预留判为 not_started
 ```
 
 请求阶段 Trace 采集默认关闭。开启后只会在网关配置的数据库中新建请求 Trace
@@ -197,6 +198,12 @@ ID；`/v1/models` 只列出可调用 ID（不列别名，也不列 `::` 路由�
 继续接受组 ID。这个开关要单独打开：先确认生产环境的应用已经不再把组 ID 当作可调用 ID 展示，
 再对请求日志做一次只读查询，确认过去 30 天没有图片请求的 `requested_model` 是组 ID（有的话先通知
 调用方）。撤销时去掉该变量并重启即可，没有其他依赖。
+
+网关从未提交给供应商的原生任务（仍是 `reserved`，例如钱包回复丢失），如果钱包预扣仍未结算，
+在网关和钱包两边都静止 5 分钟后，由恢复程序判为失败（`not_started`）并全额退回预扣（钱包原因
+`not_accepted`，不会暂停模型）。换回旧版网关前，先设置 `DISABLE_NATIVE_RESERVATION_STOP_LOSS=true`
+并重启，等到没有 `status='failed' AND error_code='not_started' AND billing_settled=false` 的原生任务：
+旧版网关无法为这些任务退款。
 
 ### 高级配置
 

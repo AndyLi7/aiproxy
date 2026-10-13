@@ -536,8 +536,15 @@ func submitImageTask(c *gin.Context) {
 	if task.PrepaymentQuoteJSON != "" {
 		// Ambiguous wallet replies never authorize paid work. The reserved task and
 		// debit are recovered by their server operation ID; no upstream retry here.
+		// The admission outlives a client disconnect, like the attempt claim, and
+		// shares one wallet budget with the first claim, retries included (R1).
+		walletDeadline := time.Now().Add(imageSubmitWalletBudget)
+		c.Set(imageWalletDeadlineKey, walletDeadline)
 		usage, _ := info.UsageIdentity()
-		if err := imageprepayment.Admit(c.Request.Context(), task, mt.Channel.ID, usage); err != nil {
+		admitCtx, cancelAdmit := context.WithDeadline(balance.WithSubmitRetry(context.WithoutCancel(c.Request.Context())), walletDeadline)
+		err := imageprepayment.Admit(admitCtx, task, mt.Channel.ID, usage)
+		cancelAdmit()
+		if err != nil {
 			status, code, taskCode, taskMessage := 0, "", "", ""
 			switch {
 			case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):

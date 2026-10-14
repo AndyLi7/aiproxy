@@ -91,6 +91,7 @@ func GetStatus(c *gin.Context) {
 		StartTime: common.StartTime,
 		Features: []string{
 			model.AdminDemoFeature,
+			model.AdminLogKindFeature,
 			"image_billing_v1",
 			"image_billing_pixels_v2",
 			"image_style_pricing_v1",

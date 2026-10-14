@@ -209,18 +209,22 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 
 	statusSQL, statusArgs := callStatusExpr(now)
 	callSQL, callArgs := isCallExpr()
+	adminCallSQL, adminCallArgs := adminLogCallExpr()
 
-	args := make([]any, 0, len(statusArgs)+len(callArgs))
+	args := make([]any, 0, len(statusArgs)+len(callArgs)+len(adminCallArgs))
 	args = append(args, statusArgs...)
 	args = append(args, callArgs...)
+	args = append(args, adminCallArgs...)
 
 	var classified []struct {
-		ID     int
-		Status string
-		IsCall int
+		ID          int
+		Status      string
+		IsCall      int
+		IsAdminCall int
 	}
 	require.NoError(t, db.Model(&Log{}).
-		Select("id, ("+statusSQL+") AS status, CASE WHEN "+callSQL+" THEN 1 ELSE 0 END AS is_call", args...).
+		Select("id, ("+statusSQL+") AS status, CASE WHEN "+callSQL+" THEN 1 ELSE 0 END AS is_call,"+
+			" CASE WHEN "+adminCallSQL+" THEN 1 ELSE 0 END AS is_admin_call", args...).
 		Find(&classified).Error)
 
 	var stored []Log
@@ -233,6 +237,7 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 	}
 
 	counts := map[string]int{}
+	adminCounts := map[AdminLogKind]int{}
 
 	for _, row := range classified {
 		entry := byID[row.ID]
@@ -241,7 +246,14 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 		description := fmt.Sprintf("%+v", *entry)
 		require.Equal(t, string(entry.CallStatus(now)), row.Status, description)
 		require.Equal(t, entry.IsCall(), row.IsCall == 1, description)
+		require.Equal(t, entry.isAdminLogCall(), row.IsAdminCall == 1, description)
 		counts[row.Status]++
+
+		if row.IsAdminCall == 1 {
+			adminCounts[AdminLogKindCalls]++
+		} else {
+			adminCounts[AdminLogKindReads]++
+		}
 	}
 
 	for _, status := range CallStatuses {
@@ -256,5 +268,17 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 			OperationalLogFilter{Status: status, Now: now},
 		).Count(&filtered).Error)
 		require.EqualValues(t, counts[string(status)], filtered, status)
+	}
+
+	// The admin kind filter splits every row into exactly one of its lists.
+	for _, kind := range []AdminLogKind{AdminLogKindCalls, AdminLogKindReads} {
+		require.Positive(t, adminCounts[kind], "fixture covers admin kind %s", kind)
+
+		var filtered int64
+		require.NoError(t, applyOperationalLogFilter(
+			db.Model(&Log{}),
+			OperationalLogFilter{Kind: kind, Now: now},
+		).Count(&filtered).Error)
+		require.EqualValues(t, adminCounts[kind], filtered, kind)
 	}
 }

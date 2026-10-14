@@ -45,11 +45,47 @@ type OperationalFields struct {
 	BillingOperationID string
 }
 
+// AdminLogKind splits the admin request log (/api/logs/ and /api/logs/search)
+// into two disjoint lists; the empty value and "all" list every row.
+//
+//   - calls: every row whose key was recognised (group and token known) and
+//     that is not a read. Unlike GroupLogKindCalls it keeps internal demo and
+//     trial rows (request_source admin_demo): the admin looks for them among
+//     calls. Rejected submits, failed calls and task rows are calls.
+//   - reads: every other row. That is a relay read mode (polls, downloads,
+//     deletes and other reads; see IsReadMode), a gateway rejection of a GET or
+//     DELETE request (a failed task status poll or artifact download, a
+//     models list refused), and a request whose key was not recognised, such
+//     as a 401, which no customer owns.
+type AdminLogKind string
+
+const (
+	AdminLogKindAll   AdminLogKind = "all"
+	AdminLogKindCalls AdminLogKind = "calls"
+	AdminLogKindReads AdminLogKind = "reads"
+
+	// AdminLogKindFeature tells the admin app that /api/logs/ and
+	// /api/logs/search honour kind; an older gateway ignores the parameter
+	// and returns every row.
+	AdminLogKindFeature = "admin_log_kind_v1"
+)
+
+func (k AdminLogKind) Valid() bool {
+	switch k {
+	case "", AdminLogKindAll, AdminLogKindCalls, AdminLogKindReads:
+		return true
+	default:
+		return false
+	}
+}
+
 type OperationalLogFilter struct {
 	Status        CallStatus
 	Source        string
 	ChannelIDs    []int
 	ExcludedModes []int
+	// Kind applies to the admin request log only; see AdminLogKind.
+	Kind AdminLogKind
 	// Now is the instant the status filter classifies at; zero means time.Now().
 	Now time.Time
 }
@@ -172,6 +208,15 @@ func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.D
 
 		statusSQL, statusArgs := callStatusExpr(now)
 		tx = tx.Where("("+statusSQL+") = ?", append(statusArgs, string(filter.Status))...)
+	}
+
+	switch filter.Kind {
+	case AdminLogKindCalls:
+		callSQL, callArgs := adminLogCallExpr()
+		tx = tx.Where("("+callSQL+")", callArgs...)
+	case AdminLogKindReads:
+		callSQL, callArgs := adminLogCallExpr()
+		tx = tx.Where("NOT ("+callSQL+")", callArgs...)
 	}
 
 	return tx

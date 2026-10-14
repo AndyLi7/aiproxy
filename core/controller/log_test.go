@@ -285,6 +285,31 @@ func TestParseOperationalLogFilterAcceptsAdminDemoSource(t *testing.T) {
 	}
 }
 
+// No kind keeps the list an older admin app expects: every row.
+func TestParseOperationalLogFilterAcceptsAdminLogKinds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for raw, want := range map[string]model.AdminLogKind{
+		"":           "",
+		"kind=all":   model.AdminLogKindAll,
+		"kind=calls": model.AdminLogKindCalls,
+		"kind=reads": model.AdminLogKindReads,
+	} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = &http.Request{URL: &url.URL{RawQuery: raw}}
+
+		filter, err := parseOperationalLogFilter(c)
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+
+		if filter.Kind != want {
+			t.Fatalf("%q parsed as kind %q, want %q", raw, filter.Kind, want)
+		}
+	}
+}
+
 func TestParseOperationalLogFilterRejectsInvalidValues(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -295,6 +320,8 @@ func TestParseOperationalLogFilterRejectsInvalidValues(t *testing.T) {
 		"channels=10,invalid",
 		"channels=0",
 		"request_source=unknown",
+		"kind=task",
+		"kind=CALLS",
 	}
 	for _, rawQuery := range tests {
 		t.Run(rawQuery, func(t *testing.T) {

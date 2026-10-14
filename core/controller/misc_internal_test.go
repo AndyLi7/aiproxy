@@ -67,6 +67,7 @@ func TestStatusAdvertisesAdminDemoV1(t *testing.T) {
 		t,
 		[]string{
 			"token_platform.admin_demo.v1",
+			"admin_log_kind_v1",
 			"image_billing_v1",
 			"image_billing_pixels_v2",
 			"image_style_pricing_v1",

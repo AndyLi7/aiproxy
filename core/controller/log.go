@@ -52,6 +52,8 @@ func parseExcludedModes(c *gin.Context) ([]int, error) {
 	return modes, nil
 }
 
+// parseOperationalLogFilter reads the filters of the admin request log
+// (/api/logs/ and /api/logs/search).
 func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, error) {
 	status, err := model.ParseCallStatus(c.Query("status"))
 	if err != nil {
@@ -61,11 +63,16 @@ func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, erro
 	filter := model.OperationalLogFilter{
 		Status: status,
 		Source: strings.TrimSpace(c.Query("request_source")),
+		Kind:   model.AdminLogKind(c.Query("kind")),
 		Now:    time.Now(),
 	}
 
 	if !model.ValidRequestSource(filter.Source) {
 		return model.OperationalLogFilter{}, fmt.Errorf("invalid request source %q", filter.Source)
+	}
+
+	if !filter.Kind.Valid() {
+		return model.OperationalLogFilter{}, fmt.Errorf("invalid kind %q", filter.Kind)
 	}
 
 	rawChannels := strings.TrimSpace(c.Query("channels"))
@@ -134,6 +141,7 @@ func parseCommonParams(c *gin.Context) (params struct {
 //	@Param			channels		query		string	false	"Comma-separated channel IDs"
 //	@Param			status			query		string	false	"Call status: succeeded (alias success), failed, rejected, processing, unknown"
 //	@Param			request_source	query		string	false	"Request source: api, playground, admin_demo"
+//	@Param			kind			query		string	false	"calls (recognised key, not a read; trial and admin demo rows included), reads (polls, downloads, other reads and requests whose key was not recognised) or all (default); see model.AdminLogKind"
 //	@Param			order			query		string	false	"Order"
 //	@Param			request_id		query		string	false	"Request ID"
 //	@Param			upstream_id		query		string	false	"Upstream ID"
@@ -418,6 +426,7 @@ func GetGroupLogs(c *gin.Context) {
 //	@Param			channels		query		string	false	"Comma-separated channel IDs"
 //	@Param			status			query		string	false	"Call status: succeeded (alias success), failed, rejected, processing, unknown"
 //	@Param			request_source	query		string	false	"Request source: api, playground, admin_demo"
+//	@Param			kind			query		string	false	"calls (recognised key, not a read; trial and admin demo rows included), reads (polls, downloads, other reads and requests whose key was not recognised) or all (default); see model.AdminLogKind"
 //	@Param			group			query		string	true	"Group name"
 //	@Param			token_id		query		int		false	"Filter by token id"
 //	@Param			token_name		query		string	false	"Filter by token name"

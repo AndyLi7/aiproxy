@@ -195,11 +195,17 @@ var (
 // recognised, it is not an internal demo, and it is not a read (a relay read
 // mode, or a middleware rejection of a GET or DELETE such as a failed poll).
 func (l *Log) IsCall() bool {
+	return l.RequestSource != RequestSourceAdminDemo && l.isAdminLogCall()
+}
+
+// isAdminLogCall reports whether the admin request log lists the row under
+// calls (AdminLogKindCalls): IsCall without the internal demo exclusion, so
+// trial and admin demo rows stay. Every other row is a read there.
+func (l *Log) isAdminLogCall() bool {
 	endpoint := string(l.Endpoint)
 
 	return l.GroupID != "" &&
 		l.TokenID > 0 &&
-		l.RequestSource != RequestSourceAdminDemo &&
 		!IsReadMode(mode.Mode(l.Mode)) &&
 		!strings.HasPrefix(endpoint, http.MethodGet+" ") &&
 		!strings.HasPrefix(endpoint, http.MethodDelete+" ")
@@ -280,13 +286,22 @@ func callStatusExpr(now time.Time) (string, []any) {
 // isCallExpr is the SQL form of Log.IsCall. It never evaluates to NULL, so
 // NOT (isCallExpr) selects exactly the other rows.
 func isCallExpr() (string, []any) {
+	adminCallSQL, adminCallArgs := adminLogCallExpr()
+
+	return "COALESCE(request_source, '') <> ? AND " + adminCallSQL,
+		append([]any{RequestSourceAdminDemo}, adminCallArgs...)
+}
+
+// adminLogCallExpr is the SQL form of Log.isAdminLogCall. It never evaluates
+// to NULL, so NOT (adminLogCallExpr) selects exactly the admin log's reads.
+// No predicate wraps created_at or request_at, so the time range of a list
+// still drives its index scan.
+func adminLogCallExpr() (string, []any) {
 	sql := "COALESCE(group_id, '') <> '' AND COALESCE(token_id, 0) > 0" +
-		" AND COALESCE(request_source, '') <> ?" +
 		" AND (mode IS NULL OR mode NOT IN ?)" +
 		" AND (endpoint IS NULL OR (endpoint NOT LIKE ? AND endpoint NOT LIKE ?))"
 
 	return sql, []any{
-		RequestSourceAdminDemo,
 		readModeIDs,
 		http.MethodGet + " %",
 		http.MethodDelete + " %",

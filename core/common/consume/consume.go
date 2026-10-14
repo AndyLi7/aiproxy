@@ -42,34 +42,39 @@ func AsyncConsume(
 		return
 	}
 
+	// Done and recover belong to the goroutine that does the work: Wait() at
+	// shutdown must cover the debit and the log write, and a panic there must
+	// not take the whole gateway down (ported from upstream aiproxy 1cf4231).
 	consumeWaitGroup.Add(1)
-	defer func() {
-		consumeWaitGroup.Done()
+	go func() {
+		defer func() {
+			consumeWaitGroup.Done()
 
-		if r := recover(); r != nil {
-			log.Errorf("panic in consume: %v", r)
-		}
+			if r := recover(); r != nil {
+				log.Errorf("panic in consume: %v", r)
+			}
+		}()
+
+		Consume(
+			context.Background(),
+			time.Now(),
+			postGroupConsumer,
+			firstByteAt,
+			code,
+			meta,
+			usage,
+			usageContext,
+			modelPrice,
+			content,
+			ip,
+			retryTimes,
+			requestDetail,
+			downstreamResult,
+			metadata,
+			upstreamID,
+			asyncUsageStatus,
+		)
 	}()
-
-	go Consume(
-		context.Background(),
-		time.Now(),
-		postGroupConsumer,
-		firstByteAt,
-		code,
-		meta,
-		usage,
-		usageContext,
-		modelPrice,
-		content,
-		ip,
-		retryTimes,
-		requestDetail,
-		downstreamResult,
-		metadata,
-		upstreamID,
-		asyncUsageStatus,
-	)
 }
 
 func Consume(

@@ -5677,7 +5677,8 @@ const docTemplate = `{
                             55,
                             56,
                             57,
-                            58
+                            58,
+                            59
                         ],
                         "type": "integer",
                         "description": "Channel type",
@@ -12035,7 +12036,8 @@ const docTemplate = `{
                 55,
                 56,
                 57,
-                58
+                58,
+                59
             ],
             "x-enum-varnames": [
                 "ChannelTypeOpenAI",
@@ -12083,7 +12085,8 @@ const docTemplate = `{
                 "ChannelTypeFakeError",
                 "ChannelTypeQwenCloud",
                 "ChannelTypeAIProxyHZH",
-                "ChannelTypeAIProxyUSW1"
+                "ChannelTypeAIProxyUSW1",
+                "ChannelTypeFal"
             ]
         },
         "model.ChartData": {

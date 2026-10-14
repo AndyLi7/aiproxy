@@ -75,6 +75,10 @@ func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, erro
 		return model.OperationalLogFilter{}, fmt.Errorf("invalid kind %q", filter.Kind)
 	}
 
+	if !filter.Kind.AllowsStatus(filter.Status) {
+		return model.OperationalLogFilter{}, fmt.Errorf("status %q is not valid with kind %q", filter.Status, filter.Kind)
+	}
+
 	rawChannels := strings.TrimSpace(c.Query("channels"))
 	if rawChannels == "" {
 		return filter, nil
@@ -141,7 +145,7 @@ func parseCommonParams(c *gin.Context) (params struct {
 //	@Param			channels		query		string	false	"Comma-separated channel IDs"
 //	@Param			status			query		string	false	"Call status: succeeded (alias success), failed, rejected, processing, unknown"
 //	@Param			request_source	query		string	false	"Request source: api, playground, admin_demo"
-//	@Param			kind			query		string	false	"calls (recognised key, not a read; trial and admin demo rows included), reads (polls, downloads, other reads and requests whose key was not recognised) or all (default); see model.AdminLogKind"
+//	@Param			kind			query		string	false	"calls (recognised key, not a read; trial and admin demo rows included), reads (polls, downloads, other reads and requests whose key was not recognised), tasks (one row per generation task; status may not be rejected), non_task (every other row; no status) or all (default); see model.AdminLogKind. tasks and non_task answer 503 task_view_unavailable until log_task_view_v1 is announced"
 //	@Param			order			query		string	false	"Order"
 //	@Param			request_id		query		string	false	"Request ID"
 //	@Param			upstream_id		query		string	false	"Upstream ID"
@@ -160,6 +164,11 @@ func GetLogs(c *gin.Context) {
 	operationalFilter, err := parseOperationalLogFilter(c)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if operationalFilter.Kind.TaskView() && !taskViewStorage.ready(model.LogDB) {
+		taskViewUnavailable(c)
 		return
 	}
 
@@ -310,6 +319,10 @@ func parseGroupLogQuery(c *gin.Context, group string, now time.Time) (model.Grou
 		return model.GroupLogQuery{}, errors.New("invalid kind parameter")
 	}
 
+	if !kind.AllowsStatus(status) {
+		return model.GroupLogQuery{}, errors.New("invalid status parameter for this kind")
+	}
+
 	modelID := c.Query("model_id")
 	if utf8.RuneCountInString(modelID) > maxLogModelIDLength {
 		return model.GroupLogQuery{}, errors.New("invalid model_id parameter")
@@ -366,7 +379,7 @@ func parseGroupLogQuery(c *gin.Context, group string, now time.Time) (model.Grou
 //	@Param			end_timestamp	query		int		false	"Legacy created_at end (milliseconds); not combinable with start/end"
 //	@Param			log_id			query		int		false	"Log ID; without start it is looked up at any age"
 //	@Param			status			query		string	false	"Call status: succeeded (alias success), failed, rejected, processing, unknown"
-//	@Param			kind			query		string	false	"calls, reads or all (default)"
+//	@Param			kind			query		string	false	"calls, reads, tasks (one row per generation task; status may not be rejected), non_task (every other row except internal demos; no status) or all (default). tasks and non_task answer 503 task_view_unavailable until log_task_view_v1 is announced"
 //	@Param			model_id		query		string	false	"Callable model ID; matches model, or model plus capability split at the last slash"
 //	@Param			token_name		query		string	false	"Token name"
 //	@Param			model_name		query		string	false	"Model name"
@@ -392,6 +405,11 @@ func GetGroupLogs(c *gin.Context) {
 	query, err := parseGroupLogQuery(c, group, time.Now())
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if query.Kind.TaskView() && !taskViewStorage.ready(model.LogDB) {
+		taskViewUnavailable(c)
 		return
 	}
 
@@ -426,7 +444,7 @@ func GetGroupLogs(c *gin.Context) {
 //	@Param			channels		query		string	false	"Comma-separated channel IDs"
 //	@Param			status			query		string	false	"Call status: succeeded (alias success), failed, rejected, processing, unknown"
 //	@Param			request_source	query		string	false	"Request source: api, playground, admin_demo"
-//	@Param			kind			query		string	false	"calls (recognised key, not a read; trial and admin demo rows included), reads (polls, downloads, other reads and requests whose key was not recognised) or all (default); see model.AdminLogKind"
+//	@Param			kind			query		string	false	"calls (recognised key, not a read; trial and admin demo rows included), reads (polls, downloads, other reads and requests whose key was not recognised), tasks (one row per generation task; status may not be rejected), non_task (every other row; no status) or all (default); see model.AdminLogKind. tasks and non_task answer 503 task_view_unavailable until log_task_view_v1 is announced"
 //	@Param			group			query		string	true	"Group name"
 //	@Param			token_id		query		int		false	"Filter by token id"
 //	@Param			token_name		query		string	false	"Filter by token name"
@@ -448,6 +466,11 @@ func SearchLogs(c *gin.Context) {
 	operationalFilter, err := parseOperationalLogFilter(c)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if operationalFilter.Kind.TaskView() && !taskViewStorage.ready(model.LogDB) {
+		taskViewUnavailable(c)
 		return
 	}
 

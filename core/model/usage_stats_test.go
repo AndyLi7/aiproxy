@@ -81,7 +81,7 @@ func TestGroupCallTotalsBySource(t *testing.T) {
 		seedUsageLog(t, db, entry)
 	}
 
-	totals, err := model.GetGroupCallTotals(context.Background(), "g", start, end, now)
+	totals, err := model.GetGroupCallTotals(context.Background(), "g", start, end, now, model.CallUnitRequests)
 	require.NoError(t, err)
 
 	lastMS := latest.UnixMilli()
@@ -99,7 +99,7 @@ func TestGroupCallTotalsBySource(t *testing.T) {
 		}},
 	}, totals.BySource)
 
-	empty, err := model.GetGroupCallTotals(context.Background(), "nobody", start, end, now)
+	empty, err := model.GetGroupCallTotals(context.Background(), "nobody", start, end, now, model.CallUnitRequests)
 	require.NoError(t, err)
 	require.Equal(t, model.CallCounts{}, empty.Totals)
 	require.Empty(t, empty.BySource)
@@ -122,7 +122,7 @@ func TestGroupKeyCallStats(t *testing.T) {
 	// Key 9 belongs to another group.
 	seedUsageLog(t, db, model.Log{GroupID: "other", TokenID: 9, TokenName: "theirs", Code: 200, RequestAt: now.Add(-time.Hour)})
 
-	stats, err := model.GetGroupKeyCallStats(context.Background(), "g", []int{9, 3, 7, 5}, start, end, now)
+	stats, err := model.GetGroupKeyCallStats(context.Background(), "g", []int{9, 3, 7, 5}, start, end, now, model.CallUnitRequests)
 	require.NoError(t, err)
 
 	require.Equal(t, []model.KeyCallStats{

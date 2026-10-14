@@ -191,6 +191,7 @@ func SetAPIRouter(router *gin.Engine) {
 			logRoute.GET("/:group/export", controller.ExportGroupLogs)
 			logRoute.GET("/:group", controller.GetGroupLogs)
 			logRoute.GET("/:group/search", controller.SearchGroupLogs)
+			logRoute.GET("/:group/task-requests", controller.GetGroupLogTaskRequests)
 			logRoute.GET("/:group/detail/:log_id", controller.GetGroupLogDetail)
 		}
 

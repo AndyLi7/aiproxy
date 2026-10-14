@@ -87,11 +87,14 @@ const callCountColumns = "COUNT(*) AS requests," +
 // groupCallsInWindow selects the group's calls with request_at in [start, end)
 // as rows of (columns..., request_at, st). created_at >= start is the index
 // lower bound (every writer sets created_at at or after request_at), so the
-// scan uses idx_group_creat.
+// scan uses idx_group_creat. With unit tasks, SUPERSEDED rows are left out
+// (see CallUnit); the status columns are unchanged, so requests is still the
+// sum of the five.
 func groupCallsInWindow(
 	db *gorm.DB,
 	group string,
 	start, end, now time.Time,
+	unit CallUnit,
 	columns string,
 	columnArgs ...any,
 ) *gorm.DB {
@@ -102,20 +105,29 @@ func groupCallsInWindow(
 	args = append(args, columnArgs...)
 	args = append(args, statusArgs...)
 
-	return db.Model(&Log{}).
+	tx := db.Model(&Log{}).
 		Select(columns+", request_at, ("+statusSQL+") AS st", args...).
 		Where("group_id = ?", group).
 		Where("created_at >= ?", start).
 		Where("request_at >= ? AND request_at < ?", start, end).
 		Where("("+callSQL+")", callArgs...)
+
+	if unit == CallUnitTasks {
+		supersededSQL, supersededArgs := supersededExpr()
+		tx = tx.Where("NOT "+supersededSQL, supersededArgs...)
+	}
+
+	return tx
 }
 
 // GetGroupCallTotals counts the group's calls by status in [start, end), with
-// one row per request source; an empty request source counts as api.
+// one row per request source; an empty request source counts as api. unit
+// selects requests (every call row) or tasks (see CallUnit).
 func GetGroupCallTotals(
 	ctx context.Context,
 	group string,
 	start, end, now time.Time,
+	unit CallUnit,
 ) (*GroupCallTotals, error) {
 	if group == "" {
 		return nil, errors.New("group is required")
@@ -128,6 +140,7 @@ func GetGroupCallTotals(
 		start,
 		end,
 		now,
+		unit,
 		"COALESCE(NULLIF(request_source, ''), ?) AS src",
 		RequestSourceAPI,
 	)
@@ -170,12 +183,14 @@ func GetGroupCallTotals(
 
 // GetGroupKeyCallStats returns one entry per requested key, in request order:
 // its calls in [start, end) and its latest call at any time. A key of another
-// group gets zeros, because every statement is scoped to the group.
+// group gets zeros, because every statement is scoped to the group. unit
+// applies to the window counts only; the latest call stays per row.
 func GetGroupKeyCallStats(
 	ctx context.Context,
 	group string,
 	tokenIDs []int,
 	start, end, now time.Time,
+	unit CallUnit,
 ) ([]KeyCallStats, error) {
 	if group == "" {
 		return nil, errors.New("group is required")
@@ -189,7 +204,7 @@ func GetGroupKeyCallStats(
 	}
 
 	if len(tokenIDs) > 0 {
-		if err := readKeyWindowCounts(db, group, tokenIDs, start, end, now, stats); err != nil {
+		if err := readKeyWindowCounts(db, group, tokenIDs, start, end, now, unit, stats); err != nil {
 			return nil, err
 		}
 	}
@@ -278,9 +293,10 @@ func readKeyWindowCounts(
 	group string,
 	tokenIDs []int,
 	start, end, now time.Time,
+	unit CallUnit,
 	stats map[int]*KeyCallStats,
 ) error {
-	calls := groupCallsInWindow(db, group, start, end, now, "token_id").
+	calls := groupCallsInWindow(db, group, start, end, now, unit, "token_id").
 		Where("token_id IN ?", tokenIDs)
 
 	rows, err := db.Table("(?) AS t", calls).

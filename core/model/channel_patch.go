@@ -22,3 +22,19 @@ type ChannelPatch struct {
 	MaxErrorRate            *float64           `json:"max_error_rate,omitempty"`
 	BalanceThreshold        *float64           `json:"balance_threshold,omitempty"`
 }
+
+// touchesCredentials reports whether the patch writes a field a provider call
+// depends on: key, type, base URL or proxy.
+func (p *ChannelPatch) touchesCredentials() bool {
+	return p.Key != nil || p.Type != nil || p.BaseURL != nil || p.ProxyURL != nil
+}
+
+// changesCredentials reports whether the patch changes one of those fields of
+// the stored channel. Accepted image and native tasks are polled and settled
+// with the channel's current key, so such a change needs the retention check.
+func (p *ChannelPatch) changesCredentials(stored *Channel) bool {
+	return (p.Key != nil && *p.Key != stored.Key) ||
+		(p.Type != nil && *p.Type != stored.Type) ||
+		(p.BaseURL != nil && *p.BaseURL != stored.BaseURL) ||
+		(p.ProxyURL != nil && *p.ProxyURL != stored.ProxyURL)
+}

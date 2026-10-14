@@ -163,6 +163,7 @@ DISABLE_NATIVE_INPUT_METER=false  # true：原生任务一律按发布的单次�
 DISABLE_PUBLIC_API_IDS=false      # true：不再声明 public_api_id_v1（已发布的 ID 照常解析）
 DISABLE_IMAGE_GROUP_IDS=false     # true：图片接口拒绝模型组 ID（404 model_not_found）
 DISABLE_NATIVE_RESERVATION_STOP_LOSS=false  # true：恢复程序不再把从未提交的原生任务预留判为 not_started
+NATIVE_ROUTE_FOLLOWS_BINDING=true  # false 或 0：原生任务恢复为先在所有启用渠道里选，再核对绑定
 ```
 
 请求阶段 Trace 采集默认关闭。开启后只会在网关配置的数据库中新建请求 Trace
@@ -204,6 +205,19 @@ ID；`/v1/models` 只列出可调用 ID（不列别名，也不列 `::` 路由�
 `not_accepted`，不会暂停模型）。换回旧版网关前，先设置 `DISABLE_NATIVE_RESERVATION_STOP_LOSS=true`
 并重启，等到没有 `status='failed' AND error_code='not_started' AND billing_settled=false` 的原生任务：
 旧版网关无法为这些任务退款。
+
+原生任务（`POST /v1/model-tasks`）只路由到模型配置的原生绑定指定的渠道，该渠道必须已启用、
+在 key 的分组里并列出该模型；绑定缺失或无效时不路由到任何渠道。内部分组的 `Aiproxy-Channel` 请求头
+只能指定绑定渠道，且该渠道必须已启用（这条路径不检查分组）。所有拒绝仍返回 503
+`model_route_unavailable`，并记一条 `native route rejected:` 日志，带原因（`binding_invalid`、
+`bound_channel_unavailable`、`channel_identity_mismatch`、`key_fingerprint_mismatch`、`quote_invalid`，
+多个配置认领同一个请求 ID 时为 `route_ambiguous`）、请求 ID、绑定渠道和选中渠道的 ID，以及路由缓存版本号。
+回滚：设置 `NATIVE_ROUTE_FOLLOWS_BINDING=false`（或 `0`）并重启，选择恢复为在所有启用渠道里挑选，选中的不是绑定渠道就拒绝。
+`off`、`no` 等其他值会记一条无效配置日志，开关保持开启。
+
+渠道上还有未结束或未结算的图片任务或原生任务时，拒绝修改该渠道的 key、类型、base URL 或代理，也拒绝删除它。
+这项检查在写入前进行，而启用中的渠道在路由缓存重建前仍会用旧 key 接收任务。要修改承载图片或原生任务的渠道的 key，
+先停用该渠道，等到修改不再被拒绝（任务已清空），再改 key。
 
 ### 高级配置
 

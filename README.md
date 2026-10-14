@@ -162,6 +162,7 @@ DISABLE_NATIVE_INPUT_METER=false  # true: native tasks hold the published per-re
 DISABLE_PUBLIC_API_IDS=false      # true: stop advertising public_api_id_v1 (published IDs keep resolving)
 DISABLE_IMAGE_GROUP_IDS=false     # true: image endpoints refuse model group IDs (404 model_not_found)
 DISABLE_NATIVE_RESERVATION_STOP_LOSS=false  # true: recovery stops failing never-submitted native reservations as not_started
+NATIVE_ROUTE_FOLLOWS_BINDING=true  # false or 0: native tasks pick among all enabled channels again, then check the binding
 ```
 
 Request-stage trace capture is disabled by default. Enabling it creates only the
@@ -215,6 +216,28 @@ been quiet for 5 minutes, and its hold is refunded in full (wallet reason
 build, set `DISABLE_NATIVE_RESERVATION_STOP_LOSS=true`, restart, and wait until
 no native task has `status='failed' AND error_code='not_started' AND
 billing_settled=false`: older builds cannot refund those rows.
+
+A native task (`POST /v1/model-tasks`) is routed only to the channel its model
+config's native binding names, among the enabled channels serving the model in
+the key's sets; a missing or invalid binding routes nowhere. An internal group's
+`Aiproxy-Channel` header may name only the bound channel, and only while it is
+enabled (that path does not check the sets). Every refusal still
+answers 503 `model_route_unavailable` and is logged as `native route rejected:`
+with a reason (`binding_invalid`, `bound_channel_unavailable`,
+`channel_identity_mismatch`, `key_fingerprint_mismatch`, `quote_invalid`, or
+`route_ambiguous` when several configs claim the requested ID), the request ID,
+the bound and selected channel IDs and the routing cache version. To roll back,
+set `NATIVE_ROUTE_FOLLOWS_BINDING=false` (or `0`) and restart: selection picks
+among all enabled channels again and refuses a pick other than the bound
+channel. Other values such as `off` or `no` are logged as invalid and leave the
+switch on.
+
+Changing a channel's key, type, base URL or proxy, or deleting it, is refused
+while an image task or a native task on that channel is unfinished or unsettled.
+The check runs before the write, and an enabled channel keeps admitting tasks
+with the old key until the routing cache is rebuilt. To change the key of a
+channel that serves image or native tasks, disable it first, wait until the
+change is no longer refused (its tasks have drained), then change the key.
 
 ### Advanced Configuration
 

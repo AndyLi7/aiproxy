@@ -32,9 +32,26 @@ type ModelCaches struct {
 
 	EnabledModel2ChannelsBySet  map[string]map[string][]*Channel
 	DisabledModel2ChannelsBySet map[string]map[string][]*Channel
+
+	// Version increases by one with every rebuild stored by this process
+	// (0 = never rebuilt); BuiltAt is when that rebuild was stored. Logs name
+	// the routing state a request was served from.
+	Version uint64
+	BuiltAt time.Time
 }
 
-var modelCaches atomic.Pointer[ModelCaches]
+var (
+	modelCaches atomic.Pointer[ModelCaches]
+
+	// cacheRebuildMu serializes rebuilds from the first database read to the
+	// store, and guards cacheVersion. The 10 s ticker and the rebuild after
+	// every admin write used to run concurrently, so a rebuild that read the
+	// database before a write could store its snapshot after the write's own
+	// rebuild (for example keeping a retired channel routable for up to 10 s).
+	// Serialized, stores happen in read order: the last store is the newest.
+	cacheRebuildMu sync.Mutex
+	cacheVersion   uint64
+)
 
 func init() {
 	modelCaches.Store(new(ModelCaches))
@@ -45,6 +62,9 @@ func LoadModelCaches() *ModelCaches {
 }
 
 func InitModelConfigAndChannelCache() error {
+	cacheRebuildMu.Lock()
+	defer cacheRebuildMu.Unlock()
+
 	modelConfig, err := initializeModelConfigCache()
 	if err != nil {
 		return err
@@ -79,6 +99,7 @@ func InitModelConfigAndChannelCache() error {
 		}
 	}
 
+	cacheVersion++
 	modelCaches.Store(&ModelCaches{
 		ChannelsByID: channelsByID,
 
@@ -90,6 +111,9 @@ func InitModelConfigAndChannelCache() error {
 
 		EnabledModel2ChannelsBySet:  enabledModel2ChannelsBySet,
 		DisabledModel2ChannelsBySet: disabledModel2ChannelsBySet,
+
+		Version: cacheVersion,
+		BuiltAt: time.Now(),
 	})
 
 	return nil

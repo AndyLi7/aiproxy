@@ -411,14 +411,21 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 	})
 }
 
+// UpdateChannel writes update to channel. Callers may pass a copy that already
+// holds the patched values (the HTTP handler does), so a credential change is
+// detected against the stored row, never against channel: compared with the
+// copy, the retention guard never fired over HTTP.
 func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
-	sensitive := (update.Key != nil && *update.Key != channel.Key) ||
-		(update.Type != nil && *update.Type != channel.Type) ||
-		(update.BaseURL != nil && *update.BaseURL != channel.BaseURL) ||
-		(update.ProxyURL != nil && *update.ProxyURL != channel.ProxyURL)
-	if sensitive {
-		if err := CheckImageChannelRetention([]int{channel.ID}); err != nil {
+	if update.touchesCredentials() {
+		stored, err := GetChannelByID(channel.ID)
+		if err != nil {
 			return err
+		}
+
+		if update.changesCredentials(stored) {
+			if err := CheckChannelRetention([]int{channel.ID}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -525,7 +532,7 @@ func (c *Channel) UpdateBalance(balance float64) error {
 }
 
 func DeleteChannelByID(id int) (err error) {
-	if err := CheckImageChannelRetention([]int{id}); err != nil {
+	if err := CheckChannelRetention([]int{id}); err != nil {
 		return err
 	}
 	defer func() {
@@ -541,7 +548,7 @@ func DeleteChannelByID(id int) (err error) {
 }
 
 func DeleteChannelsByIDs(ids []int) (err error) {
-	if err := CheckImageChannelRetention(ids); err != nil {
+	if err := CheckChannelRetention(ids); err != nil {
 		return err
 	}
 	defer func() {

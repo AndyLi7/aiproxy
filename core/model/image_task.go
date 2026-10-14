@@ -652,6 +652,43 @@ func CheckImageChannelRetention(ids []int) error {
 	return nil
 }
 
+// CheckNativeChannelRetention protects native tasks the same way. Recovery
+// polls and settles them with the channel's stored key (ResolveFalPoller
+// rejects a changed fingerprint), so a channel keeps its credentials while any
+// task naming it is unfinished or unsettled: the recovery candidate filter
+// (ClaimNativeRecovery).
+func CheckNativeChannelRetention(ids []int) error {
+	if LogDB == nil || !LogDB.Migrator().HasTable(&NativeTask{}) {
+		return nil
+	}
+
+	var count int64
+
+	err := LogDB.Model(&NativeTask{}).
+		Where("channel_id IN ? AND (status NOT IN ? OR billing_settled = ?)", ids, []string{"completed", "failed"}, false).
+		Count(&count).
+		Error
+	if err != nil {
+		return err
+	}
+
+	if count > 0 {
+		return errors.New("channel retained by unfinished or unsettled native tasks")
+	}
+
+	return nil
+}
+
+// CheckChannelRetention refuses deleting channels, or changing their
+// credentials, while image or native tasks may still need them.
+func CheckChannelRetention(ids []int) error {
+	if err := CheckImageChannelRetention(ids); err != nil {
+		return err
+	}
+
+	return CheckNativeChannelRetention(ids)
+}
+
 func ImageChannelKeyFingerprint(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:])

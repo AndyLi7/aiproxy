@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -31,6 +32,10 @@ func entitledModelConfigs(c *gin.Context, token model.TokenCache) []model.ModelC
 	return entitled
 }
 
+// NativeRouteAmbiguousReason is the logged reason of a native request whose
+// model ID matches several configs the key may call.
+const NativeRouteAmbiguousReason = "route_ambiguous"
+
 // nativeCapabilityRoute is a native request resolved to one capability config.
 type nativeCapabilityRoute struct {
 	route string
@@ -56,6 +61,12 @@ func resolveNativeCapability(
 	resolution, match := model.ResolveNativeCapabilityRoute(requested, entitledModelConfigs(c, token))
 	switch match {
 	case model.NativeRouteAmbiguous:
+		// Same public code as a broken binding (controller/native_route.go),
+		// so the log names this cause: several configs claim the requested ID.
+		common.GetLogger(c).Warnf(
+			"native route rejected: reason=%s request_id=%s requested=%q cache_version=%d",
+			NativeRouteAmbiguousReason, GetRequestID(c), requested, ModelCacheVersion(c),
+		)
 		setRequestedModelForLog(c, requested)
 		abortNativeModelError(c, http.StatusServiceUnavailable, "model_route_unavailable", model.FailureStageRouting, nil)
 

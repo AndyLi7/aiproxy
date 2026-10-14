@@ -42,6 +42,11 @@ var (
 	// (rollback switch). Rows it already failed are still refunded.
 	DisableNativeReservationStopLoss bool
 
+	// NativeRouteFollowsBinding restricts native task routing to the channel
+	// named by the model config's native binding. false restores the previous
+	// selection among every enabled channel serving the model (rollback switch).
+	NativeRouteFollowsBinding bool
+
 	// DisableImageGroupIDs makes the image endpoints refuse a model group ID
 	// (a model ID without its capability) with 404 model_not_found and the
 	// group's capability IDs, instead of picking a capability from the request
@@ -67,6 +72,7 @@ func ReloadEnv() {
 	DisablePublicAPIIDs = env.Bool("DISABLE_PUBLIC_API_IDS", false)
 	DisableImageGroupIDs = env.Bool("DISABLE_IMAGE_GROUP_IDS", false)
 	DisableNativeReservationStopLoss = env.Bool("DISABLE_NATIVE_RESERVATION_STOP_LOSS", false)
+	NativeRouteFollowsBinding = env.Bool("NATIVE_ROUTE_FOLLOWS_BINDING", true)
 	Redis = env.String("REDIS", os.Getenv("REDIS_CONN_STRING"))
 	RedisKeyPrefix = os.Getenv("REDIS_KEY_PREFIX")
 	ConfigFilePath = env.String("CONFIG_FILE_PATH", "./config.yaml")

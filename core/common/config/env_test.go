@@ -29,3 +29,25 @@ func TestDisableImageGroupIDsEnvironment(t *testing.T) {
 	config.ReloadEnv()
 	require.False(t, config.DisableImageGroupIDs, "group IDs are accepted unless disabled")
 }
+
+// NATIVE_ROUTE_FOLLOWS_BINDING is on by default and is the rollback switch for
+// rule R1. Only values strconv.ParseBool reads as false turn it off; anything
+// else unparsable (off, no) is logged and keeps it on.
+func TestNativeRouteFollowsBindingEnvironment(t *testing.T) {
+	t.Cleanup(config.ReloadEnv) // runs after the environment is restored
+	t.Setenv("NATIVE_ROUTE_FOLLOWS_BINDING", "")
+	config.ReloadEnv()
+	require.True(t, config.NativeRouteFollowsBinding, "native routing follows the binding unless switched off")
+
+	for _, off := range []string{"false", "0"} {
+		t.Setenv("NATIVE_ROUTE_FOLLOWS_BINDING", off)
+		config.ReloadEnv()
+		require.False(t, config.NativeRouteFollowsBinding, off)
+	}
+
+	for _, unparsable := range []string{"off", "no"} {
+		t.Setenv("NATIVE_ROUTE_FOLLOWS_BINDING", unparsable)
+		config.ReloadEnv()
+		require.True(t, config.NativeRouteFollowsBinding, unparsable)
+	}
+}

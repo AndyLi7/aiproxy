@@ -464,6 +464,12 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 	log := common.GetLogger(c)
 	eligible := imageProviderPredicate(c, modelName, m)
 
+	// Native tasks route only to their bound channel (nil when switched off).
+	// The image predicate above is nil for this mode, so nothing is replaced.
+	if boundEligible := nativeBindingFilter(c, m); boundEligible != nil {
+		eligible = boundEligible
+	}
+
 	var prepaid *model.ImagePrepaymentQuote
 	if m == mode.ImagesGenerations || m == mode.ImagesEdits {
 		var quoteErr error

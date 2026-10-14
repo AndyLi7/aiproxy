@@ -132,42 +132,49 @@ func submitNativeTask(c *gin.Context) {
 		return
 	}
 	handler.ResolvePlan = func(_ *http.Request, _ []byte) (nativetask.Plan, nativetask.Provider, error) {
-		mc := middleware.GetModelConfig(c)
-		if mc.Config[NativeResultConfigKey] == nil {
-			// The model is not published for native tasks: the caller chose the
-			// wrong model or endpoint. Every later failure is a server-side route.
-			// Suggest only the model's own IDs on its other endpoint.
-			var suggested []string
-			if suggestion := middleware.NativeModelSuggestions(c, middleware.GetRequestModel(c)); suggestion.OtherEndpoint {
-				suggested = suggestion.Models
-			}
-			return nativetask.Plan{}, nil, &nativetask.NotNativeModelError{SuggestedModels: suggested}
-		}
-		encoded, err := json.Marshal(mc.Config[NativeResultConfigKey])
-		if err != nil {
-			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
-		}
-		var binding nativeRouteBinding
-		if json.Unmarshal(encoded, &binding) != nil || binding.Version != 1 {
-			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
-		}
-		selected, err := getInitialChannel(c, middleware.GetRoutingModel(c), mode.NativeTasks)
-		if err != nil || selected == nil || selected.channel == nil {
-			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
-		}
-		channel := selected.channel
-		if channel.ID != binding.ChannelID || channel.Type != model.ChannelTypeFal || channel.Key == "" || (channel.BaseURL != "" && strings.TrimRight(channel.BaseURL, "/") != "https://queue.fal.run") || model.ImageChannelKeyFingerprint(channel.Key) != binding.KeyFingerprint {
-			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
-		}
-		quote, rawQuote, err := mc.ImagePrepaymentQuote()
-		if err != nil || quote == nil {
-			return nativetask.Plan{}, nil, nativetask.ErrUnavailable
-		}
-		return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
-			AcceptedModel: nativeAcceptedModel(c, mc),
-			Log:           nativeTaskLogInfo(c)}, &fal.Client{Key: channel.Key}, nil
+		return resolveNativePlan(c)
 	}
 	handler.Create(c.Writer, c.Request)
+}
+
+// resolveNativePlan routes a native submission to its bound channel. Every
+// failure but a non-native model is logged with its reason (native_route.go).
+// The identity, fingerprint and quote checks stay as a second line behind the
+// binding filter in getInitialChannel.
+func resolveNativePlan(c *gin.Context) (nativetask.Plan, nativetask.Provider, error) {
+	mc := middleware.GetModelConfig(c)
+	if mc.Config[NativeResultConfigKey] == nil {
+		// The model is not published for native tasks: the caller chose the
+		// wrong model or endpoint. Every later failure is a server-side route.
+		// Suggest only the model's own IDs on its other endpoint.
+		var suggested []string
+		if suggestion := middleware.NativeModelSuggestions(c, middleware.GetRequestModel(c)); suggestion.OtherEndpoint {
+			suggested = suggestion.Models
+		}
+		return nativetask.Plan{}, nil, &nativetask.NotNativeModelError{SuggestedModels: suggested}
+	}
+	binding, ok := parseNativeRouteBinding(mc)
+	if !ok {
+		return rejectNativeRoute(c, nativeRouteBindingInvalid, binding, nil, nil)
+	}
+	selected, err := getInitialChannel(c, middleware.GetRoutingModel(c), mode.NativeTasks)
+	if err != nil || selected == nil || selected.channel == nil {
+		return rejectNativeRoute(c, nativeRouteBoundChannelUnavailable, binding, nil, err)
+	}
+	channel := selected.channel
+	if channel.ID != binding.ChannelID || channel.Type != model.ChannelTypeFal || (channel.BaseURL != "" && strings.TrimRight(channel.BaseURL, "/") != "https://queue.fal.run") {
+		return rejectNativeRoute(c, nativeRouteChannelIdentityMismatch, binding, channel, nil)
+	}
+	if channel.Key == "" || model.ImageChannelKeyFingerprint(channel.Key) != binding.KeyFingerprint {
+		return rejectNativeRoute(c, nativeRouteKeyFingerprintMismatch, binding, channel, nil)
+	}
+	quote, rawQuote, err := mc.ImagePrepaymentQuote()
+	if err != nil || quote == nil {
+		return rejectNativeRoute(c, nativeRouteQuoteInvalid, binding, channel, err)
+	}
+	return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
+		AcceptedModel: nativeAcceptedModel(c, mc),
+		Log:           nativeTaskLogInfo(c)}, &fal.Client{Key: channel.Key}, nil
 }
 
 // nativeTaskLogInfo is the call row of a public native submission: the

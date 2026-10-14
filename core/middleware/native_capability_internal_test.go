@@ -12,6 +12,8 @@ import (
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,6 +44,9 @@ type distributedRequest struct {
 	reached  bool
 	balanced bool
 }
+
+// distributedCacheVersion is the routing cache version distributeAs serves.
+const distributedCacheVersion = 7
 
 // distributeAs runs the distributor for one request of a key entitled to
 // entitled, with every config enabled. An internal group skips the wallet.
@@ -78,6 +83,7 @@ func distributeAs(
 		c.Set(ModelCaches, &model.ModelCaches{
 			ModelConfig:            imageCapabilityTestCache(enabled),
 			EnabledModelConfigsMap: enabled,
+			Version:                distributedCacheVersion,
 		})
 		c.Next()
 		result.routing = c.GetString(RoutingModel)
@@ -231,11 +237,21 @@ func TestNativeTasksAmbiguousPublicIDIsOurs(t *testing.T) {
 	configs = append(configs, twin)
 	entitled = append(entitled, twin.Model)
 
+	hook := new(logtest.Hook)
+	oldHooks := logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
+	logrus.AddHook(hook)
+	t.Cleanup(func() { logrus.StandardLogger().ReplaceHooks(oldHooks) })
+
 	got := distributeAs(t, mode.NativeTasks, "/v1/model-tasks", configs, entitled, false,
 		`{"model":"elevenlabs/eleven-v4","input":{}}`)
 	require.Equal(t, http.StatusServiceUnavailable, got.status, got.body)
 	require.Equal(t, "model_route_unavailable", decodeModelError(t, got.body).Error.Code)
 	require.Equal(t, model.FailureStageRouting, got.fields.FailureStage)
+	// The same public code as a broken binding; the log tells them apart.
+	require.NotNil(t, hook.LastEntry())
+	require.Contains(t, hook.LastEntry().Message,
+		`reason=route_ambiguous request_id= requested="elevenlabs/eleven-v4" cache_version=7`)
+	require.NotContains(t, got.body, "route_ambiguous")
 
 	// Each capability ID still resolves.
 	got = distributeAs(t, mode.NativeTasks, "/v1/model-tasks", configs, entitled, true,

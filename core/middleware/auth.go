@@ -331,6 +331,17 @@ func GetModelCaches(c *gin.Context) *model.ModelCaches {
 	return v
 }
 
+// ModelCacheVersion is the version of the routing caches the request was
+// served from, for logs; 0 when none were loaded.
+func ModelCacheVersion(c *gin.Context) uint64 {
+	value, _ := c.Get(ModelCaches)
+	if caches, ok := value.(*model.ModelCaches); ok && caches != nil {
+		return caches.Version
+	}
+
+	return 0
+}
+
 func SetLogFieldsFromMeta(m *meta.Meta, fields logrus.Fields) {
 	SetLogServiceTier(fields, m.RequestServiceTier)
 	SetLogPromptCacheKey(fields, m.PromptCacheKey)

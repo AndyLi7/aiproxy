@@ -161,6 +161,7 @@ REQUEST_TRACE_ENABLED=false  # Opt in to request-stage trace capture
 DISABLE_NATIVE_INPUT_METER=false  # true: native tasks hold the published per-request maximum
 DISABLE_PUBLIC_API_IDS=false      # true: stop advertising public_api_id_v1 (published IDs keep resolving)
 DISABLE_IMAGE_GROUP_IDS=false     # true: image endpoints refuse model group IDs (404 model_not_found)
+DISABLE_NATIVE_RESERVATION_STOP_LOSS=false  # true: recovery stops failing never-submitted native reservations as not_started
 ```
 
 Request-stage trace capture is disabled by default. Enabling it creates only the
@@ -205,6 +206,15 @@ after the application no longer presents group IDs as callable in production,
 and after a read-only query of the request log finds no image request whose
 `requested_model` metadata is a group ID in the last 30 days (notify such callers
 first). To undo it, unset the variable and restart; nothing else depends on it.
+
+A native task the gateway never sent to a provider (it is still `reserved`, for
+example because a wallet reply was lost) but whose wallet hold is pending is
+failed by recovery with `not_started` once the gateway and the wallet have both
+been quiet for 5 minutes, and its hold is refunded in full (wallet reason
+`not_accepted`, which never pauses the model). Before deploying an older gateway
+build, set `DISABLE_NATIVE_RESERVATION_STOP_LOSS=true`, restart, and wait until
+no native task has `status='failed' AND error_code='not_started' AND
+billing_settled=false`: older builds cannot refund those rows.
 
 ### Advanced Configuration
 

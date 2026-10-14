@@ -2,7 +2,7 @@ package nativetask
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"time"
 
 	"github.com/labring/aiproxy/core/common/balance"
@@ -10,9 +10,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Expired counts tasks this pass failed at model.AsyncGenerationDeadline; they
-// are also counted as Advanced or Deferred.
-type RecoveryReport struct{ Claimed, Advanced, Deferred, Expired int }
+// Expired counts tasks this pass failed at model.AsyncGenerationDeadline and
+// Abandoned reservations it failed as not_started; both are also counted as
+// Advanced or Deferred.
+type RecoveryReport struct{ Claimed, Advanced, Deferred, Expired, Abandoned int }
 
 // NativeTaskDeadline bounds how long a received result may stay undeliverable
 // (archive or wallet failures) before it is failed and refunded. Waiting for
@@ -27,6 +28,18 @@ const providerCancelTimeout = 10 * time.Second
 // kept before recovery deletes it. Admission takes seconds; this only removes
 // reservations whose admission was refused or never reached the wallet.
 const staleReservationAge = time.Hour
+
+// reservationGrace is how long a reservation that holds money must stay quiet,
+// on the gateway and in the wallet, before recovery fails it as not_started
+// and refunds it (owner decision 2026-10-13: 5 minutes). It exceeds
+// submitTimeout, which exceeds submitWalletBudget, so the submission that
+// made the reservation is over; a later same-ID retry still racing it loses
+// the compare-and-set and never reaches the provider.
+const reservationGrace = 5 * time.Minute
+
+// reservationRefundBudget bounds the wallet calls that refund an abandoned
+// reservation, inside the 2-minute recovery lease.
+const reservationRefundBudget = 60 * time.Second
 
 // recoveryDelay backs off with task age so a stuck task stops being re-claimed
 // every minute: about an eighth of its age, between 2s (1m after an error)
@@ -119,6 +132,100 @@ func (e *Engine) expireUnconfirmed(ctx context.Context, task *model.NativeTask, 
 	return true, err
 }
 
+// reservationQuietAt is when a reservation has been quiet for reservationGrace
+// on both sides: since the gateway reserved it, since the wallet admitted its
+// hold and, while its attempt is unknown, since the wallet recorded the claim.
+// The wallet's times keep a same-ID retry that just admitted or claimed from
+// being abandoned. ok is false when a wallet time it needs is unreadable.
+func reservationQuietAt(task *model.NativeTask, hold balance.PrepaymentReceipt) (time.Time, bool) {
+	last := task.CreatedAt
+	admitted, ok := hold.AdmittedAt()
+	if !ok {
+		return time.Time{}, false
+	}
+	if admitted.After(last) {
+		last = admitted
+	}
+	if hold.Submission() == "unknown" {
+		claimed, ok := hold.UnknownAt()
+		if !ok {
+			return time.Time{}, false
+		}
+		if claimed.After(last) {
+			last = claimed
+		}
+	}
+	return last.Add(reservationGrace), true
+}
+
+// abandonReservation ends a reservation that holds money but was never sent
+// to a provider (S1, owner decision 2026-10-13): the gateway calls a provider
+// only after the reserved->submitting compare-and-set, so a reserved row is
+// durable proof that nothing was submitted. It acts only on this pass's wallet
+// receipt (task.BillingReceiptJSON, saved by Poll's get) when the hold is
+// pending, its submission is unknown or not_submitted, and both sides have
+// been quiet for reservationGrace at now. It first fails the row (reserved ->
+// failed, not_started) with the same guard as the submit transition, so a
+// Submit still in flight can no longer call the provider, and only then
+// refunds it (refundNotStarted: release the attempt if listed, then settle
+// failed/not_accepted, which never pauses the model). abandoned reports
+// whether this call failed the row; err is a refund error, which later passes
+// retry through SyncBilling because the row stays failed and unsettled.
+func (e *Engine) abandonReservation(ctx context.Context, task *model.NativeTask, now time.Time) (bool, error) {
+	var hold balance.PrepaymentReceipt
+	if json.Unmarshal([]byte(task.BillingReceiptJSON), &hold) != nil || hold.Status != "pending" {
+		return false, nil
+	}
+	fields := log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model, "submission": hold.Submission()}
+	switch hold.Submission() {
+	case "unknown", "not_submitted":
+	case "accepted":
+		// The wallet saw a provider acceptance this gateway never recorded:
+		// never refund it as not accepted.
+		log.WithFields(fields).Error("reserved native task has an accepted wallet attempt; left for an operator")
+		return false, nil
+	default:
+		return false, nil
+	}
+	quietAt, ok := reservationQuietAt(task, hold)
+	if !ok {
+		log.WithFields(fields).Warn("reserved native task kept: wallet hold times unreadable")
+		return false, nil
+	}
+	if now.Before(quietAt) {
+		return false, nil
+	}
+	abandoned, err := model.AbandonNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, now.Add(-reservationGrace))
+	if err != nil || !abandoned {
+		return false, err
+	}
+	log.WithFields(fields).Warn("native reservation was never submitted; failed with not_started, refunding its hold")
+	refundCtx, cancel := context.WithTimeout(ctx, reservationRefundBudget)
+	defer cancel()
+	failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)
+	if err == nil {
+		err = e.SyncBilling(refundCtx, failed)
+	}
+	if err != nil {
+		log.Warnf("native task %s not_started refund deferred to recovery: %v", task.ID, err)
+	}
+	return true, err
+}
+
+// reservationWake is when recovery should next look at a reservation that is
+// not yet quiet: one second past reservationQuietAt, or past the gateway's
+// grace when the wallet's times are unknown.
+func reservationWake(task *model.NativeTask) time.Time {
+	wake := task.CreatedAt.Add(reservationGrace)
+	var hold balance.PrepaymentReceipt
+	if json.Unmarshal([]byte(task.BillingReceiptJSON), &hold) == nil {
+		if quietAt, ok := reservationQuietAt(task, hold); ok {
+			wake = quietAt
+		}
+	}
+	return wake.Add(time.Second)
+}
+
 // cancelUpstream asks the provider once to stop an expired request. It only
 // uses the task's own bound credential (ResolvePoller refuses a rotated or
 // retargeted channel), never retries, and only logs the outcome.
@@ -196,8 +303,19 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 				}
 			}
 		}
-		if fresh.Status == "reserved" && errors.Is(workErr, balance.ErrPrepaymentNotFound) && age > staleReservationAge {
-			// Nothing is held or owed for it, and a retry creates a new reservation.
+		if !expired && workErr == nil && e.AbandonReservations && fresh.Status == "reserved" {
+			abandoned, abandonErr := e.abandonReservation(ctx, fresh, current)
+			if abandoned {
+				report.Abandoned++
+				fresh.Status = "failed"
+			}
+			workErr = abandonErr
+		}
+		if fresh.Status == "reserved" && balance.WalletConfirmedNotFound(workErr) && age > staleReservationAge {
+			// Nothing is held or owed for it, and a retry creates a new
+			// reservation. Only the application's own "Prepayment not found"
+			// proves that: a bare 404 (a platform page during a deploy) could
+			// delete a reservation whose hold the stop-loss must still refund.
 			if released, err := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, current.Add(-staleReservationAge)); err == nil && released {
 				report.Advanced++
 				continue
@@ -211,6 +329,12 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			// before the deadline would only poll and reschedule again.
 			if deadline := fresh.CreatedAt.Add(model.AsyncGenerationDeadline).Add(time.Second); deadline.After(release) && deadline.Before(next) {
 				next = deadline
+			}
+		}
+		if e.AbandonReservations && fresh.Status == "reserved" {
+			// Likewise, check a reservation again right when it becomes quiet.
+			if wake := reservationWake(fresh); wake.After(release) && wake.Before(next) {
+				next = wake
 			}
 		}
 		if workErr != nil {

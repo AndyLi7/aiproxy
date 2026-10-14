@@ -67,7 +67,7 @@ var errorMessages = map[string]string{
 	"model_unavailable":            "This model is temporarily unavailable. Retry later with the same X-Request-Id.",
 	"task_store_unavailable":       "Task storage is temporarily unavailable. Retry querying the same task before submitting another task.",
 	"task_temporarily_unavailable": "This task is temporarily unavailable. Retry querying the same task later.",
-	"native_execution_unavailable": "Task execution is temporarily unavailable. Retry later with the same request ID.",
+	"native_execution_unavailable": "Task execution is temporarily unavailable. Retry within a few minutes with the same request ID.",
 	"artifact_unavailable":         "The task result is temporarily unavailable. Retry downloading it later.",
 	"artifact_integrity_failed":    "The task result could not be verified. Contact support with the task ID.",
 	"billing_status_unavailable":   "Billing status is temporarily unavailable. Retry querying the same task later.",
@@ -83,6 +83,9 @@ var failureMessages = map[string]string{
 	model.UpstreamUnavailableCode:    model.UpstreamUnavailableMessage,
 	"submission_timeout":             "The provider did not confirm this task in time. You were not charged; submit a new task with a new X-Request-Id.",
 	model.AsyncGenerationTimeoutCode: model.AsyncGenerationTimeoutMessage,
+	// Owner decision 2026-10-13: recovery failed a reservation that was never
+	// sent to a provider (a wallet reply was lost) and refunded its hold.
+	model.NotStartedCode: "This task was not started because of a temporary platform error. You were not charged; submit a new task with a new X-Request-Id.",
 }
 
 // ErrorMessage is the client-facing sentence for a native error code.

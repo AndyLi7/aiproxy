@@ -15,6 +15,13 @@ import (
 
 var ErrNativeTaskConflict = errors.New("native task state conflict")
 
+// NotStartedCode is the public error code of a native task recovery failed
+// while it was still reserved: the gateway never sent it to a provider (the
+// only provider call follows the reserved->submitting transition), so the
+// hold is refunded in full as wallet reason not_accepted (owner decision
+// 2026-10-13). Native lane only; never a wallet reason.
+const NotStartedCode = "not_started"
+
 // NativeTask is additive storage, separate from ImageTask. Do not auto-migrate
 // production until the native task executor and reviewed migration are ready.
 // Provider bytes remain private until declared artifacts have been persisted.
@@ -161,6 +168,17 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 func ReleaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time) (bool, error) {
 	result := db.Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND updated_at <= ?", id, group, token, "reserved", "", notAfter).Delete(&NativeTask{})
 	return result.RowsAffected == 1, result.Error
+}
+
+// AbandonNativeReservation fails a reservation reserved at or before
+// reservedBefore with NotStartedCode. Its guard is the reserved->submitting
+// transition's (reserved, no upstream ID), so it and a Submit still in flight
+// exclude each other: once this wins, that Submit's transition matches no row
+// and it never calls the provider. It runs before any wallet write of the
+// refund. abandoned reports whether this call made the change.
+func AbandonNativeReservation(db *gorm.DB, id, group string, token int, reservedBefore time.Time) (bool, error) {
+	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND created_at <= ?", id, group, token, "reserved", "", reservedBefore).Updates(map[string]any{"status": "failed", "error_code": NotStartedCode, "public_error": "", "updated_at": time.Now()})
+	return r.RowsAffected == 1, r.Error
 }
 
 func GetNativeTask(db *gorm.DB, id, group string, token int) (*NativeTask, error) {

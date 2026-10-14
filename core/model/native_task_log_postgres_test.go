@@ -132,3 +132,47 @@ func TestNativeLogWritersAreSerialized(t *testing.T) {
 		})
 	})
 }
+
+// S1/S2 (2026-10-13): recovery fails a reservation that was never submitted as
+// not_started and refunds it. Its billing syncs read the task under the lock
+// as failed, so the guard must read error_code there too, or the sync inserts
+// a 202 call row for a request that never got one.
+func TestAbandonedReservationGainsNoCallRow(t *testing.T) {
+	withTestPostgresStoreDB(t, func() {
+		require.NoError(t, LogDB.AutoMigrate(&NativeTask{}, &Log{}))
+
+		usageAt := time.Date(2026, 10, 13, 11, 21, 0, 0, time.UTC)
+		_, created, err := ReserveNativeTask(LogDB, NativeTask{
+			ID: "abandoned", GroupID: "g", TokenID: 1, Model: "vendor/model/text-to-image", Fingerprint: "f",
+			OutputSchema: `{"type":"object"}`, BillingOperationID: "native:abandoned",
+		})
+		require.NoError(t, err)
+		require.True(t, created)
+
+		// The compare-and-set only takes a reservation older than its bound.
+		abandoned, err := AbandonNativeReservation(LogDB, "abandoned", "g", 1, time.Now().Add(-time.Hour))
+		require.NoError(t, err)
+		require.False(t, abandoned)
+		abandoned, err = AbandonNativeReservation(LogDB, "abandoned", "g", 1, time.Now().Add(time.Minute))
+		require.NoError(t, err)
+		require.True(t, abandoned)
+
+		for _, status := range []string{"pending", "refunded"} {
+			receipt := fmt.Sprintf(`{"status":%q,"chargedMicros":0,"refundMicros":200,"usageAtMs":%d,"usageSource":"api"}`, status, usageAt.UnixMilli())
+			require.NoError(t, SaveNativeBillingTerminal(LogDB, "abandoned", "g", 1, receipt))
+		}
+
+		require.Zero(t, ownNativeRows(t, LogDB, "abandoned"))
+		task, err := GetNativeTask(LogDB, "abandoned", "g", 1)
+		require.NoError(t, err)
+		require.Equal(t, "failed", task.Status)
+		require.Equal(t, NotStartedCode, task.ErrorCode)
+		require.True(t, task.BillingSettled)
+
+		// A submission that already left reserved is never abandoned.
+		reserveSubmittingNativeTask(t, LogDB, "submitting")
+		abandoned, err = AbandonNativeReservation(LogDB, "submitting", "g", 1, time.Now().Add(time.Minute))
+		require.NoError(t, err)
+		require.False(t, abandoned)
+	})
+}

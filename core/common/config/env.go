@@ -37,6 +37,11 @@ var (
 	// stay callable until the application republishes without them.
 	DisablePublicAPIIDs bool
 
+	// DisableNativeReservationStopLoss stops native task recovery from failing
+	// (not_started) and refunding reservations that were never submitted
+	// (rollback switch). Rows it already failed are still refunded.
+	DisableNativeReservationStopLoss bool
+
 	// DisableImageGroupIDs makes the image endpoints refuse a model group ID
 	// (a model ID without its capability) with 404 model_not_found and the
 	// group's capability IDs, instead of picking a capability from the request
@@ -61,6 +66,7 @@ func ReloadEnv() {
 	DisableNativeInputMeter = env.Bool("DISABLE_NATIVE_INPUT_METER", false)
 	DisablePublicAPIIDs = env.Bool("DISABLE_PUBLIC_API_IDS", false)
 	DisableImageGroupIDs = env.Bool("DISABLE_IMAGE_GROUP_IDS", false)
+	DisableNativeReservationStopLoss = env.Bool("DISABLE_NATIVE_RESERVATION_STOP_LOSS", false)
 	Redis = env.String("REDIS", os.Getenv("REDIS_CONN_STRING"))
 	RedisKeyPrefix = os.Getenv("REDIS_KEY_PREFIX")
 	ConfigFilePath = env.String("CONFIG_FILE_PATH", "./config.yaml")

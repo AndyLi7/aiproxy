@@ -124,6 +124,7 @@ func TestFailedNativeTaskExplainsItsCode(t *testing.T) {
 		"upstream_rejected":        "The provider rejected this request before generating. You were not charged.",
 		"invalid_parameters":       "The provider rejected the listed input parameters. You were not charged; fix them and submit a new task with a new X-Request-Id.",
 		"submission_timeout":       "The provider did not confirm this task in time. You were not charged; submit a new task with a new X-Request-Id.",
+		"not_started":              "This task was not started because of a temporary platform error. You were not charged; submit a new task with a new X-Request-Id.",
 		"something_new":            "This task failed. Contact support with the task ID.",
 	} {
 		w := httptest.NewRecorder()

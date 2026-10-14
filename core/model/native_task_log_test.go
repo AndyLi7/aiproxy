@@ -240,6 +240,28 @@ func TestNativeMissingRowInsert(t *testing.T) {
 		require.Empty(t, nativeLogRows(t, db, "never_sent"))
 	})
 
+	t.Run("b2: a reservation recovery failed as not_started gains no row", func(t *testing.T) {
+		db := nativeLogDB(t)
+		_, created, err := model.ReserveNativeTask(db, model.NativeTask{
+			ID: "not_started", GroupID: "g", TokenID: 1, Model: "a/b/c", Fingerprint: "hash",
+			OutputSchema: nativeLogSchema, BillingOperationID: "native:not_started",
+		})
+		require.NoError(t, err)
+		require.True(t, created)
+		abandoned, err := model.AbandonNativeReservation(db, "not_started", "g", 1, time.Now().Add(time.Minute))
+		require.NoError(t, err)
+		require.True(t, abandoned)
+
+		// The refund's syncs see a failed task; it still never got a 202.
+		require.NoError(t, model.SaveNativeBillingTerminal(db, "not_started", "g", 1, nativeReceipt("pending", usageAt, model.RequestSourceAPI)))
+		require.NoError(t, model.SaveNativeBillingTerminal(db, "not_started", "g", 1, nativeReceipt("refunded", usageAt, model.RequestSourceAPI)))
+		require.Empty(t, nativeLogRows(t, db, "not_started"))
+		task, err := model.GetNativeTask(db, "not_started", "g", 1)
+		require.NoError(t, err)
+		require.Equal(t, model.NotStartedCode, task.ErrorCode, "a refund never rewrites the code")
+		require.True(t, task.BillingSettled)
+	})
+
 	t.Run("c: a prior rejection row with the op does not block the insert", func(t *testing.T) {
 		db := nativeLogDB(t)
 		submittedNativeTask(t, db, "after_503")

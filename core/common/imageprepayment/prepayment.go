@@ -5,11 +5,34 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/model"
+	log "github.com/sirupsen/logrus"
 )
+
+// SubmitWalletBudget bounds the admission and the first attempt claim of one
+// image submission together, including their retries after a failed
+// connection or an edge 5xx (balance.WithSubmitRetry). Without retries both
+// take at most 10 seconds. The claim is sent only while the budget leaves it
+// the full wallet request timeout (balance.FullRequestLeft).
+const SubmitWalletBudget = 15 * time.Second
+
+// neverHeldAge is how long a failed task must have been failed before a
+// wallet answer that it holds nothing ends its billing for good, like the
+// native lane's stale reservations.
+const neverHeldAge = time.Hour
+
+// neverHeld reports a failed task whose admission never reached the wallet
+// (R5): it claimed no attempt, failed more than neverHeldAge ago, and the
+// wallet itself answered "Prepayment not found". A bare 404 never qualifies:
+// it may come from the platform, not the wallet.
+func neverHeld(task *model.ImageTask, err error, now time.Time) bool {
+	return balance.WalletConfirmedNotFound(err) && len(task.Attempts) == 0 &&
+		task.CompletedAt != nil && now.Sub(*task.CompletedAt) > neverHeldAge
+}
 
 func Call(ctx context.Context, task *model.ImageTask, command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
 	client, ok := balance.Default.(*balance.ExternalHTTP)
@@ -82,7 +105,17 @@ func Sync(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt
 		// sent first, because between it and the settle a provider bill could
 		// be settled as an actual charge.
 		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "platform_failure"}}); err != nil {
-			return balance.PrepaymentReceipt{}, err
+			if !neverHeld(task, err, time.Now()) {
+				return balance.PrepaymentReceipt{}, err
+			}
+			// Nothing was held, so nothing is owed or refunded: close billing
+			// instead of re-sending the settle every recovery pass forever.
+			log.WithFields(log.Fields{"lane": "image", "task_id": task.ID, "group": task.GroupID}).
+				Warn("image task failed without a wallet hold; billing closed with nothing to settle")
+			zero := int64(0)
+			task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
+			receipt := balance.PrepaymentReceipt{ID: task.BillingOperationID, Status: "refunded", ChargedMicros: &zero, RefundMicros: &zero}
+			return receipt, model.SaveImageTaskBilling(task)
 		}
 	} else if task.Status == "completed" {
 		if _, err := Call(ctx, task, balance.PrepaymentCommand{Action: "delivered"}); err != nil {

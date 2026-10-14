@@ -79,6 +79,8 @@ func TestRetryKeepsReservationFromConcurrentRelease(t *testing.T) {
 	require.True(t, released)
 }
 
+// Only the application's own "Prepayment not found" lets recovery delete a
+// stale reservation: a bare 404 page may hide a hold the stop-loss must refund.
 func TestRecoveryDeletesOnlyStaleReservationsTheWalletNeverAdmitted(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -87,8 +89,9 @@ func TestRecoveryDeletesOnlyStaleReservationsTheWalletNeverAdmitted(t *testing.T
 		after   time.Duration
 		deleted bool
 	}{
-		{"recent reservation is kept", balance.ErrPrepaymentNotFound, 30 * time.Minute, false},
-		{"stale reservation without a wallet record is deleted", balance.ErrPrepaymentNotFound, 2 * time.Hour, true},
+		{"recent reservation is kept", walletNotFound(t, appNotFound), 30 * time.Minute, false},
+		{"stale reservation without a wallet record is deleted", walletNotFound(t, appNotFound), 2 * time.Hour, true},
+		{"stale reservation behind a platform 404 page is kept", walletNotFound(t, edgeNotFound), 2 * time.Hour, false},
 		{"stale reservation with an unreadable wallet is kept", errors.New("prepayment unavailable"), 2 * time.Hour, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

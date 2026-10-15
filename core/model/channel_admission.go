@@ -415,15 +415,25 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 		if err != nil {
 			return err
 		}
+		// Retirement belongs to the physical identity, not just its digest.
+		// A same-key return must not masquerade as an ordinary new successor.
+		// Only the target's latest retirement can still be reversed: replaying
+		// an older exact pair after another generation must not reopen it.
+		var retirement ChannelAdmissionBarrier
+		retirementErr := tx.Where("from_channel_id = ?", input.To.ChannelID).
+			Order("revision DESC").First(&retirement).Error
 		reverting := input.RevertOf != ""
-		if reverting {
-			var previous ChannelAdmissionBarrier
-			if err := tx.First(&previous, "operation_id = ?", input.RevertOf).Error; err != nil {
-				return err
-			}
-			if previous.Version != ChannelAdmissionProtocolVersion || previous.FromChannelID != input.To.ChannelID || previous.FromKeyDigest != input.To.KeyDigest || previous.FromIdentityHash != input.To.IdentityHash || previous.ToChannelID != input.From.ChannelID || previous.ToKeyDigest != input.From.KeyDigest || previous.ToIdentityHash != input.From.IdentityHash {
+		if retirementErr == nil {
+			if !reverting || input.RevertOf != retirement.OperationID ||
+				retirement.Version != ChannelAdmissionProtocolVersion || retirement.Revision <= 0 || retirement.Revision > c.Revision || retirement.RecordedAtMs <= 0 || !fullIdentityDigest(retirement.RequestHash) ||
+				retirement.FromChannelID != input.To.ChannelID || retirement.FromKeyDigest != input.To.KeyDigest || retirement.FromIdentityHash != input.To.IdentityHash ||
+				retirement.ToChannelID != input.From.ChannelID || retirement.ToKeyDigest != input.From.KeyDigest || retirement.ToIdentityHash != input.From.IdentityHash {
 				return ErrChannelAdmissionConflict
 			}
+		} else if !errors.Is(retirementErr, gorm.ErrRecordNotFound) {
+			return retirementErr
+		} else if reverting {
+			return ErrChannelAdmissionConflict
 		}
 		if input.From.KeyDigest != input.To.KeyDigest && toFamily != nil && !familyAllows(toFamily, input.To) && !reverting {
 			return ErrChannelAdmissionConflict

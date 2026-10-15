@@ -34,6 +34,7 @@ func TestChannelMetadataPersistence(t *testing.T) {
 		Name:   "test-channel",
 		Remark: "primary channel",
 		Type:   ChannelTypeOpenAI,
+		Key:    "test-key",
 		Models: []string{"backup-test"},
 	}
 	require.NoError(t, BatchInsertChannels([]*Channel{channel}))

@@ -393,14 +393,24 @@ func GetChannelByID(id int) (*Channel, error) {
 	return &channel, HandleNotFound(err, ErrChannelNotFound)
 }
 
+// channelEnabledOnCreate reports whether an inserted channel starts enabled:
+// status 0 takes the column default, which is enabled.
+func channelEnabledOnCreate(channel *Channel) bool {
+	return channel.Status == ChannelStatusEnabled || channel.Status == ChannelStatusUnknown
+}
+
 func BatchInsertChannels(channels []*Channel) (err error) {
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 		}
 	}()
 
 	for _, channel := range channels {
+		if channelEnabledOnCreate(channel) && channelKeyEmpty(channel.Key) {
+			return fmt.Errorf("channel %q: %w", channel.Name, ErrChannelKeyEmpty)
+		}
+
 		if err := CheckModelConfigExist(channel.Models); err != nil {
 			return err
 		}
@@ -414,12 +424,21 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 // UpdateChannel writes update to channel. Callers may pass a copy that already
 // holds the patched values (the HTTP handler does), so a credential change is
 // detected against the stored row, never against channel: compared with the
-// copy, the retention guard never fired over HTTP.
+// copy, the retention guard never fired over HTTP. An explicit empty models
+// list and emptying an enabled channel's key are refused (IsChannelWriteRefused).
 func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
+	if err := update.validate(); err != nil {
+		return err
+	}
+
 	if update.touchesCredentials() {
 		stored, err := GetChannelByID(channel.ID)
 		if err != nil {
 			return err
+		}
+
+		if update.emptiesKeyOfEnabled(stored) {
+			return ErrChannelKeyEmpty
 		}
 
 		if update.changesCredentials(stored) {
@@ -431,7 +450,7 @@ func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
 
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 			_ = monitor.ClearChannelAllModelErrors(context.Background(), channel.ID)
 		}
 	}()
@@ -537,7 +556,7 @@ func DeleteChannelByID(id int) (err error) {
 	}
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 			_ = monitor.ClearChannelAllModelErrors(context.Background(), id)
 		}
 	}()
@@ -553,7 +572,7 @@ func DeleteChannelsByIDs(ids []int) (err error) {
 	}
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 
 			for _, id := range ids {
 				_ = monitor.ClearChannelAllModelErrors(context.Background(), id)
@@ -569,10 +588,24 @@ func DeleteChannelsByIDs(ids []int) (err error) {
 	})
 }
 
+// UpdateChannelStatusByID sets a channel's status. Enabling a disabled channel
+// whose key is empty is refused (ErrChannelKeyEmpty); re-enabling a channel
+// that is already enabled changes nothing and is not refused.
 func UpdateChannelStatusByID(id, status int) (err error) {
+	if status == ChannelStatusEnabled {
+		stored, err := GetChannelByID(id)
+		if err != nil {
+			return err
+		}
+
+		if stored.Status != ChannelStatusEnabled && channelKeyEmpty(stored.Key) {
+			return ErrChannelKeyEmpty
+		}
+	}
+
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 		}
 	}()
 

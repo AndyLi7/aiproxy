@@ -88,6 +88,7 @@ func TestStatusAdvertisesAdminDemoV1(t *testing.T) {
 			"registry_provider_fal_queue_v2",
 			"registry_provider_ark_sync_task_v1",
 			"seedream45_ark_single_v1",
+			"channel_routing_guard_v1",
 			// The LogDB has the task view's columns (SQLite has no index check).
 			"log_task_view_v1",
 		},

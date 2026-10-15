@@ -184,9 +184,15 @@ func testChannelQueriesAndPatches(t *testing.T) {
 			"name":"","remark":"","base_url":"","proxy_url":"","priority":0,
 			"backup_only":false,"enabled_auto_balance_check":false,"skip_tls_verify":false,
 			"enabled_no_permission_ban":false,"warn_error_rate":0,"max_error_rate":0,
-			"balance_threshold":0,"models":[],"model_mapping":{},"configs":{},"sets":[]
+			"balance_threshold":0,"model_mapping":{},"configs":{},"sets":[]
 		}`), &clearPatch))
 		require.NoError(t, UpdateChannel(&stale, &clearPatch))
+
+		// models is the one field an explicit empty value cannot clear: an
+		// empty list would serve every default model of the channel's type.
+		var emptyModels ChannelPatch
+		require.NoError(t, sonic.Unmarshal([]byte(`{"models":[]}`), &emptyModels))
+		require.ErrorIs(t, UpdateChannel(&stale, &emptyModels), ErrChannelModelsEmpty)
 
 		loaded, err = GetChannelByID(first.ID)
 		require.NoError(t, err)
@@ -203,7 +209,7 @@ func testChannelQueriesAndPatches(t *testing.T) {
 		require.Zero(t, loaded.WarnErrorRate)
 		require.Zero(t, loaded.MaxErrorRate)
 		require.Zero(t, loaded.BalanceThreshold)
-		require.Empty(t, loaded.Models)
+		require.Equal(t, []string{"search-test"}, loaded.Models)
 		require.Empty(t, loaded.ModelMapping)
 		require.Empty(t, loaded.Configs)
 		require.Empty(t, loaded.Sets)

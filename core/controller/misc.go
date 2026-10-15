@@ -114,9 +114,14 @@ func GetStatus(c *gin.Context) {
 			"registry_provider_fal_queue_v2",
 			"registry_provider_ark_sync_task_v1",
 			"seedream45_ark_single_v1",
+			ChannelRoutingGuardFeature,
 		},
 	}
-	status.Features = append(status.Features, nativeRuntimeFeatures()...)
+	native := nativeRuntimeFeatures()
+	status.Features = append(status.Features, native...)
+	// nativeRuntimeFeatures is empty exactly while the native engine is not
+	// configured.
+	status.Features = append(status.Features, nativeRouteFeatures(len(native) > 0)...)
 	// Left out (never a 503) while the task view's storage or indexes are not
 	// ready; its endpoints then answer 503 task_view_unavailable.
 	if taskViewStorage.ready(model.LogDB) {

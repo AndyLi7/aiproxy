@@ -34,6 +34,14 @@ func ChannelTypeMetas(c *gin.Context) {
 	middleware.SuccessResponse(c, adaptors.ChannelMetas)
 }
 
+// ChannelRoutingGuardFeature tells the application that the channel admin API
+// refuses an explicit empty models list (400) and enabling a channel without a
+// key (400); that a change to skip_tls_verify or to any configs key except
+// x_token_platform_provider_bindings and outbound_policy is a credential
+// change, refused while image or native tasks still need the channel; and
+// that the PUT response no longer echoes the key.
+const ChannelRoutingGuardFeature = "channel_routing_guard_v1"
+
 type ChannelResponse struct {
 	*model.Channel
 	AccessedAt time.Time `json:"accessed_at,omitempty"`
@@ -209,7 +217,7 @@ func GetAllChannels(c *gin.Context) {
 // AddChannels godoc
 //
 //	@Summary		Add multiple channels
-//	@Description	Adds multiple channels in a batch operation
+//	@Description	Adds multiple channels in a batch operation. A channel created enabled (status 1, or 0 for the default) needs a non-empty key (400 otherwise; nothing is inserted).
 //	@Tags			channels
 //	@Accept			json
 //	@Produce		json
@@ -239,7 +247,7 @@ func AddChannels(c *gin.Context) {
 
 	err = model.BatchInsertChannels(_channels)
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		middleware.ErrorResponse(c, channelWriteErrorStatus(err), err.Error())
 		return
 	}
 
@@ -502,7 +510,7 @@ func (r *AddChannelRequest) ToChannel() (*model.Channel, error) {
 // AddChannel godoc
 //
 //	@Summary		Add a single channel
-//	@Description	Adds a new channel to the system
+//	@Description	Adds a new channel to the system. A channel created enabled (status 1, or 0 for the default) needs a non-empty key (400 otherwise).
 //	@Tags			channel
 //	@Accept			json
 //	@Produce		json
@@ -527,7 +535,7 @@ func AddChannel(c *gin.Context) {
 
 	err = model.BatchInsertChannels([]*model.Channel{ch})
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		middleware.ErrorResponse(c, channelWriteErrorStatus(err), err.Error())
 		return
 	}
 
@@ -614,10 +622,47 @@ func GetChannelBatchInfo(c *gin.Context) {
 	middleware.SuccessResponse(c, channels)
 }
 
+// channelWriteErrorStatus answers 400 for a write refused for its content
+// (an explicit empty models list, an enabled channel without a key) and 500
+// otherwise, as before.
+func channelWriteErrorStatus(err error) int {
+	if model.IsChannelWriteRefused(err) {
+		return http.StatusBadRequest
+	}
+
+	return http.StatusInternalServerError
+}
+
+// channelUpdateResponse is the updated channel without its key: a write
+// response never echoes a credential. Every other field keeps the shape of
+// model.Channel's JSON (timestamps in milliseconds).
+type channelUpdateResponse struct {
+	*model.Channel
+}
+
+func (r channelUpdateResponse) MarshalJSON() ([]byte, error) {
+	type Alias model.Channel
+
+	return sonic.Marshal(&struct {
+		*Alias
+		// Shadows Alias.Key (a shallower field wins), so the key is never
+		// encoded; nil with omitempty leaves "key" out entirely.
+		Key              *string `json:"key,omitempty"`
+		CreatedAt        int64   `json:"created_at"`
+		BalanceUpdatedAt int64   `json:"balance_updated_at"`
+		LastTestErrorAt  int64   `json:"last_test_error_at"`
+	}{
+		Alias:            (*Alias)(r.Channel),
+		CreatedAt:        r.CreatedAt.UnixMilli(),
+		BalanceUpdatedAt: r.BalanceUpdatedAt.UnixMilli(),
+		LastTestErrorAt:  r.LastTestErrorAt.UnixMilli(),
+	})
+}
+
 // UpdateChannel godoc
 //
 //	@Summary		Update a channel
-//	@Description	Updates only supplied fields. Omitted fields and null retain current values; empty strings, false, zero, empty arrays and empty objects explicitly replace values, subject to channel validation.
+//	@Description	Updates only supplied fields. Omitted fields and null retain current values; empty strings, false, zero, empty arrays and empty objects explicitly replace values, subject to channel validation, except that an explicit empty models list is refused (400): omit models to keep them. Emptying the key of an enabled channel is refused (400). The response is the updated channel without its key.
 //	@Tags			channel
 //	@Accept			json
 //	@Produce		json
@@ -661,7 +706,7 @@ func UpdateChannel(c *gin.Context) {
 
 	err = model.UpdateChannel(ch, (*model.ChannelPatch)(&channel))
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		middleware.ErrorResponse(c, channelWriteErrorStatus(err), err.Error())
 		return
 	}
 
@@ -670,7 +715,7 @@ func UpdateChannel(c *gin.Context) {
 		log.Errorf("failed to clear channel all model errors: %+v", err)
 	}
 
-	middleware.SuccessResponse(c, ch)
+	middleware.SuccessResponse(c, channelUpdateResponse{Channel: ch})
 }
 
 // UpdateChannelStatusRequest represents the request body for updating a channel's status
@@ -681,7 +726,7 @@ type UpdateChannelStatusRequest struct {
 // UpdateChannelStatus godoc
 //
 //	@Summary		Update channel status
-//	@Description	Updates the status of a channel by its ID
+//	@Description	Updates the status of a channel by its ID. Enabling a disabled channel whose key is empty is refused (400).
 //	@Tags			channel
 //	@Accept			json
 //	@Produce		json
@@ -702,7 +747,7 @@ func UpdateChannelStatus(c *gin.Context) {
 
 	err = model.UpdateChannelStatusByID(id, status.Status)
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		middleware.ErrorResponse(c, channelWriteErrorStatus(err), err.Error())
 		return
 	}
 

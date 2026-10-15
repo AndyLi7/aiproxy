@@ -25,6 +25,22 @@ const (
 	nativeRouteQuoteInvalid            = "quote_invalid"
 )
 
+// NativeRouteFollowsBindingFeature tells the application that native task
+// routing admits only the channel a model config is bound to (rule R1, see
+// nativeBindingFilter).
+const NativeRouteFollowsBindingFeature = "native_route_follows_binding_v1"
+
+// nativeRouteFeatures advertises NativeRouteFollowsBindingFeature only while
+// NATIVE_ROUTE_FOLLOWS_BINDING is on and the native engine is configured, so
+// switching the binding filter off withdraws the promise with it.
+func nativeRouteFeatures(engineConfigured bool) []string {
+	if !engineConfigured || !config.NativeRouteFollowsBinding {
+		return nil
+	}
+
+	return []string{NativeRouteFollowsBindingFeature}
+}
+
 // nativeRouteRejection is a ResolvePlan failure with its reason. It unwraps
 // to nativetask.ErrUnavailable, so the public answer is unchanged.
 type nativeRouteRejection struct{ reason string }

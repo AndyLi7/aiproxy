@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"sort"
@@ -65,17 +66,18 @@ func InitModelConfigAndChannelCache() error {
 	cacheRebuildMu.Lock()
 	defer cacheRebuildMu.Unlock()
 
-	modelConfig, err := initializeModelConfigCache()
+	snapshot, err := readCacheSnapshot()
 	if err != nil {
 		return err
 	}
 
-	modelConfig = applyYAMLConfigToModelConfigCache(modelConfig)
+	modelConfig := applyYAMLConfigToModelConfigCache(newModelConfigCache(snapshot.modelConfigs))
 
-	enabledChannels, err := LoadEnabledChannels()
-	if err != nil {
-		return err
-	}
+	// Channel models are filtered against the configs read above, not against
+	// a fresh query per channel: one rebuild sees one set of model configs.
+	configured := configuredModels(snapshot.modelConfigs)
+	enabledChannels := prepareCachedChannels(snapshot.enabledChannels, ChannelStatusEnabled, configured)
+	disabledChannels := prepareCachedChannels(snapshot.disabledChannels, ChannelStatusDisabled, configured)
 
 	enabledModel2ChannelsBySet := buildModelToChannelsBySetMap(enabledChannels)
 	sortChannelsByPriorityBySet(enabledModel2ChannelsBySet)
@@ -84,11 +86,6 @@ func InitModelConfigAndChannelCache() error {
 		enabledModel2ChannelsBySet,
 		modelConfig,
 	)
-
-	disabledChannels, err := LoadDisabledChannels()
-	if err != nil {
-		return err
-	}
 
 	disabledModel2ChannelsBySet := buildModelToChannelsBySetMap(disabledChannels)
 
@@ -117,6 +114,90 @@ func InitModelConfigAndChannelCache() error {
 	})
 
 	return nil
+}
+
+// rebuildModelCachesAfterWrite refreshes the caches after a committed admin
+// write. The write stands either way and the ticker retries within seconds,
+// so a failed rebuild is not the writer's error; it used to be discarded and
+// is now logged (throttled, like the ticker's own failures).
+func rebuildModelCachesAfterWrite() {
+	if err := InitModelConfigAndChannelCache(); err != nil {
+		notify.ErrorThrottle(
+			"rebuildModelCachesAfterWrite",
+			time.Minute*5,
+			"failed to rebuild model and channel caches after a write",
+			err.Error(),
+		)
+	}
+}
+
+// cacheSnapshot is what one rebuild reads from the database.
+type cacheSnapshot struct {
+	modelConfigs     []ModelConfig
+	enabledChannels  []*Channel
+	disabledChannels []*Channel
+}
+
+// readCacheSnapshot reads model configs and channels. On PostgreSQL the reads
+// share one REPEATABLE READ, READ ONLY transaction, so the cache reflects one
+// point in time: a write committed between two reads (a model config deleted
+// while a channel listing it is re-pointed, say) can no longer leave a cache
+// mixing both states. SQLite reads as before.
+func readCacheSnapshot() (cacheSnapshot, error) {
+	var snapshot cacheSnapshot
+
+	read := func(tx *gorm.DB) error {
+		if err := tx.Model(&ModelConfig{}).Order("created_at desc").Find(&snapshot.modelConfigs).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("status = ?", ChannelStatusEnabled).Find(&snapshot.enabledChannels).Error; err != nil {
+			return err
+		}
+
+		return tx.Where("status = ?", ChannelStatusDisabled).Find(&snapshot.disabledChannels).Error
+	}
+
+	if DB.Dialector.Name() != "postgres" {
+		return snapshot, read(DB)
+	}
+
+	err := DB.Transaction(read, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+
+	return snapshot, err
+}
+
+// configuredModels is the set of models with a stored config, or nil while
+// model configs are disabled (every channel model is then kept).
+func configuredModels(configs []ModelConfig) map[string]struct{} {
+	if config.DisableModelConfig {
+		return nil
+	}
+
+	models := make(map[string]struct{}, len(configs))
+	for _, modelConfig := range configs {
+		models[modelConfig.Model] = struct{}{}
+	}
+
+	return models
+}
+
+// prepareCachedChannels is LoadEnabledChannels/LoadDisabledChannels for
+// channels already read: YAML channels of that status are added, and every
+// channel's models and mapping are initialized against configured.
+func prepareCachedChannels(channels []*Channel, status int, configured map[string]struct{}) []*Channel {
+	configChannels := NewConfigChannels(LoadYAMLConfig(), status)
+	if len(configChannels) != 0 {
+		log.Infof("added %d channels from config", len(configChannels))
+		channels = append(channels, configChannels...)
+	}
+
+	for _, channel := range channels {
+		initializeChannelModelsFrom(channel, configured)
+		initializeChannelModelMapping(channel)
+	}
+
+	return channels
 }
 
 func LoadEnabledChannels() ([]*Channel, error) {
@@ -238,12 +319,7 @@ func (d *disabledModelConfigCache) GetModelConfig(model string) (ModelConfig, bo
 	return NewDefaultModelConfig(model), true
 }
 
-func initializeModelConfigCache() (ModelConfigCache, error) {
-	modelConfigs, err := GetAllModelConfigs()
-	if err != nil {
-		return nil, err
-	}
-
+func newModelConfigCache(modelConfigs []ModelConfig) ModelConfigCache {
 	newModelConfigMap := make(map[string]ModelConfig)
 	for _, modelConfig := range modelConfigs {
 		newModelConfigMap[modelConfig.Model] = modelConfig
@@ -251,10 +327,10 @@ func initializeModelConfigCache() (ModelConfigCache, error) {
 
 	configs := &modelConfigMapCache{modelConfigMap: newModelConfigMap}
 	if config.DisableModelConfig {
-		return &disabledModelConfigCache{modelConfigs: configs}, nil
+		return &disabledModelConfigCache{modelConfigs: configs}
 	}
 
-	return configs, nil
+	return configs
 }
 
 func initializeChannelModels(channel *Channel) {
@@ -275,6 +351,47 @@ func initializeChannelModels(channel *Channel) {
 
 	slices.Sort(findedModels)
 	channel.Models = findedModels
+}
+
+// initializeChannelModelsFrom is initializeChannelModels against configs
+// already read (configured, nil while model configs are disabled): an empty
+// list falls back to the type's default models; otherwise models without a
+// config are dropped and logged, and the rest are kept once each, sorted.
+func initializeChannelModelsFrom(channel *Channel, configured map[string]struct{}) {
+	if len(channel.Models) == 0 {
+		channel.Models = config.GetDefaultChannelModels()[int(channel.Type)]
+		return
+	}
+
+	if configured == nil {
+		slices.Sort(channel.Models)
+		return
+	}
+
+	var found, missing []string
+
+	seen := make(map[string]struct{}, len(channel.Models))
+	for _, model := range channel.Models {
+		if _, ok := seen[model]; ok {
+			continue
+		}
+
+		seen[model] = struct{}{}
+
+		if _, ok := configured[model]; ok {
+			found = append(found, model)
+		} else {
+			missing = append(missing, model)
+		}
+	}
+
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		log.Errorf("model config not found: %v", missing)
+	}
+
+	slices.Sort(found)
+	channel.Models = found
 }
 
 func initializeChannelModelMapping(channel *Channel) {

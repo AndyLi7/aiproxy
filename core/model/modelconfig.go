@@ -426,7 +426,7 @@ func SearchModelConfigs(
 func SaveModelConfig(config ModelConfig) (err error) {
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 		}
 	}()
 
@@ -436,7 +436,7 @@ func SaveModelConfig(config ModelConfig) (err error) {
 func SaveModelConfigs(configs []ModelConfig) (err error) {
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 		}
 	}()
 
@@ -456,7 +456,7 @@ const ErrModelConfigNotFound = "model config"
 func DeleteModelConfig(model string) (err error) {
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 		}
 	}()
 
@@ -468,7 +468,7 @@ func DeleteModelConfig(model string) (err error) {
 func DeleteModelConfigsByModels(models []string) (err error) {
 	defer func() {
 		if err == nil {
-			_ = InitModelConfigAndChannelCache()
+			rebuildModelCachesAfterWrite()
 		}
 	}()
 

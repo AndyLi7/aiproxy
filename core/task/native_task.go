@@ -11,7 +11,7 @@ import (
 )
 
 // nativeRecoveryWorkers bound concurrent provider polls and archives per
-// instance; each archive buffers at most one artifact.
+// instance; each archive streams with bounded buffers.
 const nativeRecoveryWorkers = 4
 
 // NativeTaskRecoveryTask is separate from legacy image usage projection. It is

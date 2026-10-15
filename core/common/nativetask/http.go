@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/common/ownedartifact"
@@ -15,6 +16,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +30,8 @@ type HTTP struct {
 	ResolvePoller ResolvePoller
 	Archive       ArchiveFunc
 	Download      func(*http.Request, string) (*http.Response, error)
+	// DownloadRange reads bytes from..to (inclusive) of a stored file.
+	DownloadRange func(r *http.Request, key string, from, to int64) (*http.Response, error)
 	// OnError lets the gateway log the same code and message the client receives.
 	OnError func(status int, code, message string)
 	// OnReserved receives the task's billing operation when a submission fails
@@ -70,6 +75,7 @@ var errorMessages = map[string]string{
 	"native_execution_unavailable": "Task execution is temporarily unavailable. Retry within a few minutes with the same request ID.",
 	"artifact_unavailable":         "The task result is temporarily unavailable. Retry downloading it later.",
 	"artifact_integrity_failed":    "The task result could not be verified. Contact support with the task ID.",
+	"range_not_satisfiable":        "The requested byte range starts beyond the end of the file. Request a range within the file's size, or omit the Range header.",
 	"billing_status_unavailable":   "Billing status is temporarily unavailable. Retry querying the same task later.",
 	"task_not_cancellable":         "This task is no longer waiting in the queue (being sent, sent, or ended), so it cannot be cancelled. Poll it with GET /v1/model-tasks/{id}.",
 }
@@ -456,11 +462,15 @@ func (h *HTTP) Cancel(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // Artifacts up to this size are verified in full before the first byte is sent.
-// Larger ones stream, holding back the tail until the digest matches.
+// Larger ones stream, holding back the tail until the digest matches. Both
+// apply only to files archived before chunk digests were recorded.
 const (
 	bufferedArtifactLimit = 8 << 20
 	artifactTailHoldback  = 64 << 10
 )
+
+// chunkBuffers holds one verified chunk per download in flight.
+var chunkBuffers = sync.Pool{New: func() any { buffer := make([]byte, ownedartifact.ChunkSize); return &buffer }}
 
 func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText string) {
 	group, token, ok := h.owner(w, r)
@@ -482,23 +492,36 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 		h.writeError(w, 404, "artifact_not_found")
 		return
 	}
+	receipt := entries[index]
+	file := artifactFile{name: ownedartifact.FileName(id, index, receipt.Type), receipt: receipt}
+	from, to, ranged, satisfiable := artifactRange(r, receipt)
+	if !satisfiable {
+		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(receipt.Size, 10))
+		w.Header().Set("Cache-Control", "private, no-store")
+		h.writeError(w, 416, "range_not_satisfiable")
+		return
+	}
 	release, ok := h.reads().acquireDownload(group, token)
 	if !ok {
 		h.writeError(w, 429, "rate_limit_exceeded")
 		return
 	}
 	defer release()
-	receipt := entries[index]
 	// A slow reader must not hold a download slot indefinitely: the whole
 	// transfer, including the storage read, ends at this deadline. The server
 	// has no write timeout, so the deadline is cleared again for keep-alive reuse.
-	deadline := time.Now().Add(artifactTransferTime(receipt.Size))
+	deadline := time.Now().Add(artifactTransferTime(to - from + 1))
 	controller := http.NewResponseController(w)
 	_ = controller.SetWriteDeadline(deadline)
 	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
 	r = r.WithContext(ctx)
+	w = &artifactWriter{ResponseWriter: w, controller: controller, deadline: deadline}
+	if receipt.Chunks != "" {
+		h.serveChunked(w, r, file, from, to, ranged)
+		return
+	}
 	var source *http.Response
 	if h.Download != nil {
 		source, err = h.Download(r, receipt.Key)
@@ -515,12 +538,12 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 	}
 	defer source.Body.Close()
 	// A declared length that disagrees with the receipt fails before any byte is sent.
-	if source.StatusCode != 200 || (source.ContentLength > 0 && source.ContentLength != receipt.Size) {
+	if source.StatusCode != 200 || source.ContentLength != receipt.Size {
 		h.writeError(w, 503, "artifact_integrity_failed")
 		return
 	}
 	if receipt.Size > bufferedArtifactLimit {
-		streamArtifact(w, source.Body, receipt)
+		streamArtifact(w, source.Body, file)
 		return
 	}
 	// Reverify immutable receipt before emitting even one byte to the customer.
@@ -530,8 +553,151 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 		h.writeError(w, 503, "artifact_integrity_failed")
 		return
 	}
-	writeArtifactHeaders(w, receipt.Size)
+	writeArtifactHeaders(w, file, 200, 0, receipt.Size-1)
 	_, _ = w.Write(raw)
+}
+
+// Both idle writers and the total size-based budget release download slots.
+type artifactWriter struct {
+	http.ResponseWriter
+	controller *http.ResponseController
+	deadline   time.Time
+}
+
+func (w *artifactWriter) Write(p []byte) (int, error) {
+	deadline := time.Now().Add(60 * time.Second)
+	if w.deadline.Before(deadline) {
+		deadline = w.deadline
+	}
+	_ = w.controller.SetWriteDeadline(deadline)
+	return w.ResponseWriter.Write(p)
+}
+
+type artifactFile struct {
+	name    string
+	receipt ownedartifact.Receipt
+}
+
+// artifactRange reads a single "bytes=" range. Only files with chunk digests
+// serve ranges; anything else (no header, several ranges, If-Range, a
+// malformed value) is the whole file, as HTTP allows. satisfiable is false
+// only for a well-formed range that starts beyond the end of the file.
+func artifactRange(r *http.Request, receipt ownedartifact.Receipt) (from, to int64, ranged, satisfiable bool) {
+	size := receipt.Size
+	whole := func() (int64, int64, bool, bool) { return 0, size - 1, false, true }
+	header := strings.TrimSpace(r.Header.Get("Range"))
+	if receipt.Chunks == "" || size <= 0 || header == "" || r.Header.Get("If-Range") != "" {
+		return whole()
+	}
+	spec, ok := strings.CutPrefix(header, "bytes=")
+	if !ok || strings.Contains(spec, ",") {
+		return whole()
+	}
+	first, last, ok := strings.Cut(strings.TrimSpace(spec), "-")
+	if !ok {
+		return whole()
+	}
+	number := func(text string) (int64, bool) {
+		if text == "" || len(text) > 18 || strings.Trim(text, "0123456789") != "" {
+			return 0, false
+		}
+		value, err := strconv.ParseInt(text, 10, 64)
+		return value, err == nil
+	}
+	if first == "" {
+		suffix, ok := number(last)
+		if !ok {
+			return whole()
+		}
+		if suffix == 0 {
+			return 0, 0, true, false
+		}
+		return max(size-suffix, 0), size - 1, true, true
+	}
+	from, ok = number(first)
+	if !ok {
+		return whole()
+	}
+	to = size - 1
+	if last != "" {
+		if to, ok = number(last); !ok || to < from {
+			return whole()
+		}
+		to = min(to, size-1)
+	}
+	if from >= size {
+		return 0, 0, true, false
+	}
+	return from, to, true, true
+}
+
+// serveChunked streams bytes from..to, reading whole chunks from storage and
+// writing only bytes of a chunk whose digest matches the receipt. The first
+// chunk is checked before the headers, so a corrupted file answers 503; a
+// later mismatch ends the response short of its Content-Length.
+func (h *HTTP) serveChunked(w http.ResponseWriter, r *http.Request, file artifactFile, from, to int64, ranged bool) {
+	receipt := file.receipt
+	firstChunk, lastChunk := from/ownedartifact.ChunkSize, to/ownedartifact.ChunkSize
+	start, end := firstChunk*ownedartifact.ChunkSize, min((lastChunk+1)*ownedartifact.ChunkSize, receipt.Size)-1
+	var source *http.Response
+	var err error
+	switch {
+	case start == 0 && end == receipt.Size-1 && h.Download != nil:
+		source, err = h.Download(r, receipt.Key)
+	case start == 0 && end == receipt.Size-1:
+		source, err = ownedartifact.Download(r.Context(), receipt.Key)
+	case h.DownloadRange != nil:
+		source, err = h.DownloadRange(r, receipt.Key, start, end)
+	default:
+		source, err = ownedartifact.DownloadRange(r.Context(), receipt.Key, start, end)
+	}
+	if err != nil || source == nil || source.Body == nil {
+		h.writeError(w, 503, "artifact_unavailable")
+		return
+	}
+	defer source.Body.Close()
+	validHeaders := source.ContentLength == end-start+1
+	if start == 0 && end == receipt.Size-1 {
+		validHeaders = validHeaders && source.StatusCode == 200
+	} else {
+		validHeaders = validHeaders && source.StatusCode == 206 && source.Header.Get("Content-Range") == fmt.Sprintf("bytes %d-%d/%d", start, end, receipt.Size)
+	}
+	if !validHeaders {
+		h.writeError(w, 503, "artifact_integrity_failed")
+		return
+	}
+	pooled := chunkBuffers.Get().(*[]byte)
+	defer chunkBuffers.Put(pooled)
+	buffer := *pooled
+	status := 200
+	if ranged {
+		status = 206
+	}
+	for chunk := firstChunk; chunk <= lastChunk; chunk++ {
+		chunkStart := chunk * ownedartifact.ChunkSize
+		chunkEnd := min(chunkStart+ownedartifact.ChunkSize, receipt.Size)
+		piece := buffer[:chunkEnd-chunkStart]
+		_, readErr := io.ReadFull(source.Body, piece)
+		sum := sha256.Sum256(piece)
+		verified := readErr == nil && hex.EncodeToString(sum[:]) == receipt.Chunks[chunk*64:(chunk+1)*64]
+		if chunk == lastChunk && verified {
+			var extra [1]byte
+			n, err := source.Body.Read(extra[:])
+			verified = n == 0 && err == io.EOF
+		}
+		if chunk == firstChunk {
+			if !verified {
+				h.writeError(w, 503, "artifact_integrity_failed")
+				return
+			}
+			writeArtifactHeaders(w, file, status, from, to)
+		} else if !verified {
+			return
+		}
+		if _, err := w.Write(piece[max(from, chunkStart)-chunkStart : min(to+1, chunkEnd)-chunkStart]); err != nil {
+			return
+		}
+	}
 }
 
 // artifactTransferTime allows 30 seconds plus one second per 128 KiB, so a
@@ -540,22 +706,32 @@ var artifactTransferTime = func(size int64) time.Duration {
 	return 30*time.Second + time.Duration(size/(128<<10))*time.Second
 }
 
-func writeArtifactHeaders(w http.ResponseWriter, size int64) {
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="artifact.bin"`)
+// writeArtifactHeaders names the file after the task and gives it the type
+// read from its bytes when it was archived. Every file stays a download in a
+// sandbox: only the media types ownedartifact recognises are ever named.
+func writeArtifactHeaders(w http.ResponseWriter, file artifactFile, status int, from, to int64) {
+	w.Header().Set("Content-Type", ownedartifact.ContentType(file.receipt.Type))
+	w.Header().Set("Content-Disposition", `attachment; filename="`+file.name+`"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("Cache-Control", "private, no-store")
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-	w.WriteHeader(200)
+	if file.receipt.Chunks != "" {
+		w.Header().Set("Accept-Ranges", "bytes")
+	}
+	if status == 206 {
+		w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(from, 10)+"-"+strconv.FormatInt(to, 10)+"/"+strconv.FormatInt(file.receipt.Size, 10))
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(to-from+1, 10))
+	w.WriteHeader(status)
 }
 
 // streamArtifact keeps memory bounded for large artifacts. The last
 // artifactTailHoldback bytes are written only after the size and digest match,
 // so a corrupted object is never delivered complete: the response falls short
 // of its Content-Length and the server drops the connection.
-func streamArtifact(w http.ResponseWriter, body io.Reader, receipt ownedartifact.Receipt) {
-	writeArtifactHeaders(w, receipt.Size)
+func streamArtifact(w http.ResponseWriter, body io.Reader, file artifactFile) {
+	receipt := file.receipt
+	writeArtifactHeaders(w, file, 200, 0, receipt.Size-1)
 	digest := sha256.New()
 	reader := io.LimitReader(body, receipt.Size+1)
 	held := make([]byte, 0, artifactTailHoldback+32<<10)

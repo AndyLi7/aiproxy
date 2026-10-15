@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/common/ownedartifact"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"net/url"
 	"strconv"
@@ -47,7 +48,7 @@ func SaveNativeArtifact(db *gorm.DB, id, group string, token, index int, receipt
 	if err != nil {
 		return err
 	}
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND artifact_manifest = ?", id, group, token, "result_received", task.ArtifactManifest).Updates(map[string]any{"artifact_manifest": string(raw), "updated_at": time.Now()})
+	r := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND artifact_manifest = ?", id, group, token, "result_received", task.ArtifactManifest).Updates(map[string]any{"artifact_manifest": string(raw), "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}
@@ -82,7 +83,7 @@ func PrepareNativeDelivery(db *gorm.DB, id, group string, token int) error {
 	if len(entries) != len(artifacts) {
 		return ErrNativeTaskConflict
 	}
-	replacements := map[string]string{}
+	replacements := map[string]nativeresult.OwnedFile{}
 	if len(artifacts) > 0 {
 		u, err := url.Parse(task.DeliveryBase)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -93,20 +94,38 @@ func PrepareNativeDelivery(db *gorm.DB, id, group string, token int) error {
 		if !ownedartifact.ValidReceipt(id, index, entries[index]) {
 			return ErrNativeTaskConflict
 		}
-		replacements[artifact.Pointer] = strings.TrimRight(task.DeliveryBase, "/") + "/v1/model-tasks/" + url.PathEscape(id) + "/artifacts/" + strconv.Itoa(index)
-	}
-	output, err := nativeresult.RewriteArtifacts([]byte(task.NativeOutput), contract.Artifacts, replacements)
-	if err != nil {
-		return err
+		receipt := entries[index]
+		replacements[artifact.Pointer] = nativeresult.OwnedFile{
+			URL:         strings.TrimRight(task.DeliveryBase, "/") + "/v1/model-tasks/" + url.PathEscape(id) + "/artifacts/" + strconv.Itoa(index),
+			FileName:    ownedartifact.FileName(id, index, receipt.Type),
+			ContentType: ownedartifact.ContentType(receipt.Type),
+		}
 	}
 	validator, err := nativeresult.Compile(contract.OutputSchema)
 	if err != nil {
 		return err
 	}
-	if _, err = validator.Validate(output); err != nil {
+	// A provider address outside the declared files is removed; when the
+	// output schema requires that member, it is kept as an empty string.
+	var output []byte
+	var removed int
+	for _, mode := range []nativeresult.UnboundURLs{nativeresult.RemoveUnboundURLs, nativeresult.BlankUnboundURLs} {
+		output, removed, err = nativeresult.DeliverArtifacts([]byte(task.NativeOutput), contract.Artifacts, replacements, mode)
+		if err != nil {
+			return err
+		}
+		if _, err = validator.Validate(output); err == nil || removed == 0 {
+			break
+		}
+	}
+	if err != nil {
 		return err
 	}
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND artifact_manifest = ?", id, group, token, "result_received", task.ArtifactManifest).Updates(map[string]any{"delivered_output": string(output), "status": "delivery_ready", "updated_at": time.Now()})
+	if removed > 0 {
+		log.WithFields(log.Fields{"lane": "native", "task_id": id, "group": group, "model": task.Model, "removed": removed}).
+			Warn("native result carried provider addresses outside its declared files; removed before delivery")
+	}
+	r := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND artifact_manifest = ?", id, group, token, "result_received", task.ArtifactManifest).Updates(map[string]any{"delivered_output": string(output), "status": "delivery_ready", "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}
@@ -116,7 +135,7 @@ func PrepareNativeDelivery(db *gorm.DB, id, group string, token int) error {
 	return nil
 }
 func CompleteNativeTask(db *gorm.DB, id, group string, token int) error {
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, "delivery_ready").Updates(map[string]any{"status": "completed", "updated_at": time.Now()})
+	r := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, "delivery_ready").Updates(map[string]any{"status": "completed", "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}

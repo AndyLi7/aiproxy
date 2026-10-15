@@ -383,7 +383,7 @@ func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code strin
 	if err != nil {
 		return err
 	}
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).Updates(map[string]any{"status": "failed", "error_code": code, "public_error": detail, "updated_at": time.Now()})
+	r := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).Updates(map[string]any{"status": "failed", "error_code": code, "public_error": detail, "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}

@@ -103,7 +103,7 @@ func TestNativeLifecycleProtocolRestartAndOwnedDownload(t *testing.T) {
 			}, Archive: archive,
 				Download: func(_ *http.Request, key string) (*http.Response, error) {
 					data, err := os.ReadFile(filepath.Join(root, key))
-					return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(data))}, err
+					return &http.Response{StatusCode: 200, ContentLength: int64(len(data)), Body: io.NopCloser(bytes.NewReader(data))}, err
 				}}
 			submit := func() *httptest.ResponseRecorder {
 				r := httptest.NewRequest("POST", "/v1/model-tasks", bytes.NewReader(body))

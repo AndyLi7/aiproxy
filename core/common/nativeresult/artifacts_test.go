@@ -34,3 +34,44 @@ func TestNativeArtifactsRejectAmbiguousBindingsAndUnsafeSchemes(t *testing.T) {
 		t.Fatal("duplicate binding")
 	}
 }
+
+func TestDeliverArtifactsNamesFilesAndRemovesProviderAddresses(t *testing.T) {
+	raw := []byte(`{"images":[{"url":"https://fal.media/a.png","file_name":"tmp1.png","content_type":"image/png","width":1}],` +
+		`"debug":{"source":"http://fal.run/x","note":"see docs"},"extra_urls":["https://fal.media/b","data:image/png;base64,AAAA"],"inline":"data:text/plain,hi","seed":12345678901234567890}`)
+	bindings := []ArtifactBinding{{Path: []string{"images", "*", "url"}}}
+	owned := map[string]OwnedFile{"/images/0/url": {URL: "https://gw.example/v1/model-tasks/t/artifacts/0", FileName: "t.png", ContentType: "image/png"}}
+	removed, err := func() (int, error) {
+		out, n, err := DeliverArtifacts(raw, bindings, owned, RemoveUnboundURLs)
+		if err != nil {
+			return 0, err
+		}
+		text := string(out)
+		if strings.Contains(text, "fal.") || !strings.Contains(text, `"file_name":"t.png"`) || !strings.Contains(text, `"data:image/png;base64,AAAA"`) ||
+			!strings.Contains(text, `"inline":"data:text/plain,hi"`) || !strings.Contains(text, `"note":"see docs"`) || strings.Contains(text, `"source"`) ||
+			!strings.Contains(text, `12345678901234567890`) {
+			t.Fatalf("unexpected delivery %s", text)
+		}
+		return n, nil
+	}()
+	if err != nil || removed != 2 {
+		t.Fatalf("removed %d, %v", removed, err)
+	}
+	blank, n, err := DeliverArtifacts(raw, bindings, owned, BlankUnboundURLs)
+	if err != nil || n != 2 || !strings.Contains(string(blank), `"source":""`) || !strings.Contains(string(blank), `"extra_urls":["","data:image/png;base64,AAAA"]`) {
+		t.Fatalf("blank %s %d %v", blank, n, err)
+	}
+	// RewriteArtifacts keeps its contract: only declared leaves change.
+	plain, err := RewriteArtifacts(raw, bindings, map[string]string{"/images/0/url": "https://gw.example/v1/model-tasks/t/artifacts/0"})
+	if err != nil || !strings.Contains(string(plain), "http://fal.run/x") || !strings.Contains(string(plain), `"file_name":"tmp1.png"`) {
+		t.Fatalf("rewrite %s %v", plain, err)
+	}
+}
+
+func TestDeliveryRemovesEmbeddedAndKeyURLsAndRootURLs(t *testing.T) {
+	for _, raw := range []string{`{"caption":"see HTTPS://fal.media/private?signature=secret", "https://fal.run/key":"value"}`, `" https://fal.media/root"`} {
+		out, count, err := DeliverArtifacts([]byte(raw), nil, map[string]OwnedFile{}, BlankUnboundURLs)
+		if err != nil || count == 0 || strings.Contains(strings.ToLower(string(out)), "http") || strings.Contains(string(out), "secret") {
+			t.Fatalf("unsafe delivery %s %d %v", out, count, err)
+		}
+	}
+}

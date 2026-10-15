@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -48,6 +49,30 @@ func ReleaseNativeRecovery(db *gorm.DB, id, owner string, next time.Time) error 
 		return result.Error
 	}
 	if result.RowsAffected != 1 {
+		return ErrNativeTaskConflict
+	}
+	return nil
+}
+
+// ExtendNativeRecovery moves a held recovery lease's end later, for work that
+// outlasts the claim (a large file being archived). It never shortens a lease
+// or takes one held by another owner.
+func ExtendNativeRecovery(db *gorm.DB, id, owner string, until time.Time) error {
+	if owner == "" {
+		return ErrNativeTaskConflict
+	}
+	result := db.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ? AND recovery_until > ? AND recovery_until < ?", id, owner, time.Now().Unix(), until.Unix()).Update("recovery_until", until.Unix())
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	var held int64
+	if err := db.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ? AND recovery_until > ?", id, owner, time.Now().Unix()).Count(&held).Error; err != nil {
+		return err
+	}
+	if held == 0 {
 		return ErrNativeTaskConflict
 	}
 	return nil
@@ -112,4 +137,39 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 		}
 		return syncNativeTaskLog(tx, id, group, token, receipt, locked, tokenName)
 	})
+}
+
+// WithNativeRecoveryOwner fences delivery mutations with the live lease token.
+type nativeRecoveryOwnerKey struct{}
+
+func WithNativeRecoveryOwner(ctx context.Context, owner string) context.Context {
+	return context.WithValue(ctx, nativeRecoveryOwnerKey{}, owner)
+}
+func nativeRecoveryFence(db *gorm.DB) *gorm.DB {
+	if owner, ok := db.Statement.Context.Value(nativeRecoveryOwnerKey{}).(string); ok {
+		return db.Where("recovery_owner = ? AND recovery_until > ?", owner, time.Now().Unix())
+	}
+	return db
+}
+func CheckNativeRecovery(db *gorm.DB, id string) error {
+	var count int64
+	if err := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ?", id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrNativeTaskConflict
+	}
+	return nil
+}
+
+// ClaimNativeDelivery covers direct delivery too, sharing recovery's durable lease.
+func ClaimNativeDelivery(db *gorm.DB, id, group string, token int, owner string, until time.Time) error {
+	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND recovery_until <= ? AND status IN ?", id, group, token, time.Now().Unix(), []string{"result_received", "delivery_ready"}).Updates(map[string]any{"recovery_owner": owner, "recovery_until": until.Unix()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrNativeTaskConflict
+	}
+	return nil
 }

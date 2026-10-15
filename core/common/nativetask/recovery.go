@@ -376,8 +376,19 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			workErr = e.recoverQueued(ctx, &task, current)
 		} else {
 			workCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			workCtx = context.WithValue(workCtx, deliveryLeaseKey{}, deliveryLease{owner: owner, parent: ctx})
 			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
 			cancel()
+		}
+		if ctx.Err() != nil {
+			return report, ctx.Err()
+		}
+		// A worker that lost its lease during I/O cannot run the failure
+		// backstop or billing recovery against its replacement's work.
+		fenced := e.DB.WithContext(model.WithNativeRecoveryOwner(ctx, owner))
+		if err := model.CheckNativeRecovery(fenced, task.ID); err != nil {
+			report.Deferred++
+			continue
 		}
 		// Decide on the row as this poll left it, never on the claimed snapshot:
 		// the poll may have saved a result, which must not be expired.
@@ -400,7 +411,7 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		case workErr != nil && age > NativeTaskDeadline && fresh.Status == "result_received":
 			// Backstop: a received result still undeliverable after the long
 			// deadline is ended and refunded instead of retried forever.
-			if model.FailAcceptedNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
+			if model.FailAcceptedNativeTask(fenced, task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
 				if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
 					workErr = e.SyncBilling(ctx, failed)
 				}

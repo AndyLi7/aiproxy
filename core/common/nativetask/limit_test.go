@@ -89,23 +89,24 @@ func TestLargeArtifactsStreamAndNeverDeliverACorruptedTail(t *testing.T) {
 	data := bytes.Repeat([]byte("0123456789abcdef"), (bufferedArtifactLimit/16)+4096)
 	sum := sha256.Sum256(data)
 	receipt := ownedartifact.Receipt{Key: "k", Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
+	file := artifactFile{name: "task.bin", receipt: receipt}
 
 	ok := httptest.NewRecorder()
-	streamArtifact(ok, bytes.NewReader(data), receipt)
+	streamArtifact(ok, bytes.NewReader(data), file)
 	require.Equal(t, 200, ok.Code)
 	require.Equal(t, data, ok.Body.Bytes())
 
 	corrupted := append([]byte(nil), data...)
 	corrupted[len(corrupted)/2] ^= 0xff
 	bad := httptest.NewRecorder()
-	streamArtifact(bad, bytes.NewReader(corrupted), receipt)
+	streamArtifact(bad, bytes.NewReader(corrupted), file)
 	// The declared length is never reached, so the client sees a failed transfer.
 	require.Equal(t, receipt.Size, mustParseLength(t, bad.Header().Get("Content-Length")))
 	require.Less(t, int64(bad.Body.Len()), receipt.Size)
 	require.Equal(t, int64(len(data)-artifactTailHoldback), int64(bad.Body.Len()))
 
 	short := httptest.NewRecorder()
-	streamArtifact(short, bytes.NewReader(data[:len(data)-1]), receipt)
+	streamArtifact(short, bytes.NewReader(data[:len(data)-1]), file)
 	require.Less(t, int64(short.Body.Len()), receipt.Size-1)
 }
 

@@ -30,6 +30,13 @@ func TestStreamingDownloadRehearsal(t *testing.T) {
 		t.Skip("requires isolated streaming rehearsal fixtures")
 	}
 	require.True(t, strings.HasPrefix(app, "http://127.0.0.1:"))
+	// Archive/download use the actual Nitro HTTP listener; the browser relay
+	// fixture is a separate loopback service, never an upload proxy.
+	relay := os.Getenv("NATIVE_ARTIFACT_RELAY_URL")
+	if relay == "" {
+		relay = app
+	}
+	require.True(t, strings.HasPrefix(relay, "http://127.0.0.1:"))
 	t.Setenv("EXTERNAL_BALANCE_URL", app)
 	t.Setenv("EXTERNAL_BALANCE_KEY", "local-native-test-only")
 	raw, err := os.ReadFile(filepath.Join(root, "receipt.json"))
@@ -58,7 +65,7 @@ func TestStreamingDownloadRehearsal(t *testing.T) {
 	finishMemory := rehearsalHeapPeak()
 	t.Cleanup(func() { finishMemory() })
 	// Read both the public gateway and the application's browser relay in full.
-	for _, endpoint := range []string{server.URL, app + "/relay?target=" + url.QueryEscape(server.URL)} {
+	for _, endpoint := range []string{server.URL, relay + "/relay?target=" + url.QueryEscape(server.URL)} {
 		response, err := http.Get(endpoint)
 		require.NoError(t, err)
 		require.Equal(t, 200, response.StatusCode)

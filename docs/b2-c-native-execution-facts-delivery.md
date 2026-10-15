@@ -38,7 +38,7 @@ B 的真实长转存 / delivery lease 调用链尚未合并，本批仅验证 A 
 - `b2-c-native-execution-regression.jsonl`：5 包 race 131 根 / 438 项，0 fail；其中 1 个 real_wallet_prepaid 子项因未启动真实应用钱包 fixture 跳过，437 项 pass。
 - `b2-c-native-execution-native-regression.jsonl`：整个 nativetask 包 race，152 根 / 262 项，0 fail；147 根 / 257 项 pass，5 个依赖外部配置的根测试 skip。显式排除会自行启动 Docker 的 postgres 子测试，本轮 PostgreSQL 用下述隔离测试单独验证。
 - 上述 5 个跳过项为 NativeCorpusExecution、NativeCrossServiceArchiveRecovery、NativeRealWalletSettlementAndReplay、NativeRealWalletRejectedSubmissionRefund、NativeRealWalletLostBeginAttemptReplyRefundsWithoutPause。未运行付费供应商、真实 bucket 或真实钱包联调；主控对父提交的真实钱包证据不冒充本批重跑。
-- `b2-c-native-execution-postgres.jsonl`：真实 PostgreSQL16 race 4 根 / 15 项，0 fail / skip；包括开始 / 返回等待任务锁时 owner 变化、自然过期、同 token 延期，并发 Poll 独立记录，同秒释放重领，以及延期等待锁后不能复活失效或被接管租约。
+- `b2-c-native-execution-postgres.jsonl`：真实 PostgreSQL16 4 根 / 15 项，0 fail / skip；包括开始 / 返回等待任务锁时 owner 变化、自然过期、同 token 延期，并发 Poll 独立记录，同秒释放重领，以及延期等待锁后不能复活失效或被接管租约。
 - `b2-c-native-execution-extension-final.jsonl`：最终增加同目标重放及较小目标不缩短断言后，race 2 根 / 2 项，0 fail / skip。
 - `b2-c-native-execution-pg-state.json`：exit 0，自建容器 / 网络均 0。仅使用已缓存 PostgreSQL16 镜像和新建临时隔离资源，没有接触已有数据库。
 - `b2-c-native-execution-build.log`：go -C core build ./... exit 0。最后只补充测试断言，没有再改应用代码。
@@ -49,3 +49,8 @@ B 的真实长转存 / delivery lease 调用链尚未合并，本批仅验证 A 
 ## 仍未完成
 
 全入口持久移交与执行者退出、业务终态 / 账单 / 执行者联合关闭、三十分钟起点和安全停用；真实 disabled shadow / 受限 probe / SealPrepared、family+revision enable/pin CAS；应用 prepare/live 历史共享 key 取证、adapter / API / UI / drain / revert。真实 issuer、持续全副本围栏及独立恢复水位仍未证明，生产 C 不可据此激活。未进入 publication B，未 push / merge / deploy。
+
+
+## NATIVE-EXEC-R1 更正
+
+本提交原方案依赖当前 deployment 源的行为被主控复现为兼容回归，5329779 不视为已验收。修复方案与最新验证见 [R1 交付](b2-c-native-execution-r1-delivery.md)。此前本页 PostgreSQL 一项误标为 race：原 harness 没有传 -race，已纠正；R1 harness 显式传 -race 并重新通过。

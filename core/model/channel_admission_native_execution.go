@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -172,7 +173,21 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 	} else if len(recoveryUntil) > 1 || (len(recoveryUntil) == 1 && recoveryUntil[0] != 0) {
 		return nil, ErrNativeTaskConflict
 	}
-	proof, proofErr := store.deployment(ctx)
+	// An existing invocation is durable identity evidence for this frozen
+	// use, not a fresh deployment/admission grant. Avoid loading the source
+	// at all when an exact local executor already has recorded evidence.
+	var priorCount int64
+	e = db.WithContext(ctx).Model(&ChannelAdmissionTaskExecution{}).
+		Where("use_id IN (?)", db.Model(&ChannelAdmissionUse{}).Select("id").Where("resource_key = ? AND state = ?", nativeAdmissionResource(task.ID, task.GroupID, task.TokenID), "open")).
+		Where("service_id = ? AND instance_id = ? AND build_sha = ? AND epoch = ?", store.Executor.ServiceID, store.Executor.InstanceID, store.Executor.BuildSHA, store.Executor.Epoch).Count(&priorCount).Error
+	if e != nil {
+		return nil, e
+	}
+	var proof VerifiedDeploymentProof
+	proofErr := ErrChannelAdmissionUnavailable
+	if priorCount == 0 {
+		proof, proofErr = store.deployment(ctx)
+	}
 	nonce, e := newAdmissionGeneration()
 	if e != nil {
 		return nil, e
@@ -215,26 +230,10 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		if e = tx.First(&use, "id = ?", generation).Error; e != nil {
 			return e
 		}
-		if proofErr != nil {
-			return proofErr
-		}
-		if proof.StorageGeneration != c.StorageGeneration || proof.Epoch != c.Epoch || proof.Sequence != c.EpochSequence || proof.MembershipHash != c.MembershipHash || proof.ExecutorFenceHash != c.ExecutorFenceHash || proof.ProofID != c.ActiveProofID || proof.StorageWatermark < 0 || c.Revision < proof.StorageWatermark {
-			return ErrChannelAdmissionUnavailable
-		}
-		membership, _ := admissionHash(proof.Executors)
-		member := false
-		for _, candidate := range proof.Executors {
-			if candidate == store.Executor {
-				member = true
-			}
-		}
-		if membership != c.MembershipHash || !member {
-			return ErrChannelAdmissionUnavailable
-		}
 		if _, e = storedAdmissionIdentity(tx, ChannelIdentity{ChannelID: use.ChannelID, KeyDigest: use.KeyDigest, IdentityHash: use.IdentityHash}); e != nil {
 			return e
 		}
-		if store.Executor.ServiceID == "" || store.Executor.InstanceID == "" || !fullIdentityDigest(store.Executor.BuildSHA) || store.Executor.Epoch != c.Epoch {
+		if store.Executor.ServiceID == "" || len(store.Executor.ServiceID) > 128 || store.Executor.InstanceID == "" || len(store.Executor.InstanceID) > 128 || !fullIdentityDigest(store.Executor.BuildSHA) || store.Executor.Epoch != c.Epoch {
 			return ErrChannelAdmissionUnavailable
 		}
 		now, e := channelAdmissionTime(tx)
@@ -260,12 +259,27 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		if e = nativeExecutionLease(tx, current, &row); e != nil {
 			return e
 		}
+		binding, e := frozenNativeExecutionBinding(tx, c, &use, current, store.Executor, proof, proofErr)
+		if e != nil {
+			return e
+		}
+		if binding == "" {
+			// No prior coverage and no snapshot: preserve the accepted frozen
+			// business path, without inventing an executor grant or history.
+			// The durable open use is retained and cannot prove drain/closure.
+			return nativeExecutionLease(tx, current, &row)
+		}
 		row.AuthorizationHash = nativeExecutionAuthorization(row, nonce)
 		if e = tx.Create(&row).Error; e != nil {
 			return e
 		}
 		if e = nativeExecutionLease(tx, current, &row); e != nil {
 			return e
+		}
+		if binding == "snapshot" {
+			if e = finalizeAdmissionProof(tx, c, proof, c.Revision); e != nil {
+				return e
+			}
 		}
 		handle = &NativeTaskExecutionHandle{store: store, id: id, nonce: nonce, taskID: task.ID, group: task.GroupID, token: task.TokenID}
 		return nil
@@ -349,4 +363,57 @@ func (h *NativeTaskExecutionHandle) RecordReturn(ctx context.Context, failed boo
 		}
 		return nativeExecutionLease(tx, task, &row)
 	})
+}
+
+// frozenNativeExecutionBinding reuses only durable facts for this exact use.
+// It does not renew a proof, admit work, or certify any continuation finished.
+// A process restart may reuse DB facts with the same server-owned executor;
+// a different executor needs a matching trusted snapshot. Storage drift never
+// falls back to uncovered work once an original execution fact exists.
+func frozenNativeExecutionBinding(tx *gorm.DB, c *ChannelAdmissionControl, use *ChannelAdmissionUse, task *NativeTask, executor ChannelExecutorIdentity, proof VerifiedDeploymentProof, proofErr error) (string, error) {
+	var rows []ChannelAdmissionTaskExecution
+	if err := tx.Where("use_id = ?", use.ID).Find(&rows).Error; err != nil {
+		return "", err
+	}
+	bound := false
+	for _, row := range rows {
+		if row.Version != 1 || row.UseHash != executionUseHash(use) || row.TaskHash != nativeExecutionTaskHash(task) || row.StorageGeneration != c.StorageGeneration || row.Epoch != c.Epoch || row.ContinuationState != "unproven" || row.StartedAtMs <= 0 || !fullIdentityDigest(row.AuthorizationHash) {
+			return "", ErrChannelAdmissionConflict
+		}
+		switch NativeExecutionKind(row.Kind) {
+		case NativeExecutionSubmit, NativeExecutionDispatch, NativeExecutionPoll, NativeExecutionBilling, NativeExecutionDelivery:
+		default:
+			return "", ErrChannelAdmissionConflict
+		}
+		if (row.State == "active" && row.ReturnedAtMs != 0) || ((row.State == "returned" || row.State == "error_returned") && row.ReturnedAtMs < row.StartedAtMs) || (row.State != "active" && row.State != "returned" && row.State != "error_returned") {
+			return "", ErrChannelAdmissionConflict
+		}
+		if row.ServiceID == executor.ServiceID && row.InstanceID == executor.InstanceID && row.BuildSHA == executor.BuildSHA {
+			bound = true
+		}
+	}
+	if bound {
+		return "durable", nil
+	}
+	// A known local rejection is not an outage. Without an anchor do not
+	// turn an explicitly revoked/missing/corrupt proof record into fallback.
+	var stored ChannelAdmissionProof
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&stored, "id = ?", c.ActiveProofID).Error; err != nil {
+		return "", err
+	}
+	if stored.Revoked || stored.ConsumedSequence != c.EpochSequence || !fullIdentityDigest(stored.FactHash) {
+		return "", ErrChannelAdmissionUnavailable
+	}
+	if proofErr != nil {
+		hash, _ := proof.Fingerprint()
+		emptyHash, _ := (VerifiedDeploymentProof{}).Fingerprint()
+		if hash != emptyHash || errors.Is(proofErr, ErrChannelAdmissionConflict) || errors.Is(proofErr, ErrChannelAdmissionSealed) || len(rows) != 0 {
+			return "", ErrChannelAdmissionUnavailable
+		}
+		return "", nil
+	}
+	if _, err := lockDeploymentProof(tx, c, proof, executor); err != nil {
+		return "", err
+	}
+	return "snapshot", nil
 }

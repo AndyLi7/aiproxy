@@ -44,6 +44,11 @@ func (p VerifiedDeploymentProof) Fingerprint() (string, error) { return admissio
 // outside every database transaction/lock. The future trusted refresh adapter
 // fetches external evidence independently, never once per admission. Transactions
 // lock the local proof row and recheck time/version before the final CAS.
+// A zero snapshot plus an ordinary source error means unavailable. A trusted
+// adapter must report an explicit verification rejection as
+// ErrChannelAdmissionConflict (or return its nonzero rejected snapshot with
+// the error), so frozen-work compatibility cannot mistake it for an outage.
+// New admission/Seal always reject every source error regardless of class.
 type ChannelAdmissionStore struct {
 	DB             *gorm.DB
 	LogDB          *gorm.DB

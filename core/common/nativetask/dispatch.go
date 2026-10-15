@@ -261,13 +261,22 @@ func (e *Engine) DispatchRound(ctx context.Context, running *sync.WaitGroup) {
 				}
 				break
 			}
+			handoff, prepareErr := model.PrepareNativeDispatchHandoff(ctx, e.DB, task)
+			if prepareErr != nil {
+				log.WithFields(log.Fields{"lane": "native", "task_id": task.ID}).Warn("native dispatch handoff not persisted; retained for existing recovery")
+				break
+			}
 			running.Add(1)
-			go func(task *model.NativeTask) {
+			go func(task *model.NativeTask, handoff *model.NativeDispatchHandoffHandle) {
 				defer running.Done()
+				if handoff != nil {
+					e.superviseDispatchHandoff(ctx, task, handoff)
+					return
+				}
 				dispatchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), submitTimeout)
 				defer cancel()
 				_, _ = e.dispatchClaimed(dispatchCtx, task, nil)
-			}(task)
+			}(task, handoff)
 		}
 	}
 }

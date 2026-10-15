@@ -149,6 +149,10 @@ func nativeExecutionLease(tx *gorm.DB, t *NativeTask, row *ChannelAdmissionTaskE
 // claim token stays fixed during protected monotonic lease extension. A fresh
 // claim always gets a new token, including same-worker/same-second reacquisition.
 func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask, kind NativeExecutionKind, recoveryOwner string, recoveryUntil ...int64) (*NativeTaskExecutionHandle, error) {
+	return beginNativeTaskExecution(ctx, db, task, kind, recoveryOwner, nil, nil, recoveryUntil...)
+}
+
+func beginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask, kind NativeExecutionKind, recoveryOwner string, onValidate func(*gorm.DB) error, onCreate func(*gorm.DB, *ChannelAdmissionControl, *ChannelAdmissionTaskExecution, string) error, recoveryUntil ...int64) (*NativeTaskExecutionHandle, error) {
 	if task == nil {
 		return nil, ErrNativeTaskConflict
 	}
@@ -204,6 +208,11 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		}
 		if !present {
 			return ErrChannelAdmissionUnavailable
+		}
+		if onValidate != nil {
+			if e = onValidate(tx); e != nil {
+				return e
+			}
 		}
 		inactive, e := channelAdmissionNeverActivated(tx, c)
 		if e != nil || inactive {
@@ -278,6 +287,11 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		if e = tx.Create(&row).Error; e != nil {
 			return e
 		}
+		if onCreate != nil {
+			if e = onCreate(tx, c, &row, nonce); e != nil {
+				return e
+			}
+		}
 		if e = nativeExecutionLease(tx, current, &row); e != nil {
 			return e
 		}
@@ -306,6 +320,35 @@ func (h *NativeTaskExecutionHandle) RecordReturn(ctx context.Context, failed boo
 	state := "returned"
 	if failed {
 		state = "error_returned"
+	}
+	return h.withExecution(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl, task *NativeTask, row *ChannelAdmissionTaskExecution) error {
+		if row.State == state && row.ReturnedAtMs >= row.StartedAtMs {
+			return nil
+		}
+		if row.State != "active" || row.ReturnedAtMs != 0 {
+			return ErrNativeTaskConflict
+		}
+		now, e := channelAdmissionTime(tx)
+		if e != nil {
+			return e
+		}
+		if now.UnixMilli() < row.StartedAtMs {
+			return ErrNativeTaskConflict
+		}
+		result := tx.Model(&ChannelAdmissionTaskExecution{}).Where("id = ? AND state = ? AND returned_at_ms = ? AND authorization_hash = ?", row.ID, "active", 0, row.AuthorizationHash).Updates(map[string]any{"state": state, "returned_at_ms": now.UnixMilli()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrNativeTaskConflict
+		}
+		return nativeExecutionLease(tx, task, row)
+	})
+}
+
+func (h *NativeTaskExecutionHandle) withExecution(ctx context.Context, work func(*gorm.DB, *ChannelAdmissionControl, *NativeTask, *ChannelAdmissionTaskExecution) error) error {
+	if h == nil || h.store == nil || h.id == "" || h.nonce == "" {
+		return ErrNativeTaskConflict
 	}
 	return h.store.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		present, e := nativeExecutionStoragePresent(tx)
@@ -349,27 +392,7 @@ func (h *NativeTaskExecutionHandle) RecordReturn(ctx context.Context, failed boo
 		if e = nativeExecutionLease(tx, task, &row); e != nil {
 			return e
 		}
-		if row.State == state && row.ReturnedAtMs >= row.StartedAtMs {
-			return nil
-		}
-		if row.State != "active" || row.ReturnedAtMs != 0 {
-			return ErrNativeTaskConflict
-		}
-		now, e := channelAdmissionTime(tx)
-		if e != nil {
-			return e
-		}
-		if now.UnixMilli() < row.StartedAtMs {
-			return ErrNativeTaskConflict
-		}
-		result := tx.Model(&ChannelAdmissionTaskExecution{}).Where("id = ? AND state = ? AND returned_at_ms = ? AND authorization_hash = ?", row.ID, "active", 0, row.AuthorizationHash).Updates(map[string]any{"state": state, "returned_at_ms": now.UnixMilli()})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrNativeTaskConflict
-		}
-		return nativeExecutionLease(tx, task, &row)
+		return work(tx, c, task, &row)
 	})
 }
 

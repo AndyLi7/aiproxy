@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/config"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -93,13 +94,22 @@ type OtherInFlight func(tx *gorm.DB, scope string) (map[string]int64, error)
 
 // ReadNativeQueueSnapshot reads the scope's queue and in-flight work.
 func ReadNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other OtherInFlight) (*NativeQueueSnapshot, error) {
+	return readNativeQueueSnapshot(db, scope, now, other, nil)
+}
+
+// A dispatcher excludes expired waits before the read limit. Queue-position
+// readers retain the full view until recovery refunds and removes those waits.
+func readNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other OtherInFlight, waitingAfter *time.Time) (*NativeQueueSnapshot, error) {
 	snapshot := &NativeQueueSnapshot{Scope: scope, InFlightByGroup: map[string]int64{}, ActiveByGroup: map[string]int64{},
 		LastDispatchedByGroup: map[string]time.Time{}}
 
 	var waiting []NativeTask
-	if err := db.Select("id", "group_id", "token_id", "model", "enqueued_at").
-		Where("status = ? AND queue_scope = ? AND (dispatch_after IS NULL OR dispatch_after <= ?)", NativeStatusWaiting, scope, now.UTC()).
-		Order("enqueued_at ASC, id ASC").Limit(NativeQueueReadLimit + 1).Find(&waiting).Error; err != nil {
+	query := db.Select("id", "group_id", "token_id", "model", "enqueued_at").
+		Where("status = ? AND queue_scope = ? AND (dispatch_after IS NULL OR dispatch_after <= ?)", NativeStatusWaiting, scope, now.UTC())
+	if waitingAfter != nil {
+		query = query.Where("COALESCE(enqueued_at, created_at) > ?", waitingAfter.UTC())
+	}
+	if err := query.Order("enqueued_at ASC, id ASC").Limit(NativeQueueReadLimit + 1).Find(&waiting).Error; err != nil {
 		return nil, err
 	}
 
@@ -288,6 +298,10 @@ type NativeDispatchClaim struct {
 	// Owner is the claim's random token.
 	Owner string
 	Now   time.Time
+	// WaitTimeout is the current waiting limit, never above the configured
+	// five-minute ceiling. It is checked at claim, not again as a total TTL
+	// after a legal dispatch has obtained its separate two-minute lease.
+	WaitTimeout time.Duration
 	// OnlyID restricts the claim to this task, and only while no other task
 	// of the scope waits (the submitting request's fast path, spec §2 step 5).
 	OnlyID string
@@ -336,9 +350,19 @@ func logTruncatedQueue(scope string) {
 // then waiting -> dispatching with the lease. A nil task means no room
 // (noRoom) or no task to claim.
 func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTask, noRoom bool, err error) {
-	if claim.Scope == "" || claim.Owner == "" || len(claim.Owner) > 64 || claim.Pick == nil {
+	if claim.Scope == "" || claim.Owner == "" || len(claim.Owner) > 64 || claim.Pick == nil || claim.Now.IsZero() {
 		return nil, false, ErrNativeTaskConflict
 	}
+
+	started := time.Now()
+	timeout := claim.WaitTimeout
+	if timeout <= 0 || timeout > config.NativeQueueTimeout {
+		timeout = config.NativeQueueTimeout
+	}
+	// Keep injected clocks usable, but never freeze time while waiting for the
+	// database lock or running the selector. The final CAS also checks the
+	// database clock, so a stalled worker cannot send a stale cutoff to SQL.
+	claimNow := func() time.Time { return claim.Now.Add(time.Since(started)).UTC() }
 
 	if claimLocally {
 		lock, _ := claimLocks.LoadOrStore(claim.Scope, &sync.Mutex{})
@@ -355,7 +379,9 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 			}
 		}
 
-		snapshot, err := ReadNativeQueueSnapshot(tx, claim.Scope, claim.Now, claim.Other)
+		now := claimNow()
+		cutoff := now.Add(-timeout)
+		snapshot, err := readNativeQueueSnapshot(tx, claim.Scope, now, claim.Other, &cutoff)
 		if err != nil {
 			return err
 		}
@@ -373,6 +399,9 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 			return nil
 		}
 
+		if len(snapshot.Waiting) == 0 {
+			return nil
+		}
 		id := claim.Pick(snapshot)
 		if id == "" {
 			return nil
@@ -391,11 +420,11 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 			return nil
 		}
 
-		now := claim.Now.UTC()
+		now = claimNow()
 		until := now.Add(NativeDispatchLease)
 
-		result := tx.Model(&NativeTask{}).
-			Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", picked.ID, picked.GroupID, picked.TokenID, NativeStatusWaiting, "").
+		result := nativeWaitStillValid(tx.Model(&NativeTask{}), timeout).
+			Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND COALESCE(enqueued_at, created_at) > ?", picked.ID, picked.GroupID, picked.TokenID, NativeStatusWaiting, "", now.Add(-timeout)).
 			Updates(map[string]any{
 				"status": NativeStatusDispatching, "dispatch_owner": claim.Owner, "dispatch_until": until,
 				"dispatched_at": now, "next_recovery_at": until.Unix(), "updated_at": time.Now(),
@@ -419,6 +448,24 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 	}, claimTxOptions(db)...)
 
 	return claimed, noRoom, err
+}
+
+// nativeWaitStillValid evaluates age in the update statement, not from a
+// previously sampled client clock. Keep the client-clock predicate as well:
+// tests/recovery may intentionally advance that clock, while a lagging worker
+// must not extend the real waiting window. A future wallet timestamp remains
+// intact; it is not evidence that an identity has drained.
+func nativeWaitStillValid(query *gorm.DB, timeout time.Duration) *gorm.DB {
+	switch query.Dialector.Name() {
+	case "postgres":
+		return query.Where("COALESCE(enqueued_at, created_at) > clock_timestamp() - (? * INTERVAL '1 microsecond')", timeout.Microseconds())
+	case "sqlite":
+		return query.Where("julianday(COALESCE(enqueued_at, created_at)) > julianday('now') - (? / 86400000000.0)", timeout.Microseconds())
+	case "mysql":
+		return query.Where("COALESCE(enqueued_at, created_at) > TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6))", -timeout.Microseconds())
+	default:
+		return query.Where("1 = 0")
+	}
 }
 
 // dispatchHeld is the guard of every move out of dispatching by its holder.
@@ -453,7 +500,7 @@ func ReturnNativeDispatch(db *gorm.DB, id, group string, token int, owner string
 // the dispatch lease, so an accepted task is polled from the start. A claim
 // whose lease ran out matches no row and must not call the provider.
 func StartNativeDispatchSubmission(db *gorm.DB, id, group string, token int, owner string, now time.Time) error {
-	result := dispatchHeld(db, id, group, token, owner).Where("dispatch_until > ?", now.UTC()).
+	result := nativeDispatchLeaseLive(dispatchHeld(db, id, group, token, owner)).Where("dispatch_until > ?", now.UTC()).
 		Updates(map[string]any{"status": "submitting", "error_code": "", "next_recovery_at": 0, "created_at": time.Now(), "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
@@ -464,6 +511,21 @@ func StartNativeDispatchSubmission(db *gorm.DB, id, group string, token int, own
 	}
 
 	return nil
+}
+
+// Recheck the dispatch lease against the database clock at the transition,
+// including after a slow wallet reply or a pause before executing the update.
+func nativeDispatchLeaseLive(query *gorm.DB) *gorm.DB {
+	switch query.Dialector.Name() {
+	case "postgres":
+		return query.Where("dispatch_until > clock_timestamp()")
+	case "sqlite":
+		return query.Where("julianday(dispatch_until) > julianday('now')")
+	case "mysql":
+		return query.Where("dispatch_until > UTC_TIMESTAMP(6)")
+	default:
+		return query.Where("1 = 0")
+	}
 }
 
 // FailNativeDispatch ends a claimed task that will not be sent, by its holder.
@@ -504,7 +566,7 @@ func CancelNativeTask(db *gorm.DB, id, group string, token int) (bool, error) {
 // ExpireNativeQueueWait fails a task still waiting since enqueuedBefore.
 func ExpireNativeQueueWait(db *gorm.DB, id, group string, token int, enqueuedBefore time.Time) (bool, error) {
 	result := db.Model(&NativeTask{}).
-		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND enqueued_at <= ?",
+		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND COALESCE(enqueued_at, created_at) <= ?",
 			id, group, token, NativeStatusWaiting, "", enqueuedBefore.UTC()).
 		Updates(map[string]any{"status": "failed", "error_code": QueueTimeoutCode, "public_error": "", "next_recovery_at": time.Now().Unix(), "updated_at": time.Now()})
 
@@ -526,7 +588,7 @@ func NativeQueueScopesWaiting(db *gorm.DB) ([]string, error) {
 // whose next look was set from the longer one.
 func DueOverdueNativeWaits(db *gorm.DB, enqueuedBefore, now time.Time) error {
 	return db.Model(&NativeTask{}).
-		Where("status = ? AND enqueued_at <= ? AND next_recovery_at > ?", NativeStatusWaiting, enqueuedBefore.UTC(), now.Unix()).
+		Where("status = ? AND COALESCE(enqueued_at, created_at) <= ? AND next_recovery_at > ?", NativeStatusWaiting, enqueuedBefore.UTC(), now.Unix()).
 		Update("next_recovery_at", now.Unix()).Error
 }
 

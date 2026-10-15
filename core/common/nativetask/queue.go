@@ -470,7 +470,8 @@ func (e *Engine) claim(scope, onlyID string) (*model.NativeTask, bool, error) {
 
 	return model.ClaimNativeDispatch(e.DB, model.NativeDispatchClaim{
 		Scope: scope, Limit: e.queueLimit(scope), Owner: owner, Now: queue.now(), OnlyID: onlyID,
-		Other: e.otherInFlight(scope),
+		WaitTimeout: e.queueTimeout(),
+		Other:       e.otherInFlight(scope),
 		Pick: func(snapshot *model.NativeQueueSnapshot) string {
 			entry, ok := newFairOrder(snapshot, queue.activeLimit).next(queue.backedOff, queue.modelBackedOff, false)
 			if !ok {

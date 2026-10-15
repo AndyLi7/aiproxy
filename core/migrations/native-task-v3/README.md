@@ -19,8 +19,8 @@ Indexes:
 - `idx_native_tasks_status_queue_scope (status, queue_scope)`: the dispatcher
   asks every second which scopes have waiting tasks.
 - `idx_native_tasks_group_created (group_id, created_at)`: each queue decision
-  estimates the waiting customers' active tasks over the last day only, never
-  their whole history.
+  reads the waiting customers' active tasks and latest dispatch over the last
+  day only, never their whole history.
 
 **Apply the columns before deploying the gateway binary that has them. This
 order is mandatory.** `ReserveNativeTask` inserts the whole row, and the new

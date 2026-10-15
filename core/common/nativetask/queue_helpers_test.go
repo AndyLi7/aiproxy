@@ -3,6 +3,8 @@ package nativetask
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,6 +16,9 @@ import (
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+	"gorm.io/gorm"
 )
 
 // queueHold is one hold in queueWallet.
@@ -307,9 +312,61 @@ const falScope = "fal:default"
 
 func newQueueEnv(t *testing.T) *queueEnv {
 	t.Helper()
-	queue = newQueueState()
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "queue.db"))
 	require.NoError(t, err)
+	return newQueueEnvOn(t, db)
+}
+
+// forEachQueueDatabase runs a test on SQLite and on PostgreSQL, whose queue
+// SQL differs (the claim's advisory lock, the snapshot's time columns).
+func forEachQueueDatabase(t *testing.T, fn func(t *testing.T, env *queueEnv)) {
+	t.Run("sqlite", func(t *testing.T) { fn(t, newQueueEnv(t)) })
+	t.Run("postgres", func(t *testing.T) { fn(t, newQueueEnvOn(t, postgresQueueDB(t))) })
+}
+
+// postgresQueueDB starts an empty PostgreSQL in a container for one test; it
+// accepts connections without a password, so none is written here.
+func postgresQueueDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	ctx := context.Background()
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "postgres:16-alpine",
+			ExposedPorts: []string{"5432/tcp"},
+			Env:          map[string]string{"POSTGRES_HOST_AUTH_METHOD": "trust", "POSTGRES_DB": "queue_test"},
+			WaitingFor: wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).WithStartupTimeout(60 * time.Second),
+		},
+		Started: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, container.Terminate(ctx)) })
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
+	port, err := container.MappedPort(ctx, "5432")
+	require.NoError(t, err)
+	dsn := fmt.Sprintf("postgres://postgres@%s/queue_test?sslmode=disable&TimeZone=UTC",
+		net.JoinHostPort(host, port.Port()))
+	var db *gorm.DB
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		if db, err = model.OpenPostgreSQL(dsn); err == nil {
+			if err = db.Exec("SELECT 1").Error; err == nil {
+				break
+			}
+		}
+		require.True(t, time.Now().Before(deadline), "postgres did not start: %v", err)
+	}
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+	})
+	return db
+}
+
+func newQueueEnvOn(t *testing.T, db *gorm.DB) *queueEnv {
+	t.Helper()
+	queue = newQueueState()
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}, &model.ImageTask{}))
 	_, plan, _, _ := setup(t)
 	env := &queueEnv{t: t, w: newQueueWallet(), p: &queueProvider{}, plan: plan, enabled: true,

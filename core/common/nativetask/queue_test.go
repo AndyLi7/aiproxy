@@ -129,6 +129,76 @@ func TestFairnessAndPositionsMatchTheDispatchOrder(t *testing.T) {
 	require.Equal(t, want, order)
 }
 
+// §5.5 rule 2: when the scope takes one task at a time, a customer who joins
+// behind another's backlog goes next, and the position they are told at
+// submission is the real one.
+func TestLatecomerGoesNextWhenTheScopeTakesOne(t *testing.T) {
+	forEachQueueDatabase(t, func(t *testing.T, env *queueEnv) {
+		groups := map[string]string{"b1": "gb"}
+		for _, id := range []string{"a1", "a2", "a3", "a4"} {
+			groups[id] = "ga"
+			_, err := env.submit(id, "ga")
+			require.NoError(t, err)
+			time.Sleep(2 * time.Millisecond)
+		}
+		response := httptest.NewRecorder()
+		env.http().Create(response, customerRequest("POST", "/v1/model-tasks", "b1", "gb"))
+		require.Equal(t, 202, response.Code)
+		require.Contains(t, response.Body.String(), `"queue_position":1`)
+
+		want := []string{"b1", "a2", "a3", "a4"}
+		for place, id := range want {
+			queue.positions = map[string]cachedPositions{}
+			require.Equal(t, place+1, env.e.QueuePosition(env.task(id, groups[id])), id)
+		}
+		require.Equal(t, append([]string{"a1"}, want...), env.dispatchOneAtATime("a1", groups))
+	})
+}
+
+// §5.5 rule 2: customers with backlogs take turns, one task each, and the
+// positions estimated before any of them runs are the real order.
+func TestCustomersTakeTurnsWhenTheScopeTakesOne(t *testing.T) {
+	forEachQueueDatabase(t, func(t *testing.T, env *queueEnv) {
+		groups := map[string]string{}
+		for _, task := range []struct{ id, group string }{
+			{"a1", "ga"}, {"a2", "ga"}, {"a3", "ga"}, {"b1", "gb"}, {"b2", "gb"}, {"c1", "gc"}, {"c2", "gc"},
+		} {
+			groups[task.id] = task.group
+			_, err := env.submit(task.id, task.group)
+			require.NoError(t, err)
+			time.Sleep(2 * time.Millisecond)
+		}
+
+		want := []string{"b1", "c1", "a2", "b2", "c2", "a3"}
+		for place, id := range want {
+			queue.positions = map[string]cachedPositions{}
+			require.Equal(t, place+1, env.e.QueuePosition(env.task(id, groups[id])), id)
+		}
+		require.Equal(t, append([]string{"a1"}, want...), env.dispatchOneAtATime("a1", groups))
+	})
+}
+
+// dispatchOneAtATime finishes the running task and runs a round, recording
+// which task takes its place, until every listed task has been dispatched.
+func (env *queueEnv) dispatchOneAtATime(running string, groups map[string]string) []string {
+	env.t.Helper()
+	order := []string{running}
+	for len(order) < len(groups) {
+		env.finish(running)
+		env.round()
+		running = ""
+		for id, group := range groups {
+			if !contains(order, id) && env.task(id, group).Status == "queued" {
+				require.Empty(env.t, running, "one task at a time")
+				running = id
+			}
+		}
+		require.NotEmpty(env.t, running, "a round dispatches the next task")
+		order = append(order, running)
+	}
+	return order
+}
+
 func contains(list []string, value string) bool {
 	for _, item := range list {
 		if item == value {

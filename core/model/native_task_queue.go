@@ -78,6 +78,10 @@ type NativeQueueSnapshot struct {
 	// other (image tasks), and InFlightByGroup the same per customer.
 	InFlight        int64
 	InFlightByGroup map[string]int64
+	// LastDispatchedByGroup is, for each customer with waiting tasks, when
+	// this scope last dispatched one of their tasks in the last day; a
+	// customer absent from it was never dispatched there.
+	LastDispatchedByGroup map[string]time.Time
 	// ActiveByGroup approximates, for each customer with waiting tasks, the
 	// wallet's count of their active tasks in every scope.
 	ActiveByGroup map[string]int64
@@ -89,7 +93,8 @@ type OtherInFlight func(tx *gorm.DB, scope string) (map[string]int64, error)
 
 // ReadNativeQueueSnapshot reads the scope's queue and in-flight work.
 func ReadNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other OtherInFlight) (*NativeQueueSnapshot, error) {
-	snapshot := &NativeQueueSnapshot{Scope: scope, InFlightByGroup: map[string]int64{}, ActiveByGroup: map[string]int64{}}
+	snapshot := &NativeQueueSnapshot{Scope: scope, InFlightByGroup: map[string]int64{}, ActiveByGroup: map[string]int64{},
+		LastDispatchedByGroup: map[string]time.Time{}}
 
 	var waiting []NativeTask
 	if err := db.Select("id", "group_id", "token_id", "model", "enqueued_at").
@@ -181,7 +186,46 @@ func ReadNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other Oth
 		snapshot.ActiveByGroup[row.GroupID] += row.Count
 	}
 
+	// Bounded by time like the active estimate (idx_native_tasks_group_created):
+	// a task waits minutes at most, so its created_at is close to its dispatch.
+	var last []struct {
+		GroupID string
+		Last    string
+	}
+	if err := db.Model(&NativeTask{}).Select("group_id, MAX(dispatched_at) AS last").
+		Where("group_id IN ? AND queue_scope = ? AND created_at >= ? AND dispatched_at IS NOT NULL",
+			names, scope, now.Add(-nativeActiveWindow)).
+		Group("group_id").Scan(&last).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range last {
+		if at, ok := parseStoredTime(row.Last); ok {
+			snapshot.LastDispatchedByGroup[row.GroupID] = at
+		}
+	}
+
 	return snapshot, nil
+}
+
+// storedTimeLayouts read a time aggregate (MAX) as text: PostgreSQL's comes
+// through database/sql as RFC 3339, SQLite returns its stored text.
+var storedTimeLayouts = []string{
+	time.RFC3339Nano,
+	"2006-01-02 15:04:05.999999999-07:00",
+	"2006-01-02 15:04:05.999999999Z07:00",
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02 15:04:05.999999999",
+}
+
+func parseStoredTime(text string) (time.Time, bool) {
+	for _, layout := range storedTimeLayouts {
+		if at, err := time.Parse(layout, text); err == nil {
+			return at.UTC(), true
+		}
+	}
+
+	return time.Time{}, false
 }
 
 // ImageTasksInFlight counts a channel type's image tasks in flight per group:

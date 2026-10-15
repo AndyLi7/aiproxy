@@ -251,15 +251,27 @@ func (q *queueState) activeLimit(group string) int {
 type fairOrder struct {
 	scopeInFlight map[string]int64
 	active        map[string]int64
-	limit         func(string) int
-	heads         map[string][]model.NativeQueueEntry
+	// lastDispatched is when the scope last dispatched each customer's task;
+	// zero (absent) means never, which goes first.
+	lastDispatched map[string]time.Time
+	// clock stamps simulated dispatches, after every real one.
+	clock time.Time
+	limit func(string) int
+	heads map[string][]model.NativeQueueEntry
 }
 
 func newFairOrder(snapshot *model.NativeQueueSnapshot, limit func(string) int) *fairOrder {
-	order := &fairOrder{scopeInFlight: map[string]int64{}, active: map[string]int64{}, limit: limit,
-		heads: map[string][]model.NativeQueueEntry{}}
+	order := &fairOrder{scopeInFlight: map[string]int64{}, active: map[string]int64{}, lastDispatched: map[string]time.Time{},
+		limit: limit, heads: map[string][]model.NativeQueueEntry{}}
 	for group, count := range snapshot.InFlightByGroup {
 		order.scopeInFlight[group] = count
+	}
+
+	for group, at := range snapshot.LastDispatchedByGroup {
+		order.lastDispatched[group] = at
+		if at.After(order.clock) {
+			order.clock = at
+		}
 	}
 
 	for group, count := range snapshot.ActiveByGroup {
@@ -282,7 +294,12 @@ func (o *fairOrder) atLimit(group string) bool {
 
 // next pops the next task: rule 0 groups at their own active limit last (or,
 // unless includeAtLimit, not at all), rule 1 fewest in flight in the scope,
-// rule 2 earliest waiting task, rule 3 first in, first out within a group.
+// rule 2 dispatched least recently in the scope (never first), rule 3
+// earliest waiting task, rule 4 first in, first out within a group. Rule 2
+// matters when places are scarce: at a limit of 1 every free place finds
+// all customers with nothing in flight, and without it a large batch would
+// still go first in, first out (staging drill 2026-10-15). Each pop counts
+// as a dispatch now, so a simulation turns as the real dispatcher would.
 // skipGroup leaves customers out (their own active limit refused them);
 // skipTask leaves single tasks out (their model paused or their channel
 // unreadable), and the customer's next task takes their turn.
@@ -324,6 +341,8 @@ func (o *fairOrder) next(skipGroup func(string) bool, skipTask func(model.Native
 	o.heads[best] = append(rest, queued[bestIndex+1:]...)
 	o.scopeInFlight[best]++
 	o.active[best]++
+	o.clock = o.clock.Add(time.Nanosecond)
+	o.lastDispatched[best] = o.clock
 
 	return entry, true
 }
@@ -335,6 +354,10 @@ func (o *fairOrder) before(group string, head model.NativeQueueEntry, atLimit bo
 
 	if o.scopeInFlight[group] != o.scopeInFlight[other] {
 		return o.scopeInFlight[group] < o.scopeInFlight[other]
+	}
+
+	if last, otherLast := o.lastDispatched[group], o.lastDispatched[other]; !last.Equal(otherLast) {
+		return last.Before(otherLast) // zero (never dispatched) is earliest
 	}
 
 	if !head.EnqueuedAt.Equal(otherHead.EnqueuedAt) {

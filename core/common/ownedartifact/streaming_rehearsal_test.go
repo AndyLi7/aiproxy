@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -60,6 +61,8 @@ func TestStreamingArchiveRehearsal(t *testing.T) {
 	runtime.GC()
 	var baseline runtime.MemStats
 	runtime.ReadMemStats(&baseline)
+	finishMemory := rehearsalHeapPeak()
+	t.Cleanup(func() { finishMemory() })
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	receipt, err := store(ctx, "req", 0, "https://provider.example/source.mp4", app, "local-native-test-only", download, uploadClient())
@@ -75,5 +78,38 @@ func TestStreamingArchiveRehearsal(t *testing.T) {
 	runtime.ReadMemStats(&memory)
 	var usage syscall.Rusage
 	require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &usage))
-	t.Logf("ARCHIVE sizeMiB=%d baselineHeap=%d heap=%d sys=%d maxRSS=%d sha256=%s", sizeMiB, baseline.HeapAlloc, memory.HeapAlloc, memory.Sys, usage.Maxrss, sum)
+	t.Logf("ARCHIVE sizeMiB=%d baselineHeap=%d heap=%d peakHeap=%d sys=%d maxRSS=%d sha256=%s", sizeMiB, baseline.HeapAlloc, memory.HeapAlloc, finishMemory(), memory.Sys, usage.Maxrss, sum)
+}
+
+// Sample the live Go heap every 10 ms, independently of file size. RSS below
+// uses the kernel process high-water mark (bytes on this Darwin rehearsal).
+func rehearsalHeapPeak() func() uint64 {
+	stop := make(chan struct{})
+	result := make(chan uint64, 1)
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		var peak uint64
+		sample := func() {
+			var memory runtime.MemStats
+			runtime.ReadMemStats(&memory)
+			if memory.HeapAlloc > peak {
+				peak = memory.HeapAlloc
+			}
+		}
+		sample()
+		for {
+			select {
+			case <-ticker.C:
+				sample()
+			case <-stop:
+				sample()
+				result <- peak
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	var peak uint64
+	return func() uint64 { once.Do(func() { close(stop); peak = <-result }); return peak }
 }

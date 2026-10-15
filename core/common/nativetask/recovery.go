@@ -198,7 +198,7 @@ func (e *Engine) abandonReservation(ctx context.Context, task *model.NativeTask,
 	if now.Before(quietAt) {
 		return false, nil
 	}
-	abandoned, err := model.AbandonNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, now.Add(-reservationGrace))
+	abandoned, err := model.AbandonNativeReservationGeneration(e.DB, task, now.Add(-reservationGrace), quietAt)
 	if err != nil || !abandoned {
 		return false, err
 	}

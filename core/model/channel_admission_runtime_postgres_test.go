@@ -10,12 +10,13 @@ import (
 )
 
 func TestPostgresAdmissionRuntimeReleaseRechecksAfterTaskLock(t *testing.T) {
-	for _, action := range []string{"release", "positive"} {
+	for _, action := range []string{"release", "positive", "abandon"} {
 		for _, outcome := range []string{"expired", "owner-changed", "live"} {
 			t.Run(action+"/"+outcome, func(t *testing.T) {
 				db := queueLockPostgres(t)
 				f := runtimeAdmissionOnFixture(t, admissionFixtureOn(t, db, ""))
 				input := runtimeNativeTask(f, "locked", 0)
+				input.CreatedAt = time.Now().Add(-20 * time.Minute)
 				first, _, err := model.ReserveNativeTask(db, input)
 				require.NoError(t, err)
 				deadline := time.Now().Add(time.Minute)
@@ -36,8 +37,16 @@ func TestPostgresAdmissionRuntimeReleaseRechecksAfterTaskLock(t *testing.T) {
 				require.NoError(t, holder.QueryRowContext(ctx, "SELECT id FROM native_tasks WHERE id=$1 FOR UPDATE", first.ID).Scan(&id))
 				done := make(chan error, 1)
 				go func() {
-					if action == "positive" {
+					if action != "release" {
 						first.AdmissionRecoveryOwner = "worker"
+						if action == "abandon" {
+							abandoned, err := model.AbandonNativeReservationGeneration(db, first, time.Now(), first.CreatedAt.Add(5*time.Minute))
+							if err == nil && !abandoned {
+								err = model.ErrNativeTaskConflict
+							}
+							done <- err
+							return
+						}
 						done <- model.WithNativeReservationGeneration(db, first, func(tx *gorm.DB) error {
 							return model.TransitionNativeSubmission(tx, first.ID, first.GroupID, first.TokenID, "reserved", "submitting", "")
 						})
@@ -79,7 +88,12 @@ func TestPostgresAdmissionRuntimeReleaseRechecksAfterTaskLock(t *testing.T) {
 					} else {
 						var current model.NativeTask
 						require.NoError(t, db.First(&current, "id = ?", first.ID).Error)
-						require.Equal(t, "submitting", current.Status)
+						if action == "abandon" {
+							require.Equal(t, "failed", current.Status)
+							require.Equal(t, model.NotStartedCode, current.ErrorCode)
+						} else {
+							require.Equal(t, "submitting", current.Status)
+						}
 						require.Equal(t, "open", uses[0].State)
 					}
 				} else {

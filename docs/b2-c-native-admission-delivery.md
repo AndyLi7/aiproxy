@@ -38,3 +38,16 @@
 真实部署证明签发、全部入口及 executor fence、独立 restore watermark 适配仍未闭合。测试 proof 均为合成值，无生产 adapter 或激活 HTTP 入口；永久关闭不是完整 C 的完成标准。
 
 共享文件：`common/nativetask/{execute,dispatch,recovery}.go` 仅传递身份/代次/恢复 owner 并包装预留写入；`model/native_task_result.go` 增临时字段与 Reserve/Release 入口包装。未修改 `native_task_queue.go`、TaskContract、视频时长/计量/转存策略；主控已获接口预告。
+
+## NATIVE-R1 修复补充（待主控复核）
+
+主控在 `5a8affb` 发现 reserved 恢复链路保存钱包回执后，旧 worker 可在失去恢复租约时进入未保护的 abandon，写入 failed/not_started 并退款。本修复把实际 `abandonReservation` 接入同一 control → task 事务，核对 reservation generation、创建时间、恢复 owner 和锁后数据库时间，并在终止写入后再次检查租约。失败回滚且返回未终止，调用方不会退款。额外匹配钱包回执原文，避免旧的未提交快照覆盖后来已受理/未知的回执。外部钱包调用仍在事务外；C 从未激活时保留原行为。
+
+复核了 reserved 的实际写入点：Reserve/重试刷新、Release、直接转 submitting、public/recovery enqueue、SyncBilling 保存回执/终态和 abandon。它们均经过对应代次保护；已提交任务的后续状态仍不属于本批完整 executor fence 声明。
+
+验证：
+
+- 主控原始复现已纳入 `TestAdmissionNativeLostLeaseBeforeAbandonCannotRefund` 并通过。实际 RecoverOnce 追加覆盖有效 owner 正常终止且仅退款一次、回执后失租、同创建时间/owner 的新代、较新的已受理回执、终止写入期间租约到期、证明源撤回后持久围栏仍有效；拒绝分支钱包仅有 get，没有 settle/refund，供应商调用为零。
+- 定向 race 回归 32 个根测试、含子测试 64 项，0 fail / 0 skip；`/tmp/b2-c-native-r1-race.jsonl`。
+- 本地缓存 PostgreSQL 16 镜像建立隔离临时库，真实双连接行锁等待后的 abandon 覆盖 expired / owner-changed / live：1 个根测试、含子测试 4 项，0 fail / 0 skip；`/tmp/b2-c-native-r1-postgres.jsonl`。容器和网络均已清理（`/tmp/b2-c-native-r1-pg-state.json`），未读取现有数据库或拉取镜像。
+- `go build ./...` 与提交前 security-scan、人工差异审阅按本次修复重新执行。此修复不扩大 C 的验收范围，上述生产证明、其他入口和 C2 限制继续适用。

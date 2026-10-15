@@ -375,12 +375,16 @@ func lockAdmissionNativeTask(tx *gorm.DB, id, group string, token int) (*NativeT
 // well as a refusal. The bounded callback performs DB writes only. A retired
 // generation may neither submit nor enqueue a newly recreated reservation.
 func WithNativeReservationGeneration(db *gorm.DB, task *NativeTask, write func(*gorm.DB) error) error {
+	return withNativeReservationGeneration(db, task, write, write)
+}
+
+func withNativeReservationGeneration(db *gorm.DB, task *NativeTask, write, legacy func(*gorm.DB) error) error {
 	store, err := channelAdmissionRuntimeStore(db)
 	if err != nil {
 		return err
 	}
 	if store == nil {
-		return write(db)
+		return legacy(db)
 	}
 	return store.transaction(db.Statement.Context, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		inactive, err := channelAdmissionNeverActivated(tx, c)
@@ -388,7 +392,7 @@ func WithNativeReservationGeneration(db *gorm.DB, task *NativeTask, write func(*
 			return err
 		}
 		if inactive {
-			return write(tx)
+			return legacy(tx)
 		}
 		current, err := lockAdmissionNativeTask(tx, task.ID, task.GroupID, task.TokenID)
 		if err != nil {
@@ -437,4 +441,35 @@ func checkNativeAdmissionRecoveryLease(tx *gorm.DB, task *NativeTask) error {
 		return ErrNativeTaskConflict
 	}
 	return nil
+}
+
+// AbandonNativeReservationGeneration records the terminal decision before any
+// refund. Receipt equality prevents a stale not-submitted snapshot from
+// overriding newer accepted/unknown wallet evidence in the same generation.
+func AbandonNativeReservationGeneration(db *gorm.DB, task *NativeTask, reservedBefore, quietAt time.Time) (abandoned bool, err error) {
+	legacy := func(tx *gorm.DB) error {
+		var e error
+		abandoned, e = AbandonNativeReservation(tx, task.ID, task.GroupID, task.TokenID, reservedBefore)
+		return e
+	}
+	guarded := func(tx *gorm.DB) error {
+		if task.AdmissionRecoveryOwner == "" {
+			return ErrNativeTaskConflict
+		}
+		now, e := channelAdmissionTime(tx)
+		if e != nil {
+			return e
+		}
+		if quietAt.IsZero() || now.Before(quietAt) {
+			return nil
+		}
+		var writeErr error
+		abandoned, writeErr = AbandonNativeReservation(tx.Where("billing_receipt_json = ?", task.BillingReceiptJSON), task.ID, task.GroupID, task.TokenID, reservedBefore)
+		return writeErr
+	}
+	err = withNativeReservationGeneration(db, task, guarded, legacy)
+	if err != nil {
+		return false, err
+	}
+	return abandoned, nil
 }

@@ -105,6 +105,9 @@ func DoHelper(
 	adaptor.Error,
 ) {
 	detail := BodyDetail{}
+	if err := admitRelayAttempt(c, meta); err != nil {
+		return adaptor.DoResponseResult{}, &detail, err
+	}
 	detailOption := mergeBodyDetailOptions(opts...)
 
 	if requestBody, err := requestBodyDetail(c, detailOption); err != nil {

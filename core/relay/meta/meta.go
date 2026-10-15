@@ -39,11 +39,13 @@ type Meta struct {
 	RetryAt            time.Time
 	RequestID          string
 	BillingOperationID string
-	OriginModel        string
-	RoutingModel       string
-	ActualModel        string
-	VideoCapability    string
-	Mode               mode.Mode
+	// Internal durable use reference, never supplied through request metadata.
+	ChannelAdmissionUseID string
+	OriginModel           string
+	RoutingModel          string
+	ActualModel           string
+	VideoCapability       string
+	Mode                  mode.Mode
 
 	RequestTimeout time.Duration
 

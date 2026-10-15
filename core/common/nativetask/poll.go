@@ -32,6 +32,9 @@ func (e *Engine) Poll(ctx context.Context, id, group string, token int, resolve 
 		return nil, err
 	}
 	switch task.Status {
+	case model.NativeStatusWaiting, model.NativeStatusDispatching:
+		// Never sent: recovery only times these out (recoverQueued).
+		return task, nil
 	case "result_received", "delivery_ready", "completed":
 		return e.Deliver(ctx, id, group, token, archive)
 	case "queued", "running":

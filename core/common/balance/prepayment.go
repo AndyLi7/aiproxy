@@ -25,6 +25,53 @@ var (
 // ErrPrepaymentNotFound means the wallet holds nothing for this operation.
 var ErrPrepaymentNotFound = errors.New("prepayment not found")
 
+// ErrPrepaymentRejected is the application's own refusal of a command (its
+// envelope with a non-zero code): the command was processed and changed
+// nothing, unlike a timeout or an edge error, whose outcome is unknown.
+var ErrPrepaymentRejected = errors.New("prepayment rejected or unavailable")
+
+// TaskLimitError is the wallet's 429: too many active tasks, or (Waiting) a
+// full queue for a queued admission. ActiveLimit is the account's active-task
+// limit when the wallet reports it, else 0. It matches
+// ErrPrepaymentTooManyActiveTasks, so existing callers keep their answer.
+type TaskLimitError struct {
+	Waiting     bool
+	ActiveLimit int
+}
+
+func (e *TaskLimitError) Error() string {
+	if e.Waiting {
+		return "too many waiting prepaid tasks"
+	}
+
+	return ErrPrepaymentTooManyActiveTasks.Error()
+}
+
+func (e *TaskLimitError) Is(target error) bool { return target == ErrPrepaymentTooManyActiveTasks }
+
+// walletWaitingLimitMessage is the application's 429 message for a full queue.
+const walletWaitingLimitMessage = "Too many waiting tasks"
+
+// taskLimitError reads the wallet's 429 body: {code, message, data:{activeLimit}}.
+func taskLimitError(body []byte) *TaskLimitError {
+	var envelope struct {
+		Message string `json:"message"`
+		Data    struct {
+			ActiveLimit int `json:"activeLimit"`
+		} `json:"data"`
+	}
+
+	refusal := &TaskLimitError{}
+	if json.Unmarshal(body, &envelope) == nil {
+		refusal.Waiting = envelope.Message == walletWaitingLimitMessage
+		if envelope.Data.ActiveLimit > 0 {
+			refusal.ActiveLimit = envelope.Data.ActiveLimit
+		}
+	}
+
+	return refusal
+}
+
 // appNotFoundError is ErrPrepaymentNotFound in the application's own envelope
 // ("Prepayment not found"): the wallet itself answered that it holds nothing.
 type appNotFoundError struct{}
@@ -121,6 +168,10 @@ type PrepaymentCommand struct {
 	EstimatedMicros    *int64             `json:"estimatedMicros,omitempty"`
 	QuoteJSON          string             `json:"quoteJson,omitempty"`
 	Outcome            *PrepaymentOutcome `json:"outcome,omitempty"`
+	// Queue asks admit to hold the task for the own task queue (spec
+	// 2026-10-15). omitempty: the application's admit schema is strict, so an
+	// application without the queue must never receive the key.
+	Queue bool `json:"queue,omitempty"`
 	// Key usage P2 attribution, sent on admit only (WithUsage). The
 	// application must accept these keys before a gateway sends them: its
 	// admit schema is strict.
@@ -235,6 +286,20 @@ func (r PrepaymentReceipt) AttemptState(id string) (state string, present bool, 
 	return "", false, nil
 }
 
+// AttemptCount is the number of attempts in the hold's attempt list; err is
+// ErrUnreadableAttempts when the list is missing or malformed.
+func (r PrepaymentReceipt) AttemptCount() (int, error) {
+	raw := []byte(r.AttemptsJSON)
+	if text := receiptText(r.AttemptsJSON); text != "" {
+		raw = []byte(text)
+	}
+	var attempts []json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &attempts) != nil || attempts == nil {
+		return 0, ErrUnreadableAttempts
+	}
+	return len(attempts), nil
+}
+
 // normalizeUsage drops a receipt's attribution unless both fields are usable,
 // so callers either have the hold's time and source or neither.
 func (r *PrepaymentReceipt) normalizeUsage() {
@@ -296,7 +361,8 @@ func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCom
 	case http.StatusPaymentRequired:
 		return receipt, false, ErrPrepaymentInsufficientBalance
 	case http.StatusTooManyRequests:
-		return receipt, false, ErrPrepaymentTooManyActiveTasks
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, 128<<10))
+		return receipt, false, taskLimitError(raw)
 	case http.StatusLocked:
 		return receipt, false, ErrPrepaymentModelPaused
 	case http.StatusNotFound:
@@ -320,8 +386,11 @@ func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCom
 		Code *int              `json:"code"`
 		Data PrepaymentReceipt `json:"data"`
 	}
-	if json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&envelope) != nil || (envelope.Code == nil || *envelope.Code != 0) {
+	if json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&envelope) != nil || envelope.Code == nil {
 		return receipt, false, errors.New("prepayment rejected or unavailable")
+	}
+	if *envelope.Code != 0 {
+		return receipt, false, ErrPrepaymentRejected
 	}
 	if command.Action != "submitting" && envelope.Data.ID != command.BillingOperationID {
 		return receipt, false, errors.New("prepayment receipt identity mismatch")

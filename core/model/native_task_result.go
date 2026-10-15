@@ -29,7 +29,26 @@ const NotStartedCode = "not_started"
 // (see NativeTaskIssues). migrations/native-task-v2 adds it to an existing
 // table and must be applied before a binary with the field is deployed:
 // NativeTaskStorageReady refuses storage missing any column.
+//
+// The own task queue (spec 2026-10-15) adds QueueScope and the queue times;
+// migrations/native-task-v3 adds them to an existing table, also before the
+// binary. Statuses waiting and dispatching are tasks held but never sent.
 type NativeTask struct {
+	// QueueScope is the provider capacity pool the task counts against,
+	// "<provider>:<pool>" (v1 "fal:default"); written when reserved.
+	QueueScope string `gorm:"size:128;default:'';index:idx_native_tasks_status_queue_scope,priority:2" json:"-"`
+	// EnqueuedAt is when the task entered the queue (its hold's admission).
+	EnqueuedAt *time.Time `json:"-"`
+	// DispatchedAt is when a dispatcher last claimed it from the queue.
+	DispatchedAt *time.Time `json:"-"`
+	// DispatchOwner is the claim's random token; every move out of
+	// dispatching requires it, so a stale holder never changes a newer claim.
+	DispatchOwner string `gorm:"size:64;default:''" json:"-"`
+	// DispatchUntil ends the claim's lease; recovery fails it after that.
+	DispatchUntil *time.Time `json:"-"`
+	// DispatchAfter is the earliest time it may be claimed.
+	DispatchAfter *time.Time `json:"-"`
+
 	RecoveryOwner       string    `gorm:"size:64" json:"-"`
 	RecoveryUntil       int64     `gorm:"index" json:"-"`
 	NextRecoveryAt      int64     `gorm:"index" json:"-"`
@@ -50,15 +69,15 @@ type NativeTask struct {
 	PublicError         string    `gorm:"type:text" json:"-"`
 	UpstreamID          string    `gorm:"size:256" json:"-"`
 	ID                  string    `gorm:"primaryKey;size:128" json:"-"`
-	GroupID             string    `gorm:"size:64;not null;index" json:"-"`
+	GroupID             string    `gorm:"size:64;not null;index;index:idx_native_tasks_group_created,priority:1" json:"-"`
 	TokenID             int       `gorm:"not null" json:"-"`
 	Model               string    `gorm:"size:256;not null" json:"-"`
 	Fingerprint         string    `gorm:"size:64;not null" json:"-"`
 	OutputSchema        string    `gorm:"type:text;not null" json:"-"`
 	OutputSchemaHash    string    `gorm:"size:64;not null" json:"-"`
-	Status              string    `gorm:"size:32;not null" json:"-"`
+	Status              string    `gorm:"size:32;not null;index:idx_native_tasks_status_queue_scope,priority:1" json:"-"`
 	NativeOutput        string    `gorm:"type:text" json:"-"`
-	CreatedAt           time.Time `json:"-"`
+	CreatedAt           time.Time `gorm:"index:idx_native_tasks_group_created,priority:2" json:"-"`
 	UpdatedAt           time.Time `json:"-"`
 }
 
@@ -132,6 +151,11 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 	task.RecoveryUntil = 0
 	task.NextRecoveryAt = 0
 	task.BillingSettled = false
+	task.EnqueuedAt = nil
+	task.DispatchedAt = nil
+	task.DispatchOwner = ""
+	task.DispatchUntil = nil
+	task.DispatchAfter = nil
 	var saved NativeTask
 	created := false
 	err := db.Transaction(func(tx *gorm.DB) error {

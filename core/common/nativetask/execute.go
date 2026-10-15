@@ -41,6 +41,9 @@ type Plan struct {
 	// the request used the contract's own model. The task keeps the contract's
 	// model either way.
 	AcceptedModel string
+	// Direct never queues the task (admin trials): it is admitted and sent at
+	// once, as before the queue, and still counts toward its scope's in-flight work.
+	Direct bool
 }
 type Engine struct {
 	DB       *gorm.DB
@@ -54,6 +57,12 @@ type Engine struct {
 	// DISABLE_NATIVE_RESERVATION_STOP_LOSS=true), such a reservation waits for
 	// the application's 24-hour fallback; rows already failed are still refunded.
 	AbandonReservations bool
+	// Queue reads the own task queue settings (spec 2026-10-15); nil reads
+	// the gateway options.
+	Queue *QueueConfig
+	// QueueProviders, by provider name, resolve a queued task's client and
+	// count other in-flight work of the provider's scopes.
+	QueueProviders map[string]QueueProvider
 }
 
 var ErrUnavailable = errors.New("native execution unavailable")
@@ -134,7 +143,8 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		return nil, ErrUnavailable
 	}
 	digest := sha256.Sum256(body)
-	task, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: id, GroupID: group, TokenID: token, Model: frozen.Model, Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(frozen.OutputSchema), FrozenContract: string(p.Contract), NativeInput: string(input), ChannelID: p.ChannelID, Endpoint: p.Endpoint, CredentialScope: p.CredentialScope, PrepaymentQuoteJSON: p.QuoteJSON, BillingOperationID: "native:" + id, DeliveryBase: p.DeliveryBase, KeyFingerprint: p.KeyFingerprint})
+	task, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: id, GroupID: group, TokenID: token, Model: frozen.Model, Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(frozen.OutputSchema), FrozenContract: string(p.Contract), NativeInput: string(input), ChannelID: p.ChannelID, Endpoint: p.Endpoint, CredentialScope: p.CredentialScope, PrepaymentQuoteJSON: p.QuoteJSON, BillingOperationID: "native:" + id, DeliveryBase: p.DeliveryBase, KeyFingerprint: p.KeyFingerprint,
+		QueueScope: QueueScope(route.Provider)})
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +163,11 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		command.BillingOperationID = task.BillingOperationID
 		return e.Wallet.Prepayment(walletCtx, command)
 	}
-	admit := balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON}
+	// The switch only decides whether a new admission asks to queue; the
+	// route below follows the wallet's answer (spec §2 step 4), so a retry of
+	// a hold admitted before the switch changed keeps that hold's path.
+	admit := balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON,
+		Queue: !p.Direct && e.queueEnabled()}
 	if p.Log != nil {
 		admit = admit.WithUsage(model.NativeUsageIdentity(task, *p.Log))
 	}
@@ -186,6 +200,9 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 			p.Log.RequestSource = admitted.UsageSource
 		}
 	}
+	if admitted.Submission() == model.NativeStatusWaiting {
+		return e.enqueue(ctx, task, p.Log, admitted)
+	}
 	attemptID := task.BillingOperationID + ":1"
 	if !balance.FullRequestLeft(walletCtx) {
 		// Admission used most of the budget (retries or a slow wallet). A
@@ -210,14 +227,25 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		// request submitted it: answer that state, never a request ID conflict.
 		return e.storedUnlessReserved(task, err)
 	}
+	return e.submitClaimed(ctx, task, contract, e.Provider, p.Log, call)
+}
+
+// submitClaimed sends a task that holds the wallet claim of its attempt and
+// has just won the move into submitting (from reserved, or from dispatching).
+// It is the only place that calls the provider. The request log row is
+// written here unless the task already has it (queued tasks get it when
+// enqueued: logInfo nil).
+func (e *Engine) submitClaimed(ctx context.Context, task *model.NativeTask, contract *nativeresult.CompiledTask, provider Provider, logInfo *model.NativeTaskLog, call func(balance.PrepaymentCommand) (balance.PrepaymentReceipt, error)) (*model.NativeTask, error) {
+	id, group, token := task.ID, task.GroupID, task.TokenID
+	attemptID := task.BillingOperationID + ":1"
 	task.Status = "submitting"
-	if p.Log != nil {
+	if logInfo != nil {
 		// The request log is an operator view; it never blocks a paid submission.
-		if logErr := model.RecordNativeTaskLog(e.DB, task, *p.Log); logErr != nil {
+		if logErr := model.RecordNativeTaskLog(e.DB, task, *logInfo); logErr != nil {
 			log.Errorf("record native task log %s: %v", id, logErr)
 		}
 	}
-	upstreamID, submitErr := e.Provider.SubmitNative(ctx, task.Endpoint, []byte(task.NativeInput))
+	upstreamID, submitErr := provider.SubmitNative(ctx, task.Endpoint, []byte(task.NativeInput))
 	if submitErr != nil {
 		state, code := "submission_unknown", "submission_outcome_unknown"
 		var issues []nativeresult.ParameterIssue
@@ -238,27 +266,27 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 			}
 		}
 		logSubmissionFailure(task, submitErr, state, code)
-		if err = model.TransitionNativeSubmission(e.DB, id, group, token, "submitting", state, code, issues...); err != nil {
+		if err := model.TransitionNativeSubmission(e.DB, id, group, token, "submitting", state, code, issues...); err != nil {
 			return task, err
 		}
 		task.Status = state
 		task.ErrorCode = code
 		task.PublicError = model.NativeTaskPublicError(code, issues)
 		if state == "failed" {
-			if _, err = call(balance.PrepaymentCommand{Action: "reject_attempt", AttemptID: attemptID}); err != nil {
+			if _, err := call(balance.PrepaymentCommand{Action: "reject_attempt", AttemptID: attemptID}); err != nil {
 				return task, err
 			}
-			_, err = call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_accepted"}})
+			_, err := call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_accepted"}})
 			return task, err
 		}
 		return task, ErrPending
 	}
-	if err = model.AcceptNativeTask(e.DB, id, group, token, upstreamID); err != nil {
+	if err := model.AcceptNativeTask(e.DB, id, group, token, upstreamID); err != nil {
 		return task, err
 	}
 	task.Status = "queued"
 	task.UpstreamID = upstreamID
-	_, err = call(balance.PrepaymentCommand{Action: "accept_attempt", AttemptID: attemptID, UpstreamTaskID: upstreamID})
+	_, err := call(balance.PrepaymentCommand{Action: "accept_attempt", AttemptID: attemptID, UpstreamTaskID: upstreamID})
 	return task, err
 }
 
@@ -374,11 +402,16 @@ func logSubmissionFailure(task *model.NativeTask, err error, state, code string)
 // release failed: it is valid from an unknown or not_submitted submission and
 // refused only for an accepted one.
 func refundNotStarted(task *model.NativeTask, call func(balance.PrepaymentCommand) (balance.PrepaymentReceipt, error)) error {
-	attemptID := task.BillingOperationID + ":1"
 	current, err := call(balance.PrepaymentCommand{Action: "get"})
 	if err != nil {
 		return err
 	}
+	return refundNotStartedAs(task, current, call)
+}
+
+// refundNotStartedAs is refundNotStarted with the hold already read.
+func refundNotStartedAs(task *model.NativeTask, current balance.PrepaymentReceipt, call func(balance.PrepaymentCommand) (balance.PrepaymentReceipt, error)) error {
+	attemptID := task.BillingOperationID + ":1"
 	fields := log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model}
 	if _, present, attemptsErr := current.AttemptState(attemptID); attemptsErr != nil {
 		log.WithFields(fields).WithError(attemptsErr).Warn("native not_started refund: wallet attempts unreadable; settling without releasing the attempt")
@@ -387,8 +420,60 @@ func refundNotStarted(task *model.NativeTask, call func(balance.PrepaymentComman
 			log.WithFields(fields).WithError(err).Warn("native not_started refund: attempt not released; settling anyway")
 		}
 	}
-	_, err = call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_accepted"}})
+	_, err := call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_accepted"}})
 	return err
+}
+
+// failedBeforeDispatch reports a task that failed before it was ever sent:
+// recovery failed its reservation or expired its dispatch claim
+// (not_started), or it ended while queued (cancelled, queue_timeout,
+// model_unavailable_while_queued, insufficient_balance). Each is refunded in
+// full (refundBeforeDispatch).
+func failedBeforeDispatch(task *model.NativeTask) bool {
+	if task.Status != "failed" || task.UpstreamID != "" {
+		return false
+	}
+	switch task.ErrorCode {
+	case model.NotStartedCode, model.CancelledCode, model.QueueTimeoutCode,
+		model.ModelUnavailableWhileQueuedCode, model.InsufficientBalanceCode:
+		return true
+	}
+	return false
+}
+
+// refundBeforeDispatch refunds a task that failed before it was sent (spec
+// §4.3), choosing by the wallet's receipt, never by the error code: a hold
+// with no attempt is settled failed/not_dispatched, which the wallet accepts
+// only while no attempt was claimed; a hold whose attempt was claimed (and
+// never accepted) is refunded as not started (refundNotStarted); a settled
+// hold only has its receipt recorded. It is safe because the task was moved
+// out of reserved, waiting or dispatching by a compare-and-set first: nothing
+// can send it any more.
+func refundBeforeDispatch(task *model.NativeTask, call func(balance.PrepaymentCommand) (balance.PrepaymentReceipt, error)) error {
+	current, err := call(balance.PrepaymentCommand{Action: "get"})
+	if err != nil {
+		return err
+	}
+	if current.Status != "pending" {
+		return nil
+	}
+	if attempts, countErr := current.AttemptCount(); countErr == nil && attempts == 0 {
+		_, err = call(balance.PrepaymentCommand{Action: "settle", Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_dispatched"}})
+		return err
+	}
+	return refundNotStartedAs(task, current, call)
+}
+
+// acceptRecorded reports a stored wallet receipt that already shows the
+// task's attempt accepted: polling does not send accept_attempt again, so a
+// faster poll adds no serialized wallet write (spec §5.8).
+func acceptRecorded(task *model.NativeTask) bool {
+	var stored balance.PrepaymentReceipt
+	if task.BillingReceiptJSON == "" || json.Unmarshal([]byte(task.BillingReceiptJSON), &stored) != nil || stored.ID != task.BillingOperationID {
+		return false
+	}
+	state, present, err := stored.AttemptState(task.BillingOperationID + ":1")
+	return err == nil && present && state == "accepted"
 }
 
 // SyncBilling performs only idempotent wallet callbacks; it never calls a provider.
@@ -403,13 +488,13 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 		command.BillingOperationID = task.BillingOperationID
 		return e.Wallet.Prepayment(ctx, command)
 	}
-	if task.UpstreamID != "" {
+	if task.UpstreamID != "" && !acceptRecorded(task) {
 		if _, err := call(balance.PrepaymentCommand{Action: "accept_attempt", AttemptID: task.BillingOperationID + ":1", UpstreamTaskID: task.UpstreamID}); err != nil {
 			return err
 		}
 	}
-	if task.Status == "failed" && task.ErrorCode == model.NotStartedCode {
-		if err := refundNotStarted(task, call); err != nil {
+	if failedBeforeDispatch(task) {
+		if err := refundBeforeDispatch(task, call); err != nil {
 			return err
 		}
 	} else if notAccepted(task) {

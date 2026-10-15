@@ -105,3 +105,35 @@ func TestGroupNativeTaskReadListsRejectedParameters(t *testing.T) {
 	require.Equal(t, "voice", body.Data.ErrorIssues[0].Field)
 	require.Equal(t, "unsupported_value", body.Data.ErrorIssues[0].Rule)
 }
+
+// Own task queue spec 2026-10-15 §3.2: the administrative read uses the same
+// single status mapping as the customer API. Queued tasks read as queued,
+// and a status the application does not know is never passed through.
+func TestGroupNativeTaskReadUsesThePublicStatusMapping(t *testing.T) {
+	database, err := model.OpenSQLite(filepath.Join(t.TempDir(), "tasks.db"))
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.NativeTask{}))
+	for id, status := range map[string]string{"waiting": model.NativeStatusWaiting, "dispatching": model.NativeStatusDispatching, "unknown": "something_new", "sent": "submitting"} {
+		require.NoError(t, database.Create(&model.NativeTask{ID: id, GroupID: "customer", TokenID: 7, Model: "vendor/model/text-to-image",
+			Fingerprint: "f", OutputSchema: "{}", OutputSchemaHash: "h", Status: status, FrozenContract: `{}`, NativeInput: `{}`}).Error)
+	}
+	oldKey := config.AdminKey
+	config.AdminKey = "native-history-admin"
+	t.Cleanup(func() { config.AdminKey = oldKey })
+	reader := groupNativeTaskReader{engine: func() (*nativetask.Engine, bool) { return &nativetask.Engine{DB: database}, true }}
+	router := gin.New()
+	router.Group("/api", middleware.AdminAuth).GET("/native-tasks/:group/:id", reader.detail)
+	for id, want := range map[string]string{"waiting": "queued", "dispatching": "queued", "unknown": "running", "sent": "queued"} {
+		request := httptest.NewRequest("GET", "/api/native-tasks/customer/"+id, nil)
+		request.Header.Set("Authorization", "Bearer "+config.AdminKey)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Equal(t, 200, response.Code)
+		var body struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Equal(t, want, body.Data["status"], id)
+		require.Equal(t, nativetask.PublicStatus(map[string]string{"waiting": model.NativeStatusWaiting, "dispatching": model.NativeStatusDispatching, "unknown": "something_new", "sent": "submitting"}[id]), body.Data["status"])
+	}
+}

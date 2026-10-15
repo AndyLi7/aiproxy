@@ -30,7 +30,8 @@ COPY --from=frontend-builder /aiproxy/web/dist/ /aiproxy/core/public/dist/
 
 RUN SWAG_VERSION=${SWAG_VERSION} sh scripts/swag.sh
 
-RUN sh scripts/test-image-contracts.sh
+# Contract tests run before every deploy (go test), not inside the image
+# build: shared builders are slow enough to time out timing-sensitive tests.
 
 RUN go build -trimpath -ldflags "-s -w" -o aiproxy
 

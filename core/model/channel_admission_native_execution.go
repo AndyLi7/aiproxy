@@ -40,6 +40,7 @@ type ChannelAdmissionTaskExecution struct {
 type NativeExecutionKind string
 
 const (
+	NativeExecutionRecovery NativeExecutionKind = "native_recovery"
 	NativeExecutionSubmit   NativeExecutionKind = "native_submit"
 	NativeExecutionDispatch NativeExecutionKind = "native_dispatch"
 	NativeExecutionPoll     NativeExecutionKind = "native_poll"
@@ -157,7 +158,7 @@ func beginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		return nil, ErrNativeTaskConflict
 	}
 	switch kind {
-	case NativeExecutionSubmit, NativeExecutionDispatch, NativeExecutionPoll, NativeExecutionBilling, NativeExecutionDelivery:
+	case NativeExecutionRecovery, NativeExecutionSubmit, NativeExecutionDispatch, NativeExecutionPoll, NativeExecutionBilling, NativeExecutionDelivery:
 	default:
 		return nil, ErrNativeTaskConflict
 	}
@@ -171,6 +172,9 @@ func beginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 	installed, e := nativeExecutionStoragePresent(db)
 	if e != nil || !installed {
 		return nil, e
+	}
+	if kind == NativeExecutionRecovery && (recoveryOwner == "" || task.Status == "reserved") {
+		return nil, ErrNativeTaskConflict
 	}
 	expectedRecoveryUntil := int64(0)
 	if recoveryOwner != "" {
@@ -261,6 +265,9 @@ func beginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 				return ErrNativeTaskConflict
 			}
 			row.RecoveryUntil = current.RecoveryUntil
+			if kind == NativeExecutionRecovery {
+				row.RecoveryUntil = expectedRecoveryUntil
+			}
 		}
 		if kind == NativeExecutionDispatch {
 			if task.DispatchOwner == "" || task.Status != NativeStatusDispatching || current.Status != NativeStatusDispatching || current.DispatchUntil == nil {
@@ -458,7 +465,7 @@ func frozenNativeExecutionBinding(tx *gorm.DB, c *ChannelAdmissionControl, use *
 			return nativeExecutionBinding{}, ErrChannelAdmissionConflict
 		}
 		switch NativeExecutionKind(row.Kind) {
-		case NativeExecutionSubmit, NativeExecutionDispatch, NativeExecutionPoll, NativeExecutionBilling, NativeExecutionDelivery:
+		case NativeExecutionRecovery, NativeExecutionSubmit, NativeExecutionDispatch, NativeExecutionPoll, NativeExecutionBilling, NativeExecutionDelivery:
 		default:
 			return nativeExecutionBinding{}, ErrChannelAdmissionConflict
 		}

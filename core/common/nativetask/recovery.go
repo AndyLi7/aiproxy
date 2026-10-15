@@ -380,91 +380,130 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		if ctx.Err() != nil {
 			return report, ctx.Err()
 		}
-		var releaseEvidence model.NativeReservationRelease
-		var releaseEvidenceErr error
-		if task.Status == "reserved" {
-			releaseEvidence, releaseEvidenceErr = model.CaptureNativeReservationRelease(e.DB, &task, claimOwner)
-		}
-		var workErr error
-		queued := task.Status == model.NativeStatusWaiting || task.Status == model.NativeStatusDispatching
-		if queued {
-			workErr = e.recoverQueued(recoveryCtx, &task, current)
-		} else {
-			workCtx, cancel := context.WithTimeout(recoveryCtx, 90*time.Second)
-			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
-			cancel()
-		}
-		// Decide on the row as this poll left it, never on the claimed snapshot:
-		// the poll may have saved a result, which must not be expired.
-		fresh, readErr := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)
-		if readErr != nil {
-			fresh = &task
-			if workErr == nil {
-				workErr = readErr
+		var handoff *model.NativeRecoveryHandoffHandle
+		if task.Status != "reserved" {
+			handoff, err = model.PrepareNativeRecoveryHandoff(recoveryCtx, e.DB, &task)
+			if err != nil {
+				return report, err
 			}
-		}
-		if fresh.CreatedAt.Equal(task.CreatedAt) {
-			fresh.AdmissionGeneration = releaseEvidence.GenerationID
-			fresh.AdmissionRecoveryOwner = claimOwner
-		}
-		current = now.Add(time.Since(started))
-		age := current.Sub(fresh.CreatedAt)
-		expired, expireErr := e.expireGeneration(recoveryCtx, fresh, current, resolve)
-		switch {
-		case expired:
-			report.Expired++
-			workErr = expireErr
-		case expireErr != nil:
-			workErr = expireErr
-		case workErr != nil && age > NativeTaskDeadline && fresh.Status == "result_received":
-			// Backstop: a received result still undeliverable after the long
-			// deadline is ended and refunded instead of retried forever.
-			if model.FailAcceptedNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
-				if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
-					workErr = e.SyncBilling(recoveryCtx, failed)
+			if handoff != nil {
+				accepted, acceptErr := handoff.Accept(recoveryCtx)
+				if acceptErr != nil {
+					return report, acceptErr
+				}
+				if !accepted {
+					return report, model.ErrNativeTaskConflict
 				}
 			}
 		}
-		var enqueueAt time.Time
-		if !expired && workErr == nil && fresh.Status == "reserved" {
-			// A reserved task whose hold is queued is enqueued, never abandoned.
-			var enqueued bool
-			if enqueued, enqueueAt = e.enqueueRecovered(fresh, current); enqueued {
-				fresh.Status = model.NativeStatusWaiting
-			}
+		// A normal function return observes all defers owned by this body.
+		// Panic/Goexit never reaches release/exit; no recovery fabricates success.
+		outcome := e.recoverClaim(recoveryCtx, task, now, started, current, resolve, archive, &report)
+		if outcome.removed {
+			continue
 		}
-		if !expired && workErr == nil && e.AbandonReservations && fresh.Status == "reserved" && enqueueAt.IsZero() {
-			abandoned, abandonErr := e.abandonReservation(recoveryCtx, fresh, current)
-			if abandoned {
-				report.Abandoned++
-				fresh.Status = "failed"
-			}
-			workErr = abandonErr
-		}
-		if releaseEvidenceErr == nil && fresh.Status == "reserved" && balance.WalletConfirmedNotFound(workErr) && age > staleReservationAge {
-			// Nothing is held or owed for it, and a retry creates a new
-			// reservation. Only the application's own "Prepayment not found"
-			// proves that: a bare 404 (a platform page during a deploy) could
-			// delete a reservation whose hold the stop-loss must still refund.
-			if released, err := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, current.Add(-staleReservationAge), releaseEvidence); err == nil && released {
-				report.Advanced++
-				continue
-			}
-		}
-		if inFlight(task.Status) && !inFlight(fresh.Status) {
-			// A place in the provider's capacity was freed.
-			wakeDispatcher()
-		}
-		if workErr != nil {
-			report.Deferred++
-		} else {
-			report.Advanced++
-		}
-		if err = e.releaseRecovery(task.ID, task.GroupID, task.TokenID, claimOwner, fresh, now.Add(time.Since(started)), age, expired, workErr != nil, enqueueAt); err != nil {
+		if err = e.releaseRecoveryHandoff(task.ID, task.GroupID, task.TokenID, claimOwner, outcome.fresh, now.Add(time.Since(started)), outcome.age, outcome.expired, outcome.failed, outcome.enqueueAt, handoff); err != nil {
 			return report, err
 		}
+
 	}
 	return report, nil
+}
+
+type recoveryClaimOutcome struct {
+	fresh                    *model.NativeTask
+	age                      time.Duration
+	expired, failed, removed bool
+	enqueueAt                time.Time
+}
+
+// recoverClaim owns one claim's existing business work and cleanup. Its caller
+// alone records normal completion; it adds no goroutine or timeout window.
+func (e *Engine) recoverClaim(recoveryCtx context.Context, task model.NativeTask, now, started, current time.Time, resolve ResolvePoller, archive ArchiveFunc, report *RecoveryReport) recoveryClaimOutcome {
+	claimOwner := task.RecoveryOwner
+	var releaseEvidence model.NativeReservationRelease
+	var releaseEvidenceErr error
+	if task.Status == "reserved" {
+		releaseEvidence, releaseEvidenceErr = model.CaptureNativeReservationRelease(e.DB, &task, claimOwner)
+	}
+	var workErr error
+	queued := task.Status == model.NativeStatusWaiting || task.Status == model.NativeStatusDispatching
+	if queued {
+		workErr = e.recoverQueued(recoveryCtx, &task, current)
+	} else {
+		func() {
+			workCtx, cancel := context.WithTimeout(recoveryCtx, 90*time.Second)
+			defer cancel()
+			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
+		}()
+	}
+	// Decide on the row as this poll left it, never on the claimed snapshot:
+	// the poll may have saved a result, which must not be expired.
+	fresh, readErr := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)
+	if readErr != nil {
+		fresh = &task
+		if workErr == nil {
+			workErr = readErr
+		}
+	}
+	if fresh.CreatedAt.Equal(task.CreatedAt) {
+		fresh.AdmissionGeneration = releaseEvidence.GenerationID
+		fresh.AdmissionRecoveryOwner = claimOwner
+	}
+	current = now.Add(time.Since(started))
+	age := current.Sub(fresh.CreatedAt)
+	expired, expireErr := e.expireGeneration(recoveryCtx, fresh, current, resolve)
+	switch {
+	case expired:
+		report.Expired++
+		workErr = expireErr
+	case expireErr != nil:
+		workErr = expireErr
+	case workErr != nil && age > NativeTaskDeadline && fresh.Status == "result_received":
+		// Backstop: a received result still undeliverable after the long
+		// deadline is ended and refunded instead of retried forever.
+		if model.FailAcceptedNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
+			if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
+				workErr = e.SyncBilling(recoveryCtx, failed)
+			}
+		}
+	}
+	var enqueueAt time.Time
+	if !expired && workErr == nil && fresh.Status == "reserved" {
+		// A reserved task whose hold is queued is enqueued, never abandoned.
+		var enqueued bool
+		if enqueued, enqueueAt = e.enqueueRecovered(fresh, current); enqueued {
+			fresh.Status = model.NativeStatusWaiting
+		}
+	}
+	if !expired && workErr == nil && e.AbandonReservations && fresh.Status == "reserved" && enqueueAt.IsZero() {
+		abandoned, abandonErr := e.abandonReservation(recoveryCtx, fresh, current)
+		if abandoned {
+			report.Abandoned++
+			fresh.Status = "failed"
+		}
+		workErr = abandonErr
+	}
+	if releaseEvidenceErr == nil && fresh.Status == "reserved" && balance.WalletConfirmedNotFound(workErr) && age > staleReservationAge {
+		// Nothing is held or owed for it, and a retry creates a new
+		// reservation. Only the application's own "Prepayment not found"
+		// proves that: a bare 404 (a platform page during a deploy) could
+		// delete a reservation whose hold the stop-loss must still refund.
+		if released, err := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, current.Add(-staleReservationAge), releaseEvidence); err == nil && released {
+			report.Advanced++
+			return recoveryClaimOutcome{removed: true}
+		}
+	}
+	if inFlight(task.Status) && !inFlight(fresh.Status) {
+		// A place in the provider's capacity was freed.
+		wakeDispatcher()
+	}
+	if workErr != nil {
+		report.Deferred++
+	} else {
+		report.Advanced++
+	}
+	return recoveryClaimOutcome{fresh: fresh, age: age, expired: expired, failed: workErr != nil, enqueueAt: enqueueAt}
 }
 
 // releaseRecovery releases recovery's lease with the next time to look at the
@@ -474,18 +513,45 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 // timeout or a lease is never overwritten. owner is the original unique claim
 // token; rereading fresh may change scheduling, never this ownership evidence.
 func (e *Engine) releaseRecovery(id, group string, token int, owner string, fresh *model.NativeTask, release time.Time, age time.Duration, expired, failed bool, enqueueAt time.Time) error {
+	return e.releaseRecoveryHandoff(id, group, token, owner, fresh, release, age, expired, failed, enqueueAt, nil)
+}
+
+func (e *Engine) releaseRecoveryHandoff(id, group string, token int, owner string, fresh *model.NativeTask, release time.Time, age time.Duration, expired, failed bool, enqueueAt time.Time, handoff *model.NativeRecoveryHandoffHandle) error {
+	releaseAt := func(status string, next time.Time) (bool, error) {
+		if handoff == nil {
+			if status == "" {
+				err := model.ReleaseNativeRecovery(e.DB, id, owner, next)
+				return err == nil, err
+			}
+			return model.ReleaseNativeRecoveryAt(e.DB, id, owner, status, next)
+		}
+		// This only bounds evidence persistence after owned work has returned; it
+		// neither renews the claim nor authorizes business work after cancellation.
+		exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return handoff.ReleaseAndRecordExit(exitCtx, fresh, next, failed)
+	}
+
 	for attempt := 0; ; attempt++ {
 		next := e.recoveryNext(fresh, release, age, expired, failed, enqueueAt)
-		if attempt == 2 {
-			return model.ReleaseNativeRecovery(e.DB, id, owner, next)
+		if attempt == 2 && handoff == nil {
+			_, err := releaseAt("", next)
+			return err
 		}
-		released, err := model.ReleaseNativeRecoveryAt(e.DB, id, owner, fresh.Status, next)
+		released, err := releaseAt(fresh.Status, next)
 		if err != nil || released {
 			return err
 		}
+		if attempt == 2 {
+			return model.ErrNativeTaskConflict
+		}
 		reread, err := model.GetNativeTask(e.DB, id, group, token)
 		if err != nil {
-			return model.ReleaseNativeRecovery(e.DB, id, owner, next)
+			if handoff != nil {
+				return err
+			}
+			_, err := releaseAt("", next)
+			return err
 		}
 		fresh = reread
 	}

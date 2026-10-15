@@ -54,6 +54,12 @@ type ImageTaskError struct {
 // ImageTask and its accounting outbox live in LogDB so reservation/activation are atomic.
 // These records are deliberately retained: removing them would permit paid resubmission.
 type ImageTask struct {
+	// Server-only transient generation/identity captured by the real admission
+	// path. Persistent authority lives in channel_admission_uses.
+	AdmissionGeneration   string `gorm:"-" json:"-"`
+	AdmissionIdentityHash string `gorm:"-" json:"-"`
+	AdmissionAttempt      string `gorm:"-" json:"-"`
+
 	ProviderMetadata    map[string]json.RawMessage `gorm:"serializer:json;type:text" json:"provider_metadata,omitempty"`
 	NumImages           *int64                     `json:"num_images,omitempty"`
 	SeedExact           string                     `gorm:"type:text" json:"-"`
@@ -121,9 +127,18 @@ func ReserveImageTask(
 	info *AsyncUsageInfo,
 	operational ...OperationalFields,
 ) (*ImageTask, bool, error) {
+	saved, created, err := reserveImageTaskWithAdmission(task, info, operational...)
+	if err == nil && created && saved.RequestSummary != "" {
+		if detailErr := LogDB.Create(&RequestDetail{LogID: info.LogID, RequestBody: saved.RequestSummary}).Error; detailErr != nil {
+			log.WithError(detailErr).WithField("log_id", info.LogID).Warn("save image request summary")
+		}
+	}
+	return saved, created, err
+}
+
+func reserveImageTask(database *gorm.DB, task *ImageTask, info *AsyncUsageInfo, operational ...OperationalFields) (*ImageTask, bool, error) {
 	created := false
-	var reservationLogID int
-	err := LogDB.Transaction(func(tx *gorm.DB) error {
+	err := database.Transaction(func(tx *gorm.DB) error {
 		task.Status = "submitting"
 		now := time.Now().UTC()
 		task.CreatedAt = now
@@ -198,7 +213,6 @@ func ReserveImageTask(
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
-		reservationLogID = entry.ID
 		// Pending starts only once an upstream id is durably attached. GORM's default
 		// status is pending, so explicitly overwrite it within this transaction.
 		info.ImageTaskID = task.ID
@@ -221,11 +235,6 @@ func ReserveImageTask(
 
 		return nil
 	})
-	if err == nil && created && task.RequestSummary != "" {
-		if detailErr := LogDB.Create(&RequestDetail{LogID: reservationLogID, RequestBody: task.RequestSummary}).Error; detailErr != nil {
-			log.WithError(detailErr).WithField("log_id", reservationLogID).Warn("save image request summary")
-		}
-	}
 
 	return task, created, err
 }
@@ -300,7 +309,16 @@ func UpdateImageTaskCallLog(
 // so the same X-Request-Id and body can be retried after a top-up. A
 // reservation that may have reached a provider is never released.
 func ReleaseImageTaskReservation(id string) error {
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return releaseImageTaskWithAdmission(id, nil)
+}
+
+// ReleaseImageTaskReservationGeneration is for a definite wallet refusal only.
+func ReleaseImageTaskReservationGeneration(task *ImageTask) error {
+	return releaseImageTaskWithAdmission(task.ID, task)
+}
+
+func releaseImageTaskReservation(database *gorm.DB, id string) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		var task ImageTask
 		if err := tx.First(&task, "id = ?", id).Error; err != nil {
 			return err
@@ -534,6 +552,14 @@ func ExpireUnconfirmedImageSubmission(id string, now time.Time) (bool, error) {
 }
 
 func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
+	return setImageTaskResult(LogDB, id, status, data, taskError, metadata...)
+}
+
+func SetImageTaskResultGeneration(task *ImageTask, status string, data []ImageOutput, taskError *ImageTaskError) error {
+	return withImageTaskGeneration(task, func(tx *gorm.DB) error { return setImageTaskResult(tx, task.ID, status, data, taskError) })
+}
+
+func setImageTaskResult(database *gorm.DB, id, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
 	if status == "completed" && len(data) == 0 {
 		return errors.New("empty completed image result")
 	}
@@ -548,7 +574,7 @@ func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageT
 		return err
 	}
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		changes := map[string]any{"status": status, "data": string(encodedData), "error": string(encodedError), "updated_at": now}
 		if len(metadata) > 1 {
@@ -788,5 +814,14 @@ func SaveImageTaskBilling(task *ImageTask) error {
 		return err
 	}
 	task.BillingSettled = task.Billing.Status != "pending"
-	return LogDB.Model(&ImageTask{}).Where("id = ?", task.ID).Updates(map[string]any{"billing": string(encoded), "billing_settled": task.BillingSettled}).Error
+	return withImageTaskGeneration(task, func(tx *gorm.DB) error {
+		result := tx.Model(&ImageTask{}).Where("id = ?", task.ID).Updates(map[string]any{"billing": string(encoded), "billing_settled": task.BillingSettled})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrChannelAdmissionConflict
+		}
+		return nil
+	})
 }

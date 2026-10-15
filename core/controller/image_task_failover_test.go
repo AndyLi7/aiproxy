@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,8 +29,12 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 		retries         int64
 		wantAttempts    int
 		wantStatus      string
+		active, adopt   bool
 		wantCode        string
 	}{
+		{name: "C active 429 then backup", active: true, primaryStatus: 429, retries: 2, wantAttempts: 2, wantStatus: "queued"},
+		{name: "C active all connections fail", active: true, allFail: true, retries: 10, wantAttempts: 2, wantStatus: "failed", wantCode: "upstream_unavailable"},
+		{name: "C adopts preactivation 429 then backup", active: true, adopt: true, primaryStatus: 429, retries: 2, wantAttempts: 2, wantStatus: "queued"},
 		{name: "connection failure then backup", retries: 2, wantAttempts: 2, wantStatus: "queued"},
 		{name: "all connections fail only once", allFail: true, retries: 10, wantAttempts: 2, wantStatus: "failed", wantCode: "upstream_unavailable"},
 		{name: "HTTP 503 unknown", primaryStatus: 503, retries: 2, wantAttempts: 1, wantStatus: "submission_unknown"},
@@ -93,9 +98,29 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 			c.Set("image_initial_channel", initial)
 			mt := NewMetaByContext(c, first, mode.ImagesGenerations)
 			original := &model.ImageTask{ID: "logical-request", GroupID: "g", TokenID: 1, Model: public, RequestModel: public, ValidationContract: string(contract), Fingerprint: "same", ExpectedImages: 1, ChannelType: first.Type, UpstreamModel: mt.ActualModel}
+			fingerprint := original.Fingerprint
+			activate := func() {
+				activateImageAdmission(t, &imageCallLogHarness{db: db, channel: first})
+				require.NoError(t, db.Create(second).Error)
+			}
+			if tc.active {
+				original.KeyFingerprint = model.ImageChannelKeyFingerprint(first.Key)
+				if !tc.adopt {
+					activate()
+					identity, e := model.ChannelIdentityOf(first)
+					require.NoError(t, e)
+					original.AdmissionIdentityHash = identity.IdentityHash
+					original.Fingerprint = strings.Repeat("a", 64)
+					fingerprint = original.Fingerprint
+					original.BillingOperationID = "synthetic-billing"
+				}
+			}
 			saved, created, err := model.ReserveImageTask(original, &model.AsyncUsageInfo{RequestID: original.ID, RequestAt: time.Now(), GroupID: "g", TokenID: 1, ChannelID: first.ID, BaseURL: first.BaseURL, Price: price, PricingVersion: "v1"})
 			require.NoError(t, err)
 			require.True(t, created)
+			if tc.adopt {
+				activate()
+			}
 			dispatchImageTaskWithFailover(c, saved, &fal.Adaptor{}, mt, []byte(`{"prompt":"test","num_images":1}`))
 			task, err := model.GetImageTask(original.ID, "g", 1)
 			require.NoError(t, err)
@@ -127,7 +152,7 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 			} else {
 				require.Zero(t, backupCalls)
 			}
-			_, created, err = model.ReserveImageTask(&model.ImageTask{ID: original.ID, GroupID: "g", TokenID: 1, Model: public, Fingerprint: "same"}, &model.AsyncUsageInfo{})
+			_, created, err = model.ReserveImageTask(&model.ImageTask{ID: original.ID, GroupID: "g", TokenID: 1, Model: public, Fingerprint: fingerprint}, &model.AsyncUsageInfo{})
 			require.NoError(t, err)
 			require.False(t, created)
 			before := primaryCalls + backupCalls

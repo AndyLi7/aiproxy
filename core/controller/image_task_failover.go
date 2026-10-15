@@ -54,6 +54,15 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 	defer cancel()
 	for {
 		expected := len(task.Attempts)
+		identity, _ := model.ChannelIdentityOf(&model.Channel{ID: mt.Channel.ID, Type: mt.Channel.Type, Key: mt.Channel.Key, BaseURL: mt.Channel.BaseURL, ProxyURL: mt.Channel.ProxyURL, SkipTLSVerify: mt.Channel.SkipTLSVerify, Configs: mt.ChannelConfigs})
+		// The model path keeps legacy compatibility; an invalid identity cannot
+		// obtain a protected attempt after activation.
+		attemptGeneration, admissionErr := model.PrepareImageTaskAttempt(ctx, task, identity, expected)
+		if admissionErr != nil {
+			imageTaskHTTPError(c, 503, "channel_admission_unavailable")
+			return
+		}
+		task.AdmissionAttempt = attemptGeneration
 		if task.PrepaymentQuoteJSON != "" {
 			claimCtx, cancelClaim := ctx, context.CancelFunc(func() {})
 			if expected == 0 {
@@ -189,6 +198,9 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 				imageTaskHTTPError(c, 503, "task_store_unavailable")
 				return
 			}
+			persisted.AdmissionGeneration = task.AdmissionGeneration
+			persisted.AdmissionIdentityHash = task.AdmissionIdentityHash
+			persisted.AdmissionAttempt = task.AdmissionAttempt
 			persisted.Attempts = task.Attempts
 			*task = persisted
 			if model.SaveImageTaskAttempt(task, len(task.Attempts), mt.Channel.ID, mt.Channel.BaseURL) != nil {

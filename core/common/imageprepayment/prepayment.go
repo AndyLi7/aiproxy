@@ -85,6 +85,9 @@ func Sync(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt
 	if task.PrepaymentQuoteJSON == "" {
 		return balance.PrepaymentReceipt{}, nil
 	}
+	if err := model.CaptureImageTaskGeneration(task); err != nil {
+		return balance.PrepaymentReceipt{}, err
+	}
 	if len(task.Attempts) > 0 {
 		last := task.Attempts[len(task.Attempts)-1]
 		if last.Failure.Acceptance == failover.NotAccepted {
@@ -127,7 +130,7 @@ func Sync(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt
 		return receipt, err
 	}
 	if receipt.Status == "refunded" && task.Status != "failed" && task.Status != "completed" {
-		if err = model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "submission_timeout", Message: "Task could not be confirmed and was refunded"}); err != nil {
+		if err = model.SetImageTaskResultGeneration(task, "failed", nil, &model.ImageTaskError{Code: "submission_timeout", Message: "Task could not be confirmed and was refunded"}); err != nil {
 			return receipt, err
 		}
 		task.Status = "failed"

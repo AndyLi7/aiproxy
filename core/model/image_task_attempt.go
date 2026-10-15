@@ -23,11 +23,15 @@ type ImageTaskAttempt struct {
 // SaveImageTaskAttempt persists the audit and route before any upstream side effect.
 // expected is a compare-and-swap guard against concurrent dispatch/replay.
 func SaveImageTaskAttempt(task *ImageTask, expected int, channelID int, baseURL string) error {
+	return saveImageAttemptWithAdmission(task, expected, channelID, baseURL)
+}
+
+func saveImageTaskAttempt(database *gorm.DB, task *ImageTask, expected int, channelID int, baseURL string) error {
 	raw, err := json.Marshal(task.Attempts)
 	if err != nil {
 		return err
 	}
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		var current ImageTask
 		if err := tx.First(&current, "id = ?", task.ID).Error; err != nil {
 			return err

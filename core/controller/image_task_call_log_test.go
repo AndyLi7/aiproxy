@@ -24,6 +24,10 @@ import (
 const imageCallLogRequestID = "call-log"
 
 type imageCallLogHarness struct {
+	channel      *model.Channel
+	walletHook   func(balance.PrepaymentCommand)
+	providerHook func()
+
 	db            *gorm.DB
 	providerCalls int
 	requestID     string
@@ -77,6 +81,9 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 		var command balance.PrepaymentCommand
 		require.NoError(t, json.Unmarshal(raw, &command))
+		if h.walletHook != nil {
+			h.walletHook(command)
+		}
 
 		if edgeFailures[command.Action] > 0 {
 			edgeFailures[command.Action]--
@@ -108,6 +115,9 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		h.providerCalls++
+		if h.providerHook != nil {
+			h.providerHook()
+		}
 		_, _ = w.Write([]byte(`{"request_id":"upstream"}`))
 	}))
 	t.Cleanup(upstream.Close)
@@ -137,6 +147,8 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 			"contractHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}}},
 	}
+
+	h.channel = channel
 
 	var quote map[string]any
 	require.NoError(t, json.Unmarshal([]byte(`{"version":1,"quoteVersion":"test-1","currency":"USD","prepaidMicros":2000000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":1000000,"prepaidMicros":2000000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`), &quote))

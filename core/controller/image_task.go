@@ -493,23 +493,25 @@ func submitImageTask(c *gin.Context) {
 		rawWrapper.Contract = frozen
 	}
 
+	identity, _ := model.ChannelIdentityOf(&model.Channel{ID: mt.Channel.ID, Type: mt.Channel.Type, Key: mt.Channel.Key, BaseURL: mt.Channel.BaseURL, ProxyURL: mt.Channel.ProxyURL, SkipTLSVerify: mt.Channel.SkipTLSVerify, Configs: mt.ChannelConfigs})
 	task, created, err := model.ReserveImageTask(
 		&model.ImageTask{
-			ArchiveRequired:     ownedimage.Configured(),
-			PrepaymentQuoteJSON: prepaymentJSON,
-			BillingOperationID:  mt.BillingOperationID,
-			ID:                  id,
-			Model:               wrapper.ID,
-			RequestModel:        middleware.GetRequestedModel(c),
-			ValidationContract:  string(rawWrapper.Contract),
-			GroupID:             group.ID,
-			TokenID:             token.ID,
-			Fingerprint:         fingerprint,
-			UpstreamModel:       mt.ActualModel,
-			ChannelType:         mt.Channel.Type,
-			KeyFingerprint:      model.ImageChannelKeyFingerprint(mt.Channel.Key),
-			ExpectedImages:      metering.MaximumOutputs,
-			RequestSummary:      imageTaskLogRequestSummary(body),
+			AdmissionIdentityHash: identity.IdentityHash,
+			ArchiveRequired:       ownedimage.Configured(),
+			PrepaymentQuoteJSON:   prepaymentJSON,
+			BillingOperationID:    mt.BillingOperationID,
+			ID:                    id,
+			Model:                 wrapper.ID,
+			RequestModel:          middleware.GetRequestedModel(c),
+			ValidationContract:    string(rawWrapper.Contract),
+			GroupID:               group.ID,
+			TokenID:               token.ID,
+			Fingerprint:           fingerprint,
+			UpstreamModel:         mt.ActualModel,
+			ChannelType:           mt.Channel.Type,
+			KeyFingerprint:        model.ImageChannelKeyFingerprint(mt.Channel.Key),
+			ExpectedImages:        metering.MaximumOutputs,
+			RequestSummary:        imageTaskLogRequestSummary(body),
 		},
 		info,
 		operational,
@@ -563,12 +565,23 @@ func submitImageTask(c *gin.Context) {
 			// X-Request-Id and body succeed later without any risk of a double
 			// charge or a repeated provider call. It also leaves no unsettled
 			// task for billing recovery to revisit.
-			if releaseErr := releaseImageTaskReservation(task.ID); releaseErr != nil {
-				common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
-				if err := model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: taskCode, Message: taskMessage}); err != nil {
+			release := func() error { return releaseImageTaskReservation(task.ID) }
+			if task.AdmissionGeneration != "" {
+				release = func() error { return model.ReleaseImageTaskReservationGeneration(task) }
+			}
+			if releaseErr := release(); releaseErr != nil {
+				if task.AdmissionGeneration != "" {
+					// A lost/replaced generation cannot fall back to marking a newer task
+					// failed/refunded after a late wallet refusal.
 					imageTaskHTTPError(c, 503, "task_store_unavailable")
 					return
 				}
+				common.GetLogger(c).Warnf("release refused image reservation %s: %v", task.ID, releaseErr)
+				if err := model.SetImageTaskResultGeneration(task, "failed", nil, &model.ImageTaskError{Code: taskCode, Message: taskMessage}); err != nil {
+					imageTaskHTTPError(c, 503, "task_store_unavailable")
+					return
+				}
+				task.Status = "failed"
 				zero := int64(0)
 				task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: "refunded", ActualMicros: &zero, RefundMicros: &zero}
 				if err := model.SaveImageTaskBilling(task); err != nil {

@@ -25,3 +25,19 @@
 已接纳/未知的初始与 attempt use 仍保守 open；普通终态或钱包 refunded 本身不是供应商已停止、后台核账与活跃执行者均结束的证据。本批不关闭这些记录，也不声称最终 drain/safe-disable 完成。图片 polling/archive 的全部 executor 围栏及持久使用关闭继续后续落实；现有失败/退款规则不被改写成 C 证明。
 
 真实 G5 issuer/全副本与执行者/restore watermark 仍缺部署证据，生产 C 继续不可激活。应用真实 prepare/live历史共享key取证、gateway CAS adapter/受限probe、API/UI、drain/revert 继续实现；不以默认关闭当作完整交付。保持 A/B 工作区隔离，无推送、合并、部署、真实付费供应商或 bucket 调用。
+
+## IMAGE-R1：钱包首次认领途中激活 C
+
+`1cbbcf3` 首轮审核未通过：原测试覆盖 wallet admit 中启用 C，但漏掉 Prepare 已按激活前路径返回、wallet begin_attempt 尚未返回的窗口。主控新增真实 controller 反例得到 HTTP 503、attempt/use/provider 均为 0；该历史提交不能算验收通过。
+
+修复在 wallet claim 前，将绑定原预留代次、owner、完整渠道身份、usage 路由、日志 ID 的准备摘要写入已有预留日志。随机 nonce 仅留在提交进程的不可序列化私有字段中，数据库只存摘要，不存 key/nonce。C 随后激活时，claimed:true 返回路径必须在 control→task→usage/log 锁内验证原摘要及所有冻结字段，用同一事务补入 reservation/首 attempt use 并写 attempt；原首发可跨越封口，不重复认领钱包。数据库缺凭据或仅拿到摘要、新进程重载、换代、终态、路由变化或过期都不能获得首发授权。原有钱包 HTTP 传输重试策略未改；这里不新增业务 claim 重试。
+
+该准备写入只适用于 SQLite/PostgreSQL 完整旧预留；其他方言不获得跨激活凭证，C 的原有能力限制仍适用。PostgreSQL 创建时间按其持久化微秒精度比较；SQLite 保留原精度。没有新增 schema 或迁移。
+
+修复后重新验证：
+
+- `/tmp/b2-c-image-r1-regression.jsonl`：原 5 包范围加激活窗口回归，race 114 根/369 项通过，0 fail，1 个既有 real_wallet_prepaid 子测试跳过。新增 controller 覆盖 admit/begin_attempt/begin_attempt+seal、只调用一次及重放不再发送；claimed:false、未知/拒绝、换代、终态、过期、摘要丢失、身份变化均不发送供应商。
+- `/tmp/b2-c-image-r1-postgres.jsonl`：原 10 场景重跑，加激活前准备→激活后 Save 的 live/sealed/changed/自然 expired/lost-process-proof，15 场景、2 根/17 项通过。实际 PostgreSQL16 双连接等待任务行锁，失败无部分 attempt/use；成功的首 attempt 不允许再次写入。`/tmp/b2-c-image-r1-pg-state.json`：exit 0，自建容器/网络均 0。
+- `/tmp/b2-c-image-r1-build.log`：`go -C core build ./...` exit 0。提交前 worktree/staged security-scan 及完整差异人工审核；扫描记录 `/tmp/b2-c-image-r1-security-worktree.log`、`/tmp/b2-c-image-r1-security-staged.log`。
+
+仍仅为本地合成钱包/供应商和隔离 PostgreSQL 验证；real_wallet_prepaid fixture 未启动的跳过不能计为通过。完整使用关闭、safe-disable、真实部署证明、C2 对接/API/UI 等仍按上节继续，不以此修复宣称完整 C 可上线。

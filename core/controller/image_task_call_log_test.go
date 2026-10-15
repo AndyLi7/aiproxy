@@ -24,6 +24,8 @@ import (
 const imageCallLogRequestID = "call-log"
 
 type imageCallLogHarness struct {
+	beginClaimed *bool
+	beginStatus  int
 	channel      *model.Channel
 	walletHook   func(balance.PrepaymentCommand)
 	providerHook func()
@@ -85,6 +87,11 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 			h.walletHook(command)
 		}
 
+		if command.Action == "begin_attempt" && h.beginStatus != 0 {
+			w.WriteHeader(h.beginStatus)
+			_, _ = w.Write([]byte(`{"code":1,"message":"synthetic refusal"}`))
+			return
+		}
 		if edgeFailures[command.Action] > 0 {
 			edgeFailures[command.Action]--
 			w.WriteHeader(http.StatusBadGateway)
@@ -103,6 +110,9 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 		receipt := map[string]any{"id": command.BillingOperationID, "status": "pending", "prepaidMicros": 2000000}
 		if command.Action == "begin_attempt" {
 			receipt["claimed"] = true
+			if h.beginClaimed != nil {
+				receipt["claimed"] = *h.beginClaimed
+			}
 		}
 
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": receipt}))

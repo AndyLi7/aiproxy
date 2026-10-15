@@ -172,3 +172,105 @@ func TestImageAdmissionActualRecoveryWalletReplyCannotWriteReplacement(t *testin
 	require.Equal(t, "submitting", current.Status)
 	require.Zero(t, h.providerCalls)
 }
+
+func TestImageAdmissionActivationDuringWalletFirstClaim(t *testing.T) {
+	for _, phase := range []string{"admit", "begin_attempt", "begin_attempt-seal"} {
+		t.Run(phase, func(t *testing.T) {
+			h := newImageCallLogHarness(t, http.StatusOK)
+			activated := false
+			h.walletHook = func(command balance.PrepaymentCommand) {
+				trigger := phase
+				if phase == "begin_attempt-seal" {
+					trigger = "begin_attempt"
+				}
+				if !activated && command.Action == trigger {
+					activated = true
+					store := activateImageAdmission(t, h)
+					if phase == "begin_attempt-seal" {
+						next := *h.channel
+						next.ID = 8
+						require.NoError(t, h.db.Create(&next).Error)
+						from, err := model.ChannelIdentityOf(h.channel)
+						require.NoError(t, err)
+						to, err := model.ChannelIdentityOf(&next)
+						require.NoError(t, err)
+						_, err = store.Seal(context.Background(), model.ChannelSealRequest{OperationID: "move-during-claim", Epoch: "synthetic-epoch", From: from, To: to})
+						require.NoError(t, err)
+					}
+				}
+			}
+			answer := h.submit()
+			require.Equal(t, http.StatusAccepted, answer.Code, answer.Body.String())
+			require.Equal(t, 1, h.providerCalls)
+			var task model.ImageTask
+			require.NoError(t, h.db.First(&task, "id = ?", h.requestID).Error)
+			require.Equal(t, "queued", task.Status)
+			require.Len(t, task.Attempts, 1)
+			require.Len(t, imageAdmissionUses(t, h), 2)
+			claims := 0
+			for _, command := range h.commands {
+				if command["action"] == "begin_attempt" {
+					claims++
+				}
+			}
+			require.Equal(t, 1, claims)
+			before := len(h.commands)
+			answer = h.submit()
+			require.Equal(t, http.StatusAccepted, answer.Code)
+			require.Equal(t, 1, h.providerCalls)
+			require.Len(t, h.commands, before)
+		})
+	}
+}
+func TestImageAdmissionActivationDuringClaimRejectsUnknownOrChanged(t *testing.T) {
+	for _, scenario := range []string{"not-claimed", "wallet-unknown", "wallet-refused", "replacement", "terminal", "expired", "missing-preparation", "changed-identity"} {
+		t.Run(scenario, func(t *testing.T) {
+			h := newImageCallLogHarness(t, http.StatusOK)
+			if scenario == "not-claimed" {
+				value := false
+				h.beginClaimed = &value
+			}
+			if scenario == "wallet-unknown" {
+				h.beginStatus = http.StatusBadGateway
+			}
+			if scenario == "wallet-refused" {
+				h.beginStatus = http.StatusPaymentRequired
+			}
+			activated := false
+			h.walletHook = func(command balance.PrepaymentCommand) {
+				if !activated && command.Action == "begin_attempt" {
+					activated = true
+					activateImageAdmission(t, h)
+					switch scenario {
+					case "replacement":
+						replaceImageAdmissionGeneration(t, h)
+					case "terminal":
+						require.NoError(t, model.SetImageTaskResult(h.requestID, "failed", nil, &model.ImageTaskError{Code: "synthetic", Message: "synthetic"}))
+					case "expired":
+						require.NoError(t, h.db.Model(&model.ImageTask{}).Where("id = ?", h.requestID).UpdateColumn("created_at", time.Now().Add(-model.AsyncGenerationDeadline-time.Second)).Error)
+					case "missing-preparation":
+						require.NoError(t, h.db.Model(&model.Log{}).Where("request_id = ?", h.requestID).Update("metadata", "{}").Error)
+					case "changed-identity":
+						require.NoError(t, h.db.Model(&model.Channel{}).Where("id = ?", h.channel.ID).Update("base_url", "https://changed.invalid").Error)
+					}
+				}
+			}
+			answer := h.submit()
+			require.Contains(t, []int{http.StatusAccepted, http.StatusServiceUnavailable}, answer.Code, answer.Body.String())
+			require.Zero(t, h.providerCalls)
+			var task model.ImageTask
+			require.NoError(t, h.db.First(&task, "id = ?", h.requestID).Error)
+			require.Empty(t, task.Attempts)
+			require.Nil(t, task.Billing)
+			if scenario == "terminal" {
+				require.Equal(t, "failed", task.Status)
+			} else {
+				require.Equal(t, "submitting", task.Status)
+			}
+			for _, command := range h.commands {
+				require.NotEqual(t, "settle", command["action"])
+				require.NotEqual(t, "reject_attempt", command["action"])
+			}
+		})
+	}
+}

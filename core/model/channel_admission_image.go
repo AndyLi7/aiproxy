@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/labring/aiproxy/core/common/failover"
 	"gorm.io/gorm"
@@ -60,7 +61,7 @@ func lockAdmissionImageTask(tx *gorm.DB, task *ImageTask) (*ImageTask, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !current.CreatedAt.Equal(task.CreatedAt) || current.Fingerprint != task.Fingerprint || current.BillingOperationID != task.BillingOperationID || current.UsageID != task.UsageID {
+	if !imageAdmissionCreatedAtEqual(tx, current.CreatedAt, task.CreatedAt) || current.Fingerprint != task.Fingerprint || current.BillingOperationID != task.BillingOperationID || current.UsageID != task.UsageID {
 		return nil, ErrChannelAdmissionConflict
 	}
 	use, err := imageReservationUse(tx, &current)
@@ -231,7 +232,7 @@ func PrepareImageTaskAttempt(ctx context.Context, task *ImageTask, identity Chan
 		return "", err
 	}
 	if store == nil {
-		return "", nil
+		return "", prepareLegacyImageAdmission(LogDB, task, identity, index)
 	}
 	nonce, err := newAdmissionGeneration()
 	if err != nil {
@@ -247,8 +248,11 @@ func PrepareImageTaskAttempt(ctx context.Context, task *ImageTask, identity Chan
 		return checkImageAdmissionSubmitTime(tx, current)
 	}, func(tx *gorm.DB, c *ChannelAdmissionControl) (bool, error) {
 		inactive, e := channelAdmissionNeverActivated(tx, c)
-		if e != nil || inactive {
-			return inactive, e
+		if e != nil {
+			return false, e
+		}
+		if inactive {
+			return true, prepareLegacyImageAdmission(tx, task, identity, index)
 		}
 		if index < 0 || !validChannelIdentity(identity) {
 			return false, ErrChannelAdmissionConflict
@@ -361,6 +365,11 @@ func saveImageAttemptWithAdmission(task *ImageTask, expected, channelID int, bas
 		}
 		if inactive {
 			return saveImageTaskAttempt(tx, task, expected, channelID, baseURL)
+		}
+		if task.AdmissionAttempt == "" && task.admissionPreparation != nil {
+			if e = adoptPreparedImageAttempt(tx, c, task, expected, channelID, baseURL); e != nil {
+				return e
+			}
 		}
 		current, e := lockAdmissionImageTask(tx, task)
 		if e != nil {
@@ -492,4 +501,13 @@ func withImageTaskGeneration(task *ImageTask, write func(*gorm.DB) error) error 
 		}
 		return write(tx)
 	}, true)
+}
+
+func imageAdmissionCreatedAtEqual(tx *gorm.DB, stored, observed time.Time) bool {
+	// PostgreSQL persists timestamptz at microsecond precision. Match exactly
+	// that representation; SQLite retains the original full precision.
+	if tx.Dialector.Name() == "postgres" {
+		return stored.UnixMicro() == observed.UnixMicro()
+	}
+	return stored.Equal(observed)
 }

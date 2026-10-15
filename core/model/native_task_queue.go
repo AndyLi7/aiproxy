@@ -2,6 +2,7 @@ package model
 
 import (
 	"database/sql"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Own task queue (spec 2026-10-15). A queued task holds money in the wallet
@@ -420,6 +422,16 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 			return nil
 		}
 
+		// UPDATE may evaluate its predicate before waiting for a row lock.
+		// Acquire that lock first, then sample/check expiry in a new statement.
+		locked, err := lockNativeTaskTransition(tx.Model(&NativeTask{}).
+			Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", picked.ID, picked.GroupID, picked.TokenID, NativeStatusWaiting, ""))
+		if err != nil {
+			return err
+		}
+		if !locked {
+			return nil
+		}
 		now = claimNow()
 		until := now.Add(NativeDispatchLease)
 
@@ -500,17 +512,45 @@ func ReturnNativeDispatch(db *gorm.DB, id, group string, token int, owner string
 // the dispatch lease, so an accepted task is polled from the start. A claim
 // whose lease ran out matches no row and must not call the provider.
 func StartNativeDispatchSubmission(db *gorm.DB, id, group string, token int, owner string, now time.Time) error {
-	result := nativeDispatchLeaseLive(dispatchHeld(db, id, group, token, owner)).Where("dispatch_until > ?", now.UTC()).
-		Updates(map[string]any{"status": "submitting", "error_code": "", "next_recovery_at": 0, "created_at": time.Now(), "updated_at": time.Now()})
-	if result.Error != nil {
-		return result.Error
-	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		locked, err := lockNativeTaskTransition(dispatchHeld(tx, id, group, token, owner))
+		if err != nil {
+			return err
+		}
+		if !locked {
+			return ErrNativeTaskConflict
+		}
+		result := nativeDispatchLeaseLive(dispatchHeld(tx, id, group, token, owner)).Where("dispatch_until > ?", now.UTC()).
+			Updates(map[string]any{"status": "submitting", "error_code": "", "next_recovery_at": 0, "created_at": time.Now(), "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrNativeTaskConflict
+		}
+		return nil
+	}, claimTxOptions(db)...)
+}
 
-	if result.RowsAffected != 1 {
-		return ErrNativeTaskConflict
+// Take the target row lock before evaluating time-dependent predicates. An
+// UPDATE waiting on an unchanged SELECT FOR UPDATE row need not reevaluate its
+// WHERE expression after the lock is released. SQLite has no row locks; an
+// identity-guarded no-op write acquires its writer lock instead.
+func lockNativeTaskTransition(query *gorm.DB) (bool, error) {
+	switch query.Dialector.Name() {
+	case "postgres", "mysql":
+		var row NativeTask
+		err := query.Select("id").Clauses(clause.Locking{Strength: "UPDATE"}).Take(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case "sqlite":
+		result := query.UpdateColumn("status", gorm.Expr("status"))
+		return result.RowsAffected == 1, result.Error
+	default:
+		return false, ErrNativeTaskConflict
 	}
-
-	return nil
 }
 
 // Recheck the dispatch lease against the database clock at the transition,

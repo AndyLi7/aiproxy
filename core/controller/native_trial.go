@@ -150,7 +150,8 @@ func (d nativeTrialDependencies) create(c *gin.Context) {
 		requestAt = time.Now()
 	}
 	// Disabled shadow channels are deliberately eligible here, never public routing.
-	plan := nativetask.Plan{Contract: input.Contract, ChannelID: channel.ID, Endpoint: input.Endpoint,
+	// Trials are sent at once, never queued; they still count in flight.
+	plan := nativetask.Plan{Contract: input.Contract, ChannelID: channel.ID, Endpoint: input.Endpoint, Direct: true,
 		CredentialScope: input.CredentialScope, KeyFingerprint: input.KeyFingerprint, DeliveryBase: input.DeliveryBase, QuoteJSON: string(input.Quote), InputMeter: input.InputMeter,
 		Log: &model.NativeTaskLog{RequestAt: requestAt, Endpoint: "POST /api/native-trials", RequestSource: model.RequestSourceAdminDemo,
 			IP: c.ClientIP(), Mode: int(mode.NativeTasks)}}

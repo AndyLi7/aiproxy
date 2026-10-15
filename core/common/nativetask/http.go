@@ -71,7 +71,13 @@ var errorMessages = map[string]string{
 	"artifact_unavailable":         "The task result is temporarily unavailable. Retry downloading it later.",
 	"artifact_integrity_failed":    "The task result could not be verified. Contact support with the task ID.",
 	"billing_status_unavailable":   "Billing status is temporarily unavailable. Retry querying the same task later.",
+	"task_not_cancellable":         "Only a task still waiting in the queue can be cancelled. This one was already sent to the model, or is being sent; poll it with GET /v1/model-tasks/{id}.",
 }
+
+// queueFullMessage is the 429 too_many_active_tasks message of a queued
+// submission refused because the account's queue is full (spec §4.1). A
+// direct submission keeps the too_many_active_tasks message.
+const queueFullMessage = "Too many of your tasks are waiting in the queue. Wait for some of them to start, then retry with the same X-Request-Id."
 
 // failureMessages explain the error code of a task that ended as failed.
 // Every listed failure is refunded in full by SyncBilling or recovery.
@@ -86,6 +92,11 @@ var failureMessages = map[string]string{
 	// Owner decision 2026-10-13: recovery failed a reservation that was never
 	// sent to a provider (a wallet reply was lost) and refunded its hold.
 	model.NotStartedCode: "This task was not started because of a temporary platform error. You were not charged; submit a new task with a new X-Request-Id.",
+	// Own task queue (spec 2026-10-15): failures of a task never sent.
+	model.CancelledCode:                   "You cancelled this task before it was sent to the model. You were not charged.",
+	model.QueueTimeoutCode:                "This task waited in the queue too long and was not started. You were not charged; submit it again with a new X-Request-Id.",
+	model.ModelUnavailableWhileQueuedCode: "This model became unavailable while the task was waiting in the queue, so it was not started. You were not charged; submit it again with a new X-Request-Id.",
+	model.InsufficientBalanceCode:         "Your balance went below zero while this task was waiting in the queue, so it was not started. You were not charged; top up, then submit it again with a new X-Request-Id.",
 }
 
 // ErrorMessage is the client-facing sentence for a native error code.
@@ -190,11 +201,12 @@ func (h *HTTP) owner(w http.ResponseWriter, r *http.Request) (string, int, bool)
 // WritePublic excludes all routing, upstream identity, credential and raw output
 // fields. A pending result never includes output; completed null remains null.
 func WritePublic(w http.ResponseWriter, status int, task *model.NativeTask) {
-	writePublic(w, status, task, task.Model)
+	writePublic(w, status, task, task.Model, 0)
 }
 
 // writePublic reports the task under the callable ID (owner decision D2,
-// 2026-10-10): the stored task keeps its capability ID.
+// 2026-10-10): the stored task keeps its capability ID. A task waiting in our
+// queue also reports its estimated place.
 func (h *HTTP) writePublic(w http.ResponseWriter, status int, task *model.NativeTask) {
 	publicModel := task.Model
 	if h != nil && h.PublicModel != nil {
@@ -202,15 +214,22 @@ func (h *HTTP) writePublic(w http.ResponseWriter, status int, task *model.Native
 			publicModel = mapped
 		}
 	}
-	writePublic(w, status, task, publicModel)
+	position := 0
+	if h != nil && h.Engine != nil {
+		position = h.Engine.QueuePosition(task)
+	}
+	writePublic(w, status, task, publicModel, position)
 }
-func writePublic(w http.ResponseWriter, status int, task *model.NativeTask, publicModel string) {
-	response := map[string]any{"id": task.ID, "model": publicModel, "status": task.Status}
+
+// publicView is the customer view of a task. queuePosition >= 1 adds
+// queue_position: an estimate, only while the task waits in our queue; it
+// never names the provider, the scope or its limit.
+func publicView(task *model.NativeTask, publicModel string, queuePosition int) map[string]any {
+	response := map[string]any{"id": task.ID, "model": publicModel, "status": PublicStatus(task.Status)}
+	if queuePosition >= 1 && task.Status == model.NativeStatusWaiting {
+		response["queue_position"] = queuePosition
+	}
 	switch task.Status {
-	case "reserved", "submitting", "submission_unknown":
-		response["status"] = "queued"
-	case "result_received", "delivery_ready":
-		response["status"] = "running"
 	case "completed":
 		response["output"] = json.RawMessage(task.DeliveredOutput)
 	case "failed":
@@ -225,10 +244,14 @@ func writePublic(w http.ResponseWriter, status int, task *model.NativeTask, publ
 		}
 		response["error"] = failure
 	}
+	return response
+}
+
+func writePublic(w http.ResponseWriter, status int, task *model.NativeTask, publicModel string, queuePosition int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(publicView(task, publicModel, queuePosition))
 }
 func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	group, token, ok := h.owner(w, r)
@@ -309,7 +332,12 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 				h.writeError(w, 402, "insufficient_balance")
 			}
 		case errors.Is(err, balance.ErrPrepaymentTooManyActiveTasks):
-			h.writeError(w, 429, "too_many_active_tasks")
+			var limit *balance.TaskLimitError
+			if errors.As(err, &limit) && limit.Waiting {
+				h.writeErrorMessage(w, 429, "too_many_active_tasks", queueFullMessage)
+			} else {
+				h.writeError(w, 429, "too_many_active_tasks")
+			}
 		case errors.Is(err, balance.ErrPrepaymentModelPaused):
 			h.writeError(w, 503, "model_unavailable")
 		default:
@@ -359,6 +387,67 @@ func (h *HTTP) Get(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	h.writePublic(w, 200, task)
+}
+
+// Cancel ends a task still waiting in our queue (spec §6.2): waiting ->
+// failed (cancelled), a compare-and-set that a dispatch claim wins or loses,
+// then one billing sync (settle not_dispatched). A refund that fails here is
+// retried by recovery. It never reads the wallet first and never cancels work
+// already sent: that answers 409 task_not_cancellable with the task's status.
+func (h *HTTP) Cancel(w http.ResponseWriter, r *http.Request, id string) {
+	group, token, ok := h.owner(w, r)
+	if !ok {
+		return
+	}
+	if !h.reads().allowStatus(group, token) {
+		h.writeError(w, 429, "rate_limit_exceeded")
+		return
+	}
+	task, err := model.GetNativeTask(h.Engine.DB, id, group, token)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		h.writeError(w, 404, "task_not_found")
+		return
+	}
+	if err != nil {
+		h.writeError(w, 503, "task_temporarily_unavailable")
+		return
+	}
+	if task.Status == model.NativeStatusWaiting {
+		cancelled, cancelErr := model.CancelNativeTask(h.Engine.DB, id, group, token)
+		if cancelErr != nil {
+			h.writeError(w, 503, "task_temporarily_unavailable")
+			return
+		}
+		if cancelled {
+			wakeDispatcher()
+			if failed, readErr := model.GetNativeTask(h.Engine.DB, id, group, token); readErr == nil {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), submitWalletBudget)
+				if syncErr := h.Engine.SyncBilling(ctx, failed); syncErr != nil {
+					log.WithFields(log.Fields{"lane": "native", "task_id": id, "group": group}).WithError(syncErr).
+						Warn("cancelled native task refund deferred to recovery")
+				}
+				cancel()
+			}
+		}
+		if task, err = model.GetNativeTask(h.Engine.DB, id, group, token); err != nil {
+			h.writeError(w, 503, "task_temporarily_unavailable")
+			return
+		}
+	}
+	if task.Status == "failed" && task.ErrorCode == model.CancelledCode {
+		h.writePublic(w, 200, task)
+		return
+	}
+	// Reserved for under a second, already claimed, or sent: not cancellable.
+	if h.OnError != nil {
+		h.OnError(409, "task_not_cancellable", ErrorMessage("task_not_cancellable"))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(409)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
+		"code": "task_not_cancellable", "message": ErrorMessage("task_not_cancellable"), "type": errorType(409),
+	}, "status": PublicStatus(task.Status)})
 }
 
 // Artifacts up to this size are verified in full before the first byte is sent.

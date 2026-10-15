@@ -210,3 +210,83 @@ func TestNativeControllerErrorsUseSharedEnvelopeAndLogCode(t *testing.T) {
 	require.NoError(t, db.Model(&model.NativeTask{}).Count(&reserved).Error)
 	require.Zero(t, reserved, "a route failure must not reserve the request ID")
 }
+
+// Own task queue spec 2026-10-15 §6.2: cancel is scoped like a status read;
+// only a waiting task is cancelled.
+func TestNativeCancelOwnershipAndStates(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.NativeTask{}, &model.ImageTask{}))
+	previousDB, previousWallet := model.LogDB, balance.Default
+	t.Cleanup(func() { model.LogDB = previousDB; balance.Default = previousWallet })
+	model.LogDB = db
+	balance.Default = nativeControllerWallet{}
+	for id, status := range map[string]string{"waiting": model.NativeStatusWaiting, "sent": "queued"} {
+		require.NoError(t, db.Create(&model.NativeTask{ID: id, GroupID: "owner", TokenID: 7, Model: "native", Fingerprint: "fp", OutputSchema: `{}`,
+			OutputSchemaHash: "sha", Status: status, BillingOperationID: "native:" + id, QueueScope: "fal:default"}).Error)
+	}
+	cancel := func(group string, token int, id string) *httptest.ResponseRecorder {
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(middleware.Group, model.GroupCache{ID: group})
+			c.Set(middleware.Token, model.TokenCache{ID: token})
+			c.Next()
+		})
+		router.POST("/v1/model-tasks/:id/cancel", CancelNativeTask)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/model-tasks/"+id+"/cancel", nil))
+		return response
+	}
+	require.Equal(t, 401, cancel("", 0, "waiting").Code)
+	require.Equal(t, 404, cancel("other", 7, "waiting").Code)
+	require.Equal(t, 404, cancel("owner", 8, "waiting").Code)
+	require.Equal(t, model.NativeStatusWaiting, func() string { task, _ := model.GetNativeTask(db, "waiting", "owner", 7); return task.Status }())
+	response := cancel("owner", 7, "waiting")
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"code":"cancelled"`)
+	response = cancel("owner", 7, "sent")
+	require.Equal(t, 409, response.Code)
+	require.Contains(t, response.Body.String(), `"code":"task_not_cancellable"`)
+}
+
+// §7.3: the queue status needs the admin key and reports each scope.
+func TestNativeQueueStatusEndpoint(t *testing.T) {
+	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.NativeTask{}, &model.ImageTask{}))
+	previousDB, previousWallet := model.LogDB, balance.Default
+	t.Cleanup(func() {
+		model.LogDB = previousDB
+		balance.Default = previousWallet
+		config.SetNativeQueueLimits(map[string]int{})
+	})
+	model.LogDB = db
+	balance.Default = nativeControllerWallet{}
+	config.SetNativeQueueLimits(map[string]int{"fal:default": 8})
+	require.NoError(t, db.Create(&model.NativeTask{ID: "w", GroupID: "owner", TokenID: 7, Model: "native", Fingerprint: "fp", OutputSchema: `{}`,
+		OutputSchemaHash: "sha", Status: model.NativeStatusWaiting, BillingOperationID: "native:w", QueueScope: "fal:default"}).Error)
+	oldKey := config.AdminKey
+	config.AdminKey = "queue-admin"
+	t.Cleanup(func() { config.AdminKey = oldKey })
+	router := gin.New()
+	router.Group("/api", middleware.AdminAuth).GET("/native-queue/status", GetNativeQueueStatus)
+	request := httptest.NewRequest(http.MethodGet, "/api/native-queue/status", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, 401, response.Code)
+	request.Header.Set("Authorization", "Bearer queue-admin")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, 200, response.Code)
+	var body struct {
+		Data nativetask.QueueStatus `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.False(t, body.Data.Enabled)
+	require.Equal(t, int64(300), body.Data.TimeoutSeconds)
+	require.Len(t, body.Data.Scopes, 1)
+	require.Equal(t, "fal:default", body.Data.Scopes[0].Scope)
+	require.Equal(t, 8, *body.Data.Scopes[0].Limit)
+	require.Equal(t, int64(1), body.Data.Scopes[0].Waiting)
+	require.Zero(t, body.Data.Scopes[0].InFlight)
+}

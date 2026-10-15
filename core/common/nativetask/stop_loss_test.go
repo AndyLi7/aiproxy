@@ -152,6 +152,9 @@ func (w *appWallet) apply(c balance.PrepaymentCommand) (balance.PrepaymentReceip
 			if c.Outcome.Reason == "not_accepted" && w.submission == "accepted" {
 				return balance.PrepaymentReceipt{}, errors.New("prepayment rejected or unavailable")
 			}
+			if c.Outcome.Reason == "not_dispatched" && len(w.attempts) > 0 {
+				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
+			}
 			w.status = "refunded"
 		}
 	}
@@ -350,7 +353,8 @@ func TestLostBeginAttemptReplyRefundsWithoutProviderCall(t *testing.T) {
 
 // The admission was held but its reply was lost: there is no attempt to
 // release, so only the settle is sent (reject_attempt on a missing attempt is
-// refused for good).
+// refused for good). With no attempt it is not_dispatched (own task queue
+// spec §4.3), which the wallet accepts only while no attempt was claimed.
 func TestLostAdmitReplyRefundsWithoutReject(t *testing.T) {
 	e, w, p, h := stopLoss(t)
 	w.lose["admit"] = true
@@ -359,7 +363,7 @@ func TestLostAdmitReplyRefundsWithoutReject(t *testing.T) {
 	report, err := e.RecoverOnce(context.Background(), "worker", time.Now().Add(reservationGrace+time.Second), nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Abandoned)
-	require.Equal(t, []string{"get", "get", "settle:failed/not_accepted", "get"}, w.actions())
+	require.Equal(t, []string{"get", "get", "settle:failed/not_dispatched", "get"}, w.actions())
 	status, submission := w.state()
 	require.Equal(t, "refunded", status)
 	require.Equal(t, "not_submitted", submission)
@@ -380,7 +384,7 @@ func TestAbandonFencesInFlightSubmit(t *testing.T) {
 		// The claim landed before recovery read the wallet: it is released.
 		{"claim landed first", false, []string{"get", "get", "reject_attempt", "settle:failed/not_accepted", "get"}},
 		// The claim reaches the wallet after the refund and is refused.
-		{"claim landed after the refund", true, []string{"get", "get", "settle:failed/not_accepted", "get"}},
+		{"claim landed after the refund", true, []string{"get", "get", "settle:failed/not_dispatched", "get"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, w, p, h := stopLoss(t)

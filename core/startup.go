@@ -24,6 +24,7 @@ import (
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/router"
+	"github.com/labring/aiproxy/core/task"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -108,10 +109,12 @@ func initializeOptionAndCaches() error {
 }
 
 func startSyncServices(ctx context.Context, wg *sync.WaitGroup) {
-	wg.Add(2)
+	wg.Add(3)
 
 	go model.SyncOptions(ctx, wg, time.Second*5)
 	go model.SyncModelConfigAndChannelCache(ctx, wg, time.Second*10)
+	// The own task queue dispatcher; shutdown waits for the tasks it claimed.
+	go task.NativeQueueDispatcherTask(ctx, wg)
 }
 
 func setupHTTPServer(listen string) (*http.Server, *gin.Engine) {

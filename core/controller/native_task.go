@@ -42,7 +42,8 @@ func NativeTaskEngine() (*nativetask.Engine, bool) {
 		return nil, false
 	}
 	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet, InputMeter: !config.DisableNativeInputMeter,
-		AbandonReservations: !config.DisableNativeReservationStopLoss}, true
+		AbandonReservations: !config.DisableNativeReservationStopLoss,
+		QueueProviders:      map[string]nativetask.QueueProvider{"fal": nativetask.FalQueueProvider(model.GetChannelByID)}}, true
 }
 
 // nativeFailureStage mirrors image tasks so native rejections are filtered and
@@ -190,6 +191,37 @@ func GetNativeTask(c *gin.Context) {
 		handler.Get(c.Writer, c.Request, c.Param("id"))
 	}
 }
+
+// CancelNativeTask cancels a task still waiting in the own task queue
+// (POST /v1/model-tasks/:id/cancel, spec §6.2).
+func CancelNativeTask(c *gin.Context) {
+	if handler, ok := nativeHTTP(c); ok {
+		handler.Cancel(c.Writer, c.Request, c.Param("id"))
+	}
+}
+
+// RunNativeQueueDispatcher sends queued native tasks until ctx ends.
+func RunNativeQueueDispatcher(ctx context.Context) {
+	nativetask.RunDispatcher(ctx, NativeTaskEngine)
+}
+
+// GetNativeQueueStatus reports the own task queue for the admin card
+// (GET /api/native-queue/status, spec §7.3).
+func GetNativeQueueStatus(c *gin.Context) {
+	engine, ok := NativeTaskEngine()
+	if !ok {
+		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "native execution unavailable")
+		return
+	}
+	status, err := engine.ReadQueueStatus()
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "native queue status unavailable")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	middleware.SuccessResponse(c, status)
+}
+
 func GetNativeTaskArtifact(c *gin.Context) {
 	if handler, ok := nativeHTTP(c); ok {
 		handler.GetArtifact(c.Writer, c.Request, c.Param("id"), c.Param("index"))

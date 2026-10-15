@@ -25,17 +25,6 @@ func groupNativeTaskDefaults() groupNativeTaskReader {
 	return groupNativeTaskReader{NativeTaskEngine}
 }
 
-// publicNativeStatus matches the status customers see from GET /v1/model-tasks/:id.
-func publicNativeStatus(status string) string {
-	switch status {
-	case "reserved", "submitting", "submission_unknown":
-		return "queued"
-	case "result_received", "delivery_ready":
-		return "running"
-	}
-	return status
-}
-
 // customerNativeInput is what the customer sent: platform-fixed parameters are
 // configuration, not part of their request.
 func customerNativeInput(task *model.NativeTask) string {
@@ -86,7 +75,7 @@ func (r groupNativeTaskReader) detail(c *gin.Context) {
 	artifacts, _ := nativeTrialArtifactList(task)
 	// Native JSON stays text so the admin client never rounds large integers.
 	data := gin.H{
-		"id": task.ID, "model": task.Model, "status": publicNativeStatus(task.Status),
+		"id": task.ID, "model": task.Model, "status": nativetask.PublicStatus(task.Status),
 		"createdAt": task.CreatedAt.UnixMilli(), "updatedAt": task.UpdatedAt.UnixMilli(),
 		"inputJSON": customerNativeInput(task), "artifacts": artifacts,
 	}

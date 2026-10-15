@@ -127,6 +127,9 @@ func initOptionMap() error {
 		10,
 	)
 	optionMap["FuzzyTokenThreshold"] = strconv.FormatInt(config.GetFuzzyTokenThreshold(), 10)
+	optionMap[config.NativeQueueEnabledKey] = config.NativeQueueEnabledDefault
+	optionMap[config.NativeQueueLimitsKey] = config.NativeQueueLimitsDefault
+	optionMap[config.NativeQueueTimeoutSecondsKey] = config.NativeQueueTimeoutSecondsDefault
 
 	optionKeys = make([]string, 0, len(optionMap))
 	for key := range optionMap {
@@ -167,6 +170,19 @@ func loadOptionsFromDatabase(isInit bool) error {
 		// Skip if already loaded from YAML
 		if v, ok := yamlOptions[option.Key]; ok {
 			option.Value = v
+		}
+
+		if load, ok := lenientOptionLoaders[option.Key]; ok {
+			// A value this version cannot read (saved by a newer version, or
+			// edited by hand) must never stop startup or the 5-second sync of
+			// every other option: it falls back to the default (spec §7.3.1).
+			load(option.Key, option.Value)
+
+			if isInit {
+				delete(optionMap, option.Key)
+			}
+
+			continue
 		}
 
 		err := updateOption(option.Key, option.Value, isInit)
@@ -257,6 +273,40 @@ func UpdateOptions(options map[string]string) error {
 }
 
 var ErrUnknownOptionKey = errors.New("unknown option key")
+
+// lenientOptionLoaders read the own task queue options when they are loaded
+// from storage: a value that does not parse is logged and replaced by its
+// default. Saving them (updateOption) stays strict.
+var lenientOptionLoaders = map[string]func(key, value string){
+	config.NativeQueueEnabledKey: func(key, value string) {
+		enabled, err := config.ParseNativeQueueEnabled(value)
+		if err != nil {
+			log.Errorf("option %s: unreadable value, using the default: %v", key, err)
+		}
+
+		config.SetNativeQueueEnabled(enabled)
+	},
+	config.NativeQueueLimitsKey: func(key, value string) {
+		limits, err := config.ParseNativeQueueLimits(value)
+		if err != nil {
+			log.Errorf("option %s: unreadable value, using the default: %v", key, err)
+
+			limits = map[string]int{}
+		}
+
+		config.SetNativeQueueLimits(limits)
+	},
+	config.NativeQueueTimeoutSecondsKey: func(key, value string) {
+		seconds, err := config.ParseNativeQueueTimeoutSeconds(value)
+		if err != nil {
+			log.Errorf("option %s: unreadable value, using the default: %v", key, err)
+
+			seconds = int64(config.NativeQueueTimeout / time.Second)
+		}
+
+		config.SetNativeQueueTimeoutSeconds(seconds)
+	},
+}
 
 func toBool(value string) bool {
 	result, _ := strconv.ParseBool(value)
@@ -494,6 +544,27 @@ func updateOption(key, value string, isInit bool) (err error) {
 		}
 
 		config.SetFuzzyTokenThreshold(threshold)
+	case config.NativeQueueEnabledKey:
+		enabled, err := config.ParseNativeQueueEnabled(value)
+		if err != nil {
+			return err
+		}
+
+		config.SetNativeQueueEnabled(enabled)
+	case config.NativeQueueLimitsKey:
+		limits, err := config.ParseNativeQueueLimits(value)
+		if err != nil {
+			return err
+		}
+
+		config.SetNativeQueueLimits(limits)
+	case config.NativeQueueTimeoutSecondsKey:
+		seconds, err := config.ParseNativeQueueTimeoutSeconds(value)
+		if err != nil {
+			return err
+		}
+
+		config.SetNativeQueueTimeoutSeconds(seconds)
 	default:
 		return ErrUnknownOptionKey
 	}

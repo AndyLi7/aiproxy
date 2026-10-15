@@ -251,6 +251,103 @@ func cancelUpstream(ctx context.Context, task *model.NativeTask, resolve Resolve
 	log.Infof("native task %s generation timed out; provider cancel %s", task.ID, outcome)
 }
 
+// recoverQueued handles a waiting or dispatching task, the only work recovery
+// does on them (spec §6.10): a waiting task past its queue timeout is failed
+// (queue_timeout) and refunded; a dispatch claim past its lease is failed
+// (not_started) and refunded, never put back in the queue (§6.6). Before
+// that, nothing is done and the wallet is not called. Each move is a
+// compare-and-set that a concurrent claim, cancel or holder wins or loses.
+func (e *Engine) recoverQueued(ctx context.Context, task *model.NativeTask, now time.Time) error {
+	fields := log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model, "scope": task.QueueScope}
+	var ended bool
+	var err error
+	switch task.Status {
+	case model.NativeStatusWaiting:
+		if now.Before(queuedSince(task).Add(e.queueTimeout())) {
+			return nil
+		}
+		ended, err = model.ExpireNativeQueueWait(e.DB, task.ID, task.GroupID, task.TokenID, now.Add(-e.queueTimeout()))
+		if ended {
+			log.WithFields(fields).Warn("native task waited past the queue timeout; failed with queue_timeout, refunding its hold")
+		}
+	case model.NativeStatusDispatching:
+		if task.DispatchUntil != nil && now.Before(*task.DispatchUntil) {
+			return nil
+		}
+		ended, err = model.ExpireNativeDispatch(e.DB, task.ID, task.GroupID, task.TokenID, task.DispatchOwner, now)
+		if ended {
+			log.WithFields(fields).Warn("native dispatch claim lease ran out before the task was sent; failed with not_started, refunding its hold")
+		}
+	}
+	if err != nil || !ended {
+		return err
+	}
+	wakeDispatcher()
+	refundCtx, cancel := context.WithTimeout(ctx, reservationRefundBudget)
+	defer cancel()
+	failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)
+	if err == nil {
+		err = e.SyncBilling(refundCtx, failed)
+	}
+	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("native queued task refund deferred to recovery")
+	}
+	return err
+}
+
+// queuedSince is when a task entered the queue.
+func queuedSince(task *model.NativeTask) time.Time {
+	if task.EnqueuedAt != nil {
+		return *task.EnqueuedAt
+	}
+	return task.CreatedAt
+}
+
+// enqueueRecovered completes the queueing of a reserved task whose wallet hold
+// is waiting: its process stopped between the admission and the enqueue
+// (spec §6.7). The task keeps its admission time as its place. It waits
+// reservedEnqueueGrace after the admission, so a live request enqueues (and
+// fast-paths) its own task. The stop-loss never touches such a hold.
+func (e *Engine) enqueueRecovered(task *model.NativeTask, now time.Time) (bool, time.Time) {
+	var hold balance.PrepaymentReceipt
+	if json.Unmarshal([]byte(task.BillingReceiptJSON), &hold) != nil || hold.Status != "pending" || hold.Submission() != model.NativeStatusWaiting {
+		return false, time.Time{}
+	}
+	admitted, ok := hold.AdmittedAt()
+	if !ok {
+		admitted = task.CreatedAt
+	}
+	if due := admitted.Add(reservedEnqueueGrace); now.Before(due) {
+		return false, due
+	}
+	scope := task.QueueScope
+	if scope == "" {
+		route, err := dispatchRoute(task)
+		if err != nil {
+			return false, time.Time{}
+		}
+		scope = QueueScope(route.Provider)
+	}
+	wake := admitted.Add(e.queueTimeout()).Add(time.Second)
+	if err := model.EnqueueNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, scope, admitted, wake); err != nil {
+		return false, time.Time{}
+	}
+	log.WithFields(log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model, "scope": scope}).
+		Warn("reserved native task with a waiting hold enqueued by recovery")
+	wakeDispatcher()
+	return true, time.Time{}
+}
+
+// inFlight reports a status that occupies provider capacity.
+func inFlight(status string) bool {
+	for _, candidate := range model.NativeInFlightStatuses {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 // RecoverOnce is safe to invoke from multiple workers: durable leases bound
 // concurrent polling. It never calls Submit or retries an uncertain paid call.
 func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, resolve ResolvePoller, archive ArchiveFunc) (RecoveryReport, error) {
@@ -273,9 +370,15 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		if ctx.Err() != nil {
 			return report, ctx.Err()
 		}
-		workCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		_, workErr := e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
-		cancel()
+		var workErr error
+		queued := task.Status == model.NativeStatusWaiting || task.Status == model.NativeStatusDispatching
+		if queued {
+			workErr = e.recoverQueued(ctx, &task, current)
+		} else {
+			workCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
+			cancel()
+		}
 		// Decide on the row as this poll left it, never on the claimed snapshot:
 		// the poll may have saved a result, which must not be expired.
 		fresh, readErr := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)
@@ -303,7 +406,15 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 				}
 			}
 		}
-		if !expired && workErr == nil && e.AbandonReservations && fresh.Status == "reserved" {
+		var enqueueAt time.Time
+		if !expired && workErr == nil && fresh.Status == "reserved" {
+			// A reserved task whose hold is queued is enqueued, never abandoned.
+			var enqueued bool
+			if enqueued, enqueueAt = e.enqueueRecovered(fresh, current); enqueued {
+				fresh.Status = model.NativeStatusWaiting
+			}
+		}
+		if !expired && workErr == nil && e.AbandonReservations && fresh.Status == "reserved" && enqueueAt.IsZero() {
 			abandoned, abandonErr := e.abandonReservation(ctx, fresh, current)
 			if abandoned {
 				report.Abandoned++
@@ -321,30 +432,89 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 				continue
 			}
 		}
-		release := now.Add(time.Since(started))
-		next := release.Add(recoveryDelay(age, workErr != nil))
-		if !expired && underGenerationDeadline(fresh) {
-			// Check once more right at the deadline instead of up to ~2 minutes
-			// late. One second past it: leases are whole seconds, and a claim just
-			// before the deadline would only poll and reschedule again.
-			if deadline := fresh.CreatedAt.Add(model.AsyncGenerationDeadline).Add(time.Second); deadline.After(release) && deadline.Before(next) {
-				next = deadline
-			}
-		}
-		if e.AbandonReservations && fresh.Status == "reserved" {
-			// Likewise, check a reservation again right when it becomes quiet.
-			if wake := reservationWake(fresh); wake.After(release) && wake.Before(next) {
-				next = wake
-			}
+		if inFlight(task.Status) && !inFlight(fresh.Status) {
+			// A place in the provider's capacity was freed.
+			wakeDispatcher()
 		}
 		if workErr != nil {
 			report.Deferred++
 		} else {
 			report.Advanced++
 		}
-		if err = model.ReleaseNativeRecovery(e.DB, task.ID, owner, next); err != nil {
+		if err = e.releaseRecovery(task.ID, task.GroupID, task.TokenID, owner, fresh, now.Add(time.Since(started)), age, expired, workErr != nil, enqueueAt); err != nil {
 			return report, err
 		}
 	}
 	return report, nil
+}
+
+// releaseRecovery releases recovery's lease with the next time to look at the
+// task, computed from its status (spec §6.10). The release only applies while
+// the status is the one the time was computed from: a queue move meanwhile
+// (enqueue, claim, return) is re-read and the time recomputed, so a queue
+// timeout or a lease is never overwritten.
+func (e *Engine) releaseRecovery(id, group string, token int, owner string, fresh *model.NativeTask, release time.Time, age time.Duration, expired, failed bool, enqueueAt time.Time) error {
+	for attempt := 0; ; attempt++ {
+		next := e.recoveryNext(fresh, release, age, expired, failed, enqueueAt)
+		if attempt == 2 {
+			return model.ReleaseNativeRecovery(e.DB, id, owner, next)
+		}
+		released, err := model.ReleaseNativeRecoveryAt(e.DB, id, owner, fresh.Status, next)
+		if err != nil || released {
+			return err
+		}
+		reread, err := model.GetNativeTask(e.DB, id, group, token)
+		if err != nil {
+			return model.ReleaseNativeRecovery(e.DB, id, owner, next)
+		}
+		fresh = reread
+	}
+}
+
+// recoveryNext is when recovery should next look at a task.
+func (e *Engine) recoveryNext(fresh *model.NativeTask, release time.Time, age time.Duration, expired, failed bool, enqueueAt time.Time) time.Time {
+	soonest := func(at time.Time) time.Time {
+		if !at.After(release) {
+			// Due already: look again shortly, later after an error.
+			return release.Add(recoveryDelay(0, failed))
+		}
+		return at
+	}
+	switch fresh.Status {
+	case model.NativeStatusWaiting:
+		// Only its queue timeout concerns recovery.
+		return soonest(queuedSince(fresh).Add(e.queueTimeout()).Add(time.Second))
+	case model.NativeStatusDispatching:
+		if fresh.DispatchUntil == nil {
+			return release.Add(recoveryDelay(0, failed))
+		}
+		return soonest(fresh.DispatchUntil.Add(time.Second))
+	}
+	next := release.Add(recoveryDelay(age, failed))
+	if !expired && underGenerationDeadline(fresh) {
+		// Check once more right at the deadline instead of up to ~2 minutes
+		// late. One second past it: leases are whole seconds, and a claim just
+		// before the deadline would only poll and reschedule again.
+		if deadline := fresh.CreatedAt.Add(model.AsyncGenerationDeadline).Add(time.Second); deadline.After(release) && deadline.Before(next) {
+			next = deadline
+		}
+	}
+	if fresh.Status == "reserved" {
+		if !enqueueAt.IsZero() && enqueueAt.After(release) && enqueueAt.Before(next) {
+			next = enqueueAt
+		}
+		if e.AbandonReservations {
+			// Likewise, check a reservation again right when it becomes quiet.
+			if wake := reservationWake(fresh); wake.After(release) && wake.Before(next) {
+				next = wake
+			}
+		}
+	}
+	if ceiling := release.Add(queuedPollCeiling); next.After(ceiling) && e.scopeHasWaiting(fresh.QueueScope) &&
+		(fresh.Status != "failed" && fresh.Status != "completed" || !fresh.BillingSettled) {
+		// Tasks wait in this scope: notice finished work, and settled bills,
+		// within seconds so its place is freed (spec §5.8).
+		next = ceiling
+	}
+	return next
 }

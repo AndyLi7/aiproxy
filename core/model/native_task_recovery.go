@@ -32,6 +32,16 @@ func ClaimNativeRecovery(db *gorm.DB, owner string, now time.Time, limit int) ([
 	}
 	return claimed, nil
 }
+
+// ReleaseNativeRecoveryAt releases the lease only while the task still has
+// status, the state its next time was computed from: a queue move meanwhile
+// (enqueued, claimed, returned) changes when recovery must look again, so the
+// caller recomputes. released is false when the status changed.
+func ReleaseNativeRecoveryAt(db *gorm.DB, id, owner, status string, next time.Time) (bool, error) {
+	result := db.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ? AND status = ?", id, owner, status).Updates(map[string]any{"recovery_owner": "", "recovery_until": 0, "next_recovery_at": next.Unix()})
+	return result.RowsAffected == 1, result.Error
+}
+
 func ReleaseNativeRecovery(db *gorm.DB, id, owner string, next time.Time) error {
 	result := db.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ?", id, owner).Updates(map[string]any{"recovery_owner": "", "recovery_until": 0, "next_recovery_at": next.Unix()})
 	if result.Error != nil {
@@ -78,6 +88,12 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 		}
 		if parsed.Status == "refunded" {
 			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"reserved", "submitting", "submission_unknown"}).Updates(map[string]any{"status": "failed", "error_code": "submission_timeout"}).Error; err != nil {
+				return err
+			}
+			// A queued task the wallet refunded (its 2-hour backstop) was never
+			// sent: it can no longer be claimed, and its customer reads a queue
+			// failure, not a provider that did not confirm (spec §6.5).
+			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id = ? AND status IN ?", id, group, token, "", []string{NativeStatusWaiting, NativeStatusDispatching}).Updates(map[string]any{"status": "failed", "error_code": QueueTimeoutCode, "updated_at": time.Now()}).Error; err != nil {
 				return err
 			}
 		}

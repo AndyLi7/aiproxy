@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"github.com/labring/aiproxy/core/controller"
 	log "github.com/sirupsen/logrus"
+	"sync"
 	"time"
 )
 
@@ -40,4 +41,12 @@ func nativeRecoveryWorker(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// NativeQueueDispatcherTask runs the own task queue dispatcher. On shutdown
+// it stops claiming and returns once the tasks it claimed were sent (or
+// handed to their leases), so wg.Wait covers them (spec §6.8).
+func NativeQueueDispatcherTask(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+	controller.RunNativeQueueDispatcher(ctx)
 }

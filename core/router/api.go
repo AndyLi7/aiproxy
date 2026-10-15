@@ -26,6 +26,7 @@ func SetAPIRouter(router *gin.Engine) {
 	apiRouter.GET("/native-trials/:group/:token/:id/artifacts/:index", controller.GetNativeTrialArtifact)
 	apiRouter.GET("/native-tasks/:group/:id", controller.GetGroupNativeTask)
 	apiRouter.GET("/native-tasks/:group/:id/artifacts/:index", controller.GetGroupNativeTaskArtifact)
+	apiRouter.GET("/native-queue/status", controller.GetNativeQueueStatus)
 	{
 		modelsRoute := apiRouter.Group("/models")
 		{

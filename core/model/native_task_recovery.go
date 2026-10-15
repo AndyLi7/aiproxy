@@ -60,10 +60,20 @@ func ReleaseNativeRecovery(db *gorm.DB, id, owner string, next time.Time) error 
 // a 202 answer), and the lock serialises it with RecordNativeTaskLog.
 func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt string) error {
 	var parsed struct {
-		Status string `json:"status"`
+		Status           string          `json:"status"`
+		SubmissionStatus json.RawMessage `json:"submissionStatus"`
 	}
 	if json.Unmarshal([]byte(receipt), &parsed) != nil {
 		return ErrNativeTaskConflict
+	}
+	// A hold the wallet still had queued (waiting) when it was refunded was
+	// never sent: its reserved task reads as a queue timeout, never as a
+	// provider that did not confirm (spec §6.5).
+	var submission string
+	_ = json.Unmarshal(parsed.SubmissionStatus, &submission)
+	reservedCode := "submission_timeout"
+	if submission == NativeStatusWaiting {
+		reservedCode = QueueTimeoutCode
 	}
 	terminal := parsed.Status == "settled" || parsed.Status == "refunded" || parsed.Status == "estimated"
 	// Read outside the transaction: the key's name lives in the main database.
@@ -87,7 +97,10 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 			return ErrNativeTaskConflict
 		}
 		if parsed.Status == "refunded" {
-			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"reserved", "submitting", "submission_unknown"}).Updates(map[string]any{"status": "failed", "error_code": "submission_timeout"}).Error; err != nil {
+			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, "reserved").Updates(map[string]any{"status": "failed", "error_code": reservedCode}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"submitting", "submission_unknown"}).Updates(map[string]any{"status": "failed", "error_code": "submission_timeout"}).Error; err != nil {
 				return err
 			}
 			// A queued task the wallet refunded (its 2-hour backstop) was never

@@ -71,8 +71,11 @@ var errorMessages = map[string]string{
 	"artifact_unavailable":         "The task result is temporarily unavailable. Retry downloading it later.",
 	"artifact_integrity_failed":    "The task result could not be verified. Contact support with the task ID.",
 	"billing_status_unavailable":   "Billing status is temporarily unavailable. Retry querying the same task later.",
-	"task_not_cancellable":         "Only a task still waiting in the queue can be cancelled. This one was already sent to the model, or is being sent; poll it with GET /v1/model-tasks/{id}.",
+	"task_not_cancellable":         "This task is no longer waiting in the queue (being sent, sent, or ended), so it cannot be cancelled. Poll it with GET /v1/model-tasks/{id}.",
 }
+
+// cancelNotFoundMessage answers a cancel of a task that does not exist.
+const cancelNotFoundMessage = "No task with this ID exists for this API key; there is nothing to cancel."
 
 // queueFullMessage is the 429 too_many_active_tasks message of a queued
 // submission refused because the account's queue is full (spec §4.1). A
@@ -405,7 +408,9 @@ func (h *HTTP) Cancel(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	task, err := model.GetNativeTask(h.Engine.DB, id, group, token)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		h.writeError(w, 404, "task_not_found")
+		// Never the submit-time task_not_found hint: resending the POST would
+		// create, and charge, the task the customer meant to cancel.
+		h.writeErrorMessage(w, 404, "task_not_found", cancelNotFoundMessage)
 		return
 	}
 	if err != nil {

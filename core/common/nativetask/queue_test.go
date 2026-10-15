@@ -192,12 +192,14 @@ func TestPausedModelPutsTheTaskBack(t *testing.T) {
 	require.Equal(t, "waiting", submission)
 	require.Zero(t, attempts)
 	require.Equal(t, 1, env.p.count())
-	require.True(t, queue.backedOff("ga"))
+	// Review 3: only this customer's tasks of this model are held back.
+	require.False(t, queue.backedOff("ga"))
+	require.True(t, queue.modelBackedOff(model.NativeQueueEntry{GroupID: "ga", Model: "brand/model/native"}))
 
 	env.w.mu.Lock()
 	env.w.paused = false
 	env.w.mu.Unlock()
-	queue.backoff = map[string]time.Time{}
+	queue.modelBackoff = map[string]time.Time{}
 	env.round()
 	require.Equal(t, "queued", env.task("a1", "ga").Status)
 }
@@ -563,8 +565,6 @@ func TestRecoveryKeepsQueueTimesWhenReleasing(t *testing.T) {
 
 	// Recovery leases a reserved row; the request enqueues it meanwhile.
 	env3 := newQueueEnv(t)
-	_, err = env3.submit("x1", "gx")
-	require.NoError(t, err)
 	reserved, _, err := model.ReserveNativeTask(env3.e.DB, model.NativeTask{ID: "r1", GroupID: "ga", TokenID: 1, Model: "brand/model/native", Fingerprint: "f", OutputSchema: `{"type":"object"}`, BillingOperationID: "native:r1", QueueScope: falScope})
 	require.NoError(t, err)
 	leased, err := model.ClaimNativeRecovery(env3.e.DB, "worker", time.Now(), 1)

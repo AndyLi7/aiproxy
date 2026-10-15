@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"sort"
 	"sync"
 	"time"
@@ -39,6 +40,11 @@ const NativeDispatchLease = 2 * time.Minute
 // NativeQueueReadLimit bounds the waiting rows one queue decision reads.
 const NativeQueueReadLimit = 1000
 
+// nativeActiveWindow bounds the history a customer's active-task estimate
+// reads: the wallet stops counting a delivered task waiting for its bill 24
+// hours after delivery, and nothing else stays active that long.
+const nativeActiveWindow = 24 * time.Hour
+
 // NativeInFlightStatuses occupy provider capacity (spec §5.3). The provider's
 // own queue (queued) counts on purpose: within our limit the provider never
 // queues for us, so its generation deadline only counts generation.
@@ -57,6 +63,7 @@ type NativeQueueEntry struct {
 	ID         string
 	GroupID    string
 	TokenID    int
+	Model      string
 	EnqueuedAt time.Time
 }
 
@@ -85,7 +92,7 @@ func ReadNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other Oth
 	snapshot := &NativeQueueSnapshot{Scope: scope, InFlightByGroup: map[string]int64{}, ActiveByGroup: map[string]int64{}}
 
 	var waiting []NativeTask
-	if err := db.Select("id", "group_id", "token_id", "enqueued_at").
+	if err := db.Select("id", "group_id", "token_id", "model", "enqueued_at").
 		Where("status = ? AND queue_scope = ? AND (dispatch_after IS NULL OR dispatch_after <= ?)", NativeStatusWaiting, scope, now.UTC()).
 		Order("enqueued_at ASC, id ASC").Limit(NativeQueueReadLimit + 1).Find(&waiting).Error; err != nil {
 		return nil, err
@@ -99,7 +106,7 @@ func ReadNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other Oth
 	groups := map[string]struct{}{}
 
 	for _, task := range waiting {
-		entry := NativeQueueEntry{ID: task.ID, GroupID: task.GroupID, TokenID: task.TokenID}
+		entry := NativeQueueEntry{ID: task.ID, GroupID: task.GroupID, TokenID: task.TokenID, Model: task.Model}
 		if task.EnqueuedAt != nil {
 			entry.EnqueuedAt = task.EnqueuedAt.UTC()
 		}
@@ -148,9 +155,13 @@ func ReadNativeQueueSnapshot(db *gorm.DB, scope string, now time.Time, other Oth
 
 	sort.Strings(names)
 
+	// Bounded by time (idx_native_tasks_group_created), so a customer's whole
+	// history is never read: work in flight is minutes old, and a completed
+	// task stops counting in the wallet a day after delivery.
 	var active []groupCount
 	if err := db.Model(&NativeTask{}).Select("group_id, count(*) AS count").
-		Where("group_id IN ? AND (status IN ? OR (status = ? AND billing_settled = ?))", names, nativeActiveStatuses, "completed", false).
+		Where("group_id IN ? AND created_at >= ? AND (status IN ? OR (status = ? AND billing_settled = ?))",
+			names, now.Add(-nativeActiveWindow), nativeActiveStatuses, "completed", false).
 		Group("group_id").Scan(&active).Error; err != nil {
 		return nil, err
 	}
@@ -198,18 +209,21 @@ func ImageTasksInFlight(channelType ChannelType) OtherInFlight {
 
 // EnqueueNativeTask moves a reserved task whose wallet hold is waiting into
 // the queue of scope: reserved -> waiting, the same guard as the submit
-// transition. Recovery next looks at it when its queue timeout is due (wakeAt).
+// transition. enqueuedAt is the hold's admission (the wallet's clock; its
+// place and queue timeout count from it); it may be claimed from now on this
+// gateway's clock, so a clock difference never delays it. Recovery next looks
+// at it when its queue timeout is due (wakeAt).
 func EnqueueNativeTask(db *gorm.DB, id, group string, token int, scope string, enqueuedAt, wakeAt time.Time) error {
 	if scope == "" {
 		return ErrNativeTaskConflict
 	}
 
-	at := enqueuedAt.UTC()
+	now := time.Now()
 	result := db.Model(&NativeTask{}).
 		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, "reserved", "").
 		Updates(map[string]any{
-			"status": NativeStatusWaiting, "queue_scope": scope, "enqueued_at": at, "dispatch_after": at,
-			"next_recovery_at": wakeAt.Unix(), "updated_at": time.Now(),
+			"status": NativeStatusWaiting, "queue_scope": scope, "enqueued_at": enqueuedAt.UTC(), "dispatch_after": now.UTC(),
+			"next_recovery_at": wakeAt.Unix(), "updated_at": now,
 		})
 	if result.Error != nil {
 		return result.Error
@@ -247,6 +261,32 @@ var claimLocks sync.Map
 // lock alone, as separate instances would.
 var claimLocally = true
 
+// claimTxOptions pins a claim to READ COMMITTED on PostgreSQL, whatever the
+// database's default: the advisory lock, not the isolation level, serializes
+// claims, and each statement must see the claims committed before the lock
+// was granted (a snapshot taken earlier would miss them).
+func claimTxOptions(db *gorm.DB) []*sql.TxOptions {
+	if db.Dialector.Name() != "postgres" {
+		return nil
+	}
+
+	return []*sql.TxOptions{{Isolation: sql.LevelReadCommitted}}
+}
+
+// truncationLogged throttles the warning about a queue longer than one read.
+var truncationLogged sync.Map
+
+func logTruncatedQueue(scope string) {
+	last, _ := truncationLogged.Load(scope)
+	if at, ok := last.(time.Time); ok && time.Since(at) < time.Minute {
+		return
+	}
+
+	truncationLogged.Store(scope, time.Now())
+	log.WithFields(log.Fields{"lane": "native", "scope": scope}).
+		Warn("native queue holds more waiting tasks than one decision reads")
+}
+
 // ClaimNativeDispatch atomically claims one waiting task of a scope when it
 // has room (spec §5.4): lock the scope, count its in-flight work, pick a task,
 // then waiting -> dispatching with the lease. A nil task means no room
@@ -277,8 +317,7 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 		}
 
 		if snapshot.Truncated {
-			log.WithFields(log.Fields{"lane": "native", "scope": claim.Scope}).
-				Warn("native queue holds more waiting tasks than one decision reads")
+			logTruncatedQueue(claim.Scope)
 		}
 
 		if claim.Limit > 0 && snapshot.InFlight >= int64(claim.Limit) {
@@ -333,7 +372,7 @@ func ClaimNativeDispatch(db *gorm.DB, claim NativeDispatchClaim) (task *NativeTa
 		claimed = &task
 
 		return nil
-	})
+	}, claimTxOptions(db)...)
 
 	return claimed, noRoom, err
 }
@@ -365,11 +404,13 @@ func ReturnNativeDispatch(db *gorm.DB, id, group string, token int, owner string
 
 // StartNativeDispatchSubmission lets the holder of a live claim send the task:
 // dispatching -> submitting while the lease holds. created_at becomes the
-// submission time, as for reserved -> submitting. A claim whose lease ran out
-// matches no row and must not call the provider.
+// submission time, as for reserved -> submitting. Recovery may look at it at
+// once (next_recovery_at 0, as for a direct submission), not at the end of
+// the dispatch lease, so an accepted task is polled from the start. A claim
+// whose lease ran out matches no row and must not call the provider.
 func StartNativeDispatchSubmission(db *gorm.DB, id, group string, token int, owner string, now time.Time) error {
 	result := dispatchHeld(db, id, group, token, owner).Where("dispatch_until > ?", now.UTC()).
-		Updates(map[string]any{"status": "submitting", "error_code": "", "created_at": time.Now(), "updated_at": time.Now()})
+		Updates(map[string]any{"status": "submitting", "error_code": "", "next_recovery_at": 0, "created_at": time.Now(), "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -435,6 +476,16 @@ func NativeQueueScopesWaiting(db *gorm.DB) ([]string, error) {
 	return scopes, err
 }
 
+// DueOverdueNativeWaits makes every task still waiting since enqueuedBefore
+// due for recovery now, which times it out. A queue timeout shortened at run
+// time (NativeQueueTimeoutSeconds) then also applies to tasks already queued,
+// whose next look was set from the longer one.
+func DueOverdueNativeWaits(db *gorm.DB, enqueuedBefore, now time.Time) error {
+	return db.Model(&NativeTask{}).
+		Where("status = ? AND enqueued_at <= ? AND next_recovery_at > ?", NativeStatusWaiting, enqueuedBefore.UTC(), now.Unix()).
+		Update("next_recovery_at", now.Unix()).Error
+}
+
 // ExpediteNativeRecovery brings the next poll of a scope's accepted tasks to
 // at the latest, so a task the provider finished frees its place sooner while
 // others wait (spec §5.8).
@@ -482,7 +533,7 @@ func ReadNativeQueueStatus(db *gorm.DB, scopes []string, other func(scope string
 			counter = other(scope)
 		}
 
-		snapshot, err := ReadNativeQueueSnapshot(db, scope, time.Now().Add(24*time.Hour), counter)
+		snapshot, err := ReadNativeQueueSnapshot(db, scope, time.Now(), counter)
 		if err != nil {
 			return nil, err
 		}

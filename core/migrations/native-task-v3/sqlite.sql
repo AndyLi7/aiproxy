@@ -9,3 +9,4 @@ ALTER TABLE `native_tasks` ADD COLUMN `dispatch_owner` text DEFAULT '';
 ALTER TABLE `native_tasks` ADD COLUMN `dispatch_until` datetime;
 ALTER TABLE `native_tasks` ADD COLUMN `dispatch_after` datetime;
 CREATE INDEX IF NOT EXISTS `idx_native_tasks_status_queue_scope` ON `native_tasks`(`status`,`queue_scope`);
+CREATE INDEX IF NOT EXISTS `idx_native_tasks_group_created` ON `native_tasks`(`group_id`,`created_at`);

@@ -123,14 +123,18 @@ func (e *Engine) otherInFlight(scope string) model.OtherInFlight {
 
 // queueState is this process's view of the queue.
 type queueState struct {
-	mu        sync.Mutex
-	now       func() time.Time
-	backoff   map[string]time.Time
-	limits    map[string]cachedLimit
-	positions map[string]cachedPositions
-	scopes    cachedScopes
-	expedited map[string]time.Time
-	wake      chan struct{}
+	mu  sync.Mutex
+	now func() time.Time
+	// backoff holds customers back after their own active limit refused a
+	// dispatch; modelBackoff holds back one customer's tasks of one model
+	// (paused model, unreadable channel) while their other tasks still go.
+	backoff      map[string]time.Time
+	modelBackoff map[string]time.Time
+	limits       map[string]cachedLimit
+	positions    map[string]cachedPositions
+	scopes       cachedScopes
+	expedited    map[string]time.Time
+	wake         chan struct{}
 }
 
 type cachedLimit struct {
@@ -149,7 +153,7 @@ type cachedScopes struct {
 }
 
 func newQueueState() *queueState {
-	return &queueState{now: time.Now, backoff: map[string]time.Time{}, limits: map[string]cachedLimit{},
+	return &queueState{now: time.Now, backoff: map[string]time.Time{}, modelBackoff: map[string]time.Time{}, limits: map[string]cachedLimit{},
 		positions: map[string]cachedPositions{}, expedited: map[string]time.Time{}, wake: make(chan struct{}, 1)}
 }
 
@@ -182,6 +186,35 @@ func (q *queueState) backedOff(group string) bool {
 	until, ok := q.backoff[group]
 	if ok && !q.now().Before(until) {
 		delete(q.backoff, group)
+		return false
+	}
+
+	return ok
+}
+
+func modelBackoffKey(group, model string) string { return group + "\x00" + model }
+
+// backOffModel holds back a customer's tasks of one model.
+func (q *queueState) backOffModel(group, model string, d time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	key := modelBackoffKey(group, model)
+	until := q.now().Add(d)
+	if until.After(q.modelBackoff[key]) {
+		q.modelBackoff[key] = until
+	}
+}
+
+// modelBackedOff reports a waiting task whose customer and model are held back.
+func (q *queueState) modelBackedOff(entry model.NativeQueueEntry) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	key := modelBackoffKey(entry.GroupID, entry.Model)
+	until, ok := q.modelBackoff[key]
+	if ok && !q.now().Before(until) {
+		delete(q.modelBackoff, key)
 		return false
 	}
 
@@ -250,13 +283,23 @@ func (o *fairOrder) atLimit(group string) bool {
 // next pops the next task: rule 0 groups at their own active limit last (or,
 // unless includeAtLimit, not at all), rule 1 fewest in flight in the scope,
 // rule 2 earliest waiting task, rule 3 first in, first out within a group.
-// skip leaves groups out (dispatch backoff).
-func (o *fairOrder) next(skip func(string) bool, includeAtLimit bool) (model.NativeQueueEntry, bool) {
-	best := ""
-	bestAtLimit := false
+// skipGroup leaves customers out (their own active limit refused them);
+// skipTask leaves single tasks out (their model paused or their channel
+// unreadable), and the customer's next task takes their turn.
+func (o *fairOrder) next(skipGroup func(string) bool, skipTask func(model.NativeQueueEntry) bool, includeAtLimit bool) (model.NativeQueueEntry, bool) {
+	best, bestIndex, bestAtLimit := "", -1, false
 
 	for group, queued := range o.heads {
-		if len(queued) == 0 || (skip != nil && skip(group)) {
+		if len(queued) == 0 || (skipGroup != nil && skipGroup(group)) {
+			continue
+		}
+
+		index := 0
+		for skipTask != nil && index < len(queued) && skipTask(queued[index]) {
+			index++
+		}
+
+		if index == len(queued) {
 			continue
 		}
 
@@ -265,8 +308,8 @@ func (o *fairOrder) next(skip func(string) bool, includeAtLimit bool) (model.Nat
 			continue
 		}
 
-		if best == "" || o.before(group, atLimit, best, bestAtLimit) {
-			best, bestAtLimit = group, atLimit
+		if best == "" || o.before(group, queued[index], atLimit, best, o.heads[best][bestIndex], bestAtLimit) {
+			best, bestIndex, bestAtLimit = group, index, atLimit
 		}
 	}
 
@@ -274,15 +317,18 @@ func (o *fairOrder) next(skip func(string) bool, includeAtLimit bool) (model.Nat
 		return model.NativeQueueEntry{}, false
 	}
 
-	entry := o.heads[best][0]
-	o.heads[best] = o.heads[best][1:]
+	queued := o.heads[best]
+	entry := queued[bestIndex]
+	rest := make([]model.NativeQueueEntry, 0, len(queued)-1)
+	rest = append(rest, queued[:bestIndex]...)
+	o.heads[best] = append(rest, queued[bestIndex+1:]...)
 	o.scopeInFlight[best]++
 	o.active[best]++
 
 	return entry, true
 }
 
-func (o *fairOrder) before(group string, atLimit bool, other string, otherAtLimit bool) bool {
+func (o *fairOrder) before(group string, head model.NativeQueueEntry, atLimit bool, other string, otherHead model.NativeQueueEntry, otherAtLimit bool) bool {
 	if atLimit != otherAtLimit {
 		return !atLimit
 	}
@@ -291,7 +337,6 @@ func (o *fairOrder) before(group string, atLimit bool, other string, otherAtLimi
 		return o.scopeInFlight[group] < o.scopeInFlight[other]
 	}
 
-	head, otherHead := o.heads[group][0], o.heads[other][0]
 	if !head.EnqueuedAt.Equal(otherHead.EnqueuedAt) {
 		return head.EnqueuedAt.Before(otherHead.EnqueuedAt)
 	}
@@ -306,7 +351,7 @@ func queuePositions(snapshot *model.NativeQueueSnapshot, limit func(string) int)
 	positions := make(map[string]int, len(snapshot.Waiting))
 
 	for position := 1; ; position++ {
-		entry, ok := order.next(nil, true)
+		entry, ok := order.next(nil, nil, true)
 		if !ok {
 			return positions
 		}
@@ -315,9 +360,14 @@ func queuePositions(snapshot *model.NativeQueueSnapshot, limit func(string) int)
 	}
 }
 
+// readQueueSnapshot reads a scope's queue; a seam for tests.
+var readQueueSnapshot = model.ReadNativeQueueSnapshot
+
 // QueuePosition is a waiting task's estimated place in its scope's queue, or
 // 0 when it is not waiting or the estimate is unavailable. Estimates are
-// cached per scope for two seconds.
+// cached per scope for two seconds; within them a task the estimate does not
+// list (past the read limit) is not read again, unless it entered the queue
+// after the estimate.
 func (e *Engine) QueuePosition(task *model.NativeTask) int {
 	if e == nil || e.DB == nil || task == nil || task.Status != model.NativeStatusWaiting || task.QueueScope == "" {
 		return 0
@@ -328,8 +378,8 @@ func (e *Engine) QueuePosition(task *model.NativeTask) int {
 	fresh := ok && queue.now().Sub(cached.at) < positionCacheTTL
 	queue.mu.Unlock()
 
-	if !fresh || cached.positions[task.ID] == 0 {
-		snapshot, err := model.ReadNativeQueueSnapshot(e.DB, task.QueueScope, queue.now(), e.otherInFlight(task.QueueScope))
+	if _, listed := cached.positions[task.ID]; !fresh || (!listed && task.UpdatedAt.After(cached.at)) {
+		snapshot, err := readQueueSnapshot(e.DB, task.QueueScope, queue.now(), e.otherInFlight(task.QueueScope))
 		if err != nil {
 			log.WithFields(log.Fields{"lane": "native", "scope": task.QueueScope}).WithError(err).Warn("native queue position unavailable")
 			return 0
@@ -399,7 +449,7 @@ func (e *Engine) claim(scope, onlyID string) (*model.NativeTask, bool, error) {
 		Scope: scope, Limit: e.queueLimit(scope), Owner: owner, Now: queue.now(), OnlyID: onlyID,
 		Other: e.otherInFlight(scope),
 		Pick: func(snapshot *model.NativeQueueSnapshot) string {
-			entry, ok := newFairOrder(snapshot, queue.activeLimit).next(queue.backedOff, false)
+			entry, ok := newFairOrder(snapshot, queue.activeLimit).next(queue.backedOff, queue.modelBackedOff, false)
 			if !ok {
 				return ""
 			}

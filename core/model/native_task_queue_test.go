@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -89,4 +90,47 @@ func TestQueueSnapshotCountsInFlightWork(t *testing.T) {
 	other, err := model.ReadNativeQueueSnapshot(db, "other:default", time.Now(), nil)
 	require.NoError(t, err)
 	require.Zero(t, other.InFlight)
+}
+
+// Review 16: a reserved task whose hold the wallet still had queued when it
+// refunded it (the 2-hour backstop) reads as a queue timeout; a reserved
+// task with a direct hold keeps submission_timeout.
+func TestRefundedReservationWithAQueuedHoldIsAQueueTimeout(t *testing.T) {
+	usageAt := time.Date(2026, 10, 15, 1, 2, 3, 0, time.UTC)
+	for submission, want := range map[string]string{"waiting": model.QueueTimeoutCode, "not_submitted": "submission_timeout"} {
+		db := nativeLogDB(t)
+		_, created, err := model.ReserveNativeTask(db, model.NativeTask{ID: "r", GroupID: "g", TokenID: 1, Model: "a/b/c", Fingerprint: "hash",
+			OutputSchema: nativeLogSchema, BillingOperationID: "native:r", QueueScope: "fal:default"})
+		require.NoError(t, err)
+		require.True(t, created)
+		receipt := `{"id":"native:r","status":"refunded","chargedMicros":0,"refundMicros":200,"submissionStatus":"` + submission + `","usageAtMs":` +
+			strconv.FormatInt(usageAt.UnixMilli(), 10) + `,"usageSource":"api"}`
+		require.NoError(t, model.SaveNativeBillingTerminal(db, "r", "g", 1, receipt))
+		task, err := model.GetNativeTask(db, "r", "g", 1)
+		require.NoError(t, err)
+		require.Equal(t, "failed", task.Status)
+		require.Equal(t, want, task.ErrorCode, submission)
+	}
+}
+
+// Review 12: a customer's active-task estimate reads one day: a completed
+// task still waiting for its bill counts for a day, as in the wallet.
+func TestActiveEstimateReadsOneDay(t *testing.T) {
+	db := nativeLogDB(t)
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+	now := time.Now()
+	for id, row := range map[string]struct {
+		status string
+		age    time.Duration
+	}{"recent": {"completed", time.Hour}, "old": {"completed", 25 * time.Hour}, "running": {"running", time.Minute}} {
+		_, _, err := model.ReserveNativeTask(db, model.NativeTask{ID: id, GroupID: "g", TokenID: 1, Model: "a/b/c", Fingerprint: "hash",
+			OutputSchema: nativeLogSchema, BillingOperationID: "native:" + id, QueueScope: "fal:default"})
+		require.NoError(t, err)
+		require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", id).
+			Updates(map[string]any{"status": row.status, "created_at": now.Add(-row.age)}).Error)
+	}
+	enqueuedNativeTask(t, db, "waiting")
+	snapshot, err := model.ReadNativeQueueSnapshot(db, "fal:default", time.Now(), nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), snapshot.ActiveByGroup["g"], "running and the recent unbilled one; not the day-old one")
 }

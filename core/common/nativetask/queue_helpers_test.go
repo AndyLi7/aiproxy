@@ -2,6 +2,7 @@ package nativetask
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 // queueHold is one hold in queueWallet.
 type queueHold struct {
 	group        string
+	model        string
 	status       string
 	submission   string
 	attempts     []walletAttempt
@@ -39,7 +41,11 @@ type queueWallet struct {
 	activeLimit int
 	maxWaiting  int
 	paused      bool
-	commands    []balance.PrepaymentCommand
+	// pausedModels pauses single models (their dispatches answer 423).
+	pausedModels map[string]bool
+	// clockSkew moves the wallet's clock (hold createdAt) against the gateway's.
+	clockSkew time.Duration
+	commands  []balance.PrepaymentCommand
 	// beforeBegin runs as begin_attempt arrives, before it is applied;
 	// afterBegin after it was applied, before the reply.
 	beforeBegin func(balance.PrepaymentCommand)
@@ -51,7 +57,7 @@ type queueWallet struct {
 }
 
 func newQueueWallet() *queueWallet {
-	return &queueWallet{holds: map[string]*queueHold{}, balances: map[string]int64{}, maxWaiting: 20,
+	return &queueWallet{holds: map[string]*queueHold{}, balances: map[string]int64{}, maxWaiting: 20, pausedModels: map[string]bool{},
 		down: map[string]bool{}, lose: map[string]bool{}}
 }
 
@@ -126,7 +132,7 @@ func (w *queueWallet) apply(c balance.PrepaymentCommand) (balance.PrepaymentRece
 		if c.Queue {
 			submission = "waiting"
 		}
-		w.holds[c.BillingOperationID] = &queueHold{group: c.Group, status: "pending", submission: submission, createdAt: time.Now()}
+		w.holds[c.BillingOperationID] = &queueHold{group: c.Group, model: c.ModelID, status: "pending", submission: submission, createdAt: time.Now().Add(w.clockSkew)}
 		return w.receipt(c.BillingOperationID), nil
 	}
 	if hold == nil {
@@ -157,7 +163,7 @@ func (w *queueWallet) apply(c balance.PrepaymentCommand) (balance.PrepaymentRece
 			if w.balance(hold.group) < 0 {
 				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentInsufficientBalance
 			}
-			if w.paused {
+			if w.paused || w.pausedModels[hold.model] {
 				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentModelPaused
 			}
 			if w.activeLimit > 0 && w.active(hold.group, c.BillingOperationID) >= w.activeLimit {
@@ -339,6 +345,16 @@ func (env *queueEnv) submit(id, group string) (*model.NativeTask, error) {
 	engine := *env.e
 	engine.Provider = env.p
 	return engine.Submit(context.Background(), id, group, 1, body, env.plan)
+}
+
+// submitModel sends a task of another model (same channel and price).
+func (env *queueEnv) submitModel(id, group, name string) (*model.NativeTask, error) {
+	plan := env.plan
+	plan.Contract = json.RawMessage(strings.Replace(string(env.plan.Contract), `"model":"brand/model/native"`, `"model":"`+name+`"`, 1))
+	engine := *env.e
+	engine.Provider = env.p
+	return engine.Submit(context.Background(), id, group, 1,
+		[]byte(strings.Replace(string(body), `"model":"brand/model/native"`, `"model":"`+name+`"`, 1)), plan)
 }
 
 func (env *queueEnv) task(id, group string) *model.NativeTask {

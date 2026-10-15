@@ -510,10 +510,11 @@ func (e *Engine) recoveryNext(fresh *model.NativeTask, release time.Time, age ti
 			}
 		}
 	}
-	if ceiling := release.Add(queuedPollCeiling); next.After(ceiling) && e.scopeHasWaiting(fresh.QueueScope) &&
-		(fresh.Status != "failed" && fresh.Status != "completed" || !fresh.BillingSettled) {
-		// Tasks wait in this scope: notice finished work, and settled bills,
-		// within seconds so its place is freed (spec §5.8).
+	if ceiling := release.Add(queuedPollCeiling); next.After(ceiling) && inFlight(fresh.Status) && e.scopeHasWaiting(fresh.QueueScope) {
+		// Tasks wait in this scope: notice finished work within seconds so
+		// its place is freed (spec §5.8). Only work in flight: a finished
+		// task waiting for its bill holds no place, and polling it sends
+		// serialized wallet writes (execution_finished, delivered).
 		next = ceiling
 	}
 	return next

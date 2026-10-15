@@ -100,12 +100,14 @@ func TestNativeV2AddsPublicErrorToAnEarlierV1Table(t *testing.T) {
 // existing rows keep their data and read with an empty queue scope.
 func TestNativeV3AddsQueueColumnsToAnEarlierTable(t *testing.T) {
 	columns := []string{"queue_scope", "enqueued_at", "dispatched_at", "dispatch_owner", "dispatch_until", "dispatch_after"}
-	for _, dialect := range []string{"sqlite", "postgres", "mysql"} {
-		saved, err := os.ReadFile(filepath.Join("..", "..", "migrations", "native-task-v3", dialect+".sql"))
+	read := func(name string) string {
+		saved, err := os.ReadFile(filepath.Join("..", "..", "migrations", "native-task-v3", name))
 		require.NoError(t, err)
-		sql := string(saved)
+		return string(saved)
+	}
+	for _, dialect := range []string{"sqlite", "postgres", "mysql"} {
+		sql := read(dialect + ".sql")
 		require.Contains(t, sql, "REVIEW REQUIRED")
-		require.Contains(t, sql, "idx_native_tasks_status_queue_scope")
 		for _, column := range columns {
 			require.Contains(t, sql, column)
 		}
@@ -116,12 +118,23 @@ func TestNativeV3AddsQueueColumnsToAnEarlierTable(t *testing.T) {
 			require.Contains(t, sql, "IF NOT EXISTS")
 			require.Contains(t, sql, "lock_timeout")
 			require.Contains(t, sql, "COMMIT;")
+			// Indexes never inside the ALTER's transaction: its lock would block reads for the build.
+			require.NotContains(t, sql, "CREATE INDEX")
+		} else {
+			require.Contains(t, sql, "idx_native_tasks_status_queue_scope")
+			require.Contains(t, sql, "idx_native_tasks_group_created")
 		}
 	}
+	indexes := read("postgres-indexes.sql")
+	require.Contains(t, indexes, "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_tasks_status_queue_scope")
+	require.Contains(t, indexes, "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_tasks_group_created")
+	require.NotContains(t, indexes, "BEGIN;")
 	current, err := plan("sqlite")
 	require.NoError(t, err)
 	earlier := strings.Replace(current, "`queue_scope` text DEFAULT \"\",`enqueued_at` datetime,`dispatched_at` datetime,`dispatch_owner` text DEFAULT \"\",`dispatch_until` datetime,`dispatch_after` datetime,", "", 1)
 	earlier = strings.Replace(earlier, "CREATE INDEX `idx_native_tasks_status_queue_scope` ON `native_tasks`(`status`,`queue_scope`);", "", 1)
+	earlier = strings.Replace(earlier, "CREATE INDEX `idx_native_tasks_group_created` ON `native_tasks`(`group_id`,`created_at`);", "", 1)
+	require.NotContains(t, earlier, "idx_native_tasks_group_created")
 	require.NotEqual(t, current, earlier)
 	require.NotContains(t, earlier, "queue_scope")
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "upgrade-v3.db"))
@@ -141,7 +154,7 @@ func TestNativeV3AddsQueueColumnsToAnEarlierTable(t *testing.T) {
 			statements = append(statements, body)
 		}
 	}
-	require.Len(t, statements, 7)
+	require.Len(t, statements, 8)
 	for _, statement := range statements {
 		require.NoError(t, db.Exec(statement).Error)
 	}

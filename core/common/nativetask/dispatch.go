@@ -35,9 +35,21 @@ func (e *Engine) enqueue(ctx context.Context, task *model.NativeTask, logInfo *m
 		scope = QueueScope(route.Provider)
 	}
 	wake := enqueuedAt.Add(e.queueTimeout()).Add(time.Second)
-	if err := model.EnqueueNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, scope, enqueuedAt, wake); err != nil {
-		// Recovery may have enqueued it first (spec §6.7): answer that state.
-		return e.storedUnlessReserved(task, err)
+	if err := enqueueNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, scope, enqueuedAt, wake); err != nil {
+		if errors.Is(err, model.ErrNativeTaskConflict) {
+			// Recovery may have enqueued it first (spec §6.7): answer that state.
+			return e.storedUnlessReserved(task, err)
+		}
+		// The wallet holds it queued, so recovery enqueues and runs it
+		// (enqueueRecovered): answer 202 queued, never a retry hint.
+		log.WithFields(log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "scope": scope}).
+			WithError(err).Warn("native queued task not enqueued; recovery enqueues it")
+		if logInfo != nil {
+			if logErr := model.RecordNativeTaskLog(e.DB, task, *logInfo); logErr != nil {
+				log.Errorf("record native task log %s: %v", task.ID, logErr)
+			}
+		}
+		return task, nil
 	}
 	task.Status = model.NativeStatusWaiting
 	task.QueueScope = scope
@@ -48,17 +60,22 @@ func (e *Engine) enqueue(ctx context.Context, task *model.NativeTask, logInfo *m
 			log.Errorf("record native task log %s: %v", task.ID, logErr)
 		}
 	}
-	wakeDispatcher()
 	claimed, _, err := e.claim(scope, task.ID)
 	if err != nil {
 		log.WithFields(log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "scope": scope}).
 			WithError(err).Warn("native queue fast path unavailable; the dispatcher sends the task")
 	}
 	if claimed == nil {
+		// Only now: woken before the fast path, the dispatcher could claim the
+		// task first, and this request would lose its synchronous answer.
+		wakeDispatcher()
 		return e.storedQueued(task), nil
 	}
 	return e.dispatchClaimed(ctx, claimed, e.Provider)
 }
+
+// enqueueNativeTask moves a reserved task into the queue; a seam for tests.
+var enqueueNativeTask = model.EnqueueNativeTask
 
 // storedQueued is the stored task, or task when it cannot be read.
 func (e *Engine) storedQueued(task *model.NativeTask) *model.NativeTask {
@@ -106,7 +123,9 @@ func (e *Engine) dispatchClaimed(ctx context.Context, task *model.NativeTask, pr
 		failed := e.storedQueued(task)
 		return failed, e.SyncBilling(ctx, failed)
 	}
-	requeue := func(backoff time.Duration, reason string) (*model.NativeTask, error) {
+	// requeue puts the task back. perCustomer holds the customer back (their
+	// own active limit), else only their tasks of this model.
+	requeue := func(perCustomer bool, backoff time.Duration, reason string) (*model.NativeTask, error) {
 		wake := time.Now().Add(e.queueTimeout())
 		if task.EnqueuedAt != nil {
 			wake = task.EnqueuedAt.Add(e.queueTimeout())
@@ -114,7 +133,11 @@ func (e *Engine) dispatchClaimed(ctx context.Context, task *model.NativeTask, pr
 		if err := model.ReturnNativeDispatch(e.DB, task.ID, task.GroupID, task.TokenID, owner, wake.Add(time.Second)); err != nil {
 			return e.storedQueued(task), err
 		}
-		queue.backOff(task.GroupID, backoff)
+		if perCustomer {
+			queue.backOff(task.GroupID, backoff)
+		} else {
+			queue.backOffModel(task.GroupID, task.Model, backoff)
+		}
 		log.WithFields(fields).WithField("reason", reason).Info("native queued task back in the queue")
 		return e.storedQueued(task), nil
 	}
@@ -133,7 +156,7 @@ func (e *Engine) dispatchClaimed(ctx context.Context, task *model.NativeTask, pr
 			return fail(model.ModelUnavailableWhileQueuedCode)
 		}
 		if err != nil || provider == nil {
-			return requeue(transientBackoff, "channel unreadable")
+			return requeue(false, transientBackoff, "channel unreadable")
 		}
 	}
 	contract, err := nativeresult.CompileTaskContract([]byte(task.FrozenContract))
@@ -151,9 +174,9 @@ func (e *Engine) dispatchClaimed(ctx context.Context, task *model.NativeTask, pr
 		if limit != nil {
 			queue.rememberLimit(task.GroupID, limit.ActiveLimit)
 		}
-		return requeue(activeLimitBackoff, "active task limit")
+		return requeue(true, activeLimitBackoff, "active task limit")
 	case errors.Is(err, balance.ErrPrepaymentModelPaused):
-		return requeue(pausedModelBackoff, "model paused")
+		return requeue(false, pausedModelBackoff, "model paused")
 	case errors.Is(err, balance.ErrPrepaymentInsufficientBalance):
 		// The balance went below zero while the task waited (spec §4.7).
 		return fail(model.InsufficientBalanceCode)
@@ -208,6 +231,12 @@ func RunDispatcher(ctx context.Context, engine func() (*Engine, bool)) {
 // it has room for and sends each in its own goroutine, detached from ctx with
 // the submission timeout. running tracks them.
 func (e *Engine) DispatchRound(ctx context.Context, running *sync.WaitGroup) {
+	// A shortened queue timeout applies to tasks already waiting: recovery
+	// times them out at once (spec §6.1, staging drill step 3).
+	now := time.Now()
+	if err := model.DueOverdueNativeWaits(e.DB, now.Add(-e.queueTimeout()), now); err != nil {
+		log.WithError(err).Warn("native queue: overdue waits not marked due")
+	}
 	scopes, err := model.NativeQueueScopesWaiting(e.DB)
 	if err != nil {
 		log.WithError(err).Warn("native queue: waiting scopes unreadable")

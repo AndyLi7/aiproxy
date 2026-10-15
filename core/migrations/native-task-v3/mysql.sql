@@ -4,3 +4,4 @@
 -- the table first and record each statement. Keep the columns on rollback.
 ALTER TABLE `native_tasks` ADD COLUMN `queue_scope` varchar(128) DEFAULT '', ADD COLUMN `enqueued_at` datetime(3) NULL, ADD COLUMN `dispatched_at` datetime(3) NULL, ADD COLUMN `dispatch_owner` varchar(64) DEFAULT '', ADD COLUMN `dispatch_until` datetime(3) NULL, ADD COLUMN `dispatch_after` datetime(3) NULL;
 CREATE INDEX `idx_native_tasks_status_queue_scope` ON `native_tasks` (`status`,`queue_scope`);
+CREATE INDEX `idx_native_tasks_group_created` ON `native_tasks` (`group_id`,`created_at`);

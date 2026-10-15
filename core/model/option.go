@@ -280,17 +280,14 @@ var ErrUnknownOptionKey = errors.New("unknown option key")
 var lenientOptionLoaders = map[string]func(key, value string){
 	config.NativeQueueEnabledKey: func(key, value string) {
 		enabled, err := config.ParseNativeQueueEnabled(value)
-		if err != nil {
-			log.Errorf("option %s: unreadable value, using the default: %v", key, err)
-		}
-
+		reportUnreadableOption(key, value, err)
 		config.SetNativeQueueEnabled(enabled)
 	},
 	config.NativeQueueLimitsKey: func(key, value string) {
 		limits, err := config.ParseNativeQueueLimits(value)
-		if err != nil {
-			log.Errorf("option %s: unreadable value, using the default: %v", key, err)
+		reportUnreadableOption(key, value, err)
 
+		if err != nil {
 			limits = map[string]int{}
 		}
 
@@ -298,14 +295,38 @@ var lenientOptionLoaders = map[string]func(key, value string){
 	},
 	config.NativeQueueTimeoutSecondsKey: func(key, value string) {
 		seconds, err := config.ParseNativeQueueTimeoutSeconds(value)
-		if err != nil {
-			log.Errorf("option %s: unreadable value, using the default: %v", key, err)
+		reportUnreadableOption(key, value, err)
 
+		if err != nil {
 			seconds = int64(config.NativeQueueTimeout / time.Second)
 		}
 
 		config.SetNativeQueueTimeoutSeconds(seconds)
 	},
+}
+
+// unreadableOptions remembers the unreadable value logged per key, so the
+// 5-second sync logs a bad value once, not every time it reads it.
+var (
+	unreadableOptionsMu sync.Mutex
+	unreadableOptions   = map[string]string{}
+)
+
+func reportUnreadableOption(key, value string, err error) {
+	unreadableOptionsMu.Lock()
+	defer unreadableOptionsMu.Unlock()
+
+	if err == nil {
+		delete(unreadableOptions, key)
+		return
+	}
+
+	if logged, ok := unreadableOptions[key]; ok && logged == value {
+		return
+	}
+
+	unreadableOptions[key] = value
+	log.Errorf("option %s: unreadable value, using the default: %v", key, err)
 }
 
 func toBool(value string) bool {

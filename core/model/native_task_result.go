@@ -69,7 +69,7 @@ type NativeTask struct {
 	PublicError         string    `gorm:"type:text" json:"-"`
 	UpstreamID          string    `gorm:"size:256" json:"-"`
 	ID                  string    `gorm:"primaryKey;size:128" json:"-"`
-	GroupID             string    `gorm:"size:64;not null;index" json:"-"`
+	GroupID             string    `gorm:"size:64;not null;index;index:idx_native_tasks_group_created,priority:1" json:"-"`
 	TokenID             int       `gorm:"not null" json:"-"`
 	Model               string    `gorm:"size:256;not null" json:"-"`
 	Fingerprint         string    `gorm:"size:64;not null" json:"-"`
@@ -77,7 +77,7 @@ type NativeTask struct {
 	OutputSchemaHash    string    `gorm:"size:64;not null" json:"-"`
 	Status              string    `gorm:"size:32;not null;index:idx_native_tasks_status_queue_scope,priority:1" json:"-"`
 	NativeOutput        string    `gorm:"type:text" json:"-"`
-	CreatedAt           time.Time `json:"-"`
+	CreatedAt           time.Time `gorm:"index:idx_native_tasks_group_created,priority:2" json:"-"`
 	UpdatedAt           time.Time `json:"-"`
 }
 

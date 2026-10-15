@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -14,9 +15,21 @@ var (
 	adaptors = make(map[model.ChannelType]adaptor.Adaptor)
 )
 
+// Register binds an adaptor to a channel type. It panics when the type is
+// already taken: adaptors register from init(), so a reused number (for
+// example an upstream channel added under a number we already use) stops
+// the gateway at startup instead of silently sending that channel's
+// traffic, and its key, to the wrong provider.
 func Register(channelType model.ChannelType, a adaptor.Adaptor) {
 	mu.Lock()
 	defer mu.Unlock()
+
+	if existing, ok := adaptors[channelType]; ok {
+		panic(fmt.Sprintf(
+			"registry: channel type %d (%s) already registered by %T; refusing %T",
+			int(channelType), channelType, existing, a,
+		))
+	}
 
 	adaptors[channelType] = a
 }

@@ -55,6 +55,7 @@ var (
 )
 
 func ReloadEnv() {
+	reloadLimits()
 	SetRetryBudget(GetRetryBudget())
 
 	DebugEnabled = env.Bool("DEBUG", false)

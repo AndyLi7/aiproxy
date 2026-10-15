@@ -117,5 +117,11 @@ func GetStatus(c *gin.Context) {
 		},
 	}
 	status.Features = append(status.Features, nativeRuntimeFeatures()...)
+	// Left out (never a 503) while the task view's storage or indexes are not
+	// ready; its endpoints then answer 503 task_view_unavailable.
+	if taskViewStorage.ready(model.LogDB) {
+		status.Features = append(status.Features, model.LogTaskViewFeature)
+	}
+
 	middleware.SuccessResponse(c, status)
 }

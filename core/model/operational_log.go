@@ -46,7 +46,10 @@ type OperationalFields struct {
 }
 
 // AdminLogKind splits the admin request log (/api/logs/ and /api/logs/search)
-// into two disjoint lists; the empty value and "all" list every row.
+// into two disjoint lists; the empty value and "all" list every row. The task
+// view (C step 2, see task_view.go) is a second split of every row: tasks
+// (one row per generation task, trials and admin demos included) and
+// non_task (every other row, unidentified callers included).
 //
 //   - calls: every row whose key was recognised (group and token known) and
 //     that is not a read. Unlike GroupLogKindCalls it keeps internal demo and
@@ -60,9 +63,11 @@ type OperationalFields struct {
 type AdminLogKind string
 
 const (
-	AdminLogKindAll   AdminLogKind = "all"
-	AdminLogKindCalls AdminLogKind = "calls"
-	AdminLogKindReads AdminLogKind = "reads"
+	AdminLogKindAll     AdminLogKind = "all"
+	AdminLogKindCalls   AdminLogKind = "calls"
+	AdminLogKindReads   AdminLogKind = "reads"
+	AdminLogKindTasks   AdminLogKind = "tasks"
+	AdminLogKindNonTask AdminLogKind = "non_task"
 
 	// AdminLogKindFeature tells the admin app that /api/logs/ and
 	// /api/logs/search honour kind; an older gateway ignores the parameter
@@ -72,7 +77,7 @@ const (
 
 func (k AdminLogKind) Valid() bool {
 	switch k {
-	case "", AdminLogKindAll, AdminLogKindCalls, AdminLogKindReads:
+	case "", AdminLogKindAll, AdminLogKindCalls, AdminLogKindReads, AdminLogKindTasks, AdminLogKindNonTask:
 		return true
 	default:
 		return false
@@ -200,12 +205,12 @@ func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.D
 		tx = tx.Where("mode IS NULL OR mode NOT IN ?", filter.ExcludedModes)
 	}
 
-	if filter.Status != "" {
-		now := filter.Now
-		if now.IsZero() {
-			now = time.Now()
-		}
+	now := filter.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 
+	if filter.Status != "" {
 		statusSQL, statusArgs := callStatusExpr(now)
 		tx = tx.Where("("+statusSQL+") = ?", append(statusArgs, string(filter.Status))...)
 	}
@@ -217,6 +222,12 @@ func applyOperationalLogFilter(tx *gorm.DB, filter OperationalLogFilter) *gorm.D
 	case AdminLogKindReads:
 		callSQL, callArgs := adminLogCallExpr()
 		tx = tx.Where("NOT ("+callSQL+")", callArgs...)
+	case AdminLogKindTasks:
+		taskSQL, taskArgs := taskViewTaskExpr(true, now)
+		tx = tx.Where("("+taskSQL+")", taskArgs...)
+	case AdminLogKindNonTask:
+		nonTaskSQL, nonTaskArgs := taskViewNonTaskExpr(true, now)
+		tx = tx.Where("("+nonTaskSQL+")", nonTaskArgs...)
 	}
 
 	return tx

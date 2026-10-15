@@ -122,6 +122,7 @@ func logUsageQueryDuration(c *gin.Context, startedAt time.Time) {
 //	@Param			start		query		int		true	"Window start, Unix milliseconds; at most 400 days before now"
 //	@Param			end			query		int		true	"Window end (exclusive), Unix milliseconds; at most 400 days after start"
 //	@Param			group_by	query		string	false	"source: also return totals per request source"
+//	@Param			unit		query		string	false	"requests (default) or tasks: a submit that failed after the hold and was resent with the same ID counts once. Rejected calls are always counted. The answer echoes unit when the parameter is given; tasks answers 503 task_view_unavailable until log_task_view_v1 is announced"
 //	@Success		200			{object}	middleware.APIResponse{data=map[string]any}
 //	@Router			/api/usage/{group}/calls [get]
 func GetGroupUsageCalls(c *gin.Context) {
@@ -157,11 +158,16 @@ func GetGroupUsageCalls(c *gin.Context) {
 		return
 	}
 
+	unit, echoUnit, ok := parseUsageUnit(c)
+	if !ok {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), usageQueryTimeout)
 	defer cancel()
 
 	startedAt := time.Now()
-	totals, err := model.GetGroupCallTotals(ctx, group, start, end, now)
+	totals, err := model.GetGroupCallTotals(ctx, group, start, end, now, unit)
 
 	logUsageQueryDuration(c, startedAt)
 
@@ -180,6 +186,10 @@ func GetGroupUsageCalls(c *gin.Context) {
 		response["by_source"] = totals.BySource
 	}
 
+	if echoUnit {
+		response["unit"] = unit
+	}
+
 	middleware.SuccessResponse(c, response)
 }
 
@@ -194,6 +204,7 @@ func GetGroupUsageCalls(c *gin.Context) {
 //	@Param			token_ids	query		string	true	"Comma-separated key ids (1-100, distinct)"
 //	@Param			start		query		int		true	"Window start, Unix milliseconds; at most 400 days before now"
 //	@Param			end			query		int		true	"Window end (exclusive), Unix milliseconds; at most 400 days after start"
+//	@Param			unit		query		string	false	"requests (default) or tasks, as for /api/usage/{group}/calls; the latest call stays per row"
 //	@Success		200			{object}	middleware.APIResponse{data=map[string]any}
 //	@Router			/api/usage/{group}/keys [get]
 func GetGroupUsageKeys(c *gin.Context) {
@@ -217,11 +228,16 @@ func GetGroupUsageKeys(c *gin.Context) {
 		return
 	}
 
+	unit, echoUnit, ok := parseUsageUnit(c)
+	if !ok {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), usageQueryTimeout)
 	defer cancel()
 
 	startedAt := time.Now()
-	keys, err := model.GetGroupKeyCallStats(ctx, group, tokenIDs, start, end, now)
+	keys, err := model.GetGroupKeyCallStats(ctx, group, tokenIDs, start, end, now, unit)
 
 	logUsageQueryDuration(c, startedAt)
 
@@ -230,10 +246,41 @@ func GetGroupUsageKeys(c *gin.Context) {
 		return
 	}
 
-	middleware.SuccessResponse(c, gin.H{
+	response := gin.H{
 		"start": start.UnixMilli(),
 		"end":   end.UnixMilli(),
 		"as_of": now.UnixMilli(),
 		"keys":  keys,
-	})
+	}
+	if echoUnit {
+		response["unit"] = unit
+	}
+
+	middleware.SuccessResponse(c, response)
+}
+
+// parseUsageUnit reads unit (requests or tasks; see model.CallUnit). Without
+// the parameter the answer is exactly the pre-task-view one: requests, and no
+// unit field. With it the answer echoes unit, so an App can tell this gateway
+// from an older one that ignores the parameter. It answers the error itself
+// and reports false: 400 for an unknown unit, 503 task_view_unavailable for
+// tasks before the task view storage is ready.
+func parseUsageUnit(c *gin.Context) (model.CallUnit, bool, bool) {
+	raw, present := c.GetQuery("unit")
+	if !present {
+		return model.CallUnitRequests, false, true
+	}
+
+	unit, err := model.ParseCallUnit(raw)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return "", false, false
+	}
+
+	if unit == model.CallUnitTasks && !taskViewStorage.ready(model.LogDB) {
+		taskViewUnavailable(c)
+		return "", false, false
+	}
+
+	return unit, true, true
 }

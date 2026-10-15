@@ -111,7 +111,11 @@ func TestAdminLogsKindSeparatesCallsFromReads(t *testing.T) {
 			handler = SearchLogs
 		}
 
-		code, _, body := serveAdminLogs(t, handler, path, url.Values{"kind": {"tasks"}})
-		require.Equal(t, http.StatusBadRequest, code, body)
+		// Unknown kinds keep failing closed (tasks and non_task are the task
+		// view's kinds, see task_view_test.go).
+		for _, kind := range []string{"task", "TASKS", "non-task"} {
+			code, _, body := serveAdminLogs(t, handler, path, url.Values{"kind": {kind}})
+			require.Equal(t, http.StatusBadRequest, code, body)
+		}
 	}
 }

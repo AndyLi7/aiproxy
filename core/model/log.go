@@ -673,18 +673,22 @@ func buildGetLogsQuery(
 }
 
 // GroupLogKind selects calls, reads or every row of a group (§1.2 of the key
-// usage P1 plan).
+// usage P1 plan), or one side of the task view (C step 2, see task_view.go):
+// tasks (one row per generation task) and non_task (every other row the
+// customer may see). tasks and non_task partition the visible rows.
 type GroupLogKind string
 
 const (
-	GroupLogKindAll   GroupLogKind = "all"
-	GroupLogKindCalls GroupLogKind = "calls"
-	GroupLogKindReads GroupLogKind = "reads"
+	GroupLogKindAll     GroupLogKind = "all"
+	GroupLogKindCalls   GroupLogKind = "calls"
+	GroupLogKindReads   GroupLogKind = "reads"
+	GroupLogKindTasks   GroupLogKind = "tasks"
+	GroupLogKindNonTask GroupLogKind = "non_task"
 )
 
 func (k GroupLogKind) Valid() bool {
 	switch k {
-	case "", GroupLogKindAll, GroupLogKindCalls, GroupLogKindReads:
+	case "", GroupLogKindAll, GroupLogKindCalls, GroupLogKindReads, GroupLogKindTasks, GroupLogKindNonTask:
 		return true
 	default:
 		return false
@@ -819,6 +823,12 @@ func buildGroupLogsQuery(db *gorm.DB, q GroupLogQuery) *gorm.DB {
 	case GroupLogKindReads:
 		callSQL, callArgs := isCallExpr()
 		tx = tx.Where("NOT ("+callSQL+")", callArgs...)
+	case GroupLogKindTasks:
+		taskSQL, taskArgs := taskViewTaskExpr(false, q.Now)
+		tx = tx.Where("("+taskSQL+")", taskArgs...)
+	case GroupLogKindNonTask:
+		nonTaskSQL, nonTaskArgs := taskViewNonTaskExpr(false, q.Now)
+		tx = tx.Where("("+nonTaskSQL+")", nonTaskArgs...)
 	}
 
 	return tx

@@ -35,3 +35,8 @@
 native 的五个外部 fixture 跳过项仍为 CorpusExecution、CrossServiceArchiveRecovery、RealWalletSettlementAndReplay、RealWalletRejectedSubmissionRefund、RealWalletLostBeginAttemptReplyRefundsWithoutPause。没有真实钱包、付费供应商或 bucket 联调；没有生产 / 已有开发数据库修改，没有 push / merge / deploy。B 的真实长转存组合仍未合并验证。
 
 本轮测试编写时曾因扩展反例脚本未匹配格式而产生两个未使用 import 的编译失败；修正后所有最终回归完整通过，没有将该次失败计作通过。父批次文档把原 PostgreSQL harness 误标为 race，已纠正文档，本批明确用 -race 重跑。
+
+
+## 后续 R2
+
+主控确认本页原证明源故障反例已通过，但发现合法 epoch 更替被历史执行行阻断。17e2bf4 因此未通过整批验收。历史证明绑定、native 扩展协议 v2 和验证结果见 [R2 修复交付](b2-c-native-execution-r2-delivery.md)；本页的同 epoch 身份记录规则由 R2 的历史事实与当前资格分别验证规则补充。

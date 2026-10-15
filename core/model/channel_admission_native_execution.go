@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"gorm.io/gorm"
@@ -10,6 +11,8 @@ import (
 
 // Native execution is an additive subjournal: a frozen use may have many
 // wallet/poll/delivery invocations. No row is a new submission grant or lease.
+const NativeExecutionProtocolVersion = 2
+
 type ChannelAdmissionTaskExecution struct {
 	ID                  string `gorm:"primaryKey;size:64"`
 	UseID               string `gorm:"size:64;index;not null"`
@@ -27,6 +30,7 @@ type ChannelAdmissionTaskExecution struct {
 	RecoveryUntil       int64  `gorm:"not null"`
 	DispatchOwner       string `gorm:"size:64;not null"`
 	DispatchUntilMicros int64  `gorm:"not null"`
+	ExecutorProofJSON   string `gorm:"type:text;not null"`
 	AuthorizationHash   string `gorm:"size:64;not null"`
 	State               string `gorm:"size:32;not null"`
 	ContinuationState   string `gorm:"size:32;not null"`
@@ -57,7 +61,7 @@ func nativeExecutionAuthorization(row ChannelAdmissionTaskExecution, nonce strin
 	row.AuthorizationHash = ""
 	row.State = "active"
 	row.ReturnedAtMs = 0
-	hash, _ := admissionHash([]any{"native-execution-v1", row, nonce})
+	hash, _ := admissionHash([]any{"native-execution-v2", row, nonce})
 	return hash
 }
 func nativeExecutionStoragePresent(tx *gorm.DB) (bool, error) {
@@ -91,7 +95,7 @@ func nativeExecutionStoragePresent(tx *gorm.DB) (bool, error) {
 	if tables == 0 && len(protocols) == 0 {
 		return false, nil
 	}
-	if tables != 1 || len(protocols) != 1 || protocols[0].Version != 1 {
+	if tables != 1 || len(protocols) != 1 || protocols[0].Version != NativeExecutionProtocolVersion {
 		return false, ErrChannelAdmissionUnavailable
 	}
 	statement := &gorm.Statement{DB: tx}
@@ -241,7 +245,7 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 			return e
 		}
 		id, _ := admissionHash([]any{"native-execution-id-v1", generation, kind, nonce})
-		row := ChannelAdmissionTaskExecution{ID: id, UseID: generation, Version: 1, Kind: string(kind), UseHash: executionUseHash(&use), TaskHash: nativeExecutionTaskHash(current), TaskCreatedAtMicros: current.CreatedAt.UnixMicro(), Epoch: c.Epoch, StorageGeneration: c.StorageGeneration, ServiceID: store.Executor.ServiceID, InstanceID: store.Executor.InstanceID, BuildSHA: store.Executor.BuildSHA, State: "active", ContinuationState: "unproven", StartedAtMs: now.UnixMilli()}
+		row := ChannelAdmissionTaskExecution{ID: id, UseID: generation, Version: NativeExecutionProtocolVersion, Kind: string(kind), UseHash: executionUseHash(&use), TaskHash: nativeExecutionTaskHash(current), TaskCreatedAtMicros: current.CreatedAt.UnixMicro(), Epoch: c.Epoch, StorageGeneration: c.StorageGeneration, ServiceID: store.Executor.ServiceID, InstanceID: store.Executor.InstanceID, BuildSHA: store.Executor.BuildSHA, State: "active", ContinuationState: "unproven", StartedAtMs: now.UnixMilli()}
 		if recoveryOwner != "" {
 			row.RecoveryOwner = recoveryOwner
 			if current.RecoveryUntil < expectedRecoveryUntil {
@@ -263,12 +267,13 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		if e != nil {
 			return e
 		}
-		if binding == "" {
+		if binding.source == "" {
 			// No prior coverage and no snapshot: preserve the accepted frozen
 			// business path, without inventing an executor grant or history.
 			// The durable open use is retained and cannot prove drain/closure.
 			return nativeExecutionLease(tx, current, &row)
 		}
+		row.ExecutorProofJSON = binding.proofJSON
 		row.AuthorizationHash = nativeExecutionAuthorization(row, nonce)
 		if e = tx.Create(&row).Error; e != nil {
 			return e
@@ -276,7 +281,7 @@ func BeginNativeTaskExecution(ctx context.Context, db *gorm.DB, task *NativeTask
 		if e = nativeExecutionLease(tx, current, &row); e != nil {
 			return e
 		}
-		if binding == "snapshot" {
+		if binding.source == "snapshot" {
 			if e = finalizeAdmissionProof(tx, c, proof, c.Revision); e != nil {
 				return e
 			}
@@ -318,8 +323,11 @@ func (h *NativeTaskExecutionHandle) RecordReturn(ctx context.Context, failed boo
 		if e = tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, "id = ?", h.id).Error; e != nil {
 			return e
 		}
-		if row.Version != 1 || row.ContinuationState != "unproven" || row.AuthorizationHash != nativeExecutionAuthorization(row, h.nonce) || row.StorageGeneration != c.StorageGeneration || nativeExecutionTaskHash(task) != row.TaskHash {
+		if row.Version != NativeExecutionProtocolVersion || row.ContinuationState != "unproven" || row.AuthorizationHash != nativeExecutionAuthorization(row, h.nonce) || row.StorageGeneration != c.StorageGeneration || nativeExecutionTaskHash(task) != row.TaskHash {
 			return ErrNativeTaskConflict
+		}
+		if _, e = nativeExecutionHistoricalProof(tx, c, &row); e != nil {
+			return e
 		}
 		generation, e := nativeReservationGeneration(tx, task)
 		if e != nil {
@@ -365,55 +373,108 @@ func (h *NativeTaskExecutionHandle) RecordReturn(ctx context.Context, failed boo
 	})
 }
 
-// frozenNativeExecutionBinding reuses only durable facts for this exact use.
-// It does not renew a proof, admit work, or certify any continuation finished.
-// A process restart may reuse DB facts with the same server-owned executor;
-// a different executor needs a matching trusted snapshot. Storage drift never
-// falls back to uncovered work once an original execution fact exists.
-func frozenNativeExecutionBinding(tx *gorm.DB, c *ChannelAdmissionControl, use *ChannelAdmissionUse, task *NativeTask, executor ChannelExecutorIdentity, proof VerifiedDeploymentProof, proofErr error) (string, error) {
+// A binding records immutable historical membership facts. It never restores
+// the invocation nonce, grants new admission, or certifies continuous coverage.
+type nativeExecutionBinding struct {
+	source, proofJSON string
+}
+
+// Historical proof validity is checked at creation with lockDeploymentProof
+// and the final CAS. Its normal expiry does not invalidate past membership.
+// Explicit revocation, loss or mutation of those trusted facts is different:
+// retain the unknown invocation and reject rather than treating it as outage.
+func nativeExecutionHistoricalProof(tx *gorm.DB, c *ChannelAdmissionControl, row *ChannelAdmissionTaskExecution) (VerifiedDeploymentProof, error) {
+	var proof VerifiedDeploymentProof
+	if row.ExecutorProofJSON == "" || json.Unmarshal([]byte(row.ExecutorProofJSON), &proof) != nil {
+		return proof, ErrChannelAdmissionConflict
+	}
+	if proof.ProofID == "" || len(proof.ProofID) > 128 || proof.Sequence <= 0 || proof.Sequence > c.EpochSequence || proof.Epoch == "" || proof.Epoch != row.Epoch || proof.StorageGeneration != row.StorageGeneration || proof.StorageGeneration != c.StorageGeneration || proof.StorageWatermark < 0 || proof.StorageWatermark > c.Revision || len(proof.Executors) == 0 || len(proof.Executors) > 1024 || !fullIdentityDigest(proof.ExecutorFenceHash) {
+		return proof, ErrChannelAdmissionConflict
+	}
+	if proof.Sequence == c.EpochSequence && (proof.Epoch != c.Epoch || proof.ProofID != c.ActiveProofID || proof.MembershipHash != c.MembershipHash || proof.ExecutorFenceHash != c.ExecutorFenceHash) {
+		return proof, ErrChannelAdmissionConflict
+	}
+	membership, err := admissionHash(proof.Executors)
+	if err != nil || membership != proof.MembershipHash {
+		return proof, ErrChannelAdmissionConflict
+	}
+	member := false
+	for _, candidate := range proof.Executors {
+		if candidate.ServiceID == "" || len(candidate.ServiceID) > 128 || candidate.InstanceID == "" || len(candidate.InstanceID) > 128 || !fullIdentityDigest(candidate.BuildSHA) || candidate.Epoch != proof.Epoch {
+			return proof, ErrChannelAdmissionConflict
+		}
+		if candidate.ServiceID == row.ServiceID && candidate.InstanceID == row.InstanceID && candidate.BuildSHA == row.BuildSHA {
+			member = true
+		}
+	}
+	if !member || proof.IssuedAtMs <= 0 || proof.ValidUntilMs <= proof.IssuedAtMs || proof.RevocationFreshUntilMs <= proof.IssuedAtMs {
+		return proof, ErrChannelAdmissionConflict
+	}
+	hash, err := proof.Fingerprint()
+	if err != nil {
+		return proof, err
+	}
+	var stored ChannelAdmissionProof
+	if err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&stored, "id = ?", proof.ProofID).Error; err != nil {
+		return proof, err
+	}
+	if stored.FactHash != hash || stored.ConsumedSequence != proof.Sequence || stored.Revoked {
+		return proof, ErrChannelAdmissionConflict
+	}
+	return proof, nil
+}
+
+func frozenNativeExecutionBinding(tx *gorm.DB, c *ChannelAdmissionControl, use *ChannelAdmissionUse, task *NativeTask, executor ChannelExecutorIdentity, proof VerifiedDeploymentProof, proofErr error) (nativeExecutionBinding, error) {
 	var rows []ChannelAdmissionTaskExecution
 	if err := tx.Where("use_id = ?", use.ID).Find(&rows).Error; err != nil {
-		return "", err
+		return nativeExecutionBinding{}, err
 	}
-	bound := false
+	binding := nativeExecutionBinding{}
 	for _, row := range rows {
-		if row.Version != 1 || row.UseHash != executionUseHash(use) || row.TaskHash != nativeExecutionTaskHash(task) || row.StorageGeneration != c.StorageGeneration || row.Epoch != c.Epoch || row.ContinuationState != "unproven" || row.StartedAtMs <= 0 || !fullIdentityDigest(row.AuthorizationHash) {
-			return "", ErrChannelAdmissionConflict
+		if row.Version != NativeExecutionProtocolVersion || row.UseHash != executionUseHash(use) || row.TaskHash != nativeExecutionTaskHash(task) || row.StorageGeneration != c.StorageGeneration || row.ContinuationState != "unproven" || row.StartedAtMs <= 0 || !fullIdentityDigest(row.AuthorizationHash) {
+			return nativeExecutionBinding{}, ErrChannelAdmissionConflict
 		}
 		switch NativeExecutionKind(row.Kind) {
 		case NativeExecutionSubmit, NativeExecutionDispatch, NativeExecutionPoll, NativeExecutionBilling, NativeExecutionDelivery:
 		default:
-			return "", ErrChannelAdmissionConflict
+			return nativeExecutionBinding{}, ErrChannelAdmissionConflict
 		}
 		if (row.State == "active" && row.ReturnedAtMs != 0) || ((row.State == "returned" || row.State == "error_returned") && row.ReturnedAtMs < row.StartedAtMs) || (row.State != "active" && row.State != "returned" && row.State != "error_returned") {
-			return "", ErrChannelAdmissionConflict
+			return nativeExecutionBinding{}, ErrChannelAdmissionConflict
 		}
-		if row.ServiceID == executor.ServiceID && row.InstanceID == executor.InstanceID && row.BuildSHA == executor.BuildSHA {
-			bound = true
+		if _, err := nativeExecutionHistoricalProof(tx, c, &row); err != nil {
+			return nativeExecutionBinding{}, err
+		}
+		// An older epoch's facts are valid history, but never the current
+		// executor's proof-outage binding, even when process labels repeat.
+		if row.Epoch == c.Epoch && row.ServiceID == executor.ServiceID && row.InstanceID == executor.InstanceID && row.BuildSHA == executor.BuildSHA {
+			binding = nativeExecutionBinding{source: "durable", proofJSON: row.ExecutorProofJSON}
 		}
 	}
-	if bound {
-		return "durable", nil
+	if binding.source != "" {
+		return binding, nil
 	}
-	// A known local rejection is not an outage. Without an anchor do not
-	// turn an explicitly revoked/missing/corrupt proof record into fallback.
 	var stored ChannelAdmissionProof
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&stored, "id = ?", c.ActiveProofID).Error; err != nil {
-		return "", err
+		return nativeExecutionBinding{}, err
 	}
 	if stored.Revoked || stored.ConsumedSequence != c.EpochSequence || !fullIdentityDigest(stored.FactHash) {
-		return "", ErrChannelAdmissionUnavailable
+		return nativeExecutionBinding{}, ErrChannelAdmissionUnavailable
 	}
 	if proofErr != nil {
 		hash, _ := proof.Fingerprint()
 		emptyHash, _ := (VerifiedDeploymentProof{}).Fingerprint()
-		if hash != emptyHash || errors.Is(proofErr, ErrChannelAdmissionConflict) || errors.Is(proofErr, ErrChannelAdmissionSealed) || len(rows) != 0 {
-			return "", ErrChannelAdmissionUnavailable
+		if hash != emptyHash || errors.Is(proofErr, ErrChannelAdmissionConflict) || errors.Is(proofErr, ErrChannelAdmissionSealed) || len(rows) != 0 || use.Epoch != c.Epoch {
+			return nativeExecutionBinding{}, ErrChannelAdmissionUnavailable
 		}
-		return "", nil
+		return nativeExecutionBinding{}, nil
 	}
 	if _, err := lockDeploymentProof(tx, c, proof, executor); err != nil {
-		return "", err
+		return nativeExecutionBinding{}, err
 	}
-	return "snapshot", nil
+	raw, err := json.Marshal(proof)
+	if err != nil {
+		return nativeExecutionBinding{}, err
+	}
+	return nativeExecutionBinding{source: "snapshot", proofJSON: string(raw)}, nil
 }

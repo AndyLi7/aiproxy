@@ -14,7 +14,7 @@ import (
 func installNativeInvocationJournal(t *testing.T, e *Engine) {
 	t.Helper()
 	require.NoError(t, e.DB.AutoMigrate(&model.ChannelAdmissionExecutionProtocol{}, &model.ChannelAdmissionExecution{}, &model.ChannelAdmissionTaskExecution{}))
-	require.NoError(t, e.DB.Create(&[]model.ChannelAdmissionExecutionProtocol{{ID: 1, Version: 1}, {ID: 2, Version: 1}}).Error)
+	require.NoError(t, e.DB.Create(&[]model.ChannelAdmissionExecutionProtocol{{ID: 1, Version: 1}, {ID: 2, Version: model.NativeExecutionProtocolVersion}}).Error)
 }
 func nativeInvocations(t *testing.T, e *Engine) []model.ChannelAdmissionTaskExecution {
 	t.Helper()

@@ -14,8 +14,12 @@ import (
 
 func installNativeExecution(t *testing.T, db *gorm.DB) {
 	t.Helper()
+	installNativeExecutionDraft(t, db, "v2")
+}
+func installNativeExecutionDraft(t *testing.T, db *gorm.DB, version string) {
+	t.Helper()
 	installExecutionJournal(t, db)
-	raw, err := os.ReadFile("../migrations/channel-native-execution-v1/" + db.Dialector.Name() + ".sql")
+	raw, err := os.ReadFile("../migrations/channel-native-execution-" + version + "/" + db.Dialector.Name() + ".sql")
 	require.NoError(t, err)
 	var lines []string
 	for _, line := range strings.Split(string(raw), "\n") {

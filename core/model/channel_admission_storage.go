@@ -72,6 +72,7 @@ type ChannelAdmissionBarrier struct {
 // provider acceptance or missing async outbox can never turn into zero usage
 // just because a lease or timer elapsed. Closure requires server-side evidence.
 type ChannelAdmissionUse struct {
+	ResourceKey  string `gorm:"size:64;index;not null;default:''"`
 	ID           string `gorm:"primaryKey;size:64"`
 	RequestHash  string `gorm:"size:64;not null"`
 	Epoch        string `gorm:"size:128;not null"`

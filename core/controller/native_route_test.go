@@ -147,6 +147,9 @@ func TestNativeRouteFollowsBindingDuringPublishWindow(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 		require.Equal(t, boundChannelID, plan.ChannelID)
+		identity, identityErr := model.ChannelIdentityOf(fixture.bound)
+		require.NoError(t, identityErr)
+		require.Equal(t, identity.IdentityHash, plan.AdmissionIdentityHash)
 	}
 
 	// A higher-priority sibling still loses and a backup-only bound channel is

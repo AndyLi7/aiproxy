@@ -262,6 +262,8 @@ func familyAllows(family *ChannelAdmissionFamily, identity ChannelIdentity) bool
 }
 
 type ChannelAdmissionRequest struct {
+	// ResourceKey is a server-derived logical task key; RequestID identifies one reservation generation.
+	ResourceKey string
 	RequestID   string
 	GroupID     string
 	TokenID     int
@@ -286,16 +288,33 @@ func validAdmissionLane(lane string) bool {
 // created=false to perform a second provider send. No client-supplied bypass
 // exists, including for trials, probes or explicit channel headers.
 func (s *ChannelAdmissionStore) Admit(ctx context.Context, input ChannelAdmissionRequest, reserve func(*gorm.DB) error) (use *ChannelAdmissionUse, created bool, err error) {
-	if input.RequestID == "" || len(input.RequestID) > 256 || input.GroupID == "" || len(input.GroupID) > 128 || input.TokenID <= 0 || !validAdmissionLane(input.Lane) || !fullIdentityDigest(input.RequestHash) || !validChannelIdentity(input.Identity) {
+	return s.admit(ctx, input, reserve, nil)
+}
+
+// compatibility is used only by persisted task entry points. It runs under the
+// same control lock as activation/sealing and may handle inactive deployments
+// or an already-frozen task without treating it as a new admission.
+func (s *ChannelAdmissionStore) admit(ctx context.Context, input ChannelAdmissionRequest, reserve func(*gorm.DB) error, compatibility func(*gorm.DB, *ChannelAdmissionControl) (bool, error)) (use *ChannelAdmissionUse, created bool, err error) {
+	valid := !(input.RequestID == "" || len(input.RequestID) > 256 || input.GroupID == "" || len(input.GroupID) > 128 || input.TokenID <= 0 || !validAdmissionLane(input.Lane) || !fullIdentityDigest(input.RequestHash) || !validChannelIdentity(input.Identity) || (input.ResourceKey != "" && !fullIdentityDigest(input.ResourceKey)))
+	if !valid && compatibility == nil {
 		return nil, false, ErrChannelAdmissionConflict
 	}
 	id, _ := admissionHash([]any{input.Lane, input.GroupID, input.TokenID, input.RequestID})
 	proof, proofErr := s.deploymentForNew(ctx, &ChannelAdmissionUse{}, "id", id)
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
+		if compatibility != nil {
+			handled, err := compatibility(tx, c)
+			if handled || err != nil {
+				return err
+			}
+		}
+		if !valid {
+			return ErrChannelAdmissionConflict
+		}
 		var existing ChannelAdmissionUse
 		read := tx.First(&existing, "id = ?", id).Error
 		if read == nil {
-			if existing.RequestHash != input.RequestHash || existing.ChannelID != input.Identity.ChannelID || existing.KeyDigest != input.Identity.KeyDigest || existing.IdentityHash != input.Identity.IdentityHash || existing.Lane != input.Lane || existing.Epoch == "" || existing.AdmittedAtMs <= 0 ||
+			if existing.ResourceKey != input.ResourceKey || existing.RequestHash != input.RequestHash || existing.ChannelID != input.Identity.ChannelID || existing.KeyDigest != input.Identity.KeyDigest || existing.IdentityHash != input.Identity.IdentityHash || existing.Lane != input.Lane || existing.Epoch == "" || existing.AdmittedAtMs <= 0 ||
 				(existing.State != "open" && existing.State != "unknown" && existing.State != "closed") ||
 				(existing.State == "closed" && (existing.ClosedAtMs <= 0 || !fullIdentityDigest(existing.ClosureHash))) ||
 				(existing.State != "closed" && (existing.ClosedAtMs != 0 || existing.ClosureHash != "")) {
@@ -330,7 +349,7 @@ func (s *ChannelAdmissionStore) Admit(ctx context.Context, input ChannelAdmissio
 		if err != nil {
 			return err
 		}
-		row := ChannelAdmissionUse{ID: id, RequestHash: input.RequestHash, Epoch: c.Epoch, ChannelID: input.Identity.ChannelID, KeyDigest: input.Identity.KeyDigest, IdentityHash: input.Identity.IdentityHash, Lane: input.Lane, State: "open", AdmittedAtMs: now.UnixMilli()}
+		row := ChannelAdmissionUse{ResourceKey: input.ResourceKey, ID: id, RequestHash: input.RequestHash, Epoch: c.Epoch, ChannelID: input.Identity.ChannelID, KeyDigest: input.Identity.KeyDigest, IdentityHash: input.Identity.IdentityHash, Lane: input.Lane, State: "open", AdmittedAtMs: now.UnixMilli()}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
@@ -345,7 +364,7 @@ func (s *ChannelAdmissionStore) Admit(ctx context.Context, input ChannelAdmissio
 		use = &row
 		created = true
 		return nil
-	})
+	}, compatibility != nil)
 	if err != nil {
 		return nil, false, err
 	}

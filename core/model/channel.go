@@ -461,12 +461,17 @@ func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
 		}
 	}
 
-	result := DB.Model(channel).
+	return persistChannelPatchWithAdmission(channel, update)
+}
+
+func persistChannelPatch(db *gorm.DB, channel *Channel, update *ChannelPatch) error {
+	result := db.Model(channel).
 		Clauses(clause.Returning{}).
 		Where("id = ?", channel.ID).
 		Updates(update)
 	if result.Error == nil && result.RowsAffected == 0 {
-		current, err := GetChannelByID(channel.ID)
+		current := &Channel{}
+		err := db.First(current, "id = ?", channel.ID).Error
 		if err != nil {
 			return err
 		}
@@ -561,9 +566,7 @@ func DeleteChannelByID(id int) (err error) {
 		}
 	}()
 
-	result := DB.Delete(&Channel{ID: id})
-
-	return HandleUpdateResult(result, ErrChannelNotFound)
+	return deleteChannelsWithAdmission([]int{id}, true)
 }
 
 func DeleteChannelsByIDs(ids []int) (err error) {
@@ -580,12 +583,7 @@ func DeleteChannelsByIDs(ids []int) (err error) {
 		}
 	}()
 
-	return DB.Transaction(func(tx *gorm.DB) error {
-		return tx.
-			Where("id IN (?)", ids).
-			Delete(&Channel{}).
-			Error
-	})
+	return deleteChannelsWithAdmission(ids, false)
 }
 
 // UpdateChannelStatusByID sets a channel's status. Enabling a disabled channel

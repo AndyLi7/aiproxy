@@ -8,11 +8,14 @@ import (
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/model"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 // Expired counts tasks this pass failed at model.AsyncGenerationDeadline and
 // Abandoned reservations it failed as not_started; both are also counted as
 // Advanced or Deferred.
+type nativeRecoveryOwnerKey struct{}
+
 type RecoveryReport struct{ Claimed, Advanced, Deferred, Expired, Abandoned int }
 
 // NativeTaskDeadline bounds how long a received result may stay undeliverable
@@ -329,7 +332,9 @@ func (e *Engine) enqueueRecovered(task *model.NativeTask, now time.Time) (bool, 
 		scope = QueueScope(route.Provider)
 	}
 	wake := admitted.Add(e.queueTimeout()).Add(time.Second)
-	if err := model.EnqueueNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, scope, admitted, wake); err != nil {
+	if err := model.WithNativeReservationGeneration(e.DB, task, func(tx *gorm.DB) error {
+		return model.EnqueueNativeTask(tx, task.ID, task.GroupID, task.TokenID, scope, admitted, wake)
+	}); err != nil {
 		return false, time.Time{}
 	}
 	log.WithFields(log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model, "scope": scope}).
@@ -370,12 +375,17 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		if ctx.Err() != nil {
 			return report, ctx.Err()
 		}
+		var releaseEvidence model.NativeReservationRelease
+		var releaseEvidenceErr error
+		if task.Status == "reserved" {
+			releaseEvidence, releaseEvidenceErr = model.CaptureNativeReservationRelease(e.DB, &task, owner)
+		}
 		var workErr error
 		queued := task.Status == model.NativeStatusWaiting || task.Status == model.NativeStatusDispatching
 		if queued {
 			workErr = e.recoverQueued(ctx, &task, current)
 		} else {
-			workCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			workCtx, cancel := context.WithTimeout(context.WithValue(ctx, nativeRecoveryOwnerKey{}, owner), 90*time.Second)
 			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
 			cancel()
 		}
@@ -387,6 +397,10 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			if workErr == nil {
 				workErr = readErr
 			}
+		}
+		if fresh.CreatedAt.Equal(task.CreatedAt) {
+			fresh.AdmissionGeneration = releaseEvidence.GenerationID
+			fresh.AdmissionRecoveryOwner = owner
 		}
 		current = now.Add(time.Since(started))
 		age := current.Sub(fresh.CreatedAt)
@@ -422,12 +436,12 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			}
 			workErr = abandonErr
 		}
-		if fresh.Status == "reserved" && balance.WalletConfirmedNotFound(workErr) && age > staleReservationAge {
+		if releaseEvidenceErr == nil && fresh.Status == "reserved" && balance.WalletConfirmedNotFound(workErr) && age > staleReservationAge {
 			// Nothing is held or owed for it, and a retry creates a new
 			// reservation. Only the application's own "Prepayment not found"
 			// proves that: a bare 404 (a platform page during a deploy) could
 			// delete a reservation whose hold the stop-loss must still refund.
-			if released, err := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, current.Add(-staleReservationAge)); err == nil && released {
+			if released, err := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, current.Add(-staleReservationAge), releaseEvidence); err == nil && released {
 				report.Advanced++
 				continue
 			}

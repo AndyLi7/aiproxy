@@ -34,6 +34,10 @@ const NotStartedCode = "not_started"
 // migrations/native-task-v3 adds them to an existing table, also before the
 // binary. Statuses waiting and dispatching are tasks held but never sent.
 type NativeTask struct {
+	// AdmissionIdentityHash is server-resolved request evidence, never a new DB column.
+	AdmissionIdentityHash  string `gorm:"-" json:"-"`
+	AdmissionGeneration    string `gorm:"-" json:"-"`
+	AdmissionRecoveryOwner string `gorm:"-" json:"-"`
 	// QueueScope is the provider capacity pool the task counts against,
 	// "<provider>:<pool>" (v1 "fal:default"); written when reserved.
 	QueueScope string `gorm:"size:128;default:'';index:idx_native_tasks_status_queue_scope,priority:2" json:"-"`
@@ -131,6 +135,10 @@ func NativeTaskIssues(task *NativeTask) []nativeresult.ParameterIssue {
 // ReserveNativeTask claims idempotency before any caller may reserve funds or
 // submit upstream. created=false must never trigger a second paid submission.
 func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) {
+	return reserveNativeTaskWithAdmission(db, task)
+}
+
+func reserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) {
 	if task.ID == "" || len(task.ID) > 128 || task.GroupID == "" || len(task.GroupID) > 64 || task.TokenID <= 0 || task.Model == "" || len(task.Model) > 256 || task.Fingerprint == "" || len(task.Fingerprint) > 64 {
 		return nil, false, ErrNativeTaskConflict
 	}
@@ -189,7 +197,11 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 // a refused or abandoned submission leaves no row for recovery to poll. Only a
 // reservation untouched since notAfter is removed: a concurrent retry of the
 // same request refreshes it first and keeps it.
-func ReleaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time) (bool, error) {
+func ReleaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time, evidence ...NativeReservationRelease) (bool, error) {
+	return releaseNativeReservationWithAdmission(db, id, group, token, notAfter, evidence...)
+}
+
+func releaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time) (bool, error) {
 	result := db.Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND updated_at <= ?", id, group, token, "reserved", "", notAfter).Delete(&NativeTask{})
 	return result.RowsAffected == 1, result.Error
 }

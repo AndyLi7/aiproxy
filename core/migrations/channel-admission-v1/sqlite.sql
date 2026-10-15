@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS channel_admission_barriers (
   recorded_at_ms BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS channel_admission_uses (
+  resource_key VARCHAR(64) NOT NULL DEFAULT '',
   id VARCHAR(64) PRIMARY KEY,
   request_hash VARCHAR(64) NOT NULL,
   epoch VARCHAR(128) NOT NULL,
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS channel_admission_uses (
 CREATE INDEX IF NOT EXISTS idx_channel_admission_barriers_from_channel_id ON channel_admission_barriers (from_channel_id);
 CREATE INDEX IF NOT EXISTS idx_channel_admission_uses_channel_id ON channel_admission_uses (channel_id);
 CREATE INDEX IF NOT EXISTS idx_channel_admission_uses_key_digest ON channel_admission_uses (key_digest);
+CREATE INDEX IF NOT EXISTS idx_channel_admission_uses_resource_key ON channel_admission_uses (resource_key);
 CREATE INDEX IF NOT EXISTS idx_channel_admission_uses_state ON channel_admission_uses (state);
 INSERT INTO channel_admission_controls (id, version, epoch, revision) VALUES (1, 1, '', 0) ON CONFLICT (id) DO NOTHING;
 COMMIT;

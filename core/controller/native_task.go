@@ -173,7 +173,11 @@ func resolveNativePlan(c *gin.Context) (nativetask.Plan, nativetask.Provider, er
 	if err != nil || quote == nil {
 		return rejectNativeRoute(c, nativeRouteQuoteInvalid, binding, channel, err)
 	}
-	return nativetask.Plan{Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
+	identity, err := model.ChannelIdentityOf(channel)
+	if err != nil {
+		return rejectNativeRoute(c, nativeRouteChannelIdentityMismatch, binding, channel, err)
+	}
+	return nativetask.Plan{AdmissionIdentityHash: identity.IdentityHash, Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
 		AcceptedModel: nativeAcceptedModel(c, mc),
 		Log:           nativeTaskLogInfo(c)}, &fal.Client{Key: channel.Key}, nil
 }

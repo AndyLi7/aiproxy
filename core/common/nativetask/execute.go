@@ -26,6 +26,8 @@ type Provider interface {
 	SubmitNative(context.Context, string, []byte) (string, error)
 }
 type Plan struct {
+	// Server-resolved physical identity for activated admission protection.
+	AdmissionIdentityHash                string
 	KeyFingerprint                       string
 	Contract                             json.RawMessage
 	ChannelID                            int
@@ -143,7 +145,7 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		return nil, ErrUnavailable
 	}
 	digest := sha256.Sum256(body)
-	task, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: id, GroupID: group, TokenID: token, Model: frozen.Model, Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(frozen.OutputSchema), FrozenContract: string(p.Contract), NativeInput: string(input), ChannelID: p.ChannelID, Endpoint: p.Endpoint, CredentialScope: p.CredentialScope, PrepaymentQuoteJSON: p.QuoteJSON, BillingOperationID: "native:" + id, DeliveryBase: p.DeliveryBase, KeyFingerprint: p.KeyFingerprint,
+	task, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{AdmissionIdentityHash: p.AdmissionIdentityHash, ID: id, GroupID: group, TokenID: token, Model: frozen.Model, Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(frozen.OutputSchema), FrozenContract: string(p.Contract), NativeInput: string(input), ChannelID: p.ChannelID, Endpoint: p.Endpoint, CredentialScope: p.CredentialScope, PrepaymentQuoteJSON: p.QuoteJSON, BillingOperationID: "native:" + id, DeliveryBase: p.DeliveryBase, KeyFingerprint: p.KeyFingerprint,
 		QueueScope: QueueScope(route.Provider)})
 	if err != nil {
 		return nil, err
@@ -176,7 +178,7 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		if WalletRefusal(err) {
 			// The wallet refused before holding anything. Drop the reservation so a
 			// refused request leaves no row behind; the same request may be retried.
-			if _, releaseErr := model.ReleaseNativeReservation(e.DB, id, group, token, task.UpdatedAt); releaseErr != nil {
+			if _, releaseErr := model.ReleaseNativeReservation(e.DB, id, group, token, task.UpdatedAt, model.NativeReservationRelease{GenerationID: task.AdmissionGeneration, CreatedAt: task.CreatedAt}); releaseErr != nil {
 				log.Errorf("release refused native reservation %s: %v", id, releaseErr)
 			}
 		}
@@ -222,7 +224,9 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	if !receipt.Claimed {
 		return e.storedUnlessReserved(task, ErrPending)
 	}
-	if err = model.TransitionNativeSubmission(e.DB, id, group, token, "reserved", "submitting", ""); err != nil {
+	if err = model.WithNativeReservationGeneration(e.DB, task, func(tx *gorm.DB) error {
+		return model.TransitionNativeSubmission(tx, id, group, token, "reserved", "submitting", "")
+	}); err != nil {
 		// Recovery may have failed the reservation (not_started) or another
 		// request submitted it: answer that state, never a request ID conflict.
 		return e.storedUnlessReserved(task, err)
@@ -483,6 +487,15 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 	if e == nil || e.DB == nil || e.Wallet == nil || task == nil || task.BillingOperationID == "" {
 		return ErrUnavailable
 	}
+	if task.Status == "reserved" {
+		owner, _ := ctx.Value(nativeRecoveryOwnerKey{}).(string)
+		evidence, err := model.CaptureNativeReservationRelease(e.DB, task, owner)
+		if err != nil {
+			return err
+		}
+		task.AdmissionGeneration = evidence.GenerationID
+		task.AdmissionRecoveryOwner = owner
+	}
 	call := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
 		command.Group = task.GroupID
 		command.BillingOperationID = task.BillingOperationID
@@ -548,12 +561,21 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 	if err != nil {
 		return err
 	}
-	if err = model.SaveNativeTaskBillingReceipt(e.DB, task.ID, task.GroupID, task.TokenID, string(raw)); err != nil {
+	save := func(db *gorm.DB) error {
+		if err := model.SaveNativeTaskBillingReceipt(db, task.ID, task.GroupID, task.TokenID, string(raw)); err != nil {
+			return err
+		}
+		return model.SaveNativeBillingTerminal(db, task.ID, task.GroupID, task.TokenID, string(raw))
+	}
+	if task.Status == "reserved" {
+		err = model.WithNativeReservationGeneration(e.DB, task, save)
+	} else {
+		err = save(e.DB)
+	}
+	if err != nil {
 		return err
 	}
-	if err = model.SaveNativeBillingTerminal(e.DB, task.ID, task.GroupID, task.TokenID, string(raw)); err != nil {
-		return err
-	}
+
 	// Return the durable terminal state as well as its receipt. Private trial
 	// evidence must not report a stale billing flag until the next HTTP poll.
 	saved, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID)

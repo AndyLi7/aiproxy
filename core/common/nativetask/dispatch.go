@@ -10,6 +10,7 @@ import (
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 // dispatchRound bounds one dispatcher round's wait between rounds (spec §5.7).
@@ -35,7 +36,9 @@ func (e *Engine) enqueue(ctx context.Context, task *model.NativeTask, logInfo *m
 		scope = QueueScope(route.Provider)
 	}
 	wake := enqueuedAt.Add(e.queueTimeout()).Add(time.Second)
-	if err := enqueueNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, scope, enqueuedAt, wake); err != nil {
+	if err := model.WithNativeReservationGeneration(e.DB, task, func(tx *gorm.DB) error {
+		return enqueueNativeTask(tx, task.ID, task.GroupID, task.TokenID, scope, enqueuedAt, wake)
+	}); err != nil {
 		if errors.Is(err, model.ErrNativeTaskConflict) {
 			// Recovery may have enqueued it first (spec §6.7): answer that state.
 			return e.storedUnlessReserved(task, err)

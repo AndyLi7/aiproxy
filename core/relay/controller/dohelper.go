@@ -17,6 +17,7 @@ import (
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/conv"
 	"github.com/labring/aiproxy/core/common/failover"
+	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
@@ -104,10 +105,33 @@ func DoHelper(
 	*BodyDetail,
 	adaptor.Error,
 ) {
-	detail := BodyDetail{}
-	if err := admitRelayAttempt(c, meta); err != nil {
-		return adaptor.DoResponseResult{}, &detail, err
+	execution, admissionErr := admitRelayAttempt(c, meta)
+	if admissionErr != nil {
+		return adaptor.DoResponseResult{}, &BodyDetail{}, admissionErr
 	}
+	// A panic/crash never reaches RecordReturn. The inner helper's deferred
+	// response-body cleanup runs before recording the invocation's return.
+	result, detail, relayErr := doAdmittedHelper(a, c, meta, store, opts...)
+	if execution != nil {
+		state := model.RelayExecutionReturned
+		if result.AsyncUsage {
+			state = model.RelayExecutionAsyncReturned
+		}
+		if relayErr != nil {
+			state = model.RelayExecutionErrorReturned
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := execution.RecordReturn(ctx, state)
+		cancel()
+		if err != nil {
+			common.GetLogger(c).Warn("relay execution return not persisted; admission retained")
+		}
+	}
+	return result, detail, relayErr
+}
+
+func doAdmittedHelper(a adaptor.Adaptor, c *gin.Context, meta *meta.Meta, store adaptor.Store, opts ...BodyDetailOption) (adaptor.DoResponseResult, *BodyDetail, adaptor.Error) {
+	detail := BodyDetail{}
 	detailOption := mergeBodyDetailOptions(opts...)
 
 	if requestBody, err := requestBodyDetail(c, detailOption); err != nil {

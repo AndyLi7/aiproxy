@@ -294,7 +294,7 @@ func (s *ChannelAdmissionStore) Admit(ctx context.Context, input ChannelAdmissio
 // compatibility is used only by persisted task entry points. It runs under the
 // same control lock as activation/sealing and may handle inactive deployments
 // or an already-frozen task without treating it as a new admission.
-func (s *ChannelAdmissionStore) admit(ctx context.Context, input ChannelAdmissionRequest, reserve func(*gorm.DB) error, compatibility func(*gorm.DB, *ChannelAdmissionControl) (bool, error)) (use *ChannelAdmissionUse, created bool, err error) {
+func (s *ChannelAdmissionStore) admit(ctx context.Context, input ChannelAdmissionRequest, reserve func(*gorm.DB) error, compatibility func(*gorm.DB, *ChannelAdmissionControl) (bool, error), onAdmit ...func(*gorm.DB, *ChannelAdmissionControl, *ChannelAdmissionUse) error) (use *ChannelAdmissionUse, created bool, err error) {
 	valid := !(input.RequestID == "" || len(input.RequestID) > 256 || input.GroupID == "" || len(input.GroupID) > 128 || input.TokenID <= 0 || !validAdmissionLane(input.Lane) || !fullIdentityDigest(input.RequestHash) || !validChannelIdentity(input.Identity) || (input.ResourceKey != "" && !fullIdentityDigest(input.ResourceKey)))
 	if !valid && compatibility == nil {
 		return nil, false, ErrChannelAdmissionConflict
@@ -355,6 +355,11 @@ func (s *ChannelAdmissionStore) admit(ctx context.Context, input ChannelAdmissio
 		}
 		if reserve != nil {
 			if err := reserve(tx); err != nil {
+				return err
+			}
+		}
+		for _, record := range onAdmit {
+			if err := record(tx, c, &row); err != nil {
 				return err
 			}
 		}

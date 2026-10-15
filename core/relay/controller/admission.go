@@ -31,12 +31,12 @@ func relayNeedsAdmission(m mode.Mode, method string) bool {
 // Shared DoHelper entry covers public relay, retries, admin channel tests and
 // nested plugin model calls before ConvertRequest can send anything upstream.
 // A use is evidence of a possible call, not permission to replay another one.
-func admitRelayAttempt(c *gin.Context, m *meta.Meta) adaptor.Error {
+func admitRelayAttempt(c *gin.Context, m *meta.Meta) (*model.RelayExecutionHandle, adaptor.Error) {
 	m.ChannelAdmissionUseID = ""
 	if !relayNeedsAdmission(m.Mode, c.Request.Method) {
-		return nil
+		return nil, nil
 	}
-	use, err := model.AdmitRelayAttempt(c.Request.Context(), &model.Channel{
+	use, execution, err := model.AdmitRelayExecution(c.Request.Context(), &model.Channel{
 		ID: m.Channel.ID, Type: m.Channel.Type, Key: m.Channel.Key,
 		BaseURL: m.Channel.BaseURL, ProxyURL: m.Channel.ProxyURL,
 		SkipTLSVerify: m.Channel.SkipTLSVerify, Configs: m.ChannelConfigs,
@@ -44,11 +44,11 @@ func admitRelayAttempt(c *gin.Context, m *meta.Meta) adaptor.Error {
 		BillingOperationID: m.BillingOperationID, RequestID: m.RequestID,
 		Mode: int(m.Mode), Model: m.OriginModel})
 	if err != nil {
-		return relaymodel.WrapperOpenAIErrorWithMessage(
+		return nil, relaymodel.WrapperOpenAIErrorWithMessage(
 			"channel admission unavailable", "channel_admission_unavailable", http.StatusServiceUnavailable)
 	}
 	if use != nil {
 		m.ChannelAdmissionUseID = use.ID
 	}
-	return nil
+	return execution, nil
 }

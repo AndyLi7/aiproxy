@@ -39,7 +39,7 @@ func channelAdmissionTablesExist(db *gorm.DB) (bool, error) {
 	if db == nil {
 		return false, nil
 	}
-	names := []string{"channel_admission_controls", "channel_admission_proofs", "channel_admission_families", "channel_admission_barriers", "channel_admission_uses"}
+	names := []string{"channel_admission_controls", "channel_admission_proofs", "channel_admission_families", "channel_admission_barriers", "channel_admission_uses", "channel_admission_executions", "channel_admission_execution_protocols"}
 	var count int64
 	var result *gorm.DB
 	switch db.Dialector.Name() {

@@ -33,6 +33,7 @@ type relayAdmissionHarness struct {
 	missingUse     atomic.Bool
 	responseStatus int
 	stream         bool
+	responseHook   func(http.ResponseWriter, *http.Request)
 }
 
 func newRelayAdmissionHarness(t *testing.T) *relayAdmissionHarness {
@@ -44,6 +45,10 @@ func newRelayAdmissionHarness(t *testing.T) *relayAdmissionHarness {
 		var count int64
 		if err := h.db.Model(&model.ChannelAdmissionUse{}).Where("state = ? AND lane = ?", "open", "relay").Count(&count).Error; err != nil || count == 0 {
 			h.missingUse.Store(true)
+		}
+		if h.responseHook != nil {
+			h.responseHook(w, r)
+			return
 		}
 		if h.stream {
 			w.Header().Set("Content-Type", "text/event-stream")

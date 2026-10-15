@@ -16,6 +16,9 @@ import (
 // Advanced or Deferred.
 type nativeRecoveryOwnerKey struct{}
 
+// Carries the exact claim, so a reused worker name cannot borrow a newer lease.
+type nativeRecoveryExecutionUntilKey struct{}
+
 type RecoveryReport struct{ Claimed, Advanced, Deferred, Expired, Abandoned int }
 
 // NativeTaskDeadline bounds how long a received result may stay undeliverable
@@ -371,6 +374,8 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			break
 		}
 		task := tasks[0]
+		claimOwner := task.RecoveryOwner
+		recoveryCtx := context.WithValue(context.WithValue(ctx, nativeRecoveryOwnerKey{}, claimOwner), nativeRecoveryExecutionUntilKey{}, task.RecoveryUntil)
 		report.Claimed++
 		if ctx.Err() != nil {
 			return report, ctx.Err()
@@ -378,14 +383,14 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		var releaseEvidence model.NativeReservationRelease
 		var releaseEvidenceErr error
 		if task.Status == "reserved" {
-			releaseEvidence, releaseEvidenceErr = model.CaptureNativeReservationRelease(e.DB, &task, owner)
+			releaseEvidence, releaseEvidenceErr = model.CaptureNativeReservationRelease(e.DB, &task, claimOwner)
 		}
 		var workErr error
 		queued := task.Status == model.NativeStatusWaiting || task.Status == model.NativeStatusDispatching
 		if queued {
-			workErr = e.recoverQueued(ctx, &task, current)
+			workErr = e.recoverQueued(recoveryCtx, &task, current)
 		} else {
-			workCtx, cancel := context.WithTimeout(context.WithValue(ctx, nativeRecoveryOwnerKey{}, owner), 90*time.Second)
+			workCtx, cancel := context.WithTimeout(recoveryCtx, 90*time.Second)
 			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
 			cancel()
 		}
@@ -400,11 +405,11 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		}
 		if fresh.CreatedAt.Equal(task.CreatedAt) {
 			fresh.AdmissionGeneration = releaseEvidence.GenerationID
-			fresh.AdmissionRecoveryOwner = owner
+			fresh.AdmissionRecoveryOwner = claimOwner
 		}
 		current = now.Add(time.Since(started))
 		age := current.Sub(fresh.CreatedAt)
-		expired, expireErr := e.expireGeneration(ctx, fresh, current, resolve)
+		expired, expireErr := e.expireGeneration(recoveryCtx, fresh, current, resolve)
 		switch {
 		case expired:
 			report.Expired++
@@ -416,7 +421,7 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			// deadline is ended and refunded instead of retried forever.
 			if model.FailAcceptedNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
 				if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
-					workErr = e.SyncBilling(ctx, failed)
+					workErr = e.SyncBilling(recoveryCtx, failed)
 				}
 			}
 		}
@@ -429,7 +434,7 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 			}
 		}
 		if !expired && workErr == nil && e.AbandonReservations && fresh.Status == "reserved" && enqueueAt.IsZero() {
-			abandoned, abandonErr := e.abandonReservation(ctx, fresh, current)
+			abandoned, abandonErr := e.abandonReservation(recoveryCtx, fresh, current)
 			if abandoned {
 				report.Abandoned++
 				fresh.Status = "failed"
@@ -455,7 +460,7 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 		} else {
 			report.Advanced++
 		}
-		if err = e.releaseRecovery(task.ID, task.GroupID, task.TokenID, owner, fresh, now.Add(time.Since(started)), age, expired, workErr != nil, enqueueAt); err != nil {
+		if err = e.releaseRecovery(task.ID, task.GroupID, task.TokenID, claimOwner, fresh, now.Add(time.Since(started)), age, expired, workErr != nil, enqueueAt); err != nil {
 			return report, err
 		}
 	}
@@ -466,7 +471,8 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 // task, computed from its status (spec §6.10). The release only applies while
 // the status is the one the time was computed from: a queue move meanwhile
 // (enqueue, claim, return) is re-read and the time recomputed, so a queue
-// timeout or a lease is never overwritten.
+// timeout or a lease is never overwritten. owner is the original unique claim
+// token; rereading fresh may change scheduling, never this ownership evidence.
 func (e *Engine) releaseRecovery(id, group string, token int, owner string, fresh *model.NativeTask, release time.Time, age time.Duration, expired, failed bool, enqueueAt time.Time) error {
 	for attempt := 0; ; attempt++ {
 		next := e.recoveryNext(fresh, release, age, expired, failed, enqueueAt)

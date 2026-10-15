@@ -9,7 +9,9 @@ import (
 )
 
 // ClaimNativeRecovery leases one bounded page. It never returns a new submission
-// to be sent to a provider: unknown outcomes are reconciliation-only.
+// to be sent to a provider: unknown outcomes are reconciliation-only. The owner
+// argument labels a worker; the returned RecoveryOwner is a unique claim token
+// that callers must retain for all completion and release operations.
 func ClaimNativeRecovery(db *gorm.DB, owner string, now time.Time, limit int) ([]NativeTask, error) {
 	if owner == "" || len(owner) > 64 || limit < 1 || limit > 100 {
 		return nil, ErrNativeTaskConflict
@@ -21,12 +23,24 @@ func ClaimNativeRecovery(db *gorm.DB, owner string, now time.Time, limit int) ([
 	}
 	claimed := []NativeTask{}
 	for _, task := range candidates {
-		result := db.Model(&NativeTask{}).Where("id = ? AND recovery_until <= ? AND next_recovery_at <= ?", task.ID, now.Unix(), now.Unix()).Updates(map[string]any{"recovery_owner": owner, "recovery_until": now.Add(2 * time.Minute).Unix()})
+		// Worker names and second-resolution deadlines can repeat after an
+		// early release. The existing owner column carries a unique claim
+		// capability, just as dispatch_owner does; callers retain this value.
+		nonce, err := newAdmissionGeneration()
+		if err != nil {
+			return nil, err
+		}
+		claimOwner, err := admissionHash([]any{"native-recovery-claim-v1", owner, nonce})
+		if err != nil {
+			return nil, err
+		}
+		result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND created_at = ? AND recovery_until <= ? AND next_recovery_at <= ?", task.ID, task.GroupID, task.TokenID, task.CreatedAt, now.Unix(), now.Unix()).Updates(map[string]any{"recovery_owner": claimOwner, "recovery_until": now.Add(2 * time.Minute).Unix()})
 		if result.Error != nil {
 			return nil, result.Error
 		}
 		if result.RowsAffected == 1 {
-			task.RecoveryOwner = owner
+			task.RecoveryOwner = claimOwner
+			task.RecoveryUntil = now.Add(2 * time.Minute).Unix()
 			claimed = append(claimed, task)
 		}
 	}
@@ -36,7 +50,8 @@ func ClaimNativeRecovery(db *gorm.DB, owner string, now time.Time, limit int) ([
 // ReleaseNativeRecoveryAt releases the lease only while the task still has
 // status, the state its next time was computed from: a queue move meanwhile
 // (enqueued, claimed, returned) changes when recovery must look again, so the
-// caller recomputes. released is false when the status changed.
+// caller recomputes. released is false when the status changed. owner must be
+// the original ClaimNativeRecovery result token, not the worker label.
 func ReleaseNativeRecoveryAt(db *gorm.DB, id, owner, status string, next time.Time) (bool, error) {
 	result := db.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ? AND status = ?", id, owner, status).Updates(map[string]any{"recovery_owner": "", "recovery_until": 0, "next_recovery_at": next.Unix()})
 	return result.RowsAffected == 1, result.Error
@@ -112,4 +127,59 @@ func SaveNativeBillingTerminal(db *gorm.DB, id, group string, token int, receipt
 		}
 		return syncNativeTaskLog(tx, id, group, token, receipt, locked, tokenName)
 	})
+}
+
+// ExtendNativeRecovery preserves the exact claim token while extending its
+// existing live lease. It accepts the same interface used by long delivery,
+// but evaluates database time only after the task lock, and again after the
+// write against the ORIGINAL deadline so a delayed write cannot revive a lease.
+func ExtendNativeRecovery(db *gorm.DB, id, owner string, until time.Time) error {
+	if owner == "" || len(owner) > 64 || until.IsZero() {
+		return ErrNativeTaskConflict
+	}
+	clock := ""
+	switch db.Dialector.Name() {
+	case "postgres":
+		clock = "EXTRACT(EPOCH FROM clock_timestamp())"
+	case "sqlite":
+		clock = "CAST(strftime('%s','now') AS INTEGER)"
+	case "mysql":
+		clock = "UNIX_TIMESTAMP()"
+	default:
+		return ErrNativeTaskConflict
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ?", id, owner)
+		locked, err := lockNativeTaskTransition(query)
+		if err != nil {
+			return err
+		}
+		if !locked {
+			return ErrNativeTaskConflict
+		}
+		var current NativeTask
+		if err = tx.Where("id = ? AND recovery_owner = ?", id, owner).First(&current).Error; err != nil {
+			return err
+		}
+		next := max(current.RecoveryUntil, until.Unix())
+		if next != current.RecoveryUntil {
+			result := tx.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ? AND recovery_until = ?", id, owner, current.RecoveryUntil).
+				Where("recovery_until > "+clock).UpdateColumn("recovery_until", next)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrNativeTaskConflict
+			}
+		}
+		// Check the former deadline, not the newly written future deadline.
+		var valid int64
+		if err = tx.Model(&NativeTask{}).Where("id = ? AND recovery_owner = ? AND recovery_until = ?", id, owner, next).Where("? > "+clock, current.RecoveryUntil).Count(&valid).Error; err != nil {
+			return err
+		}
+		if valid != 1 {
+			return ErrNativeTaskConflict
+		}
+		return nil
+	}, claimTxOptions(db)...)
 }

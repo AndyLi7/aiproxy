@@ -28,7 +28,7 @@ func TestAdmissionNativeLostLeaseBeforeAbandonCannotRefund(t *testing.T) {
 			return
 		}
 		task, ok := tx.Statement.Dest.(*model.NativeTask)
-		if !ok || task.ID != "lost-before-abandon" || task.BillingReceiptJSON == "" || task.RecoveryOwner != "old-worker" {
+		if !ok || task.ID != "lost-before-abandon" || task.BillingReceiptJSON == "" || len(task.RecoveryOwner) != 64 {
 			return
 		}
 		replaced = true
@@ -66,7 +66,7 @@ func TestAdmissionNativeAbandonChecksEveryTerminalDecision(t *testing.T) {
 					return
 				}
 				task, ok := tx.Statement.Dest.(*model.NativeTask)
-				if !ok || task.ID != "abandon-guard" || task.BillingReceiptJSON == "" || task.RecoveryOwner != "worker" {
+				if !ok || task.ID != "abandon-guard" || task.BillingReceiptJSON == "" || len(task.RecoveryOwner) != 64 {
 					return
 				}
 				reads++
@@ -84,7 +84,7 @@ func TestAdmissionNativeAbandonChecksEveryTerminalDecision(t *testing.T) {
 				case "receipt-changed":
 					require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", task.ID).UpdateColumn("billing_receipt_json", `{"status":"pending","submissionStatus":"accepted"}`).Error)
 				case "new-generation":
-					evidence, captureErr := model.CaptureNativeReservationRelease(e.DB, task, "worker")
+					evidence, captureErr := model.CaptureNativeReservationRelease(e.DB, task, task.RecoveryOwner)
 					require.NoError(t, captureErr)
 					released, releaseErr := model.ReleaseNativeReservation(e.DB, task.ID, task.GroupID, task.TokenID, time.Now().Add(time.Hour), evidence)
 					require.NoError(t, releaseErr)
@@ -95,7 +95,7 @@ func TestAdmissionNativeAbandonChecksEveryTerminalDecision(t *testing.T) {
 					require.NoError(t, reserveErr)
 					require.True(t, created)
 					// Even identical creation time and owner must not replace generation.
-					require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", task.ID).UpdateColumns(map[string]any{"billing_receipt_json": task.BillingReceiptJSON, "recovery_owner": "worker", "recovery_until": time.Now().Add(time.Minute).Unix()}).Error)
+					require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", task.ID).UpdateColumns(map[string]any{"billing_receipt_json": task.BillingReceiptJSON, "recovery_owner": task.RecoveryOwner, "recovery_until": time.Now().Add(time.Minute).Unix()}).Error)
 				}
 			}))
 			defer e.DB.Callback().Query().Remove("test:abandon-race")

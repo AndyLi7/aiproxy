@@ -153,85 +153,87 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 	if task.Status != "reserved" {
 		return task, e.SyncBilling(ctx, task)
 	}
-	call := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
-		command.Group = group
-		command.BillingOperationID = task.BillingOperationID
-		return e.Wallet.Prepayment(ctx, command)
-	}
-	walletCtx, cancelWallet := context.WithTimeout(balance.WithSubmitRetry(ctx), submitWalletBudget)
-	defer cancelWallet()
-	claim := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
-		command.Group = group
-		command.BillingOperationID = task.BillingOperationID
-		return e.Wallet.Prepayment(walletCtx, command)
-	}
-	// The switch only decides whether a new admission asks to queue; the
-	// route below follows the wallet's answer (spec §2 step 4), so a retry of
-	// a hold admitted before the switch changed keeps that hold's path.
-	admit := balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON,
-		Queue: !p.Direct && e.queueEnabled()}
-	if p.Log != nil {
-		admit = admit.WithUsage(model.NativeUsageIdentity(task, *p.Log))
-	}
-	admitted, err := claim(admit)
-	if err != nil {
-		if WalletRefusal(err) {
-			// The wallet refused before holding anything. Drop the reservation so a
-			// refused request leaves no row behind; the same request may be retried.
-			if _, releaseErr := model.ReleaseNativeReservation(e.DB, id, group, token, task.UpdatedAt, model.NativeReservationRelease{GenerationID: task.AdmissionGeneration, CreatedAt: task.CreatedAt}); releaseErr != nil {
-				log.Errorf("release refused native reservation %s: %v", id, releaseErr)
+	return e.runTaskExecution(ctx, task, model.NativeExecutionSubmit, func() (*model.NativeTask, error) {
+		call := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+			command.Group = group
+			command.BillingOperationID = task.BillingOperationID
+			return e.Wallet.Prepayment(ctx, command)
+		}
+		walletCtx, cancelWallet := context.WithTimeout(balance.WithSubmitRetry(ctx), submitWalletBudget)
+		defer cancelWallet()
+		claim := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+			command.Group = group
+			command.BillingOperationID = task.BillingOperationID
+			return e.Wallet.Prepayment(walletCtx, command)
+		}
+		// The switch only decides whether a new admission asks to queue; the
+		// route below follows the wallet's answer (spec §2 step 4), so a retry of
+		// a hold admitted before the switch changed keeps that hold's path.
+		admit := balance.PrepaymentCommand{Action: "admit", TaskID: id, ModelID: task.Model, Currency: "USD", PrepaidMicros: &quote.PrepaidMicros, EstimatedMicros: &route.EstimatedMicros, QuoteJSON: p.QuoteJSON,
+			Queue: !p.Direct && e.queueEnabled()}
+		if p.Log != nil {
+			admit = admit.WithUsage(model.NativeUsageIdentity(task, *p.Log))
+		}
+		admitted, err := claim(admit)
+		if err != nil {
+			if WalletRefusal(err) {
+				// The wallet refused before holding anything. Drop the reservation so a
+				// refused request leaves no row behind; the same request may be retried.
+				if _, releaseErr := model.ReleaseNativeReservation(e.DB, id, group, token, task.UpdatedAt, model.NativeReservationRelease{GenerationID: task.AdmissionGeneration, CreatedAt: task.CreatedAt}); releaseErr != nil {
+					log.Errorf("release refused native reservation %s: %v", id, releaseErr)
+				}
+			}
+			if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) {
+				// The 402 names the hold this request asked for (the sized quote).
+				err = &HoldRefusal{HoldMicros: quote.PrepaidMicros, Err: err}
+			}
+			if WalletRefusal(err) {
+				return task, err
+			}
+			return e.storedUnlessReserved(task, err)
+		}
+		if p.Log != nil && admitted.UsageAtMs != nil {
+			// The call row takes the hold's time and source: a retry of a reserved
+			// task (an admit replay) stamps the first admission, so the row and
+			// every money movement of the operation share one usage time. An
+			// application without key usage P2 returns neither; the request start
+			// is kept.
+			p.Log.RequestAt = time.UnixMilli(*admitted.UsageAtMs).UTC()
+			if model.ValidUsageSource(admitted.UsageSource) {
+				p.Log.RequestSource = admitted.UsageSource
 			}
 		}
-		if errors.Is(err, balance.ErrPrepaymentInsufficientBalance) {
-			// The 402 names the hold this request asked for (the sized quote).
-			err = &HoldRefusal{HoldMicros: quote.PrepaidMicros, Err: err}
+		if admitted.Submission() == model.NativeStatusWaiting {
+			return e.enqueue(ctx, task, p.Log, admitted)
 		}
-		if WalletRefusal(err) {
-			return task, err
+		attemptID := task.BillingOperationID + ":1"
+		if !balance.FullRequestLeft(walletCtx) {
+			// Admission used most of the budget (retries or a slow wallet). A
+			// claim cut short could still be recorded after this request gave up,
+			// leaving an attempt of unknown outcome (incident 2026-10-13). Send
+			// none: the task stays reserved and its hold not_submitted, so a
+			// same-ID retry replays the admission and claims; without one, the
+			// stop-loss refunds the hold after reservationGrace.
+			log.WithFields(log.Fields{"lane": "native", "task_id": id, "group": group, "model": task.Model}).
+				Warn("native task wallet budget too short for the attempt claim; nothing claimed or submitted")
+			return e.storedUnlessReserved(task, ErrPending)
 		}
-		return e.storedUnlessReserved(task, err)
-	}
-	if p.Log != nil && admitted.UsageAtMs != nil {
-		// The call row takes the hold's time and source: a retry of a reserved
-		// task (an admit replay) stamps the first admission, so the row and
-		// every money movement of the operation share one usage time. An
-		// application without key usage P2 returns neither; the request start
-		// is kept.
-		p.Log.RequestAt = time.UnixMilli(*admitted.UsageAtMs).UTC()
-		if model.ValidUsageSource(admitted.UsageSource) {
-			p.Log.RequestSource = admitted.UsageSource
+		receipt, err := claim(balance.PrepaymentCommand{Action: "begin_attempt", RouteID: route.RouteID, AttemptID: attemptID})
+		if err != nil {
+			return e.storedUnlessReserved(task, err)
 		}
-	}
-	if admitted.Submission() == model.NativeStatusWaiting {
-		return e.enqueue(ctx, task, p.Log, admitted)
-	}
-	attemptID := task.BillingOperationID + ":1"
-	if !balance.FullRequestLeft(walletCtx) {
-		// Admission used most of the budget (retries or a slow wallet). A
-		// claim cut short could still be recorded after this request gave up,
-		// leaving an attempt of unknown outcome (incident 2026-10-13). Send
-		// none: the task stays reserved and its hold not_submitted, so a
-		// same-ID retry replays the admission and claims; without one, the
-		// stop-loss refunds the hold after reservationGrace.
-		log.WithFields(log.Fields{"lane": "native", "task_id": id, "group": group, "model": task.Model}).
-			Warn("native task wallet budget too short for the attempt claim; nothing claimed or submitted")
-		return e.storedUnlessReserved(task, ErrPending)
-	}
-	receipt, err := claim(balance.PrepaymentCommand{Action: "begin_attempt", RouteID: route.RouteID, AttemptID: attemptID})
-	if err != nil {
-		return e.storedUnlessReserved(task, err)
-	}
-	if !receipt.Claimed {
-		return e.storedUnlessReserved(task, ErrPending)
-	}
-	if err = model.WithNativeReservationGeneration(e.DB, task, func(tx *gorm.DB) error {
-		return model.TransitionNativeSubmission(tx, id, group, token, "reserved", "submitting", "")
-	}); err != nil {
-		// Recovery may have failed the reservation (not_started) or another
-		// request submitted it: answer that state, never a request ID conflict.
-		return e.storedUnlessReserved(task, err)
-	}
-	return e.submitClaimed(ctx, task, contract, e.Provider, p.Log, call)
+		if !receipt.Claimed {
+			return e.storedUnlessReserved(task, ErrPending)
+		}
+		if err = model.WithNativeReservationGeneration(e.DB, task, func(tx *gorm.DB) error {
+			return model.TransitionNativeSubmission(tx, id, group, token, "reserved", "submitting", "")
+		}); err != nil {
+			// Recovery may have failed the reservation (not_started) or another
+			// request submitted it: answer that state, never a request ID conflict.
+			return e.storedUnlessReserved(task, err)
+		}
+		return e.submitClaimed(ctx, task, contract, e.Provider, p.Log, call)
+	})
 }
 
 // submitClaimed sends a task that holds the wallet claim of its attempt and
@@ -487,6 +489,10 @@ func (e *Engine) SyncBilling(ctx context.Context, task *model.NativeTask) error 
 	if e == nil || e.DB == nil || e.Wallet == nil || task == nil || task.BillingOperationID == "" {
 		return ErrUnavailable
 	}
+	_, err := e.runTaskExecution(ctx, task, model.NativeExecutionBilling, func() (*model.NativeTask, error) { return task, e.syncBillingInvocation(ctx, task) })
+	return err
+}
+func (e *Engine) syncBillingInvocation(ctx context.Context, task *model.NativeTask) error {
 	if task.Status == "reserved" {
 		owner, _ := ctx.Value(nativeRecoveryOwnerKey{}).(string)
 		evidence, err := model.CaptureNativeReservationRelease(e.DB, task, owner)

@@ -230,7 +230,7 @@ func TestAdmissionNativeRecoveryLateReceiptRequiresLiveClaim(t *testing.T) {
 				if kind == "new-generation" {
 					current, readErr := model.GetNativeTask(e.DB, "recover-receipt", "g", 1)
 					require.NoError(t, readErr)
-					evidence, captureErr := model.CaptureNativeReservationRelease(e.DB, current, "worker")
+					evidence, captureErr := model.CaptureNativeReservationRelease(e.DB, current, current.RecoveryOwner)
 					require.NoError(t, captureErr)
 					released, releaseErr := model.ReleaseNativeReservation(e.DB, current.ID, current.GroupID, current.TokenID, time.Now().Add(time.Hour), evidence)
 					require.NoError(t, releaseErr)

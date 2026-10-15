@@ -110,6 +110,9 @@ func dispatchRoute(task *model.NativeTask) (*model.ImagePrepaymentRoute, error) 
 // refusal that leaves the hold unchanged puts the task back in the queue;
 // anything that may have claimed the attempt never does.
 func (e *Engine) dispatchClaimed(ctx context.Context, task *model.NativeTask, provider Provider) (*model.NativeTask, error) {
+	return e.runTaskExecution(ctx, task, model.NativeExecutionDispatch, func() (*model.NativeTask, error) { return e.dispatchInvocation(ctx, task, provider) })
+}
+func (e *Engine) dispatchInvocation(ctx context.Context, task *model.NativeTask, provider Provider) (*model.NativeTask, error) {
 	owner := task.DispatchOwner
 	fields := log.Fields{"lane": "native", "task_id": task.ID, "group": task.GroupID, "model": task.Model, "scope": task.QueueScope}
 	call := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {

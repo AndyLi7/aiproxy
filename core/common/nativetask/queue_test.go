@@ -642,7 +642,7 @@ func TestRecoveryKeepsQueueTimesWhenReleasing(t *testing.T) {
 	require.NotEmpty(t, leased)
 	enqueuedAt := time.Now()
 	require.NoError(t, model.EnqueueNativeTask(env3.e.DB, "r1", "ga", 1, falScope, enqueuedAt, enqueuedAt.Add(5*time.Minute+time.Second)))
-	require.NoError(t, env3.e.releaseRecovery("r1", "ga", 1, "worker", reserved, time.Now(), 0, false, false, time.Time{}))
+	require.NoError(t, env3.e.releaseRecovery("r1", "ga", 1, leased[0].RecoveryOwner, reserved, time.Now(), 0, false, false, time.Time{}))
 	require.Equal(t, enqueuedAt.Add(5*time.Minute+time.Second).Unix(), env3.task("r1", "ga").NextRecoveryAt)
 }
 

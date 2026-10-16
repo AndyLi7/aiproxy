@@ -21,6 +21,25 @@ type Artifact struct {
 const MaxArtifacts = 1024
 
 func PlanArtifacts(raw []byte, bindings []ArtifactBinding) ([]Artifact, error) {
+	return planArtifacts(raw, bindings, nil)
+}
+
+// PlanDeliveredArtifacts inspects already-owned output at its frozen delivery
+// origin. It does not fetch URLs. Provider downloads must still use PlanArtifacts;
+// a configured HTTPS delivery origin may use a nonstandard port.
+func PlanDeliveredArtifacts(raw []byte, bindings []ArtifactBinding, deliveryBase string) ([]Artifact, error) {
+	// Non-file results have no delivery origin to check.
+	if len(bindings) == 0 {
+		return PlanArtifacts(raw, bindings)
+	}
+	origin, err := url.Parse(deliveryBase)
+	if err != nil || origin.Scheme != "https" || origin.Hostname() == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
+		return nil, ErrInvalid
+	}
+	return planArtifacts(raw, bindings, origin)
+}
+
+func planArtifacts(raw []byte, bindings []ArtifactBinding, deliveryOrigin *url.URL) ([]Artifact, error) {
 	root, err := decode(raw)
 	if err != nil {
 		return nil, err
@@ -45,7 +64,14 @@ func PlanArtifacts(raw []byte, bindings []ArtifactBinding) ([]Artifact, error) {
 					return ErrInvalid
 				}
 				parsed, err := url.Parse(source)
-				if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || (parsed.Port() != "" && parsed.Port() != "443") {
+				if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
+					return ErrInvalid
+				}
+				if deliveryOrigin == nil {
+					if parsed.Port() != "" && parsed.Port() != "443" {
+						return ErrInvalid
+					}
+				} else if parsed.Host != deliveryOrigin.Host {
 					return ErrInvalid
 				}
 				pointer := ""

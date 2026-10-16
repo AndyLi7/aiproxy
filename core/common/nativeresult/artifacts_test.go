@@ -75,3 +75,19 @@ func TestDeliveryRemovesEmbeddedAndKeyURLsAndRootURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveredArtifactOriginDoesNotRelaxProviderSources(t *testing.T) {
+	bindings := []ArtifactBinding{{Path: []string{"video", "url"}}}
+	output := []byte(`{"video":{"url":"https://127.0.0.1:3443/v1/model-tasks/trial_video/artifacts/0"}}`)
+	if _, err := PlanArtifacts(output, bindings); err == nil {
+		t.Fatal("provider source must still reject nonstandard ports")
+	}
+	if files, err := PlanDeliveredArtifacts(output, bindings, "https://127.0.0.1:3443"); err != nil || len(files) != 1 {
+		t.Fatalf("owned output at configured origin: %v, %v", files, err)
+	}
+	for _, origin := range []string{"https://127.0.0.1:4443", "https://other.example:3443", "http://127.0.0.1:3443", "https://user:secret@127.0.0.1:3443", "https://127.0.0.1:3443/path", "https://127.0.0.1:3443?x=y"} {
+		if _, err := PlanDeliveredArtifacts(output, bindings, origin); err == nil {
+			t.Fatalf("accepted wrong or malformed origin %q", origin)
+		}
+	}
+}

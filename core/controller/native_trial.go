@@ -246,7 +246,7 @@ func nativeTrialArtifactList(task *model.NativeTask) ([]gin.H, bool) {
 	if json.Unmarshal([]byte(task.FrozenContract), &contract) != nil {
 		return result, false
 	}
-	planned, err := nativeresult.PlanArtifacts([]byte(task.DeliveredOutput), contract.Artifacts)
+	planned, err := nativeresult.PlanDeliveredArtifacts([]byte(task.DeliveredOutput), contract.Artifacts, task.DeliveryBase)
 	if err != nil {
 		return result, false
 	}

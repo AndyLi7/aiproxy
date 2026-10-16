@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
 )
 
@@ -193,29 +194,92 @@ func TryClaimAsyncUsageInfo(
 	return true, nil
 }
 
-func RenewAsyncUsageClaim(
-	id int,
-	token string,
-	leaseUntil time.Time,
-) (bool, error) {
-	if id == 0 || token == "" {
+func RenewAsyncUsageClaim(id int, token string, leaseUntil time.Time) (bool, error) {
+	return RenewAsyncUsageClaimContext(context.Background(), id, token, leaseUntil)
+}
+
+var errAsyncUsageRenewalExpired = errors.New("async usage renewal expired")
+
+// RenewAsyncUsageClaimContext extends only a still-live claim. The locked old
+// deadline remains the authorization boundary through the final write check;
+// the proposed new deadline cannot revive an expired owner. Each successful
+// same-token renewal becomes the next renewal's original deadline.
+func RenewAsyncUsageClaimContext(ctx context.Context, id int, token string, leaseUntil time.Time) (bool, error) {
+	if id == 0 || token == "" || leaseUntil.IsZero() {
 		return false, nil
 	}
-
-	now := time.Now()
-
-	tx := LogDB.
-		Model(&AsyncUsageInfo{}).
-		Where("id = ? AND status = ? AND processing_token = ?", id, int(AsyncUsageStatusPending), token).
-		Updates(map[string]any{
-			"next_poll_at": leaseUntil,
-			"updated_at":   now,
-		})
-	if tx.Error != nil {
-		return false, tx.Error
+	if LogDB == nil {
+		return false, errors.New("async usage database unavailable")
 	}
+	clock, err := asyncUsageLeaseClockSQL(LogDB)
+	if err != nil {
+		return false, err
+	}
+	leaseUntil = leaseUntil.UTC().Truncate(time.Microsecond)
+	renewed := false
+	err = LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current AsyncUsageInfo
+		e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND status=? AND processing_token=?", id, AsyncUsageStatusPending, token).First(&current).Error
+		if errors.Is(e, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		var now int64
+		if e = tx.Raw("SELECT " + clock).Scan(&now).Error; e != nil {
+			return e
+		}
+		if now <= 0 {
+			return errors.New("async usage database clock unavailable")
+		}
+		// Reject equal/shorter proposals too: renewal must not shorten a valid lease.
+		if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now || !leaseUntil.After(current.NextPollAt) {
+			return nil
+		}
+		priorDeadline := current.NextPollAt.UnixMilli()
+		result := tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", id, AsyncUsageStatusPending, token, current.NextPollAt).Updates(map[string]any{"next_poll_at": leaseUntil, "updated_at": time.UnixMilli(now).UTC()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errAsyncUsageRenewalExpired
+		}
+		// Final DB-time predicate is after every write/callback/lock wait. A failure
+		// rolls back the proposed extension, even if it is far in the future.
+		var count int64
+		e = tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", id, AsyncUsageStatusPending, token, leaseUntil).Where("? > "+clock, priorDeadline).Count(&count).Error
+		if e != nil {
+			return e
+		}
+		if count != 1 {
+			return errAsyncUsageRenewalExpired
+		}
+		renewed = true
+		return nil
+	}, claimTxOptions(LogDB)...)
+	if errors.Is(err, errAsyncUsageRenewalExpired) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return renewed, nil
+}
 
-	return tx.RowsAffected > 0, nil
+// This primitive also serves existing MySQL async workers; it does not depend
+// on installing the optional SQLite/PostgreSQL admission extension.
+func asyncUsageLeaseClockSQL(db *gorm.DB) (string, error) {
+	switch db.Dialector.Name() {
+	case "sqlite":
+		return "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)", nil
+	case "postgres":
+		return "CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)", nil
+	case "mysql":
+		return "CAST(UNIX_TIMESTAMP(CURRENT_TIMESTAMP(6)) * 1000 AS UNSIGNED)", nil
+	default:
+		return "", errors.New("unsupported async usage lease clock")
+	}
 }
 
 func AsyncUsageBackoffDelay(

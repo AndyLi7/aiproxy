@@ -673,28 +673,37 @@ func startAsyncUsageClaimRenewalAtInterval(
 ) (context.Context, func()) {
 	workCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	exited := make(chan struct{})
+	// Capture immutable claim identity. Renewal never writes business fields on
+	// info: the worker owns NextPollAt when scheduling its next poll/retry.
+	id, token, requestID, upstreamID := info.ID, info.ProcessingToken, info.RequestID, info.UpstreamID
 
 	var stopOnce sync.Once
 
 	go func() {
+		defer close(exited)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-workCtx.Done():
 				return
 			case <-done:
 				return
 			case <-ticker.C:
 				leaseUntil := time.Now().Add(asyncUsageProcessingLease)
 
-				renewed, err := model.RenewAsyncUsageClaim(
-					info.ID,
-					info.ProcessingToken,
+				renewed, err := model.RenewAsyncUsageClaimContext(
+					workCtx,
+					id,
+					token,
 					leaseUntil,
 				)
 				if err != nil {
+					if workCtx.Err() != nil {
+						return
+					}
 					notify.ErrorThrottle(
 						"asyncUsageRenewClaim",
 						time.Minute*5,
@@ -710,9 +719,9 @@ func startAsyncUsageClaimRenewalAtInterval(
 				if !renewed {
 					log.Debugf(
 						"async usage poll: claim lost id=%d request_id=%s upstream_id=%s",
-						info.ID,
-						info.RequestID,
-						info.UpstreamID,
+						id,
+						requestID,
+						upstreamID,
 					)
 
 					cancel()
@@ -720,7 +729,6 @@ func startAsyncUsageClaimRenewalAtInterval(
 					return
 				}
 
-				info.NextPollAt = leaseUntil
 			}
 		}
 	}()
@@ -730,6 +738,7 @@ func startAsyncUsageClaimRenewalAtInterval(
 			close(done)
 			cancel()
 		})
+		<-exited
 	}
 }
 

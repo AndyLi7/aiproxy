@@ -43,13 +43,30 @@ func recoverImagePrepayments(ctx context.Context) {
 			continue
 		}
 
-		if _, err := imageprepayment.Sync(ctx, task); err != nil {
+		handoff, err := model.PrepareImageRecoveryHandoff(ctx, task)
+		if err != nil {
+			log.WithField("task_id", task.ID).Warn("image recovery handoff unavailable")
+			continue
+		}
+		if handoff != nil {
+			accepted, err := handoff.Accept(ctx)
+			if err != nil || !accepted {
+				continue
+			}
+		}
+		_, syncErr := imageprepayment.Sync(ctx, task)
+		if syncErr != nil {
 			log.WithField("task_id", task.ID).Warn("image prepayment state synchronization unavailable")
 		}
 		// A normal Sync return observes its owned cleanup. Never use a defer
 		// to release on panic/Goexit or convert unknown work into success.
 		exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		releaseErr := model.ReleaseImagePrepaymentRecovery(exitCtx, task)
+		var releaseErr error
+		if handoff != nil {
+			releaseErr = handoff.ReleaseAndRecordExit(exitCtx, syncErr != nil)
+		} else {
+			releaseErr = model.ReleaseImagePrepaymentRecovery(exitCtx, task)
+		}
 		cancel()
 		if releaseErr != nil {
 			log.WithField("task_id", task.ID).Warn("image prepayment claim release unavailable")

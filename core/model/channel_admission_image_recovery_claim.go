@@ -4,6 +4,7 @@ import (
 	"context"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,8 +22,9 @@ type ChannelAdmissionImageRecoveryClaim struct {
 }
 
 type imageBillingRecoveryClaim struct {
-	store *ChannelAdmissionStore
-	row   ChannelAdmissionImageRecoveryClaim
+	store           *ChannelAdmissionStore
+	row             ChannelAdmissionImageRecoveryClaim
+	handoffPrepared atomic.Bool
 }
 
 func imageRecoveryTaskHash(t *ImageTask) string {
@@ -228,6 +230,10 @@ func checkImageRecoveryClaim(tx *gorm.DB, c *ChannelAdmissionControl, task *Imag
 }
 
 func (h *imageBillingRecoveryClaim) withClaim(ctx context.Context, task *ImageTask, release bool, work func(*gorm.DB, *ImageTask) error) error {
+	return h.withClaimControl(ctx, task, release, func(tx *gorm.DB, c *ChannelAdmissionControl, current *ImageTask) error { return work(tx, current) })
+}
+func (h *imageBillingRecoveryClaim) withClaimControl(ctx context.Context, task *ImageTask, release bool, work func(*gorm.DB, *ChannelAdmissionControl, *ImageTask) error) error {
+
 	if h == nil || h.store == nil || h.row.Owner == "" || task == nil {
 		return ErrChannelAdmissionConflict
 	}
@@ -252,7 +258,7 @@ func (h *imageBillingRecoveryClaim) withClaim(ctx context.Context, task *ImageTa
 		if err = checkImageRecoveryClaim(tx, c, current, &h.row, false); err != nil {
 			return err
 		}
-		if err = work(tx, current); err != nil {
+		if err = work(tx, c, current); err != nil {
 			return err
 		}
 		return checkImageRecoveryClaim(tx, c, current, &h.row, release)
@@ -276,6 +282,9 @@ func ValidateImagePrepaymentRecovery(ctx context.Context, task *ImageTask) error
 // evidence. No capability is cleared in memory: a stale task cannot downgrade
 // later wallet calls or cleanup to the legacy path.
 func ReleaseImagePrepaymentRecovery(ctx context.Context, task *ImageTask) error {
+	if task != nil && task.imageRecoveryClaim != nil && task.imageRecoveryClaim.handoffPrepared.Load() {
+		return ErrChannelAdmissionConflict
+	}
 	if task == nil {
 		return ErrChannelAdmissionConflict
 	}
@@ -283,14 +292,31 @@ func ReleaseImagePrepaymentRecovery(ctx context.Context, task *ImageTask) error 
 		return nil
 	}
 	return task.imageRecoveryClaim.withClaim(ctx, task, true, func(tx *gorm.DB, current *ImageTask) error {
-		row := task.imageRecoveryClaim.row
-		result := tx.Model(&ChannelAdmissionImageRecoveryClaim{}).Where("id = ? AND owner = ? AND until_micros = ?", row.ID, row.Owner, row.UntilMicros).Updates(map[string]any{"owner": "", "until_micros": 0})
-		if result.Error != nil {
-			return result.Error
+		// A committed offer with a lost response still forbids legacy release.
+		present, err := imageRecoveryHandoffStoragePresent(tx)
+		if err != nil {
+			return err
 		}
-		if result.RowsAffected != 1 {
-			return ErrChannelAdmissionConflict
+		if present {
+			var count int64
+			if err = tx.Model(&ChannelAdmissionImageRecoveryHandoff{}).Where("claim_id = ? AND claim_owner = ?", task.imageRecoveryClaim.row.ID, task.imageRecoveryClaim.row.Owner).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 0 {
+				return ErrChannelAdmissionConflict
+			}
 		}
-		return nil
+		return releaseImageRecoveryClaim(tx, task.imageRecoveryClaim.row)
 	})
+}
+
+func releaseImageRecoveryClaim(tx *gorm.DB, row ChannelAdmissionImageRecoveryClaim) error {
+	result := tx.Model(&ChannelAdmissionImageRecoveryClaim{}).Where("id = ? AND owner = ? AND until_micros = ?", row.ID, row.Owner, row.UntilMicros).Updates(map[string]any{"owner": "", "until_micros": 0})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrChannelAdmissionConflict
+	}
+	return nil
 }

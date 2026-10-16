@@ -25,3 +25,9 @@ func ShortenImageRecoveryDeadlineForTest(task *ImageTask, deadline time.Time) er
 	}
 	return err
 }
+
+// ForgetImageHandoffResponseForTest simulates loss of the successful Prepare
+// response/private marker; durable journal evidence must still block release.
+func ForgetImageHandoffResponseForTest(task *ImageTask) {
+	task.imageRecoveryClaim.handoffPrepared.Store(false)
+}

@@ -39,6 +39,9 @@ func Call(ctx context.Context, task *model.ImageTask, command balance.Prepayment
 	if !ok {
 		return balance.PrepaymentReceipt{}, errors.New("external prepayment wallet unavailable")
 	}
+	if err := model.ValidateImagePrepaymentRecovery(ctx, task); err != nil {
+		return balance.PrepaymentReceipt{}, err
+	}
 	command.Group = task.GroupID
 	command.BillingOperationID = task.BillingOperationID
 	return client.Prepayment(ctx, command)

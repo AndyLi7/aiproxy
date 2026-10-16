@@ -477,6 +477,15 @@ func sameImageWalletSnapshot(current, observed *ImageTask) error {
 	return nil
 }
 func withImageTaskGeneration(task *ImageTask, write func(*gorm.DB) error) error {
+	if task.imageRecoveryClaim != nil {
+		return task.imageRecoveryClaim.withClaim(context.Background(), task, false, func(tx *gorm.DB, current *ImageTask) error {
+			if err := sameImageWalletSnapshot(current, task); err != nil {
+				return err
+			}
+			return write(tx)
+		})
+	}
+
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil {
 		return err

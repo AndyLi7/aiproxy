@@ -55,6 +55,7 @@ type ImageTaskError struct {
 // These records are deliberately retained: removing them would permit paid resubmission.
 type ImageTask struct {
 	admissionPreparation *imageAdmissionPreparation
+	imageRecoveryClaim   *imageBillingRecoveryClaim
 
 	// Server-only transient generation/identity captured by the real admission
 	// path. Persistent authority lives in channel_admission_uses.

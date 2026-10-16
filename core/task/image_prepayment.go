@@ -38,16 +38,23 @@ func recoverImagePrepayments(ctx context.Context) {
 	}
 	for i := range tasks {
 		task := &tasks[i]
-		// Claim a short lease using the same predicate. All remote effects are also
-		// idempotent, so expiry/crashes cannot duplicate a debit or refund.
-		won := model.LogDB.Model(&model.ImageTask{}).Where("id = ? AND (billing_next_check_at IS NULL OR billing_next_check_at <= ?)", task.ID, now).
-			Update("billing_next_check_at", now.Add(2*time.Minute))
-		if won.Error != nil || won.RowsAffected != 1 {
+		won, err := model.ClaimImagePrepaymentRecovery(ctx, task, now)
+		if err != nil || !won {
 			continue
 		}
+
 		if _, err := imageprepayment.Sync(ctx, task); err != nil {
 			log.WithField("task_id", task.ID).Warn("image prepayment state synchronization unavailable")
 		}
+		// A normal Sync return observes its owned cleanup. Never use a defer
+		// to release on panic/Goexit or convert unknown work into success.
+		exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		releaseErr := model.ReleaseImagePrepaymentRecovery(exitCtx, task)
+		cancel()
+		if releaseErr != nil {
+			log.WithField("task_id", task.ID).Warn("image prepayment claim release unavailable")
+		}
+
 	}
 }
 

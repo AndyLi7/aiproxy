@@ -21,8 +21,15 @@ CREATE TABLE channel_migration_shadow_resources (
  shadow_projection_hash VARCHAR(64) NOT NULL,
  created_revision BIGINT NOT NULL,
  created_at_ms BIGINT NOT NULL,
- checkpoint_hash VARCHAR(64) NOT NULL
+ checkpoint_hash VARCHAR(64) NOT NULL,
+ lifecycle_state VARCHAR(16) NOT NULL DEFAULT 'unknown',
+ lifecycle_revision BIGINT NOT NULL DEFAULT 0,
+ prepared_request_hash VARCHAR(64) NOT NULL DEFAULT '',
+ prepared_probe_hash VARCHAR(64) NOT NULL DEFAULT '',
+ prepared_probe_fact_hash VARCHAR(64) NOT NULL DEFAULT '',
+ prepared_at_ms BIGINT NOT NULL DEFAULT 0,
+ cancelled_at_ms BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_channel_migration_shadow_resources_from ON channel_migration_shadow_resources(from_channel_id);
-INSERT INTO channel_migration_shadow_protocols(id,version) VALUES (1,1);
+INSERT INTO channel_migration_shadow_protocols(id,version) VALUES (1,2);
 COMMIT;

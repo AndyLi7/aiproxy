@@ -56,6 +56,8 @@ type ChannelAdmissionStore struct {
 	LoadDeployment func(context.Context) (VerifiedDeploymentProof, error)
 	// Server-only probe verifier; never populated from an HTTP request.
 	LoadMigrationProbe func(context.Context, ChannelMigrationRequest) (VerifiedMigrationProbe, error)
+	// Trusted local runtime feature projection, never supplied by a browser.
+	MigrationFeatures []string
 }
 
 func (s *ChannelAdmissionStore) deployment(ctx context.Context) (VerifiedDeploymentProof, error) {
@@ -421,7 +423,7 @@ func (s *ChannelAdmissionStore) seal(ctx context.Context, input ChannelSealReque
 	}
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		if prepared != nil {
-			if err := validateMigrationAuthorization(tx, c, prepared, "seal"); err != nil {
+			if err := validateMigrationAuthorization(tx, c, prepared, "seal", s.MigrationFeatures); err != nil {
 				return err
 			}
 			if _, err := lockDeploymentProof(tx, c, prepared.deployment, s.Executor); err != nil {

@@ -185,3 +185,33 @@ replay); its standalone child entry skips once because it is started by the pare
 test with its private fixture. This is not a missing multiprocess execution.
 `build-delivery.log` passes all three modules. Do not sum old PG evidence into this
 batch or describe external fixture skips as passed integration coverage.
+
+
+### Separate test-only cancellation expectation correction
+
+The primary reviewer ran the complete controller/native packages and found the
+pre-existing `TestVideoMigrationActualLostOwnerAndCancellation/cancel-in-cleanup`
+asserted a nil return. Exact parent `8968cab` and probe head `6161191` each failed
+that isolated case 10/10: `RecoverOnce` finishes its owned release/exit, then the
+next recovery loop correctly returns the cancelled parent context. This is not a
+probe business-logic regression.
+
+The separate follow-up changes only that expectation to
+`require.ErrorIs(t, err, context.Canceled)`, with an explanatory comment. Existing
+`exited`, no manifest/delivered output, no settled bill and no refund assertions
+are unchanged. No business code or test skipping is added.
+
+Primary evidence: `/private/tmp/b2-probe-primary-1l7aacym/cancel-parent.jsonl`,
+`cancel-head.jsonl`, `cancel-parent-corrected.jsonl`, `cancel-head-corrected.jsonl`.
+With only that assertion corrected, both primary archives passed all four
+scenarios three times (15 test events including the root). These are primary
+review results, not claimed as the author's independent PG rerun.
+
+Author follow-up verification: `go test -race -json ./core/controller
+./core/common/nativetask -count=1` passed 1003 test events (442 roots), with
+19 conditional skips (10 roots), no failures. Evidence:
+`/private/tmp/b2-probe-runtime-final/full-cancel-correction.jsonl`.
+Worktree and staged security scans covered the two test/documentation files and
+passed; manual diff review confirms no business-code change. PG and business build
+were not repeated for this assertion-only correction; their exact `6161191`
+results remain separately attributed above and in the primary acceptance record.

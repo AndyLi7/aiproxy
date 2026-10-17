@@ -154,7 +154,9 @@ func TestVideoMigrationActualLostOwnerAndCancellation(t *testing.T) {
 			require.NotContains(t, row.BillingReceiptJSON, `"status":"settled"`)
 			require.False(t, refundedWith(w, "platform_failure"))
 			if mode == "cancel-in-cleanup" {
-				require.NoError(t, err)
+				// RecoverOnce finishes the owned handoff/exit, then its next loop
+				// respects the cancelled parent instead of claiming more work.
+				require.ErrorIs(t, err, context.Canceled)
 				assertRecoveryOuter(t, e, "exited")
 			} else {
 				require.Error(t, err)

@@ -25,6 +25,8 @@ func SetAPIRouter(router *gin.Engine) {
 	inventoryRouter.GET("/channel-migrations/operations/:id", controller.GetPreparedMigrationFacts)
 	inventoryRouter.GET("/channel-migrations/operations/:id/shadow", controller.GetMigrationShadow)
 	inventoryRouter.POST("/channel-migrations/operations/:id/shadow", controller.CreateMigrationShadow)
+	inventoryRouter.GET("/channel-migrations/operations/:id/shadow/lifecycle", controller.GetMigrationShadowLifecycle)
+	inventoryRouter.POST("/channel-migrations/operations/:id/shadow/cancel", controller.CancelMigrationShadow)
 
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)

@@ -26,6 +26,8 @@ type Provider interface {
 	SubmitNative(context.Context, string, []byte) (string, error)
 }
 type Plan struct {
+	// A private operation-owned grant, never decoded from a public request.
+	MigrationProbe *model.MigrationProbeHandle
 	// Server-resolved physical identity for activated admission protection.
 	AdmissionIdentityHash                string
 	KeyFingerprint                       string
@@ -145,8 +147,14 @@ func (e *Engine) Submit(ctx context.Context, id, group string, token int, body [
 		return nil, ErrUnavailable
 	}
 	digest := sha256.Sum256(body)
-	task, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{AdmissionIdentityHash: p.AdmissionIdentityHash, ID: id, GroupID: group, TokenID: token, Model: frozen.Model, Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(frozen.OutputSchema), FrozenContract: string(p.Contract), NativeInput: string(input), ChannelID: p.ChannelID, Endpoint: p.Endpoint, CredentialScope: p.CredentialScope, PrepaymentQuoteJSON: p.QuoteJSON, BillingOperationID: "native:" + id, DeliveryBase: p.DeliveryBase, KeyFingerprint: p.KeyFingerprint,
-		QueueScope: QueueScope(route.Provider)})
+	reservation := model.NativeTask{AdmissionIdentityHash: p.AdmissionIdentityHash, ID: id, GroupID: group, TokenID: token, Model: frozen.Model, Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(frozen.OutputSchema), FrozenContract: string(p.Contract), NativeInput: string(input), ChannelID: p.ChannelID, Endpoint: p.Endpoint, CredentialScope: p.CredentialScope, PrepaymentQuoteJSON: p.QuoteJSON, BillingOperationID: "native:" + id, DeliveryBase: p.DeliveryBase, KeyFingerprint: p.KeyFingerprint,
+		QueueScope: QueueScope(route.Provider)}
+	var task *model.NativeTask
+	if p.MigrationProbe != nil {
+		task, _, err = model.ReserveMigrationProbeTask(ctx, e.DB, p.MigrationProbe, reservation)
+	} else {
+		task, _, err = model.ReserveNativeTask(e.DB, reservation)
+	}
 	if err != nil {
 		return nil, err
 	}

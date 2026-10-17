@@ -23,7 +23,7 @@ func permanent(err error) bool {
 // rejectResult ends an accepted task whose result can never be delivered and
 // settles it so the customer's prepayment is released.
 func (e *Engine) rejectResult(ctx context.Context, id, group string, token int) (*model.NativeTask, error) {
-	if err := model.FailAcceptedNativeTask(e.DB, id, group, token, "upstream_result_rejected"); err != nil {
+	if err := model.FailAcceptedNativeTask(e.DB.WithContext(ctx), id, group, token, "upstream_result_rejected"); err != nil {
 		return nil, err
 	}
 	task, err := model.GetNativeTask(e.DB, id, group, token)

@@ -442,7 +442,19 @@ func ImageGenerationExpired(task *ImageTask, now time.Time) bool {
 // and a later result is discarded (SetImageTaskResult never leaves failed). The
 // accounting outbox and request log fail in the same commit. expired reports
 // whether this call made the change; only that caller refunds and cancels.
-func ExpireImageGeneration(id string, now time.Time) (bool, error) {
+// The original live claim is required; the token is cleared in this commit,
+// which does not prove any executor has exited or any external refund finished.
+func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (bool, error) {
+	if claim == nil || claim.ID == 0 || claim.ProcessingToken == "" || claim.ImageTaskID != id {
+		return false, nil
+	}
+	if LogDB == nil {
+		return false, errors.New("async usage database unavailable")
+	}
+	clock, err := asyncUsageLeaseClockSQL(LogDB)
+	if err != nil {
+		return false, err
+	}
 	encodedError, err := json.Marshal(&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage})
 	if err != nil {
 		return false, err
@@ -450,10 +462,40 @@ func ExpireImageGeneration(id string, now time.Time) (bool, error) {
 
 	expired := false
 	err = LogDB.Transaction(func(tx *gorm.DB) error {
-		at := time.Now().UTC()
+		// Keep the existing task -> usage -> log lock order. Re-read the
+		// original claim only after the task lock; stale workers cannot fail a
+		// newer owner's task, accounting outbox or request log.
+		var task ImageTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=?", id).First(&task).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		var current AsyncUsageInfo
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND image_task_id=? AND group_id=? AND token_id=? AND status=? AND processing_token=?", claim.ID, id, task.GroupID, task.TokenID, AsyncUsageStatusPending, claim.ProcessingToken).First(&current).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var dbNow int64
+		if err = tx.Raw("SELECT " + clock).Scan(&dbNow).Error; err != nil {
+			return err
+		}
+		if dbNow <= 0 {
+			return errors.New("async usage database clock unavailable")
+		}
+		if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= dbNow {
+			return nil
+		}
+		deadline := current.NextPollAt.UnixMilli()
+		at := time.UnixMilli(dbNow).UTC()
 		result := tx.Model(&ImageTask{}).
 			Where("id = ? AND upstream_id <> ? AND status IN ? AND COALESCE(queued_at, created_at) <= ?",
 				id, "", []string{"queued", "in_progress"}, now.UTC().Add(-AsyncGenerationDeadline)).
+			Where("? > "+clock, deadline).
 			Updates(map[string]any{
 				"status": "failed", "data": "null", "error": string(encodedError), "updated_at": at,
 				"completed_at": at, "retain_until": at.Add(30 * 24 * time.Hour),
@@ -463,21 +505,40 @@ func ExpireImageGeneration(id string, now time.Time) (bool, error) {
 		}
 		expired = true
 
-		if err := tx.Model(&AsyncUsageInfo{}).
-			Where("image_task_id = ?", id).
-			Update("status", AsyncUsageStatusFailed).
-			Error; err != nil {
-			return err
+		receipt := tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", current.ID, AsyncUsageStatusPending, claim.ProcessingToken, current.NextPollAt).
+			Where("? > "+clock, deadline).Updates(map[string]any{"status": AsyncUsageStatusFailed, "processing_token": "", "error": "image generation timed out", "updated_at": at})
+		if receipt.Error != nil {
+			return receipt.Error
+		}
+		if receipt.RowsAffected != 1 {
+			return errAsyncUsageClaimExpired
 		}
 
-		return tx.Model(&Log{}).
-			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
+		logReceipt := tx.Model(&Log{}).
+			Where("request_id = ? AND id = ? AND group_id = ? AND token_id = ? AND async_usage_status = ?", id, current.LogID, current.GroupID, current.TokenID, AsyncUsageStatusPending).
 			Updates(map[string]any{
 				"async_usage_status": AsyncUsageStatusFailed, "code": 502,
-				"error_code": AsyncGenerationTimeoutCode, "safe_error": "Image generation timed out",
-			}).
-			Error
-	})
+				"error_code": AsyncGenerationTimeoutCode, "safe_error": "Image generation timed out", "content": "image generation timed out",
+			})
+		if logReceipt.Error != nil {
+			return logReceipt.Error
+		}
+		if logReceipt.RowsAffected != 1 {
+			return NotFoundError("image timeout log receipt")
+		}
+		var count int64
+		err = tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=?", current.ID, AsyncUsageStatusFailed, "").Where("? > "+clock, deadline).Count(&count).Error
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errAsyncUsageClaimExpired
+		}
+		return nil
+	}, claimTxOptions(LogDB)...)
+	if errors.Is(err, errAsyncUsageClaimExpired) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

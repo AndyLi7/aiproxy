@@ -197,7 +197,7 @@ func expireImageGeneration(
 	task *model.ImageTask,
 	cancelUpstream imageCancel,
 ) {
-	expired, err := model.ExpireImageGeneration(task.ID, time.Now())
+	expired, err := model.ExpireImageGeneration(task.ID, time.Now(), info)
 	if err != nil {
 		retryImageUsage(info, err)
 		return
@@ -242,7 +242,7 @@ func expireImageGeneration(
 		}
 	}
 
-	markAsyncUsageFailed(info, "image generation timed out")
+	// The claimed timeout transaction already finalized the outbox and log.
 }
 
 // refundFailedImageTask refunds a failed prepaid task as soon as the failure is

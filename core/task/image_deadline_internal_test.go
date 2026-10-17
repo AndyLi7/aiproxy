@@ -307,3 +307,37 @@ func TestImageGenerationDeadlineLeavesYoungTasksPolling(t *testing.T) {
 	require.NoError(t, model.LogDB.First(&usage, info.ID).Error)
 	require.Equal(t, model.AsyncUsageStatusPending, usage.Status)
 }
+
+func TestImageGenerationDeadlineLostClaimDoesNotRefundOrCancel(t *testing.T) {
+	for _, mode := range []string{"expired", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			wallet := &deadlineWallet{}
+			fal := &deadlineFal{status: "IN_PROGRESS", wallet: wallet}
+			setupDeadlineTask(t, time.Hour, "in_progress", fal, wallet)
+			info := claimDeadlineUsage(t)
+			if mode == "expired" {
+				require.NoError(t, model.LogDB.Model(&model.AsyncUsageInfo{}).Where("id=?", info.ID).Update("next_poll_at", time.Now().Add(-time.Second)).Error)
+			} else {
+				require.NoError(t, model.LogDB.Model(&model.AsyncUsageInfo{}).Where("id=?", info.ID).Update("processing_token", "replacement").Error)
+			}
+			processOneImageUsage(t.Context(), info)
+			task, err := model.GetImageTask("deadline", "g", 1)
+			require.NoError(t, err)
+			require.Equal(t, "in_progress", task.Status)
+			require.False(t, task.BillingSettled)
+			require.Zero(t, fal.cancelCount())
+			require.Empty(t, wallet.actions)
+			var usage model.AsyncUsageInfo
+			require.NoError(t, model.LogDB.First(&usage, info.ID).Error)
+			require.Equal(t, model.AsyncUsageStatusPending, usage.Status)
+			if mode == "replacement" {
+				require.Equal(t, "replacement", usage.ProcessingToken)
+			} else {
+				require.Equal(t, info.ProcessingToken, usage.ProcessingToken)
+			}
+			var entry model.Log
+			require.NoError(t, model.LogDB.First(&entry, usage.LogID).Error)
+			require.Equal(t, model.AsyncUsageStatusPending, entry.AsyncUsageStatus)
+		})
+	}
+}

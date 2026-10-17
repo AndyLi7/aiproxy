@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -181,5 +182,74 @@ func ExtendNativeRecovery(db *gorm.DB, id, owner string, until time.Time) error 
 			return ErrNativeTaskConflict
 		}
 		return nil
+	}, claimTxOptions(db)...)
+}
+
+// WithNativeRecoveryOwner fences delivery mutations with the live lease token.
+type nativeRecoveryOwnerKey struct{}
+
+func WithNativeRecoveryOwner(ctx context.Context, owner string) context.Context {
+	return context.WithValue(ctx, nativeRecoveryOwnerKey{}, owner)
+}
+func nativeRecoveryFence(db *gorm.DB) *gorm.DB {
+	if owner, ok := db.Statement.Context.Value(nativeRecoveryOwnerKey{}).(string); ok {
+		switch db.Dialector.Name() {
+		case "postgres":
+			return db.Where("recovery_owner = ? AND recovery_until > EXTRACT(EPOCH FROM clock_timestamp())", owner)
+		case "sqlite":
+			return db.Where("recovery_owner = ? AND recovery_until > CAST(strftime('%s','now') AS INTEGER)", owner)
+		case "mysql":
+			return db.Where("recovery_owner = ? AND recovery_until > UNIX_TIMESTAMP()", owner)
+		default:
+			return db.Where("1 = 0")
+		}
+	}
+	return db
+}
+func CheckNativeRecovery(db *gorm.DB, id string) error {
+	var count int64
+	if err := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ?", id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrNativeTaskConflict
+	}
+	return nil
+}
+
+// ClaimNativeDelivery covers direct delivery too, sharing recovery's durable lease.
+func ClaimNativeDelivery(db *gorm.DB, id, group string, token int, owner string, until time.Time) error {
+	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND recovery_until <= ? AND status IN ?", id, group, token, time.Now().Unix(), []string{"result_received", "delivery_ready"}).Updates(map[string]any{"recovery_owner": owner, "recovery_until": until.Unix()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrNativeTaskConflict
+	}
+	return nil
+}
+
+// WithNativeRecoveryGuard protects all receipt writes as one transaction. An
+// ownerless legacy call keeps its existing behavior; a recovery/delivery caller
+// must still own its live lease after the row lock and after synchronous writes.
+func WithNativeRecoveryGuard(db *gorm.DB, id string, work func(*gorm.DB) error) error {
+	if _, ok := db.Statement.Context.Value(nativeRecoveryOwnerKey{}).(string); !ok {
+		return work(db)
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		locked, err := lockNativeTaskTransition(tx.Model(&NativeTask{}).Where("id = ?", id))
+		if err != nil {
+			return err
+		}
+		if !locked {
+			return ErrNativeTaskConflict
+		}
+		if err = CheckNativeRecovery(tx, id); err != nil {
+			return err
+		}
+		if err = work(tx); err != nil {
+			return err
+		}
+		return CheckNativeRecovery(tx, id)
 	}, claimTxOptions(db)...)
 }

@@ -189,6 +189,7 @@ func TestMarkAsyncUsageFailedFailsOnlyTheOutboxOwnersLog(t *testing.T) {
 			info.TokenID = 1
 			info.Status = model.AsyncUsageStatusPending
 			info.ProcessingToken = "claim-token"
+			info.NextPollAt = time.Now().Add(time.Minute)
 			require.NoError(t, db.Create(info).Error)
 
 			markAsyncUsageFailed(info, "upstream task failed")

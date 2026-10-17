@@ -273,3 +273,21 @@ func TestNativePrivateTrialSizesHoldWithInputMeter(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTrialArtifactListUsesFrozenHTTPSDeliveryPort(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	task := &model.NativeTask{ID: "trial_video", Status: "completed", DeliveryBase: "https://127.0.0.1:3443",
+		FrozenContract:   `{"version":1,"model":"test/video/native","input_schema":{"type":"object"},"output_schema":{"type":"object"},"artifacts":[{"path":["video","url"]}]}`,
+		DeliveredOutput:  `{"video":{"url":"https://127.0.0.1:3443/v1/model-tasks/trial_video/artifacts/0","content_type":"video/mp4"}}`,
+		ArtifactManifest: `{"0":{"key":"native-results/trial_video/0/` + hash + `.bin","sha256":"` + hash + `","size":9741588}}`}
+	list, valid := nativeTrialArtifactList(task)
+	require.True(t, valid)
+	require.Equal(t, []gin.H{{"index": 0, "size": int64(9741588)}}, list)
+	for _, oldURL := range []string{"https://127.0.0.1:4443/v1/model-tasks/trial_video/artifacts/0", "https://other.example:3443/v1/model-tasks/trial_video/artifacts/0", "https://127.0.0.1:3443/v1/model-tasks/another/artifacts/0", "https://127.0.0.1:3443/v1/model-tasks/trial_video/artifacts/1"} {
+		changed := *task
+		changed.DeliveredOutput = `{"video":{"url":"` + oldURL + `"}}`
+		list, valid = nativeTrialArtifactList(&changed)
+		require.False(t, valid, oldURL)
+		require.Empty(t, list, oldURL)
+	}
+}

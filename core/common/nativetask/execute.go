@@ -503,6 +503,9 @@ func (e *Engine) syncBillingInvocation(ctx context.Context, task *model.NativeTa
 		task.AdmissionRecoveryOwner = owner
 	}
 	call := func(command balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+		if err := model.CheckNativeRecovery(e.DB.WithContext(ctx), task.ID); err != nil {
+			return balance.PrepaymentReceipt{}, err
+		}
 		command.Group = task.GroupID
 		command.BillingOperationID = task.BillingOperationID
 		return e.Wallet.Prepayment(ctx, command)
@@ -553,7 +556,7 @@ func (e *Engine) syncBillingInvocation(ctx context.Context, task *model.NativeTa
 			return err
 		}
 		if task.Status == "delivery_ready" {
-			if err := model.CompleteNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err != nil {
+			if err := model.CompleteNativeTask(e.DB.WithContext(ctx), task.ID, task.GroupID, task.TokenID); err != nil {
 				return err
 			}
 			task.Status = "completed"
@@ -576,7 +579,7 @@ func (e *Engine) syncBillingInvocation(ctx context.Context, task *model.NativeTa
 	if task.Status == "reserved" {
 		err = model.WithNativeReservationGeneration(e.DB, task, save)
 	} else {
-		err = save(e.DB)
+		err = model.WithNativeRecoveryGuard(e.DB.WithContext(ctx), task.ID, save)
 	}
 	if err != nil {
 		return err

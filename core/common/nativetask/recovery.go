@@ -97,7 +97,7 @@ func (e *Engine) expireGeneration(ctx context.Context, task *model.NativeTask, n
 	if unconfirmedSubmission(task) {
 		return e.expireUnconfirmed(ctx, task, now)
 	}
-	expired, err := model.ExpireNativeGeneration(e.DB, task.ID, task.GroupID, task.TokenID, now)
+	expired, err := model.ExpireNativeGeneration(e.DB.WithContext(ctx), task.ID, task.GroupID, task.TokenID, now)
 	if err != nil || !expired {
 		return false, err
 	}
@@ -120,7 +120,7 @@ func (e *Engine) expireGeneration(ctx context.Context, task *model.NativeTask, n
 // ID, so nothing is polled or cancelled, and the task is never resubmitted.
 // A refund error is retried by later passes: the row stays failed, unsettled.
 func (e *Engine) expireUnconfirmed(ctx context.Context, task *model.NativeTask, now time.Time) (bool, error) {
-	expired, err := model.ExpireUnconfirmedNativeSubmission(e.DB, task.ID, task.GroupID, task.TokenID, now)
+	expired, err := model.ExpireUnconfirmedNativeSubmission(e.DB.WithContext(ctx), task.ID, task.GroupID, task.TokenID, now)
 	if err != nil || !expired {
 		return false, err
 	}
@@ -421,6 +421,7 @@ type recoveryClaimOutcome struct {
 // alone records normal completion; it adds no goroutine or timeout window.
 func (e *Engine) recoverClaim(recoveryCtx context.Context, task model.NativeTask, now, started, current time.Time, resolve ResolvePoller, archive ArchiveFunc, report *RecoveryReport) recoveryClaimOutcome {
 	claimOwner := task.RecoveryOwner
+	recoveryCtx = model.WithNativeRecoveryOwner(recoveryCtx, claimOwner)
 	var releaseEvidence model.NativeReservationRelease
 	var releaseEvidenceErr error
 	if task.Status == "reserved" {
@@ -434,8 +435,14 @@ func (e *Engine) recoverClaim(recoveryCtx context.Context, task model.NativeTask
 		func() {
 			workCtx, cancel := context.WithTimeout(recoveryCtx, 90*time.Second)
 			defer cancel()
+			workCtx = context.WithValue(workCtx, deliveryLeaseKey{}, deliveryLease{owner: claimOwner, parent: recoveryCtx})
 			_, workErr = e.Poll(workCtx, task.ID, task.GroupID, task.TokenID, resolve, archive)
 		}()
+	}
+	// Lost owners cannot run timeout or billing cleanup against replacement work.
+	if err := model.CheckNativeRecovery(e.DB.WithContext(recoveryCtx), task.ID); err != nil || recoveryCtx.Err() != nil {
+		report.Deferred++
+		return recoveryClaimOutcome{fresh: &task, failed: true}
 	}
 	// Decide on the row as this poll left it, never on the claimed snapshot:
 	// the poll may have saved a result, which must not be expired.
@@ -462,7 +469,7 @@ func (e *Engine) recoverClaim(recoveryCtx context.Context, task model.NativeTask
 	case workErr != nil && age > NativeTaskDeadline && fresh.Status == "result_received":
 		// Backstop: a received result still undeliverable after the long
 		// deadline is ended and refunded instead of retried forever.
-		if model.FailAcceptedNativeTask(e.DB, task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
+		if model.FailAcceptedNativeTask(e.DB.WithContext(recoveryCtx), task.ID, task.GroupID, task.TokenID, "upstream_result_rejected") == nil {
 			if failed, err := model.GetNativeTask(e.DB, task.ID, task.GroupID, task.TokenID); err == nil {
 				workErr = e.SyncBilling(recoveryCtx, failed)
 			}

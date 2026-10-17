@@ -951,14 +951,14 @@ func TestTouchAsyncUsagePollCursorAdvancesUpdatedAtAndNextPollAt(t *testing.T) {
 	})
 
 	oldUpdatedAt := time.Now().Add(-time.Hour)
-	oldNextPollAt := time.Now().Add(-time.Minute)
+	oldNextPollAt := time.Now().Add(time.Minute)
 	info := &model.AsyncUsageInfo{
 		RequestID:       "pending",
 		Status:          model.AsyncUsageStatusPending,
 		UpdatedAt:       oldUpdatedAt,
-		NextPollAt:      oldNextPollAt,
 		Error:           "previous error",
 		ProcessingToken: "claim-token",
+		NextPollAt:      oldNextPollAt,
 	}
 	require.NoError(t, db.Create(info).Error)
 
@@ -996,6 +996,7 @@ func TestScheduleAsyncUsageSettlementRetryDoesNotFailSuccessfulJobAtRetryLimit(t
 		RetryCount:      asyncUsageMaxRetry - 1,
 		Error:           "previous wallet error",
 		ProcessingToken: "claim-token",
+		NextPollAt:      time.Now().Add(time.Minute),
 	}
 	require.NoError(t, db.Create(info).Error)
 
@@ -1105,6 +1106,7 @@ func TestMarkAsyncUsageFailedWritesLogMessage(t *testing.T) {
 		Capability:      string(model.ModelCapabilityImageToVideo),
 		Status:          model.AsyncUsageStatusPending,
 		ProcessingToken: "claim-token",
+		NextPollAt:      time.Now().Add(time.Minute),
 	}
 	require.NoError(t, db.Create(info).Error)
 

@@ -67,7 +67,7 @@ func (e *Engine) Poll(ctx context.Context, id, group string, token int, resolve 
 			return task, err
 		}
 		if result.Status == "result_received" {
-			if err = model.SaveNativeTaskResult(e.DB, id, group, token, result.Output); permanent(err) {
+			if err = model.SaveNativeTaskResult(e.DB.WithContext(ctx), id, group, token, result.Output); permanent(err) {
 				return e.rejectResult(ctx, id, group, token)
 			} else if err != nil {
 				return task, err
@@ -78,7 +78,7 @@ func (e *Engine) Poll(ctx context.Context, id, group string, token int, resolve 
 			result = customerRejection(contract, result)
 			logProviderFailure(task, result)
 		}
-		if err = model.UpdateNativePoll(e.DB, id, group, token, result.Status, result.ErrorCode, result.Issues...); err != nil {
+		if err = model.UpdateNativePoll(e.DB.WithContext(ctx), id, group, token, result.Status, result.ErrorCode, result.Issues...); err != nil {
 			return task, err
 		}
 		task, err = model.GetNativeTask(e.DB, id, group, token)

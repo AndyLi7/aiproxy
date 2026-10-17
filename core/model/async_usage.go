@@ -350,6 +350,9 @@ func PrepareClaimedAsyncUsageSettlement(
 }
 
 func RetryClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {
+	if info == nil {
+		return NotFoundError("async usage claim")
+	}
 	return updateClaimedAsyncUsageInfo(info, map[string]any{
 		"retry_count":      info.RetryCount,
 		"error":            info.Error,
@@ -359,6 +362,9 @@ func RetryClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {
 }
 
 func TouchClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {
+	if info == nil {
+		return NotFoundError("async usage claim")
+	}
 	return updateClaimedAsyncUsageInfo(info, map[string]any{
 		"error":            "",
 		"next_poll_at":     info.NextPollAt,
@@ -367,20 +373,12 @@ func TouchClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {
 }
 
 func FailClaimedAsyncUsageInfo(info *AsyncUsageInfo) (bool, error) {
-	tx := LogDB.
-		Model(&AsyncUsageInfo{}).
-		Where("id = ? AND processing_token = ?", info.ID, info.ProcessingToken).
-		Updates(map[string]any{
-			"status":           int(AsyncUsageStatusFailed),
-			"error":            info.Error,
-			"processing_token": "",
-			"updated_at":       time.Now(),
-		})
-	if tx.Error != nil {
-		return false, tx.Error
+	if info == nil {
+		return false, nil
 	}
-
-	return tx.RowsAffected > 0, nil
+	return writeClaimedAsyncUsageInfo(info, map[string]any{
+		"status": int(AsyncUsageStatusFailed), "error": info.Error, "processing_token": "",
+	})
 }
 
 func CompleteClaimedAsyncUsageInfo(
@@ -389,7 +387,9 @@ func CompleteClaimedAsyncUsageInfo(
 	usageContext UsageContext,
 	amount Amount,
 ) (bool, error) {
-	now := time.Now()
+	if info == nil {
+		return false, nil
+	}
 	updatesModel := &AsyncUsageInfo{
 		Status:          AsyncUsageStatusCompleted,
 		Usage:           usage,
@@ -398,7 +398,6 @@ func CompleteClaimedAsyncUsageInfo(
 		Error:           "",
 		BalanceConsumed: info.BalanceConsumed,
 		ProcessingToken: "",
-		UpdatedAt:       now,
 	}
 
 	updates, err := asyncUsageUpdateValues(
@@ -410,21 +409,12 @@ func CompleteClaimedAsyncUsageInfo(
 		"Error",
 		"BalanceConsumed",
 		"ProcessingToken",
-		"UpdatedAt",
 	)
 	if err != nil {
 		return false, err
 	}
 
-	tx := LogDB.
-		Model(&AsyncUsageInfo{}).
-		Where("id = ? AND processing_token = ?", info.ID, info.ProcessingToken).
-		Updates(updates)
-	if tx.Error != nil {
-		return false, tx.Error
-	}
-
-	return tx.RowsAffected > 0, nil
+	return writeClaimedAsyncUsageInfo(info, updates)
 }
 
 func asyncUsageUpdateValues(
@@ -479,28 +469,92 @@ func asyncUsageUpdateValues(
 	return values, nil
 }
 
-func updateClaimedAsyncUsageInfo(
-	info *AsyncUsageInfo,
-	updates map[string]any,
-) error {
-	if info == nil || info.ProcessingToken == "" {
+// writeClaimedAsyncUsageInfo authorizes against the locked database deadline,
+// never info.NextPollAt (which the caller may already use for the next poll).
+// A same-token renewal is accepted only if its committed deadline is still live.
+func writeClaimedAsyncUsageInfo(info *AsyncUsageInfo, updates map[string]any) (bool, error) {
+	if info == nil || info.ID == 0 || info.ProcessingToken == "" {
+		return false, nil
+	}
+	if LogDB == nil {
+		return false, errors.New("async usage database unavailable")
+	}
+	clock, err := asyncUsageLeaseClockSQL(LogDB)
+	if err != nil {
+		return false, err
+	}
+	written := false
+	err = LogDB.Transaction(func(tx *gorm.DB) error {
+		var current AsyncUsageInfo
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND status=? AND processing_token=?", info.ID, AsyncUsageStatusPending, info.ProcessingToken).First(&current).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var now int64
+		if err = tx.Raw("SELECT " + clock).Scan(&now).Error; err != nil {
+			return err
+		}
+		if now <= 0 {
+			return errors.New("async usage database clock unavailable")
+		}
+		if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now {
+			return nil
+		}
+		deadline := current.NextPollAt.UnixMilli()
+		updates["updated_at"] = time.UnixMilli(now).UTC()
+		result := tx.Model(&AsyncUsageInfo{}).
+			Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", info.ID, AsyncUsageStatusPending, info.ProcessingToken, current.NextPollAt).
+			Where("? > "+clock, deadline).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errAsyncUsageClaimExpired
+		}
+		// A terminal/retry update can clear the token or replace the deadline with
+		// its next schedule. Check the expected new identity but the OLD deadline.
+		var status any = AsyncUsageStatusPending
+		var token any = info.ProcessingToken
+		if value, ok := updates["status"]; ok {
+			status = value
+		}
+		if value, ok := updates["processing_token"]; ok {
+			token = value
+		}
+		var count int64
+		err = tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=?", info.ID, status, token).
+			Where("? > "+clock, deadline).Count(&count).Error
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errAsyncUsageClaimExpired
+		}
+		written = true
+		return nil
+	}, claimTxOptions(LogDB)...)
+	if errors.Is(err, errAsyncUsageClaimExpired) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return written, nil
+}
+
+var errAsyncUsageClaimExpired = errors.New("async usage claim expired")
+
+func updateClaimedAsyncUsageInfo(info *AsyncUsageInfo, updates map[string]any) error {
+	written, err := writeClaimedAsyncUsageInfo(info, updates)
+	if err != nil {
+		return err
+	}
+	if !written {
 		return NotFoundError("async usage claim")
 	}
-
-	updates["updated_at"] = time.Now()
-
-	tx := LogDB.
-		Model(&AsyncUsageInfo{}).
-		Where("id = ? AND processing_token = ?", info.ID, info.ProcessingToken).
-		Updates(updates)
-	if tx.Error != nil {
-		return tx.Error
-	}
-
-	if tx.RowsAffected == 0 {
-		return NotFoundError("async usage claim")
-	}
-
 	return nil
 }
 

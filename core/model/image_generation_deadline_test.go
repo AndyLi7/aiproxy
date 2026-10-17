@@ -49,12 +49,20 @@ func TestExpireImageGenerationIsCompareAndSet(t *testing.T) {
 	require.NoError(t, model.SetImageTaskResult("unknown", "submission_unknown", nil, nil))
 	require.NoError(t, model.LogDB.Model(&model.ImageTask{}).Where("id = ?", "unknown").Update("created_at", now.UTC().Add(-time.Hour)).Error)
 
+	var runningClaim *model.AsyncUsageInfo
 	for id, want := range map[string]bool{"young": false, "queued": true, "running": true, "processing": false, "done": false, "unknown": false} {
-		expired, err := model.ExpireImageGeneration(id, now)
+		var claim model.AsyncUsageInfo
+		require.NoError(t, model.LogDB.First(&claim, "image_task_id=?", id).Error)
+		require.NoError(t, model.LogDB.Model(&model.AsyncUsageInfo{}).Where("id=?", claim.ID).Updates(map[string]any{"processing_token": "deadline-owner", "next_poll_at": time.Now().Add(time.Minute)}).Error)
+		claim.ProcessingToken = "deadline-owner"
+		if id == "running" {
+			runningClaim = &claim
+		}
+		expired, err := model.ExpireImageGeneration(id, now, &claim)
 		require.NoError(t, err)
 		require.Equal(t, want, expired, id)
 	}
-	again, err := model.ExpireImageGeneration("running", now)
+	again, err := model.ExpireImageGeneration("running", now, runningClaim)
 	require.NoError(t, err)
 	require.False(t, again, "a second call never re-fails")
 

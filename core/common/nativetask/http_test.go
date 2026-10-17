@@ -81,7 +81,7 @@ func TestNativeHTTPArtifactOwnershipAndIntegrity(t *testing.T) {
 		if corrupt {
 			b += "bad"
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(b)), Header: http.Header{"Content-Type": []string{"image/svg+xml"}}}, nil
+		return &http.Response{StatusCode: 200, ContentLength: int64(len(b)), Body: io.NopCloser(strings.NewReader(b)), Header: http.Header{"Content-Type": []string{"image/svg+xml"}}}, nil
 	}}
 	r := httptest.NewRequest("GET", "/v1/model-tasks/req/artifacts/0", nil)
 	response := httptest.NewRecorder()

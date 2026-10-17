@@ -81,7 +81,7 @@ func TestMigrationProbeBillingInteropServer(t *testing.T) {
 		for {
 			_, raw = f.call(t, "GET", "/api/channel-migrations/operations/http-probe-op/probe", nil, config.AdminKey)
 			require.NoError(t, json.Unmarshal(raw, &observed))
-			if observed.Data.Observation != nil && observed.Data.Observation.UseID != "" && observed.Data.Observation.TaskStatus == "pending" {
+			if observed.Data.Observation != nil && observed.Data.Observation.UseID != "" && (observed.Data.Observation.TaskStatus == "pending" || observed.Data.Observation.TaskStatus == "queued") {
 				break
 			}
 			if _, e = os.Stat(filepath.Join(dir, "stop")); e == nil {

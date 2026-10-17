@@ -48,3 +48,15 @@
 - 最终精确源码真实临时 PostgreSQL16：3 根、29 项通过，无 skip/fail。覆盖 prepare/seal/commit 的 live、deployment/probe 自然过期、两种独立撤销、投影变化、取消，最终回执/最终 control 写后过期回滚、普通新增行的持久串行化及 SQL 重放。MySQL 没有实例实测。
 - 最终 `go build ./core/...` 成功；security-scan 12 文件 clean，人工复核参数化查询、证据来源、状态/钱款/共享 key 边界通过。
 - 证据：`/private/tmp/b2-c2-commands-final-rlh6xH/`。测试容器 `b2-c2-commands-pg` 使用 localhost 随机端口和 tmpfs，已删除；无另建网络，无留存临时数据库凭据。
+
+## C2-COMMANDS-R1 修复
+
+原 `1bfd0a2` 只比对完整原始 pin hash，没有在封口前验证这些配置能否真正改写。已知的重复 JSON、身份不匹配或目标 route 冲突可能先被 Prepare/Seal 接受，随后 Commit 拒绝，造成旧身份被封、新 shadow 仍 disabled 的可避免停服。
+
+修复让 Prepare、Seal 和 Commit 共用完整 `migrationPlanConfigRewrites`，在原 control 锁保护的全配置快照上预演所有改写；任何非法行或目标冲突都在 barrier/family 修改前拒绝。Commit 的最终快照校验、完整计划与写入 CAS、写后 proof/deadline 复核保留。没有扩大 Abandon，没有普通 status 补救入口。
+
+回归覆盖重复 JSON、credentialScope 不匹配、目标 route 冲突、未知 quote 版本：Prepare 拒绝且不留 prepared；对旧版本已形成的 prepared fixture，Seal 拒绝且仍可安全 Abandon。各场景验证没有 barrier/family、新 shadow 仍 disabled、旧身份可继续 Admit。合法未知嵌套值/超大整数/冻结原价沿用实际正向提交回归。真实 PostgreSQL 新增 Prepare/Seal/Commit 等 channel 锁期间 pin 被改变的场景，锁后完整快照拒绝，封口前失败保持旧准入。
+
+**仍有明确门槛：** 正向 Seal 后，原 probe 过期、撤销或来源失效仍可能使 Commit 停住。原 ProbeFactHash 不可自行刷新，不能修改原证明期限或扩大 Abandon。完整 C 开启前还需要合法安全逆向或严格重新取证的恢复协议；本修复只解决封口前已知配置非法导致的可避免停服，不能冒称恢复闭环已完成。
+
+R1 最终验证：相关 `-race` 111 根/428 项通过（无 skip/fail，包含本批 11 根/42 项）；真实临时 PG 3 根/32 项通过（无 skip/fail）；`go build ./core/...` 成功；security-scan 4 文件 clean 并完成人工 diff 复核。证据 `/private/tmp/b2-c2-r1-final-wg8qrg/`；`b2-c2-r1-pg` 容器/tmpfs 已清理，无独立网络或线上迁移。

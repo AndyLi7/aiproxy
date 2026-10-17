@@ -380,7 +380,11 @@ func migrationSnapshotMatches(tx *gorm.DB, input ChannelMigrationRequest, toStat
 	if hash != input.ExpectedPinHash {
 		return ErrChannelAdmissionConflict
 	}
-	return nil
+	// Do not seal admission for a snapshot that is already known to be
+	// uncommittable. Prepare and Seal run the exact same complete rewrite plan
+	// as Commit under the control lock, before any barrier or family change.
+	_, err = migrationPlanConfigRewrites(rows, input)
+	return err
 }
 func migrationCurrentHead(tx *gorm.DB, row *ChannelMigrationPrepared, input ChannelMigrationRequest) error {
 	if row.SealRevision <= 0 {
@@ -454,22 +458,12 @@ func (s *ChannelAdmissionStore) CommitPreparedPins(ctx context.Context, input Ch
 		if err != nil {
 			return err
 		}
-		for _, config := range configs {
-			raw, ok := config["config"].(string)
-			if !ok {
-				if config["config"] == nil {
-					continue
-				}
-				return ErrChannelAdmissionConflict
-			}
-			next, changed, err := migrationRewriteConfig(raw, input)
-			if err != nil {
-				return err
-			}
-			if !changed {
-				continue
-			}
-			update := tx.Table("model_configs").Where("model = ? AND config = ?", config["model"], raw).UpdateColumn("config", next)
+		plan, err := migrationPlanConfigRewrites(configs, input)
+		if err != nil {
+			return err
+		}
+		for _, change := range plan {
+			update := tx.Table("model_configs").Where("model = ? AND config = ?", change.model, change.before).UpdateColumn("config", change.after)
 			if update.Error != nil {
 				return update.Error
 			}
@@ -640,6 +634,37 @@ func migrationProjection(tx *gorm.DB, id int) (string, error) {
 		return "", ErrChannelAdmissionConflict
 	}
 	return admissionHash(rows[0])
+}
+
+type migrationConfigRewrite struct {
+	model  string
+	before string
+	after  string
+}
+
+func migrationPlanConfigRewrites(rows []map[string]any, input ChannelMigrationRequest) ([]migrationConfigRewrite, error) {
+	plan := []migrationConfigRewrite{}
+	for _, row := range rows {
+		name, ok := row["model"].(string)
+		if !ok {
+			return nil, ErrChannelAdmissionConflict
+		}
+		raw, ok := row["config"].(string)
+		if !ok {
+			if row["config"] == nil {
+				continue
+			}
+			return nil, ErrChannelAdmissionConflict
+		}
+		next, changed, err := migrationRewriteConfig(raw, input)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			plan = append(plan, migrationConfigRewrite{name, raw, next})
+		}
+	}
+	return plan, nil
 }
 
 // RawMessage retains unknown JSON numbers (including >2^53) and fields. Only

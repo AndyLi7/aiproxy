@@ -314,31 +314,81 @@ func TestPreparedMigrationMissingProbeRecordAndRevocation(t *testing.T) {
 		})
 	}
 }
-func TestPreparedMigrationRejectsAmbiguousJSONWithoutPartialWrites(t *testing.T) {
-	f := newAdmissionFixture(t)
-	req, probe := migrationFixture(t, f, 3)
-	ctx := context.Background()
-	raw := migrationConfig(t, f.store.DB)
-	raw = strings.Replace(raw, `"unknown":`, `"duplicate":1,"duplicate":2,"unknown":`, 1)
-	require.NoError(t, f.store.DB.Table("model_configs").Where("model = ?", "example").Update("config", raw).Error)
-	snap, err := f.store.ReadMigrationSnapshot(ctx, req.Seal.From, req.Seal.To)
+
+// Simulates the frozen prepared row an older command implementation could have
+// accepted. It is a test-only fixture, not a supported installation/write API.
+func migrationLegacyPreparedFixture(t *testing.T, f *admissionFixture, req model.ChannelMigrationRequest, probe *model.VerifiedMigrationProbe) {
+	t.Helper()
+	raw, err := json.Marshal(req)
+	require.NoError(t, err)
+	fact, err := probe.Fingerprint()
+	require.NoError(t, err)
+	require.NoError(t, f.store.DB.Create(&model.ChannelMigrationPrepared{OperationID: req.Seal.OperationID, RequestJSON: string(raw), RequestHash: probe.RequestHash, StorageGeneration: probe.StorageGeneration, ProbeHash: probe.EvidenceHash, ProbeFactHash: fact, State: "prepared", FromChannelID: req.Seal.From.ChannelID, ToChannelID: req.Seal.To.ChannelID}).Error)
+}
+func migrationRefreshSyntheticPinReview(t *testing.T, f *admissionFixture, req *model.ChannelMigrationRequest, probe *model.VerifiedMigrationProbe) {
+	t.Helper()
+	snap, err := f.store.ReadMigrationSnapshot(context.Background(), req.Seal.From, req.Seal.To)
 	require.NoError(t, err)
 	req.ExpectedPinHash = snap.PinHash
-	encoded, err := json.Marshal(req)
+	raw, err := json.Marshal(req)
 	require.NoError(t, err)
-	sum := sha256.Sum256(encoded)
+	sum := sha256.Sum256(raw)
 	probe.RequestHash = hex.EncodeToString(sum[:])
-	hash, err := probe.Fingerprint()
+	fact, err := probe.Fingerprint()
 	require.NoError(t, err)
-	require.NoError(t, f.store.DB.Model(&model.ChannelMigrationProbeRecord{}).Where("evidence_hash = ?", probe.EvidenceHash).Update("fact_hash", hash).Error)
-	_, err = f.store.PrepareMigration(ctx, req)
+	require.NoError(t, f.store.DB.Model(&model.ChannelMigrationProbeRecord{}).Where("evidence_hash = ?", probe.EvidenceHash).Update("fact_hash", fact).Error)
+}
+func migrationAssertOldAdmissionPreserved(t *testing.T, f *admissionFixture, req model.ChannelMigrationRequest) {
+	t.Helper()
+	for _, table := range []any{&model.ChannelAdmissionBarrier{}, &model.ChannelAdmissionFamily{}} {
+		var count int64
+		require.NoError(t, f.store.DB.Model(table).Count(&count).Error)
+		require.Zero(t, count)
+	}
+	require.Equal(t, model.ChannelStatusDisabled, migrationStatus(t, f.store.DB, req.Seal.To.ChannelID))
+	_, _, err := f.store.Admit(context.Background(), admissionRequest("old-still-admitted", req.Seal.From), nil)
 	require.NoError(t, err)
-	seal, err := f.store.SealPrepared(ctx, req)
-	require.NoError(t, err)
-	_, err = f.store.CommitPreparedPins(ctx, req, seal.Revision)
-	require.Error(t, err)
-	require.Equal(t, raw, migrationConfig(t, f.store.DB))
-	require.Equal(t, model.ChannelStatusDisabled, migrationStatus(t, f.store.DB, 3))
+}
+func TestPreparedMigrationRejectsUncommittablePinsBeforeBarrier(t *testing.T) {
+	for _, stage := range []string{"prepare", "seal-legacy-prepared"} {
+		for _, scenario := range []string{"duplicate-json", "identity-mismatch", "target-collision", "unsupported-quote"} {
+			t.Run(stage+"/"+scenario, func(t *testing.T) {
+				f := newAdmissionFixture(t)
+				req, probe := migrationFixture(t, f, 3)
+				raw := migrationConfig(t, f.store.DB)
+				switch scenario {
+				case "duplicate-json":
+					raw = strings.Replace(raw, `"unknown":`, `"duplicate":1,"duplicate":2,"unknown":`, 1)
+				case "identity-mismatch":
+					raw = strings.Replace(raw, `"credentialScope":"old"`, `"credentialScope":"wrong"`, 1)
+				case "target-collision":
+					raw = strings.Replace(raw, `"routes":[`, `"routes":[{"channelId":3,"routeId":"other","endpoint":"fal/other","credentialScope":"new"},`, 1)
+				case "unsupported-quote":
+					raw = strings.Replace(raw, `"version":1`, `"version":999`, 1)
+				}
+				require.NoError(t, f.store.DB.Table("model_configs").Where("model = ?", "example").Update("config", raw).Error)
+				migrationRefreshSyntheticPinReview(t, f, &req, probe)
+				if stage == "prepare" {
+					_, err := f.store.PrepareMigration(context.Background(), req)
+					require.Error(t, err)
+					var count int64
+					require.NoError(t, f.store.DB.Model(&model.ChannelMigrationPrepared{}).Count(&count).Error)
+					require.Zero(t, count)
+				} else {
+					migrationLegacyPreparedFixture(t, f, req, probe)
+					_, err := f.store.SealPrepared(context.Background(), req)
+					require.Error(t, err)
+					var row model.ChannelMigrationPrepared
+					require.NoError(t, f.store.DB.First(&row).Error)
+					require.Equal(t, "prepared", row.State)
+					_, err = f.store.AbandonPrepared(context.Background(), req.Seal.OperationID, probe.RequestHash)
+					require.NoError(t, err)
+				}
+				require.Equal(t, raw, migrationConfig(t, f.store.DB))
+				migrationAssertOldAdmissionPreserved(t, f, req)
+			})
+		}
+	}
 }
 
 func TestPreparedMigrationDraftSQLite(t *testing.T) {

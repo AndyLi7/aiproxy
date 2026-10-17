@@ -14,7 +14,7 @@ import (
 
 func TestPostgresPreparedMigrationChannelLock(t *testing.T) {
 	for _, stage := range []string{"prepare", "seal", "commit"} {
-		for _, outcome := range []string{"live", "deployment-expired", "probe-expired", "revoked", "probe-revoked", "projection-changed", "cancelled"} {
+		for _, outcome := range []string{"live", "deployment-expired", "probe-expired", "revoked", "probe-revoked", "projection-changed", "pins-changed", "cancelled"} {
 			t.Run(stage+"/"+outcome, func(t *testing.T) {
 				db := queueLockPostgres(t)
 				f := admissionFixtureOn(t, db, "")
@@ -82,6 +82,10 @@ func TestPostgresPreparedMigrationChannelLock(t *testing.T) {
 				case "projection-changed":
 					_, err = holder.ExecContext(ctx, "UPDATE channels SET priority=37 WHERE id=3")
 					require.NoError(t, err)
+				case "pins-changed":
+					// Raw out-of-band mutation while the command waits on its
+					// channel lock; the post-lock snapshot must see and reject it.
+					require.NoError(t, db.Exec("UPDATE model_configs SET config=? WHERE model=?", `{"duplicate":1,"duplicate":2}`, "example").Error)
 				case "cancelled":
 					cancel()
 					require.Error(t, <-done)
@@ -104,7 +108,12 @@ func TestPostgresPreparedMigrationChannelLock(t *testing.T) {
 					require.Equal(t, "committed", read.State)
 				} else {
 					require.Equal(t, model.ChannelStatusDisabled, migrationStatus(t, db, 3))
-					require.Equal(t, before, migrationConfig(t, db))
+					if outcome != "pins-changed" {
+						require.Equal(t, before, migrationConfig(t, db))
+					}
+					if outcome == "pins-changed" && stage != "commit" {
+						migrationAssertOldAdmissionPreserved(t, f, req)
+					}
 				}
 			})
 		}

@@ -165,14 +165,14 @@ var (
 // (rejected); every other error after reservation is ours (failed). Reading
 // the status from the writer covers future error branches too. If the update
 // fails, the middleware writes its fallback row so the call is never lost.
-func finishReservedImageCall(c *gin.Context, logID int, requestID, groupID string, gateRejection bool) {
+func finishReservedImageCall(c *gin.Context, logID int, requestID, groupID string, gateRejection bool) error {
 	if logID <= 0 {
-		return
+		return nil
 	}
 
 	status := c.Writer.Status()
 	if status < http.StatusBadRequest {
-		return
+		return nil
 	}
 
 	fields := middleware.OperationalFieldsFromContext(c)
@@ -193,11 +193,32 @@ func finishReservedImageCall(c *gin.Context, logID int, requestID, groupID strin
 	); err != nil {
 		common.GetLogger(c).Errorf("update image task call log %d: %v", logID, err)
 		middleware.ClearOperationalLogRecorded(c)
+		return err
+	}
+	return nil
+}
+
+type imageSubmissionExecution struct {
+	task      *model.ImageTask
+	cleanupOK bool
+}
+
+func submitImageTask(c *gin.Context) {
+	execution := &imageSubmissionExecution{}
+	// The inner function owns all synchronous cleanup. Panic/Goexit never reach
+	// RecordReturn. An HTTP error or unknown acceptance is not backend completion.
+	submitImageTaskInner(c, execution)
+	if execution.cleanupOK {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := model.RecordImageProducerReturn(ctx, execution.task, c.Writer.Status() >= http.StatusBadRequest); err != nil {
+			common.GetLogger(c).Warn("image frontend return could not be recorded")
+		}
 	}
 }
 
 //nolint:gocyclo // Admission combines authentication, contract, pricing and idempotency gates.
-func submitImageTask(c *gin.Context) {
+func submitImageTaskInner(c *gin.Context, execution *imageSubmissionExecution) {
 	id := c.GetHeader("X-Request-Id")
 
 	var (
@@ -206,7 +227,7 @@ func submitImageTask(c *gin.Context) {
 		gateRejection bool
 	)
 	defer func() {
-		finishReservedImageCall(c, callLogID, id, callGroupID, gateRejection)
+		execution.cleanupOK = finishReservedImageCall(c, callLogID, id, callGroupID, gateRejection) == nil
 	}()
 
 	if !imageRequestID.MatchString(id) {
@@ -494,7 +515,7 @@ func submitImageTask(c *gin.Context) {
 	}
 
 	identity, _ := model.ChannelIdentityOf(&model.Channel{ID: mt.Channel.ID, Type: mt.Channel.Type, Key: mt.Channel.Key, BaseURL: mt.Channel.BaseURL, ProxyURL: mt.Channel.ProxyURL, SkipTLSVerify: mt.Channel.SkipTLSVerify, Configs: mt.ChannelConfigs})
-	task, created, err := model.ReserveImageTask(
+	task, created, err := model.ReserveImageTaskContext(c.Request.Context(),
 		&model.ImageTask{
 			AdmissionIdentityHash: identity.IdentityHash,
 			ArchiveRequired:       ownedimage.Configured(),
@@ -530,6 +551,8 @@ func submitImageTask(c *gin.Context) {
 		c.JSON(202, publicImageTask(c, task))
 		return
 	}
+
+	execution.task = task
 
 	// The reservation row is this request's call row from here on.
 	callLogID, callGroupID = info.LogID, group.ID
@@ -567,7 +590,7 @@ func submitImageTask(c *gin.Context) {
 			// task for billing recovery to revisit.
 			release := func() error { return releaseImageTaskReservation(task.ID) }
 			if task.AdmissionGeneration != "" {
-				release = func() error { return model.ReleaseImageTaskReservationGeneration(task) }
+				release = func() error { return model.ReleaseImageTaskReservationGenerationContext(c.Request.Context(), task) }
 			}
 			if releaseErr := release(); releaseErr != nil {
 				if task.AdmissionGeneration != "" {

@@ -104,6 +104,12 @@ func admissionHash(value any) (string, error) {
 // backends are deliberately refused; pointer equality is conservative, not a
 // claim that two connections necessarily name different databases.
 func (s *ChannelAdmissionStore) transaction(ctx context.Context, work func(*gorm.DB, *ChannelAdmissionControl) error, allowUnactivated ...bool) error {
+	return s.controlTransaction(ctx, work, len(allowUnactivated) != 0 && allowUnactivated[0], false)
+}
+
+// allowMaxRevision is reserved for readback and exact cutover replay; ordinary
+// mutation entry points retain the exhausted-counter refusal.
+func (s *ChannelAdmissionStore) controlTransaction(ctx context.Context, work func(*gorm.DB, *ChannelAdmissionControl) error, allowUnactivated, allowMaxRevision bool) error {
 	if s == nil || s.DB == nil || s.DB != s.LogDB || !ChannelAdmissionStorageReady(s.DB) {
 		return ErrChannelAdmissionUnavailable
 	}
@@ -122,7 +128,7 @@ func (s *ChannelAdmissionStore) transaction(ctx context.Context, work func(*gorm
 		if err := tx.First(&control, 1).Error; err != nil {
 			return err
 		}
-		if control.Version != ChannelAdmissionProtocolVersion || (control.Epoch == "" && (len(allowUnactivated) == 0 || !allowUnactivated[0])) || (control.Revision < 0 || control.Revision == math.MaxInt64) {
+		if control.Version != ChannelAdmissionProtocolVersion || (control.Epoch == "" && !allowUnactivated) || (control.Revision < 0 || (control.Revision == math.MaxInt64 && !allowMaxRevision)) {
 			return ErrChannelAdmissionUnavailable
 		}
 		return work(tx, &control)
@@ -422,6 +428,19 @@ func (s *ChannelAdmissionStore) seal(ctx context.Context, input ChannelSealReque
 		proofErr = nil
 	}
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
+		barrier, err = s.sealTx(tx, c, input, prepared, proof, proofErr, hash)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return barrier, nil
+}
+
+// sealTx runs under the caller's existing control transaction. Never opens a
+// nested public command transaction; the caller owns rollback of all effects.
+func (s *ChannelAdmissionStore) sealTx(tx *gorm.DB, c *ChannelAdmissionControl, input ChannelSealRequest, prepared *migrationAuthorization, proof VerifiedDeploymentProof, proofErr error, hash string) (barrier *ChannelAdmissionBarrier, err error) {
+	err = func() error {
 		if prepared != nil {
 			if err := validateMigrationAuthorization(tx, c, prepared, "seal", s.MigrationFeatures); err != nil {
 				return err
@@ -553,9 +572,6 @@ func (s *ChannelAdmissionStore) seal(ctx context.Context, input ChannelSealReque
 		}
 		barrier = &row
 		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return barrier, nil
+	}()
+	return
 }

@@ -494,93 +494,8 @@ func (s *ChannelAdmissionStore) CommitPreparedPins(ctx context.Context, input Ch
 		return nil, err
 	}
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
-		if err := validateMigrationAuthorization(tx, c, a, "commit", s.MigrationFeatures); err != nil {
-			return err
-		}
-		row, err := loadMigration(tx, input.Seal.OperationID)
-		if err != nil {
-			return err
-		}
-		if row.SealRevision != sealRevision {
-			return ErrChannelAdmissionConflict
-		}
-		if row.State == "committed" {
-			if err := migrationCommittedMatches(tx, row, input); err != nil {
-				return err
-			}
-			if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
-				return err
-			}
-			result = row
-			return finalizeMigrationProbe(tx, a.probe)
-		}
-		if err := migrationSnapshotMatches(tx, input, ChannelStatusDisabled); err != nil {
-			return err
-		}
-		if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
-			return err
-		}
-		configs, err := migrationConfigRows(tx)
-		if err != nil {
-			return err
-		}
-		plan, err := migrationPlanConfigRewrites(configs, input)
-		if err != nil {
-			return err
-		}
-		for _, change := range plan {
-			update := tx.Table("model_configs").Where("model = ? AND config = ?", change.model, change.before).UpdateColumn("config", change.after)
-			if update.Error != nil {
-				return update.Error
-			}
-			if update.RowsAffected != 1 {
-				return ErrChannelAdmissionConflict
-			}
-		}
-		update := tx.Model(&Channel{}).Where("id = ? AND status = ?", input.Seal.To.ChannelID, ChannelStatusDisabled).UpdateColumn("status", ChannelStatusEnabled)
-		if update.Error != nil {
-			return update.Error
-		}
-		if update.RowsAffected != 1 {
-			return ErrChannelAdmissionConflict
-		}
-		after, err := migrationConfigRows(tx)
-		if err != nil {
-			return err
-		}
-		hash, err := admissionHash(after)
-		if err != nil {
-			return err
-		}
-		now, err := channelAdmissionTime(tx)
-		if err != nil {
-			return err
-		}
-		row.State = "committed"
-		row.AfterPinHash = hash
-		row.CommitRevision = c.Revision + 1
-		row.CommittedAtMs = now.UnixMilli()
-		save := tx
-		if row.ShadowCheckpointHash == "" {
-			save = save.Omit("ShadowCheckpointHash")
-		}
-		if err := save.Save(row).Error; err != nil {
-			return err
-		}
-		if err := finalizeMigrationProbe(tx, a.probe); err != nil {
-			return err
-		}
-		if err := finalizeAdmissionProof(tx, c, a.deployment, row.CommitRevision); err != nil {
-			return err
-		}
-		if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
-			return err
-		}
-		if err := finalizeMigrationProbe(tx, a.probe); err != nil {
-			return err
-		}
-		result = row
-		return nil
+		result, err = s.commitPreparedPinsTx(tx, c, a, sealRevision)
+		return err
 	})
 	if err == nil && s.DB == DB {
 		rebuildModelCachesAfterWrite()
@@ -599,10 +514,10 @@ func migrationCommittedMatches(tx *gorm.DB, row *ChannelMigrationPrepared, input
 // ReadPreparedMigration requires the CURRENT family head and, for committed
 // state, every atomic postcondition. Historical receipts cannot authorize work.
 func (s *ChannelAdmissionStore) ReadPreparedMigration(ctx context.Context, operationID string) (result *ChannelMigrationPrepared, err error) {
-	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
+	err = s.controlTransaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		result, err = readPreparedMigrationTx(tx, c, operationID, false)
 		return err
-	})
+	}, false, true)
 	return
 }
 
@@ -1009,4 +924,99 @@ func abandonPreparedTx(tx *gorm.DB, c *ChannelAdmissionControl, row *ChannelMigr
 		row.State = "abandoned"
 	}
 	return nil
+}
+
+// commitPreparedPinsTx requires the same held control transaction as sealTx.
+func (s *ChannelAdmissionStore) commitPreparedPinsTx(tx *gorm.DB, c *ChannelAdmissionControl, a *migrationAuthorization, sealRevision int64) (result *ChannelMigrationPrepared, err error) {
+	input := a.request
+	err = func() error {
+		if err := validateMigrationAuthorization(tx, c, a, "commit", s.MigrationFeatures); err != nil {
+			return err
+		}
+		row, err := loadMigration(tx, input.Seal.OperationID)
+		if err != nil {
+			return err
+		}
+		if row.SealRevision != sealRevision {
+			return ErrChannelAdmissionConflict
+		}
+		if row.State == "committed" {
+			if err := migrationCommittedMatches(tx, row, input); err != nil {
+				return err
+			}
+			if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
+				return err
+			}
+			result = row
+			return finalizeMigrationProbe(tx, a.probe)
+		}
+		if err := migrationSnapshotMatches(tx, input, ChannelStatusDisabled); err != nil {
+			return err
+		}
+		if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
+			return err
+		}
+		configs, err := migrationConfigRows(tx)
+		if err != nil {
+			return err
+		}
+		plan, err := migrationPlanConfigRewrites(configs, input)
+		if err != nil {
+			return err
+		}
+		for _, change := range plan {
+			update := tx.Table("model_configs").Where("model = ? AND config = ?", change.model, change.before).UpdateColumn("config", change.after)
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != 1 {
+				return ErrChannelAdmissionConflict
+			}
+		}
+		update := tx.Model(&Channel{}).Where("id = ? AND status = ?", input.Seal.To.ChannelID, ChannelStatusDisabled).UpdateColumn("status", ChannelStatusEnabled)
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected != 1 {
+			return ErrChannelAdmissionConflict
+		}
+		after, err := migrationConfigRows(tx)
+		if err != nil {
+			return err
+		}
+		hash, err := admissionHash(after)
+		if err != nil {
+			return err
+		}
+		now, err := channelAdmissionTime(tx)
+		if err != nil {
+			return err
+		}
+		row.State = "committed"
+		row.AfterPinHash = hash
+		row.CommitRevision = c.Revision + 1
+		row.CommittedAtMs = now.UnixMilli()
+		save := tx
+		if row.ShadowCheckpointHash == "" {
+			save = save.Omit("ShadowCheckpointHash")
+		}
+		if err := save.Save(row).Error; err != nil {
+			return err
+		}
+		if err := finalizeMigrationProbe(tx, a.probe); err != nil {
+			return err
+		}
+		if err := finalizeAdmissionProof(tx, c, a.deployment, row.CommitRevision); err != nil {
+			return err
+		}
+		if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
+			return err
+		}
+		if err := finalizeMigrationProbe(tx, a.probe); err != nil {
+			return err
+		}
+		result = row
+		return nil
+	}()
+	return
 }

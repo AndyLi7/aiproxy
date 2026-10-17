@@ -30,19 +30,20 @@ type ChannelMigrationProbeRecord struct {
 }
 
 type ChannelMigrationPrepared struct {
-	OperationID       string `gorm:"primaryKey;size:128"`
-	RequestJSON       string `gorm:"type:text;not null"`
-	RequestHash       string `gorm:"size:64;not null"`
-	StorageGeneration string `gorm:"size:128;not null"`
-	ProbeHash         string `gorm:"size:64;not null"`
-	ProbeFactHash     string `gorm:"size:64;not null"`
-	State             string `gorm:"size:16;not null"`
-	SealRevision      int64  `gorm:"not null"`
-	CommitRevision    int64  `gorm:"not null"`
-	CommittedAtMs     int64  `gorm:"not null"`
-	AfterPinHash      string `gorm:"size:64;not null"`
-	FromChannelID     int    `gorm:"index;not null"`
-	ToChannelID       int    `gorm:"index;not null"`
+	ShadowCheckpointHash string `gorm:"size:64;not null;default:''"`
+	OperationID          string `gorm:"primaryKey;size:128"`
+	RequestJSON          string `gorm:"type:text;not null"`
+	RequestHash          string `gorm:"size:64;not null"`
+	StorageGeneration    string `gorm:"size:128;not null"`
+	ProbeHash            string `gorm:"size:64;not null"`
+	ProbeFactHash        string `gorm:"size:64;not null"`
+	State                string `gorm:"size:16;not null"`
+	SealRevision         int64  `gorm:"not null"`
+	CommitRevision       int64  `gorm:"not null"`
+	CommittedAtMs        int64  `gorm:"not null"`
+	AfterPinHash         string `gorm:"size:64;not null"`
+	FromChannelID        int    `gorm:"index;not null"`
+	ToChannelID          int    `gorm:"index;not null"`
 }
 
 // ExpectedPinHash is a gateway-generated opaque digest of the complete raw
@@ -139,7 +140,22 @@ func migrationStorageReady(tx *gorm.DB) error {
 		if err := st.Parse(m); err != nil {
 			return err
 		}
-		rows, err := tx.Model(m).Select(st.Schema.DBNames).Limit(0).Rows()
+		columns := st.Schema.DBNames
+		if _, isPrepared := m.(*ChannelMigrationPrepared); isPrepared {
+			present, e := shadowStoragePresent(tx)
+			if e != nil {
+				return e
+			}
+			if !present {
+				columns = make([]string, 0, len(st.Schema.DBNames))
+				for _, name := range st.Schema.DBNames {
+					if name != "shadow_checkpoint_hash" {
+						columns = append(columns, name)
+					}
+				}
+			}
+		}
+		rows, err := tx.Model(m).Select(columns).Limit(0).Rows()
 		if err != nil {
 			return ErrChannelAdmissionUnavailable
 		}
@@ -241,9 +257,16 @@ func loadMigration(tx *gorm.DB, id string, snapshotRead ...bool) (*ChannelMigrat
 	}
 	return &row, nil
 }
-func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *migrationAuthorization, stage string) error {
+func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *migrationAuthorization, stage string, features []string) error {
+	// All command writers already hold control; acquire owned resource before Prepared.
+	if _, err := loadShadowResource(tx, a.request.Seal.OperationID, a.request.Seal.To.ChannelID, false); err != nil {
+		return err
+	}
 	row, err := loadMigration(tx, a.request.Seal.OperationID)
 	if err != nil {
+		return err
+	}
+	if err := validatePreparedShadowLink(tx, c, row, a.request, false); err != nil {
 		return err
 	}
 	encoded, _ := json.Marshal(a.request)
@@ -263,6 +286,18 @@ func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *
 		}
 	}
 	if stage == "seal" {
+		if row.State == "prepared" && row.ShadowCheckpointHash != "" {
+			r, e := loadShadowResource(tx, row.OperationID, row.ToChannelID, false)
+			if e != nil || r == nil {
+				return ErrChannelAdmissionConflict
+			}
+			if e = lockShadowSourceRows(tx); e != nil {
+				return e
+			}
+			if _, e = shadowObserve(tx, c, r, features, true); e != nil {
+				return e
+			}
+		}
 		if row.State == "prepared" {
 			family, err := migrationFamilyHash(tx, a.request.Seal.From.KeyDigest, a.request.Seal.To.KeyDigest)
 			if err != nil {
@@ -296,10 +331,14 @@ func (s *ChannelAdmissionStore) PrepareMigration(ctx context.Context, input Chan
 		if err := migrationStorageReady(tx); err != nil {
 			return err
 		}
+		resource, err := prepareShadowResource(tx, c, input, s.MigrationFeatures)
+		if err != nil {
+			return err
+		}
 		var old ChannelMigrationPrepared
 		e := tx.First(&old, "operation_id = ?", input.Seal.OperationID).Error
 		if e == nil {
-			if err := validateMigrationAuthorization(tx, c, a, "seal"); err != nil {
+			if err := validateMigrationAuthorization(tx, c, a, "seal", s.MigrationFeatures); err != nil {
 				return err
 			}
 			if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
@@ -338,8 +377,20 @@ func (s *ChannelAdmissionStore) PrepareMigration(ctx context.Context, input Chan
 		raw, _ := json.Marshal(input)
 		probeFactHash, _ := a.probe.Fingerprint()
 		row := ChannelMigrationPrepared{OperationID: input.Seal.OperationID, RequestJSON: string(raw), RequestHash: a.hash, StorageGeneration: c.StorageGeneration, ProbeHash: a.probe.EvidenceHash, ProbeFactHash: probeFactHash, State: "prepared", FromChannelID: input.Seal.From.ChannelID, ToChannelID: input.Seal.To.ChannelID}
-		if err := tx.Create(&row).Error; err != nil {
+		if resource != nil {
+			row.ShadowCheckpointHash = resource.CheckpointHash
+		}
+		create := tx
+		if resource == nil {
+			create = create.Omit("ShadowCheckpointHash")
+		}
+		if err := create.Create(&row).Error; err != nil {
 			return err
+		}
+		if resource != nil {
+			if err := consumeShadowResource(tx, c, resource, &row); err != nil {
+				return err
+			}
 		}
 		if err := finalizeMigrationProbe(tx, a.probe); err != nil {
 			return err
@@ -443,7 +494,7 @@ func (s *ChannelAdmissionStore) CommitPreparedPins(ctx context.Context, input Ch
 		return nil, err
 	}
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
-		if err := validateMigrationAuthorization(tx, c, a, "commit"); err != nil {
+		if err := validateMigrationAuthorization(tx, c, a, "commit", s.MigrationFeatures); err != nil {
 			return err
 		}
 		row, err := loadMigration(tx, input.Seal.OperationID)
@@ -509,7 +560,11 @@ func (s *ChannelAdmissionStore) CommitPreparedPins(ctx context.Context, input Ch
 		row.AfterPinHash = hash
 		row.CommitRevision = c.Revision + 1
 		row.CommittedAtMs = now.UnixMilli()
-		if err := tx.Save(row).Error; err != nil {
+		save := tx
+		if row.ShadowCheckpointHash == "" {
+			save = save.Omit("ShadowCheckpointHash")
+		}
+		if err := save.Save(row).Error; err != nil {
 			return err
 		}
 		if err := finalizeMigrationProbe(tx, a.probe); err != nil {
@@ -564,6 +619,9 @@ func readPreparedMigrationTx(tx *gorm.DB, c *ChannelAdmissionControl, operationI
 		hash, _ := admissionHash(req)
 		if hash != row.RequestHash || row.StorageGeneration != c.StorageGeneration || req.Seal.Epoch != c.Epoch {
 			return ErrChannelAdmissionConflict
+		}
+		if err := validatePreparedShadowLink(tx, c, row, req, snapshotRead); err != nil {
+			return err
 		}
 		if row.State == "abandoned" {
 			result = row
@@ -875,49 +933,80 @@ func (s *ChannelAdmissionStore) AbandonPrepared(ctx context.Context, operationID
 		return nil, ErrChannelAdmissionConflict
 	}
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
+		if _, err := loadShadowResource(tx, operationID, 0, false); err != nil {
+			return err
+		}
 		row, err := loadMigration(tx, operationID)
 		if err != nil {
 			return err
 		}
-		var req ChannelMigrationRequest
-		if json.Unmarshal([]byte(row.RequestJSON), &req) != nil {
+		if row.RequestHash != requestHash {
 			return ErrChannelAdmissionConflict
 		}
-		hash, _ := admissionHash(req)
-		if row.RequestHash != requestHash || hash != requestHash || req.Seal.OperationID != operationID || row.StorageGeneration != c.StorageGeneration || row.FromChannelID != req.Seal.From.ChannelID || row.ToChannelID != req.Seal.To.ChannelID || row.SealRevision != 0 || row.CommitRevision != 0 || row.CommittedAtMs != 0 || row.AfterPinHash != "" || (row.State != "prepared" && row.State != "abandoned") {
+		var original ChannelMigrationRequest
+		if json.Unmarshal([]byte(row.RequestJSON), &original) != nil {
 			return ErrChannelAdmissionConflict
 		}
-		if _, err := storedAdmissionIdentity(tx, req.Seal.From); err != nil {
+		if err := validatePreparedShadowLink(tx, c, row, original, false); err != nil {
 			return err
 		}
-		shadow, err := storedAdmissionIdentity(tx, req.Seal.To)
-		if err != nil {
-			return err
-		}
-		if shadow.Status != ChannelStatusDisabled {
-			return ErrChannelAdmissionConflict
-		}
-		for _, table := range []any{&ChannelAdmissionBarrier{}, &ChannelAdmissionFamily{}} {
-			var count int64
-			if err := tx.Model(table).Where("operation_id = ?", operationID).Count(&count).Error; err != nil {
-				return err
-			}
-			if count != 0 {
+		if row.ShadowCheckpointHash != "" {
+			resource, e := loadShadowResource(tx, operationID, row.ToChannelID, false)
+			if e != nil || resource == nil {
 				return ErrChannelAdmissionConflict
 			}
-		}
-		if row.State == "prepared" {
-			update := tx.Model(&ChannelMigrationPrepared{}).Where("operation_id = ? AND state = ? AND request_hash = ?", operationID, "prepared", requestHash).UpdateColumn("state", "abandoned")
-			if update.Error != nil {
-				return update.Error
-			}
-			if update.RowsAffected != 1 {
-				return ErrChannelAdmissionConflict
+			if _, e := cancelShadowTx(tx, c, resource, resource.RequestHash, resource.CheckpointHash); e != nil {
+				return e
 			}
 			row.State = "abandoned"
+		} else if e := abandonPreparedTx(tx, c, row, requestHash); e != nil {
+			return e
 		}
+
 		result = row
 		return nil
 	})
 	return
+}
+
+func abandonPreparedTx(tx *gorm.DB, c *ChannelAdmissionControl, row *ChannelMigrationPrepared, requestHash string) error {
+	operationID := row.OperationID
+	var req ChannelMigrationRequest
+	if json.Unmarshal([]byte(row.RequestJSON), &req) != nil {
+		return ErrChannelAdmissionConflict
+	}
+	hash, _ := admissionHash(req)
+	if row.RequestHash != requestHash || hash != requestHash || req.Seal.OperationID != operationID || row.StorageGeneration != c.StorageGeneration || row.FromChannelID != req.Seal.From.ChannelID || row.ToChannelID != req.Seal.To.ChannelID || row.SealRevision != 0 || row.CommitRevision != 0 || row.CommittedAtMs != 0 || row.AfterPinHash != "" || (row.State != "prepared" && row.State != "abandoned") {
+		return ErrChannelAdmissionConflict
+	}
+	if _, err := storedAdmissionIdentity(tx, req.Seal.From); err != nil {
+		return err
+	}
+	shadow, err := storedAdmissionIdentity(tx, req.Seal.To)
+	if err != nil {
+		return err
+	}
+	if shadow.Status != ChannelStatusDisabled {
+		return ErrChannelAdmissionConflict
+	}
+	for _, table := range []any{&ChannelAdmissionBarrier{}, &ChannelAdmissionFamily{}} {
+		var count int64
+		if err := tx.Model(table).Where("operation_id = ?", operationID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return ErrChannelAdmissionConflict
+		}
+	}
+	if row.State == "prepared" {
+		update := tx.Model(&ChannelMigrationPrepared{}).Where("operation_id = ? AND state = ? AND request_hash = ?", operationID, "prepared", requestHash).UpdateColumn("state", "abandoned")
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected != 1 {
+			return ErrChannelAdmissionConflict
+		}
+		row.State = "abandoned"
+	}
+	return nil
 }

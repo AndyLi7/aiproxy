@@ -23,23 +23,30 @@ type ChannelMigrationShadowProtocol struct {
 	Version int `gorm:"not null"`
 }
 type ChannelMigrationShadowResource struct {
-	OperationID          string `gorm:"primaryKey;size:128"`
-	Version              int    `gorm:"not null"`
-	RequestJSON          string `gorm:"type:text;not null"`
-	RequestHash          string `gorm:"size:64;not null"`
-	SourceSnapshotHash   string `gorm:"size:64;not null"`
-	SourceFamilyHash     string `gorm:"size:64;not null"`
-	SourceEpoch          string `gorm:"size:128;not null"`
-	SourceRevision       int64  `gorm:"not null"`
-	StorageGeneration    string `gorm:"size:128;not null"`
-	FromChannelID        int    `gorm:"not null;index"`
-	ShadowChannelID      int    `gorm:"not null;uniqueIndex"`
-	ShadowKeyDigest      string `gorm:"size:64;not null"`
-	ShadowIdentityHash   string `gorm:"size:64;not null"`
-	ShadowProjectionHash string `gorm:"size:64;not null"`
-	CreatedRevision      int64  `gorm:"not null"`
-	CreatedAtMs          int64  `gorm:"not null"`
-	CheckpointHash       string `gorm:"size:64;not null"`
+	OperationID           string `gorm:"primaryKey;size:128"`
+	Version               int    `gorm:"not null"`
+	RequestJSON           string `gorm:"type:text;not null"`
+	RequestHash           string `gorm:"size:64;not null"`
+	SourceSnapshotHash    string `gorm:"size:64;not null"`
+	SourceFamilyHash      string `gorm:"size:64;not null"`
+	SourceEpoch           string `gorm:"size:128;not null"`
+	SourceRevision        int64  `gorm:"not null"`
+	StorageGeneration     string `gorm:"size:128;not null"`
+	FromChannelID         int    `gorm:"not null;index"`
+	ShadowChannelID       int    `gorm:"not null;uniqueIndex"`
+	ShadowKeyDigest       string `gorm:"size:64;not null"`
+	ShadowIdentityHash    string `gorm:"size:64;not null"`
+	ShadowProjectionHash  string `gorm:"size:64;not null"`
+	CreatedRevision       int64  `gorm:"not null"`
+	CreatedAtMs           int64  `gorm:"not null"`
+	CheckpointHash        string `gorm:"size:64;not null"`
+	LifecycleState        string `gorm:"size:16;not null;default:unknown"`
+	LifecycleRevision     int64  `gorm:"not null;default:0"`
+	PreparedRequestHash   string `gorm:"size:64;not null;default:''"`
+	PreparedProbeHash     string `gorm:"size:64;not null;default:''"`
+	PreparedProbeFactHash string `gorm:"size:64;not null;default:''"`
+	PreparedAtMs          int64  `gorm:"not null;default:0"`
+	CancelledAtMs         int64  `gorm:"not null;default:0"`
 }
 type MigrationShadowSource struct {
 	SourceSnapshotHash string          `json:"sourceSnapshotHash"`
@@ -139,7 +146,7 @@ func shadowStorageReady(tx *gorm.DB) error {
 		}
 	}
 	var p ChannelMigrationShadowProtocol
-	if tx.First(&p, 1).Error != nil || p.Version != 1 {
+	if tx.First(&p, 1).Error != nil || p.Version != 2 {
 		return ErrChannelAdmissionUnavailable
 	}
 	var bad int64
@@ -271,7 +278,13 @@ func shadowNoOperationEffects(tx *gorm.DB, op string) error {
 	}
 	return nil
 }
-func shadowObserve(tx *gorm.DB, c *ChannelAdmissionControl, row *ChannelMigrationShadowResource, features []string) (MigrationShadowReceipt, error) {
+func shadowObserve(tx *gorm.DB, c *ChannelAdmissionControl, row *ChannelMigrationShadowResource, features []string, allowConsumed ...bool) (MigrationShadowReceipt, error) {
+	if err := shadowLifecycleValid(row); err != nil {
+		return MigrationShadowReceipt{}, err
+	}
+	if row.LifecycleState != "created" && !(len(allowConsumed) > 0 && allowConsumed[0] && row.LifecycleState == "consumed") {
+		return MigrationShadowReceipt{}, ErrChannelAdmissionConflict
+	}
 	var empty MigrationShadowReceipt
 	var bindings int64
 	if e := tx.Model(&ChannelMigrationShadowResource{}).Where("operation_id = ? OR shadow_channel_id = ?", row.OperationID, row.ShadowChannelID).Count(&bindings).Error; e != nil {
@@ -489,6 +502,8 @@ func (s *ChannelAdmissionStore) CreateMigrationShadow(ctx context.Context, req M
 			return e
 		}
 		row = ChannelMigrationShadowResource{OperationID: req.OperationID, Version: 1, RequestJSON: string(raw), RequestHash: hash, SourceFamilyHash: familyHash, SourceSnapshotHash: req.Source.SourceSnapshotHash, SourceEpoch: c.Epoch, SourceRevision: sourceRevision, StorageGeneration: c.StorageGeneration, FromChannelID: req.Source.From.ChannelID, ShadowChannelID: ch.ID, ShadowKeyDigest: identity.KeyDigest, ShadowIdentityHash: identity.IdentityHash, ShadowProjectionHash: projection, CreatedRevision: c.Revision, CreatedAtMs: now.UnixMilli()}
+		row.LifecycleState = "created"
+		row.LifecycleRevision = c.Revision
 		row.CheckpointHash, e = shadowCheckpoint(&row)
 		if e != nil {
 			return e

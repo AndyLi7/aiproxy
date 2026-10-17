@@ -20,7 +20,7 @@ func shadowFixture(t *testing.T, f *admissionFixture) model.MigrationShadowReque
 	inventoryFixture(t, f)
 	require.NoError(t, f.store.DB.Exec("UPDATE channels SET status=1 WHERE id=3").Error)
 	require.NoError(t, f.store.DB.AutoMigrate(&model.ChannelMigrationShadowProtocol{}, &model.ChannelMigrationShadowResource{}))
-	require.NoError(t, f.store.DB.Create(&model.ChannelMigrationShadowProtocol{ID: 1, Version: 1}).Error)
+	require.NoError(t, f.store.DB.Create(&model.ChannelMigrationShadowProtocol{ID: 1, Version: 2}).Error)
 	if f.store.DB.Dialector.Name() == "postgres" {
 		require.NoError(t, f.store.DB.Exec("SELECT setval(pg_get_serial_sequence('channels','id'), (SELECT max(id) FROM channels))").Error)
 	}

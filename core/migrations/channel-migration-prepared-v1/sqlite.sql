@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS channel_migration_probe_records (
 );
 CREATE TABLE IF NOT EXISTS channel_migration_prepareds (
  operation_id VARCHAR(128) PRIMARY KEY,
+ shadow_checkpoint_hash VARCHAR(64) NOT NULL DEFAULT '',
  request_json TEXT NOT NULL,
  request_hash VARCHAR(64) NOT NULL,
  storage_generation VARCHAR(128) NOT NULL,

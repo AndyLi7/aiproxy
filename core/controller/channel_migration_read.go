@@ -124,3 +124,15 @@ func migrationReadUniqueObject(d *json.Decoder, depth int) error {
 	_, err = d.Token()
 	return err
 }
+
+// GetMigrationRetention returns diagnostics only, never a disable/revoke grant.
+func GetMigrationRetention(c *gin.Context) {
+	if !migrationReadNoBody(c) {
+		return
+	}
+	if len(c.Request.URL.Query()) != 0 || !model.ValidMigrationReadOperationID(c.Param("id")) {
+		migrationReadReject(c)
+		return
+	}
+	middleware.SuccessResponse(c, migrationReadStore().ReadMigrationRetention(c.Request.Context(), c.Param("id")))
+}

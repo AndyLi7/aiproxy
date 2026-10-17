@@ -25,7 +25,7 @@ func prepareHTTPProbeForCutover(t *testing.T, f *probeHTTPFixture) model.Migrati
 		Data model.MigrationProbeResult `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &observed))
-	require.NotNil(t, observed.Data.Observation)
+	require.NotNil(t, observed.Data.Observation, string(raw))
 	obs := observed.Data.Observation
 	_, err := f.engine.Poll(t.Context(), obs.TaskID, f.body.GroupID, 1, func(context.Context, *model.NativeTask) (nativetask.Poller, error) {
 		return probeCompletedPoller{}, nil

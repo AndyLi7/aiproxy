@@ -216,73 +216,78 @@ func (s *ChannelAdmissionStore) ReadPreparedMigrationFacts(ctx context.Context, 
 		return migrationReadState("conflict", "migration_read_invalid_operation")
 	}
 	return s.migrationReadTransaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) (MigrationReadResult, error) {
-		r := migrationReadState("ready", "")
-		r.OperationID = operationID
-		r.Epoch = c.Epoch
-		r.Revision = migrationDecimal(c.Revision)
-		r.StorageGeneration = c.StorageGeneration
-		// Only this exact lookup can establish absent. Missing rows in validators
-		// (probe, barrier, family, channel) are conflicts/unavailable, never absence.
-		var count int64
-		if err := tx.Model(&ChannelMigrationPrepared{}).Where("operation_id = ?", operationID).Count(&count).Error; err != nil {
-			return r, err
-		}
-		if count == 0 {
-			if err := migrationReadNoOperationEffects(tx, operationID); err != nil {
-				return r, err
-			}
-			r.State = "absent"
-			return r, nil
-		}
-		row, err := readPreparedMigrationTx(tx, c, operationID, true)
-		if err != nil {
-			return r, err
-		}
-		if row.State == "prepared" {
-			if err := migrationReadNoOperationEffects(tx, operationID); err != nil {
-				return r, err
-			}
-		}
-		if row.State == "abandoned" {
-			return r, ErrChannelAdmissionConflict
-		}
-		var req ChannelMigrationRequest
-		if json.Unmarshal([]byte(row.RequestJSON), &req) != nil {
-			return r, ErrChannelAdmissionConflict
-		}
-		if req.Seal.ExpectedRevision < 0 || req.Seal.ExpectedRevision > c.Revision {
-			return r, ErrChannelAdmissionConflict
-		}
-		snap, err := readMigrationSnapshotTx(tx, c, req.Seal.From, req.Seal.To, true)
-		if err != nil {
-			return r, err
-		}
-		from, err := storedAdmissionIdentity(tx, req.Seal.From, true)
-		if err != nil {
-			return r, err
-		}
-		to, err := storedAdmissionIdentity(tx, req.Seal.To, true)
-		if err != nil {
-			return r, err
-		}
-		r.ConfigModels = &snap.ConfigModels
-		r.Readback = &MigrationReadback{
-			Request: MigrationReadRequest{req.TargetResourceKind, MigrationReadSealRequest{req.Seal.OperationID, req.Seal.Epoch, migrationDecimal(req.Seal.ExpectedRevision), req.Seal.From, req.Seal.To, req.Seal.RevertOf}, req.FromCredentialID, req.ToCredentialID, req.ExpectedPinHash, req.ProjectionHash, req.FamilyHash},
-			Receipt: MigrationReadReceipt{row.OperationID, row.RequestHash, row.StorageGeneration, row.ProbeHash, row.ProbeFactHash, row.State, migrationDecimal(row.SealRevision), migrationDecimal(row.CommitRevision), migrationDecimal(row.CommittedAtMs), row.AfterPinHash, row.FromChannelID, row.ToChannelID},
-			From:    req.Seal.From, To: req.Seal.To, FromEnabled: from.Status == ChannelStatusEnabled, ToEnabled: to.Status == ChannelStatusEnabled, PinHash: snap.PinHash, ProjectionHash: snap.ProjectionHash, FamilyHash: snap.FamilyHash,
-		}
-		if row.State != "prepared" {
-			var head ChannelAdmissionBarrier
-			if err := tx.First(&head, "operation_id = ?", operationID).Error; err != nil {
-				return r, err
-			}
-			if head.RecordedAtMs <= 0 || head.Revision > c.Revision || row.CommitRevision > c.Revision {
-				return r, ErrChannelAdmissionConflict
-			}
-			r.Readback.CurrentHead = &MigrationReadHead{head.Version, head.OperationID, head.Epoch, migrationDecimal(head.Revision), head.FromIdentityHash, head.ToIdentityHash, migrationDecimal(head.RecordedAtMs)}
-		}
-		return r, nil
+		return readPreparedMigrationFactsTx(tx, c, operationID)
 	})
+}
+
+// Shared complete operation observation; callers must use migrationReadTransaction.
+func readPreparedMigrationFactsTx(tx *gorm.DB, c *ChannelAdmissionControl, operationID string) (MigrationReadResult, error) {
+	r := migrationReadState("ready", "")
+	r.OperationID = operationID
+	r.Epoch = c.Epoch
+	r.Revision = migrationDecimal(c.Revision)
+	r.StorageGeneration = c.StorageGeneration
+	// Only this exact lookup can establish absent. Missing rows in validators
+	// (probe, barrier, family, channel) are conflicts/unavailable, never absence.
+	var count int64
+	if err := tx.Model(&ChannelMigrationPrepared{}).Where("operation_id = ?", operationID).Count(&count).Error; err != nil {
+		return r, err
+	}
+	if count == 0 {
+		if err := migrationReadNoOperationEffects(tx, operationID); err != nil {
+			return r, err
+		}
+		r.State = "absent"
+		return r, nil
+	}
+	row, err := readPreparedMigrationTx(tx, c, operationID, true)
+	if err != nil {
+		return r, err
+	}
+	if row.State == "prepared" {
+		if err := migrationReadNoOperationEffects(tx, operationID); err != nil {
+			return r, err
+		}
+	}
+	if row.State == "abandoned" {
+		return r, ErrChannelAdmissionConflict
+	}
+	var req ChannelMigrationRequest
+	if json.Unmarshal([]byte(row.RequestJSON), &req) != nil {
+		return r, ErrChannelAdmissionConflict
+	}
+	if req.Seal.ExpectedRevision < 0 || req.Seal.ExpectedRevision > c.Revision {
+		return r, ErrChannelAdmissionConflict
+	}
+	snap, err := readMigrationSnapshotTx(tx, c, req.Seal.From, req.Seal.To, true)
+	if err != nil {
+		return r, err
+	}
+	from, err := storedAdmissionIdentity(tx, req.Seal.From, true)
+	if err != nil {
+		return r, err
+	}
+	to, err := storedAdmissionIdentity(tx, req.Seal.To, true)
+	if err != nil {
+		return r, err
+	}
+	r.ConfigModels = &snap.ConfigModels
+	r.Readback = &MigrationReadback{
+		Request: MigrationReadRequest{req.TargetResourceKind, MigrationReadSealRequest{req.Seal.OperationID, req.Seal.Epoch, migrationDecimal(req.Seal.ExpectedRevision), req.Seal.From, req.Seal.To, req.Seal.RevertOf}, req.FromCredentialID, req.ToCredentialID, req.ExpectedPinHash, req.ProjectionHash, req.FamilyHash},
+		Receipt: MigrationReadReceipt{row.OperationID, row.RequestHash, row.StorageGeneration, row.ProbeHash, row.ProbeFactHash, row.State, migrationDecimal(row.SealRevision), migrationDecimal(row.CommitRevision), migrationDecimal(row.CommittedAtMs), row.AfterPinHash, row.FromChannelID, row.ToChannelID},
+		From:    req.Seal.From, To: req.Seal.To, FromEnabled: from.Status == ChannelStatusEnabled, ToEnabled: to.Status == ChannelStatusEnabled, PinHash: snap.PinHash, ProjectionHash: snap.ProjectionHash, FamilyHash: snap.FamilyHash,
+	}
+	if row.State != "prepared" {
+		var head ChannelAdmissionBarrier
+		if err := tx.First(&head, "operation_id = ?", operationID).Error; err != nil {
+			return r, err
+		}
+		if head.RecordedAtMs <= 0 || head.Revision > c.Revision || row.CommitRevision > c.Revision {
+			return r, ErrChannelAdmissionConflict
+		}
+		r.Readback.CurrentHead = &MigrationReadHead{head.Version, head.OperationID, head.Epoch, migrationDecimal(head.Revision), head.FromIdentityHash, head.ToIdentityHash, migrationDecimal(head.RecordedAtMs)}
+	}
+	return r, nil
 }
 func ValidMigrationReadOperationID(id string) bool {
 	if len(id) == 0 || len(id) > 128 {

@@ -217,6 +217,7 @@ func newProbeHTTPFixtureDB(t *testing.T, db *gorm.DB, attribution ...bool) *prob
 	api.POST("/operations/:id/prepare", deps.prepare)
 	api.POST("/operations/:id/cutover", CutoverMigrationProbe)
 	api.GET("/operations/:id", GetPreparedMigrationFacts)
+	api.GET("/operations/:id/retention", GetMigrationRetention)
 	api.POST("/snapshot/read", ReadMigrationSnapshotFacts)
 	f.server = httptest.NewServer(r)
 	t.Cleanup(f.server.Close)

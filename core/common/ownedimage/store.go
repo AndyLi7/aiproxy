@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	_ "golang.org/x/image/webp"
 	"image"
@@ -180,6 +181,9 @@ func storeWithMetadata(ctx context.Context, source, base, key string, download, 
 	if err != nil {
 		return fail()
 	}
+	if err := actionguard.Check(ctx); err != nil {
+		return "", "", err
+	}
 	response, err := download.Do(request)
 	if err != nil {
 		return fail()
@@ -228,6 +232,9 @@ func storeWithMetadata(ctx context.Context, source, base, key string, download, 
 	if identity, ok := ctx.Value(archiveIdentityKey{}).(archiveIdentity); ok {
 		request.Header.Set("X-Musespan-Image-Task-ID", identity.taskID)
 		request.Header.Set("X-Musespan-Image-Output-Index", strconv.Itoa(identity.index))
+	}
+	if err := actionguard.Check(ctx); err != nil {
+		return "", "", err
 	}
 	stored, err := upload.Do(request)
 	if err != nil {

@@ -3,6 +3,7 @@ package ownedimage
 import (
 	"bufio"
 	"context"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"image"
 	"io"
 	"net/http"
@@ -27,6 +28,9 @@ func readMetadata(ctx context.Context, source string, client *http.Client) (Meta
 		return Metadata{}, ErrStorage
 	}
 	req.Header.Set("Range", "bytes=0-1048575")
+	if err := actionguard.Check(ctx); err != nil {
+		return Metadata{}, err
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return Metadata{}, ErrStorage

@@ -624,6 +624,10 @@ func SetImageTaskResultGeneration(task *ImageTask, status string, data []ImageOu
 }
 
 func setImageTaskResult(database *gorm.DB, id, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
+	return writeImageTaskResult(database, id, status, data, taskError, true, metadata...)
+}
+
+func writeImageTaskResult(database *gorm.DB, id, status string, data []ImageOutput, taskError *ImageTaskError, legacyFailure bool, metadata ...ImageResultMetadata) error {
 	if status == "completed" && len(data) == 0 {
 		return errors.New("empty completed image result")
 	}
@@ -694,7 +698,7 @@ func setImageTaskResult(database *gorm.DB, id, status string, data []ImageOutput
 			return nil
 		}
 
-		if status == "failed" {
+		if status == "failed" && legacyFailure {
 			if err := tx.Model(&AsyncUsageInfo{}).
 				Where("image_task_id = ?", id).
 				Update("status", AsyncUsageStatusFailed).

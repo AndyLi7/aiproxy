@@ -59,12 +59,13 @@ func TestOversizedArchiveTerminatesAndCannotBeReplayedAsSuccess(t *testing.T) {
 	t.Cleanup(func() { model.LogDB = old })
 	task := &model.ImageTask{ID: "oversize", Status: "result_processing", ArchiveRequired: true, ExpectedImages: 1, Data: []model.ImageOutput{{URL: "https://upstream/1"}}}
 	require.NoError(t, db.Create(task).Error)
-	info := &model.AsyncUsageInfo{ImageTaskID: task.ID}
+	info := &model.AsyncUsageInfo{ImageTaskID: task.ID, Status: model.AsyncUsageStatusPending, ProcessingToken: "archive-owner", NextPollAt: time.Now().Add(time.Minute)}
+	require.NoError(t, db.Create(info).Error)
 	err = archiveImageTask(context.Background(), task, func(context.Context, string) (string, ownedimage.Metadata, error) {
 		return "", ownedimage.Metadata{}, ownedimage.ErrTooLarge
 	})
 	require.ErrorIs(t, err, ownedimage.ErrTooLarge)
-	handleImageArchiveFailure(info, task.ID, err)
+	handleImageArchiveFailure(t.Context(), info, task, err)
 	var saved model.ImageTask
 	require.NoError(t, db.First(&saved, "id = ?", task.ID).Error)
 	require.Equal(t, "failed", saved.Status)

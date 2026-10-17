@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"io"
 	"net/http"
 	"net/url"
@@ -166,6 +167,9 @@ func (c *Client) request(
 	copyClient := *client
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
+	if err := actionguard.Check(ctx); err != nil {
+		return 0, err
+	}
 	resp, err := copyClient.Do(req)
 	if err != nil {
 		return 0, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err), ProviderReason: transportReason(err)}

@@ -248,7 +248,12 @@ func expireImageGeneration(
 		entry.Warn("image task generation timed out; provider cancel unavailable")
 	} else {
 		cancelCtx, cancel := context.WithTimeout(detached, imageCancelTimeout)
-		outcome, err := cancelUpstream(cancelCtx)
+		cancelCtx = actionguard.With(cancelCtx, func(c context.Context) error { return model.ValidateImagePollTerminalCleanup(c, info) })
+		var outcome string
+		err := actionguard.Check(cancelCtx)
+		if err == nil {
+			outcome, err = cancelUpstream(cancelCtx)
+		}
 		cancel()
 
 		if err != nil {

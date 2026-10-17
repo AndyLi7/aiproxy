@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
 )
@@ -49,8 +50,14 @@ func (c *Client) Cancel(ctx context.Context, modelName, id string, frozenContrac
 		}
 	}
 
+	if err := actionguard.Check(ctx); err != nil {
+		return "", err
+	}
 	_, code, err := c.nativeRequest(ctx, http.MethodPut, path+"/cancel", nil)
 	if code == http.StatusMethodNotAllowed && path != legacy {
+		if err := actionguard.Check(ctx); err != nil {
+			return "", err
+		}
 		_, code, err = c.nativeRequest(ctx, http.MethodPut, legacy+"/cancel", nil)
 	}
 	switch {

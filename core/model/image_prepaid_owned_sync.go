@@ -16,7 +16,10 @@ type imageWalletClaimContext struct {
 	control *ChannelAdmissionControl
 }
 
-func imageWalletPollTransaction(ctx context.Context, work func(*gorm.DB, *imageWalletClaimContext) error) error {
+func imageWalletPollTransaction(ctx context.Context, info *AsyncUsageInfo, work func(*gorm.DB, *imageWalletClaimContext) error) error {
+	if info != nil && info.imagePoll != nil {
+		return imagePollTransaction(ctx, info, work)
+	}
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil {
 		return err
@@ -98,7 +101,7 @@ func withImageWalletPollClaim(ctx context.Context, info *AsyncUsageInfo, observe
 		return ErrImagePollClaimLost
 	}
 	var granted *ImageTask
-	err := imageWalletPollTransaction(ctx, func(tx *gorm.DB, authority *imageWalletClaimContext) error {
+	err := imageWalletPollTransaction(ctx, info, func(tx *gorm.DB, authority *imageWalletClaimContext) error {
 		err := withImagePollClaimTx(tx, info, observed, func(tx *gorm.DB, task *ImageTask, usage *AsyncUsageInfo) error {
 			return write(tx, task, usage, func() error {
 				var err error
@@ -124,7 +127,7 @@ func ClaimImagePrepaymentFromPoll(ctx context.Context, info *AsyncUsageInfo, tas
 		return false, ErrImagePollClaimLost
 	}
 	var granted *ImageTask
-	err := imageWalletPollTransaction(ctx, func(tx *gorm.DB, authority *imageWalletClaimContext) error {
+	err := imageWalletPollTransaction(ctx, info, func(tx *gorm.DB, authority *imageWalletClaimContext) error {
 		err := withImagePollClaimTx(tx, info, task, func(tx *gorm.DB, current *ImageTask, usage *AsyncUsageInfo) error {
 			if current.Status != task.Status {
 				return ErrImagePollClaimLost

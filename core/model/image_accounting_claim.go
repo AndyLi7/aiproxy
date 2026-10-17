@@ -46,7 +46,7 @@ func withImageAccountingClaim(ctx context.Context, info *AsyncUsageInfo, write f
 	if err != nil {
 		return err
 	}
-	return LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return imagePollTransaction(ctx, info, func(tx *gorm.DB, _ *imageWalletClaimContext) error {
 		// Image tasks always lock task -> usage -> log. Synchronous measured images
 		// have no task row and take usage -> log; never manufacture a task identity.
 		var task ImageTask
@@ -130,7 +130,7 @@ func withImageAccountingClaim(ctx context.Context, info *AsyncUsageInfo, write f
 			return ErrImagePollClaimLost
 		}
 		return nil
-	}, claimTxOptions(LogDB)...)
+	})
 }
 
 func ValidateImageAccountingClaim(ctx context.Context, info *AsyncUsageInfo) error {
@@ -187,7 +187,7 @@ func verifyAccountingWrite(query *gorm.DB, affected int64, values map[string]any
 	return nil
 }
 func updateImageAccountingUsage(info *AsyncUsageInfo, values map[string]any) error {
-	return withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, _ *Log) error {
+	return withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, _ *Log) error {
 		return writeImageAccountingUsage(tx, current, values)
 	})
 }

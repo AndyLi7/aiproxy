@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/common/ownedartifact"
 	"github.com/labring/aiproxy/core/model"
@@ -107,6 +108,15 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			prepared, e := f.store.PrepareReverseMigrationFromProbe(t.Context(), req.Seal.OperationID, nil)
 			require.NoError(t, e)
 			require.Equal(t, "prepared", prepared.State)
+			// Integration boundary: a valid reverse probe cannot use the forward HTTP route.
+			var run model.ChannelMigrationProbeRun
+			require.NoError(t, f.db.First(&run, "operation_id=?", req.Seal.OperationID).Error)
+			binding := model.MigrationProbeCutoverBinding{Version: 1, AuthorizationHash: run.AuthorizationHash, RequestHash: prepared.RequestHash, ProbeFactHash: prepared.ProbeFactHash, StorageGeneration: prepared.StorageGeneration}
+			_, denied := f.call(t, "POST", "/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover", binding, config.AdminKey)
+			require.Contains(t, string(denied), `"state":"conflict"`)
+			var unchanged model.ChannelMigrationPrepared
+			require.NoError(t, f.db.First(&unchanged, "operation_id=?", req.Seal.OperationID).Error)
+			require.Equal(t, *prepared, unchanged)
 			result, e := f.store.CutoverReversePrepared(t.Context(), req)
 			require.NoError(t, e)
 			require.Equal(t, "committed", result.State)

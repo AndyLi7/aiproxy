@@ -69,11 +69,30 @@ func TestMigrationProbeBillingInteropServer(t *testing.T) {
 		require.True(t, time.Now().Before(deadline), "app resource handshake timed out")
 		time.Sleep(100 * time.Millisecond)
 	}
-	_, raw := f.call(t, "POST", "/api/channel-migrations/operations/http-probe-op/probe", f.body, config.AdminKey)
+	var raw []byte
+	if os.Getenv("B2_PROBE_APP_DRIVEN") != "1" {
+		_, raw = f.call(t, "POST", "/api/channel-migrations/operations/http-probe-op/probe", f.body, config.AdminKey)
+	}
 	var observed struct {
 		Data model.MigrationProbeResult `json:"data"`
 	}
-	require.NoError(t, json.Unmarshal(raw, &observed))
+	if os.Getenv("B2_PROBE_APP_DRIVEN") == "1" {
+		// This mode never starts a probe: only the actual app command may POST.
+		for {
+			_, raw = f.call(t, "GET", "/api/channel-migrations/operations/http-probe-op/probe", nil, config.AdminKey)
+			require.NoError(t, json.Unmarshal(raw, &observed))
+			if observed.Data.Observation != nil && observed.Data.Observation.UseID != "" && observed.Data.Observation.TaskStatus == "pending" {
+				break
+			}
+			if _, e = os.Stat(filepath.Join(dir, "stop")); e == nil {
+				return
+			}
+			require.True(t, time.Now().Before(deadline), "app probe POST timed out")
+			time.Sleep(100 * time.Millisecond)
+		}
+	} else {
+		require.NoError(t, json.Unmarshal(raw, &observed))
+	}
 	require.NotNil(t, observed.Data.Observation)
 	taskID := observed.Data.Observation.TaskID
 	done, e := f.engine.Poll(t.Context(), taskID, f.body.GroupID, 1, func(context.Context, *model.NativeTask) (nativetask.Poller, error) {

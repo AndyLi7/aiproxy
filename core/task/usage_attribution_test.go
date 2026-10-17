@@ -359,6 +359,8 @@ func TestImageTaskOutboxPricesAtHandlerTime(t *testing.T) {
 	}
 	info.SetUsageIdentity(usage)
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+	require.NoError(t, db.Create(&model.ImageTask{ID: info.ImageTaskID, GroupID: info.GroupID, TokenID: info.TokenID, UsageID: info.ID, Status: "completed", BillingOperationID: info.BillingOperationID}).Error)
 
 	require.NoError(t, completeAsyncUsage(t.Context(), info, model.Usage{ImageOutputTokens: 1}, model.UsageContext{}))
 	require.Len(t, wallet.consumes, 1)

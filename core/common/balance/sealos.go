@@ -12,6 +12,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/common/conv"
 	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/model"
@@ -268,6 +269,9 @@ func (s *Sealos) GetGroupRemainBalance(
 	group model.GroupCache,
 ) (float64, PostGroupConsumer, error) {
 	for i := 0; ; i++ {
+		if err := actionguard.Check(ctx); err != nil {
+			return 0, nil, err
+		}
 		balance, userUID, err := s.getGroupRemainBalance(ctx, group.ID)
 		if err == nil {
 			if sealosCheckRealNameEnable &&
@@ -368,6 +372,9 @@ func (s *Sealos) fetchRealNameFromAPI(ctx context.Context, userUID string) (bool
 
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 
+	if err := actionguard.Check(ctx); err != nil {
+		return false, err
+	}
 	resp, err := sealosHTTPClient.Do(req)
 	if err != nil {
 		return false, err
@@ -440,6 +447,9 @@ func (s *Sealos) fetchBalanceFromAPI(
 
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 
+	if err := actionguard.Check(ctx); err != nil {
+		return nil, err
+	}
 	resp, err := sealosHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -510,6 +520,9 @@ func (s *SealosPostGroupConsumer) PostGroupConsume(
 	tokenName string,
 	usage float64,
 ) (float64, error) {
+	if err := actionguard.Check(ctx); err != nil {
+		return 0, err
+	}
 	amount := s.calculateAmount(usage)
 
 	if err := cacheDecreaseGroupBalance(ctx, s.group, amount.IntPart()); err != nil {
@@ -558,6 +571,9 @@ func (s *SealosPostGroupConsumer) postConsume(
 
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 
+	if err := actionguard.Check(ctx); err != nil {
+		return err
+	}
 	resp, err := sealosHTTPClient.Do(req)
 	if err != nil {
 		return err

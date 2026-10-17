@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -93,22 +94,11 @@ func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
 }
 
 func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {
-	return LogDB.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&AsyncUsageInfo{}).
-			Where("id = ? AND processing_token = ?", info.ID, info.ProcessingToken).
-			Updates(map[string]any{"status": AsyncUsageStatusMeasurementPending, "processing_token": "", "error": "immutable image measurement pending"})
-		if result.Error != nil {
-			return result.Error
+	return withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+		if err := writeImageAccountingUsage(tx, current, map[string]any{"status": AsyncUsageStatusMeasurementPending, "processing_token": "", "error": "immutable image measurement pending"}); err != nil {
+			return err
 		}
-
-		if result.RowsAffected != 1 {
-			return errors.New("measured usage claim lost")
-		}
-
-		return tx.Model(&Log{}).
-			Where("id = ?", info.LogID).
-			Update("async_usage_status", AsyncUsageStatusMeasurementPending).
-			Error
+		return writeImageAccountingLog(tx, entry, map[string]any{"async_usage_status": AsyncUsageStatusMeasurementPending})
 	})
 }
 
@@ -143,32 +133,17 @@ func PrepareClaimedImageTaskMeasurement(
 		return err
 	}
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
-		row := tx.Model(&AsyncUsageInfo{}).
-			Where("id = ? AND processing_token = ? AND status = ?", info.ID, info.ProcessingToken, AsyncUsageStatusPending).
-			Updates(values)
-		if row.Error != nil {
-			return row.Error
+	return withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+		if current.MeasuredImage {
+			return errors.New("image measurement already frozen")
 		}
-
-		if row.RowsAffected != 1 {
-			return errors.New("image measurement claim lost")
+		if err := writeImageAccountingUsage(tx, current, values); err != nil {
+			return err
 		}
-
 		logValues, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount")
 		if err != nil {
 			return err
 		}
-
-		row = tx.Model(&Log{}).Where("id = ?", info.LogID).Updates(logValues)
-		if row.Error != nil {
-			return row.Error
-		}
-
-		if row.RowsAffected != 1 {
-			return errors.New("image measurement log missing")
-		}
-
-		return nil
+		return writeImageAccountingLog(tx, entry, logValues)
 	})
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/model"
 )
 
@@ -82,6 +83,9 @@ func (e *ExternalHTTP) MeasuredZero(ctx context.Context, request MeasuredZeroReq
 	client := *externalHTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
+	if err := actionguard.Check(ctx); err != nil {
+		return "", err
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("measured-zero receipt unavailable: %w", err)

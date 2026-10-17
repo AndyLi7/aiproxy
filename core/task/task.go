@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
@@ -430,6 +431,9 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	defer stopRenew()
 
 	if info.MeasuredImage {
+		if err := model.ValidateImageAccountingClaim(ctx, info); err != nil {
+			return
+		}
 		result := info.Amount.ImageBillingResult
 		if info.Status != model.AsyncUsageStatusPending {
 			return
@@ -578,7 +582,7 @@ func completePolledAsyncUsage(
 	usageContext model.UsageContext,
 ) {
 	if err := completeAsyncUsage(ctx, info, usage, usageContext); err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, model.ErrImagePollClaimLost) {
 			log.Debugf(
 				"async usage poll: claim work cancelled id=%d request_id=%s upstream_id=%s",
 				info.ID,
@@ -752,6 +756,17 @@ func completeAsyncUsage(
 		return err
 	}
 
+	if model.UsesImageAccountingClaim(info) {
+		originalToken := info.ProcessingToken
+		ctx = actionguard.With(ctx, func(checkCtx context.Context) error {
+			snapshot := *info
+			snapshot.ProcessingToken = originalToken
+			return model.ValidateImageAccountingClaim(checkCtx, &snapshot)
+		})
+		if err := actionguard.Check(ctx); err != nil {
+			return err
+		}
+	}
 	usageContext = usageContext.WithFallback(info.UsageContext)
 
 	price := info.Price
@@ -856,6 +871,14 @@ func completeAsyncUsage(
 		charged, replaySafe, err := consumeAsyncUsageGroupBalance(ctx, info, amount.UsedAmount)
 
 		nonReplaySafeDebitAttempted = charged && !replaySafe
+		if model.UsesImageAccountingClaim(info) {
+			if guardErr := actionguard.Check(ctx); guardErr != nil {
+				return guardErr
+			}
+			if err != nil && charged && !replaySafe {
+				return fmt.Errorf("%w: non-replay-safe debit outcome unknown: %s", errAsyncUsageManualSettlement, err)
+			}
+		}
 		if err != nil {
 			if errors.Is(err, errAsyncUsageManualSettlement) {
 				return err
@@ -895,7 +918,7 @@ func completeAsyncUsage(
 		} else if charged {
 			info.BalanceConsumed = true
 			if err := markAsyncUsageBalanceConsumed(info); err != nil {
-				if replaySafe {
+				if replaySafe || requiresAccountingLog(info) {
 					return fmt.Errorf(
 						"%w: persist consumed balance: %s",
 						errAsyncUsageSettlementPending,
@@ -921,6 +944,9 @@ func completeAsyncUsage(
 		}
 	}
 
+	if err := actionguard.Check(ctx); err != nil {
+		return err
+	}
 	info.Status = model.AsyncUsageStatusCompleted
 	info.Usage = usage
 	info.UsageContext = usageContext
@@ -1028,6 +1054,9 @@ func reportMeasuredZero(ctx context.Context, info *model.AsyncUsageInfo) error {
 
 	usage, _ := info.UsageIdentity()
 
+	if err := actionguard.Check(ctx); err != nil {
+		return err
+	}
 	_, err := reporter.MeasuredZero(ctx, balance.MeasuredZeroRequest{
 		Group:              info.GroupID,
 		RequestID:          info.RequestID,
@@ -1194,6 +1223,9 @@ func consumeAsyncUsageGroupBalance(
 		ctx = balance.ContextWithUsageIdentity(ctx, usage)
 	}
 
+	if err := actionguard.Check(ctx); err != nil {
+		return false, false, err
+	}
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
 	if err != nil {
 		return false, false, fmt.Errorf("get group balance: %w", err)
@@ -1226,6 +1258,9 @@ func consumeAsyncUsageGroupBalance(
 		info.BalanceConsumeAttempted = true
 	}
 
+	if err := actionguard.Check(ctx); err != nil {
+		return false, replaySafe, err
+	}
 	_, err = consumer.PostGroupConsume(ctx, info.TokenName, amount)
 
 	return true, replaySafe, err
@@ -1278,6 +1313,9 @@ func markAsyncUsageFailed(info *model.AsyncUsageInfo, errMsg string) {
 		return
 	}
 
+	if model.UsesImageAccountingClaim(info) {
+		return
+	} // the paired receipt committed with the terminal claim
 	if err := model.IgnoreNotFound(
 		model.UpdateAsyncUsageLogFailed(info, errMsg),
 	); err != nil {

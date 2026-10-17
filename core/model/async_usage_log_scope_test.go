@@ -193,6 +193,10 @@ func TestAsyncUsageLogUpdatesForAccountingOutboxNeedTheirRow(t *testing.T) {
 			requireAsyncScopeLogUntouched(t, db, own)
 
 			info.LogID = own.ID
+			info.ProcessingToken = "accounting-owner"
+			info.Status = model.AsyncUsageStatusPending
+			info.NextPollAt = time.Now().Add(time.Minute)
+			require.NoError(t, db.Create(info).Error)
 			require.NoError(t, update(info))
 
 			var got model.Log

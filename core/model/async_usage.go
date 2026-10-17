@@ -376,6 +376,15 @@ func FailClaimedAsyncUsageInfo(info *AsyncUsageInfo) (bool, error) {
 	if info == nil {
 		return false, nil
 	}
+	if UsesImageAccountingClaim(info) {
+		err := withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			if err := writeImageAccountingUsage(tx, current, map[string]any{"status": AsyncUsageStatusFailed, "error": info.Error, "processing_token": ""}); err != nil {
+				return err
+			}
+			return writeImageAccountingLog(tx, entry, map[string]any{"async_usage_status": AsyncUsageStatusFailed, "content": info.Error})
+		})
+		return err == nil, err
+	}
 	return writeClaimedAsyncUsageInfo(info, map[string]any{
 		"status": int(AsyncUsageStatusFailed), "error": info.Error, "processing_token": "",
 	})
@@ -414,6 +423,20 @@ func CompleteClaimedAsyncUsageInfo(
 		return false, err
 	}
 
+	if UsesImageAccountingClaim(info) {
+		err := withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			// A memory-only consumed flag cannot turn an unknown debit into confirmation.
+			// Prepaid image tasks retain their separately owned billing receipt boundary.
+			if info.BalanceConsumed && !current.BalanceConsumed {
+				return ErrImagePollClaimLost
+			}
+			if err := writeImageAccountingUsage(tx, current, updates); err != nil {
+				return err
+			}
+			return writeImageAccountingLog(tx, entry, map[string]any{"async_usage_status": AsyncUsageStatusCompleted})
+		})
+		return err == nil, err
+	}
 	return writeClaimedAsyncUsageInfo(info, updates)
 }
 
@@ -548,6 +571,9 @@ func writeClaimedAsyncUsageInfo(info *AsyncUsageInfo, updates map[string]any) (b
 var errAsyncUsageClaimExpired = errors.New("async usage claim expired")
 
 func updateClaimedAsyncUsageInfo(info *AsyncUsageInfo, updates map[string]any) error {
+	if info != nil && UsesImageAccountingClaim(info) {
+		return updateImageAccountingUsage(info, updates)
+	}
 	written, err := writeClaimedAsyncUsageInfo(info, updates)
 	if err != nil {
 		return err
@@ -673,6 +699,20 @@ func UpdateAsyncUsageLogUsage(
 	currency string,
 	pricingVersion string,
 ) error {
+	if info != nil && requiresAsyncUsageLogID(info) && info.LogID <= 0 {
+		return NotFoundError("log")
+	}
+	if info != nil && UsesImageAccountingClaim(info) {
+		return withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			update := &AsyncUsageInfo{Usage: usage, UsageContext: usageContext, Price: price, Amount: amount}
+			values, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Price", "Amount")
+			if err != nil {
+				return err
+			}
+			values["currency"], values["pricing_version"], values["async_usage_status"] = currency, pricingVersion, AsyncUsageStatusCompleted
+			return writeImageAccountingLog(tx, entry, values)
+		})
+	}
 	logID, err := resolveAsyncUsageLog(info)
 	if err != nil {
 		return err

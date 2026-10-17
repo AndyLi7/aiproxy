@@ -9,7 +9,7 @@ import (
 func migrationStoragePresent(tx *gorm.DB) (bool, error) {
 	var count int64
 	var err error
-	names := []string{"channel_migration_protocols", "channel_migration_prepareds", "channel_migration_probe_records"}
+	names := []string{"channel_migration_protocols", "channel_migration_prepareds", "channel_migration_probe_records", "channel_migration_shadow_protocols", "channel_migration_shadow_resources"}
 	switch tx.Dialector.Name() {
 	case "sqlite":
 		err = tx.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ?", names).Scan(&count).Error
@@ -23,6 +23,9 @@ func migrationStoragePresent(tx *gorm.DB) (bool, error) {
 	return count > 0, err
 }
 func guardPreparedChannelMutation(tx *gorm.DB, ids []int) error {
+	if err := guardOwnedShadowMutation(tx, ids); err != nil {
+		return err
+	}
 	exists, err := migrationStoragePresent(tx)
 	if err != nil {
 		return err

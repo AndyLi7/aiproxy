@@ -11,6 +11,9 @@ import (
 // the admission control lock so they cannot race a newly accepted task or a
 // seal. Migration history retains physical rows even after their uses close.
 func persistChannelPatchWithAdmission(channel *Channel, patch *ChannelPatch) error {
+	if err := shadowOrdinaryWriteReady(DB); err != nil {
+		return err
+	}
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil {
 		return err
@@ -43,6 +46,9 @@ func persistChannelPatchWithAdmission(channel *Channel, patch *ChannelPatch) err
 }
 
 func deleteChannelsWithAdmission(ids []int, single bool) error {
+	if err := shadowOrdinaryWriteReady(DB); err != nil {
+		return err
+	}
 	write := func(tx *gorm.DB) error {
 		result := tx.Where("id IN ?", ids).Delete(&Channel{})
 		if single {
@@ -66,6 +72,9 @@ func deleteChannelsWithAdmission(ids []int, single bool) error {
 		}
 		var channels []Channel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN ?", ids).Order("id").Find(&channels).Error; err != nil {
+			return err
+		}
+		if err := guardOwnedShadowMutation(tx, ids); err != nil {
 			return err
 		}
 		if !inactive {

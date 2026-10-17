@@ -23,6 +23,8 @@ func SetAPIRouter(router *gin.Engine) {
 	inventoryRouter.GET("/channel-migrations/protocol", controller.GetMigrationCommandProtocol)
 	inventoryRouter.POST("/channel-migrations/snapshot/read", controller.ReadMigrationSnapshotFacts)
 	inventoryRouter.GET("/channel-migrations/operations/:id", controller.GetPreparedMigrationFacts)
+	inventoryRouter.GET("/channel-migrations/operations/:id/shadow", controller.GetMigrationShadow)
+	inventoryRouter.POST("/channel-migrations/operations/:id/shadow", controller.CreateMigrationShadow)
 
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)

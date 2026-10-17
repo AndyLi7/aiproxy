@@ -153,6 +153,9 @@ func migrationStorageReady(tx *gorm.DB) error {
 	if tx.First(&protocol, 1).Error != nil || protocol.Version != 1 {
 		return ErrChannelAdmissionUnavailable
 	}
+	if err := optionalShadowStorageReady(tx); err != nil {
+		return err
+	}
 	return migrationStatesReady(tx)
 }
 func (s *ChannelAdmissionStore) migrationAuthorization(ctx context.Context, input ChannelMigrationRequest) (*migrationAuthorization, error) {

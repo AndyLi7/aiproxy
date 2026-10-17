@@ -58,6 +58,7 @@ type ImageTask struct {
 	admissionPreparation *imageAdmissionPreparation
 	imageRecoveryClaim   *imageBillingRecoveryClaim
 	imageSyncPermit      *imageSyncPermit
+	imageSubmitReceipt   *imageSubmitReceipt
 
 	// Server-only transient generation/identity captured by the real admission
 	// path. Persistent authority lives in channel_admission_uses.
@@ -373,9 +374,13 @@ func releaseImageTaskReservation(database *gorm.DB, id string) error {
 }
 
 func AcceptImageTask(id, upstream string) error {
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return acceptImageTask(LogDB, id, upstream)
+}
+
+func acceptImageTask(database *gorm.DB, id, upstream string) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		var task ImageTask
-		if err := tx.First(&task, "id = ?", id).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, "id = ?", id).Error; err != nil {
 			return err
 		}
 
@@ -387,23 +392,33 @@ func AcceptImageTask(id, upstream string) error {
 			return errors.New("missing upstream id")
 		}
 
-		if err := tx.Model(&task).
-			Updates(map[string]any{"status": "queued", "upstream_id": upstream, "queued_at": gorm.Expr("COALESCE(queued_at, ?)", time.Now().UTC())}).
-			Error; err != nil {
-			return err
+		result := tx.Model(&ImageTask{}).Where("id = ? AND status = ? AND usage_id = ?", id, task.Status, task.UsageID).
+			Updates(map[string]any{"status": "queued", "upstream_id": upstream, "queued_at": gorm.Expr("COALESCE(queued_at, ?)", time.Now().UTC())})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrImageTaskConflict
 		}
 
-		if err := tx.Model(&Log{}).
-			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
-			Update("upstream_id", upstream).
-			Error; err != nil {
-			return err
+		usage := tx.Model(&AsyncUsageInfo{}).Where("id = ? AND image_task_id = ? AND status = ?", task.UsageID, id, AsyncUsageStatusNone).
+			Updates(map[string]any{"status": AsyncUsageStatusPending, "upstream_id": upstream, "next_poll_at": time.Now()})
+		if usage.Error != nil {
+			return usage.Error
 		}
-
-		return tx.Model(&AsyncUsageInfo{}).
-			Where("id = ?", task.UsageID).
-			Updates(map[string]any{"status": AsyncUsageStatusPending, "upstream_id": upstream, "next_poll_at": time.Now()}).
-			Error
+		if usage.RowsAffected != 1 {
+			return ErrImageTaskConflict
+		}
+		entry := tx.Model(&Log{}).
+			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("id = ?", task.UsageID)).
+			Update("upstream_id", upstream)
+		if entry.Error != nil {
+			return entry.Error
+		}
+		if entry.RowsAffected != 1 {
+			return ErrImageTaskConflict
+		}
+		return nil
 	})
 }
 
@@ -826,6 +841,10 @@ func RecoverStaleImageSubmissionsContext(ctx context.Context, now time.Time) err
 // together. A crash before this commit leaves the reservation unknown; it must
 // never cause a second upstream submission.
 func CompleteSyncImageTask(id string, data []ImageOutput, metadata ...ImageResultMetadata) error {
+	return completeSyncImageTask(LogDB, id, data, metadata...)
+}
+
+func completeSyncImageTask(database *gorm.DB, id string, data []ImageOutput, metadata ...ImageResultMetadata) error {
 	if len(metadata) > 1 {
 		return errors.New("multiple image result metadata")
 	}
@@ -838,7 +857,14 @@ func CompleteSyncImageTask(id string, data []ImageOutput, metadata ...ImageResul
 		return err
 	}
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return database.Transaction(func(tx *gorm.DB) error {
+		var current ImageTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if current.Status != "submitting" {
+			return ErrImageTaskConflict
+		}
 		changes := map[string]any{"status": "completed", "data": string(encoded), "updated_at": time.Now()}
 		if len(metadata) == 1 {
 			providerMetadata, err := json.Marshal(metadata[0].ProviderMetadata)

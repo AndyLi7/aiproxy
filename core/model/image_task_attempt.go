@@ -23,7 +23,34 @@ type ImageTaskAttempt struct {
 // SaveImageTaskAttempt persists the audit and route before any upstream side effect.
 // expected is a compare-and-swap guard against concurrent dispatch/replay.
 func SaveImageTaskAttempt(task *ImageTask, expected int, channelID int, baseURL string) error {
-	return saveImageAttemptWithAdmission(task, expected, channelID, baseURL)
+	if task == nil {
+		return ErrImageTaskConflict
+	}
+	if actor := task.imageSubmitReceipt; actor != nil {
+		if actor.index != len(task.Attempts)-1 || actor.identity.ChannelID != channelID {
+			return ErrImageTaskConflict
+		}
+		copy := *actor
+		task.imageSubmitReceipt = &copy
+	}
+	err := saveImageAttemptWithAdmission(task, expected, channelID, baseURL)
+	if err != nil {
+		task.imageSubmitReceipt = nil
+		return err
+	}
+	if task.imageSubmitReceipt != nil {
+		actor := *task.imageSubmitReceipt
+		if actor.index != len(task.Attempts)-1 || actor.identity.ChannelID != channelID {
+			return ErrImageTaskConflict
+		}
+		// Only a successful prepared attempt write can qualify a receipt. A
+		// fresh DB read or copied public generation strings cannot recreate it.
+		actor.generation, actor.attempt = task.AdmissionGeneration, task.AdmissionAttempt
+		actor.facts, actor.createdAt, actor.baseURL = imageSubmissionFacts(task), task.CreatedAt, baseURL
+		actor.ready = true
+		task.imageSubmitReceipt = &actor
+	}
+	return err
 }
 
 func saveImageTaskAttempt(database *gorm.DB, task *ImageTask, expected int, channelID int, baseURL string) error {
@@ -85,6 +112,17 @@ func saveImageTaskAttempt(database *gorm.DB, task *ImageTask, expected int, chan
 		}
 		entry.Metadata["channel_failover_attempts"] = string(encoded)
 		entry.ChannelID = channelID
+		if actor := task.imageSubmitReceipt; actor != nil {
+			var info AsyncUsageInfo
+			if err = tx.First(&info, "id = ?", task.UsageID).Error; err != nil {
+				return err
+			}
+			facts := imageSubmissionUsageFacts(&info)
+			if facts == "" || (actor.usageFacts != "" && actor.usageFacts != facts) {
+				return ErrImageTaskConflict
+			}
+			actor.usageFacts = facts
+		}
 		return tx.Save(&entry).Error
 	})
 }

@@ -335,7 +335,7 @@ func TestImageFailoverPrepaidReleaseBeforeSwitch(t *testing.T) {
 				ChannelType: first.Type, UpstreamModel: mt.ActualModel,
 				PrepaymentQuoteJSON: quote, BillingOperationID: "op-prepaid-failover",
 			}
-			saved, created, err := model.ReserveImageTask(original, &model.AsyncUsageInfo{RequestID: original.ID, RequestAt: time.Now(), GroupID: "g", TokenID: 1, ChannelID: first.ID, BaseURL: first.BaseURL, Price: price, PricingVersion: "v1"})
+			saved, created, err := model.ReserveImageTask(original, &model.AsyncUsageInfo{RequestID: original.ID, BillingOperationID: original.BillingOperationID, RequestAt: time.Now(), GroupID: "g", TokenID: 1, ChannelID: first.ID, BaseURL: first.BaseURL, Price: price, PricingVersion: "v1"})
 			require.NoError(t, err)
 			require.True(t, created)
 

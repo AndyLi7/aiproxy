@@ -696,10 +696,10 @@ func dispatchSyncImageTask(
 	body []byte,
 ) {
 	result, err := a.GenerateImage(ctx, mt, body, []byte(task.ValidationContract))
-	finishSyncImageTask(c, task, result, err)
+	finishSyncImageTask(c, ctx, task, result, err)
 }
 
-func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.ImageTaskResult, err error) {
+func finishSyncImageTask(c *gin.Context, ctx context.Context, task *model.ImageTask, result adaptor.ImageTaskResult, err error) {
 	if err != nil {
 		status := "submission_unknown"
 
@@ -709,7 +709,7 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 			taskError = adaptor.NotAcceptedTaskError(err)
 		}
 
-		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
+		if model.SetSubmittedImageTaskResult(ctx, task, status, taskError) != nil {
 			imageTaskHTTPError(c, 503, "task_store_unavailable")
 			return
 		}
@@ -727,7 +727,7 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 			Code:    "invalid_result",
 			Message: "Image generation failed",
 		}
-		if model.SetImageTaskResult(task.ID, "failed", nil, taskError) != nil {
+		if model.SetSubmittedImageTaskResult(ctx, task, "failed", taskError) != nil {
 			imageTaskHTTPError(c, 503, "task_store_unavailable")
 			return
 		}
@@ -739,7 +739,7 @@ func finishSyncImageTask(c *gin.Context, task *model.ImageTask, result adaptor.I
 		return
 	}
 
-	if model.CompleteSyncImageTask(task.ID, result.Data, result.Metadata) != nil {
+	if model.CompleteSubmittedImageTask(ctx, task, result.Data, result.Metadata) != nil {
 		imageTaskHTTPError(c, 503, "task_store_unavailable")
 		return
 	}

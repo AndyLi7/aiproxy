@@ -443,7 +443,11 @@ func TestImagePollExecutorFirstMeasurementParksAndReturns(t *testing.T) {
 			old := balance.Default
 			balance.Default = pricingCaptureBalance{consumer: consumer}
 			t.Cleanup(func() { balance.Default = old })
-			require.NoError(t, model.CacheSetGroup(&model.GroupCache{ID: info.GroupID, Status: model.GroupStatusEnabled}))
+			// Exercise the real cache-miss path too; a cache-only group expires
+			// under race load and is not a durable billing fixture.
+			require.NoError(t, db.AutoMigrate(&model.Group{}, &model.GroupModelConfig{}))
+			require.NoError(t, db.Create(&model.Group{ID: info.GroupID, Status: model.GroupStatusEnabled}).Error)
+			require.NoError(t, model.CacheDeleteGroup(info.GroupID))
 			t.Cleanup(func() { _ = model.CacheDeleteGroup(info.GroupID) })
 			installTaskImagePoll(t, db)
 			claimPollFixture(t, db, info, "first-measurement", time.Minute)

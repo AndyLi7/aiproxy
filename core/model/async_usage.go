@@ -215,7 +215,14 @@ func RenewAsyncUsageClaimContext(ctx context.Context, id int, token string, leas
 	if err != nil {
 		return false, err
 	}
-	leaseUntil = leaseUntil.UTC().Truncate(time.Microsecond)
+	precision := time.Microsecond
+	if LogDB.Dialector.Name() == "mysql" {
+		// OpenMySQL's existing GORM model uses DATETIME(3). Bind exactly the
+		// same representable value on write and final equality check in either
+		// rounding or TIME_TRUNCATE_FRACTIONAL mode; do not change the schema.
+		precision = time.Millisecond
+	}
+	leaseUntil = leaseUntil.UTC().Truncate(precision)
 	renewed := false
 	err = LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current AsyncUsageInfo

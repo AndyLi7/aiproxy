@@ -2,6 +2,16 @@
 
 基线：已验收 `f43ace39ec6c6da7e03d037ec942389e0b102d8a`。本批不新增 schema、TTL 或执行日志，只修正现有异步 worker 的续租原语及 stop/join。图片 poll 实际动作/回执 fencing 与持久交接后续单独交付。
 
+## 2026-10-17 主控接手：ASYNC-RENEW-R1 修复
+
+在独立 `codex/b2-migration-takeover` 分支接续 A 暂停前的草稿，原工作区保留。MySQL 的延期提议先截到现有 GORM `DATETIME(3)` 能准确保存的毫秒，再比较是否严格延长；写入和最终等值核验使用同一个值。SQLite/PostgreSQL 仍用微秒，不改 schema、三分钟窗口、owner/status/原 deadline 的锁后与写后检查。
+
+新增精度记录驱动验证实际 GORM model/schema/SQL：round-down、round-up、truncate、整毫秒对照，以及两次连续续租、归一后相等/缩短、写后原期限过期回滚和取消。记录驱动不是 MySQL 实例，仍不声称已证明其真实引擎锁语义。
+
+主控本地 `go test -race ./model ./task -run 'TestAsyncUsageRenewal|TestPostgresAsyncUsageRenewal' -count=1 -json`：40 pass、8 个 PG 子场景 skip。随后用已有 PostgreSQL16 镜像和一次性 loopback 数据库补跑真实行锁及 stop/join：10 pass、0 fail、0 skip（含两个父用例），容器和临时凭据已清理。`go build ./...` 通过。证据 `/private/tmp/b2-takeover-renewal.jsonl`、`/private/tmp/b2-takeover-pg-lensiye0/`、`/private/tmp/b2-takeover-build.log`。不将此前 607 项回归算作本次重跑。
+
+该精度修复闭合 ASYNC-RENEW-R1；完整图片 poll fencing、联合关闭、安全停用、实际长转存组合和应用 C2 仍未完成。未推送、部署或执行生产 SQL。
+
 ## 复现与修正
 
 修改前的 `/tmp/b2-poll-lease-before.jsonl` 记录三个定向用例：过期但 token 未变的租约被 Renew 续活、stop 在续租拥有的清理尚未退出时返回，两个用例均失败。同 worker/同秒换随机新 token 后，旧 token 的续租及 touch/retry/fail cleanup 已正确拒绝，作为通过对照保留，未另造 token 机制。

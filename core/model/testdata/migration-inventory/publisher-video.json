@@ -1,0 +1,191 @@
+{
+  "model": "test/film/text-to-video",
+  "config": {
+    "owner": "test",
+    "type": 41,
+    "config": {
+      "x_token_platform_native_result_v1": {
+        "version": 1,
+        "contract": {
+          "artifacts": [
+            {
+              "path": [
+                "video",
+                "url"
+              ]
+            }
+          ],
+          "input_schema": {
+            "properties": {
+              "duration": {
+                "default": "5",
+                "enum": [
+                  "5",
+                  "10"
+                ],
+                "type": "string"
+              },
+              "generate_audio": {
+                "default": false,
+                "type": "boolean"
+              },
+              "prompt": {
+                "default": "A sample prompt",
+                "type": "string"
+              },
+              "resolution": {
+                "default": "720p",
+                "enum": [
+                  "720p",
+                  "1080p"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "prompt"
+            ],
+            "type": "object"
+          },
+          "model": "test/film/text-to-video",
+          "output_schema": {
+            "properties": {
+              "video": {
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "version": 1
+        },
+        "channelId": 8,
+        "endpoint": "test-provider/video-v1",
+        "credentialScope": "credential",
+        "keyFingerprint": "8fdae36beacbc1e5af30ec2dd25e235e6d46c032a9ea0eca8d403f0032b80065",
+        "deliveryBase": "https://gateway.example"
+      },
+      "upstream_prepayment_v1": {
+        "settlementPolicy": "actual-cost-v1",
+        "version": 1,
+        "currency": "USD",
+        "quoteVersion": "release:1",
+        "prepaidMicros": 600000,
+        "routes": [
+          {
+            "routeId": "route",
+            "rule": {
+              "mode": "list_ratio",
+              "ratio": "1.5"
+            },
+            "estimatedMicros": 600000,
+            "prepaidMicros": 600000,
+            "quantityMetric": "request",
+            "channelId": 8,
+            "provider": "fal",
+            "endpoint": "test-provider/video-v1",
+            "credentialScope": "credential"
+          }
+        ]
+      }
+    }
+  },
+  "documentation": {
+    "inputSchema": {
+      "properties": {
+        "duration": {
+          "default": "5",
+          "enum": [
+            "5",
+            "10"
+          ],
+          "type": "string"
+        },
+        "generate_audio": {
+          "default": false,
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": "A sample prompt",
+          "type": "string"
+        },
+        "resolution": {
+          "default": "720p",
+          "enum": [
+            "720p",
+            "1080p"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "requestSchema": {
+      "type": "object",
+      "required": [
+        "model",
+        "input"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "const": "test/film/text-to-video"
+        },
+        "input": {
+          "properties": {
+            "duration": {
+              "default": "5",
+              "enum": [
+                "5",
+                "10"
+              ],
+              "type": "string"
+            },
+            "generate_audio": {
+              "default": false,
+              "type": "boolean"
+            },
+            "prompt": {
+              "default": "A sample prompt",
+              "type": "string"
+            },
+            "resolution": {
+              "default": "720p",
+              "enum": [
+                "720p",
+                "1080p"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "type": "object",
+          "$id": "urn:musespan:native-input:76ec5ba9d223dd7723d0026d14ff2c1c805fb726a51bc18ee4fa285254ac46c6"
+        }
+      }
+    },
+    "outputSchema": {
+      "properties": {
+        "video": {
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "llmsText": "Model: test/film/text-to-video\nPOST /v1/model-tasks with {\"model\":\"test/film/text-to-video\",\"input\":{...}}.\nX-Request-Id is required (1-128 letters, digits, _ or -; a UUID is recommended). The task ID equals the X-Request-Id.\nSubmission is idempotent: if the POST times out, the connection fails, or it returns 429 or 5xx, resend the byte-identical body with the same X-Request-Id. It returns the existing task and is never charged twice. A different body with the same ID returns 409 request_id_conflict.\nPoll GET /v1/model-tasks/{id} every 5 seconds with a total deadline; queued and running are pending, and only status=completed includes output. Null or empty output can be successful. If it returns 404 task_not_found, the POST never arrived: resend it with the same X-Request-Id instead of polling.\nDeclared file URLs are authenticated downloads. Preserve the API authorization header when downloading files."
+  }
+}

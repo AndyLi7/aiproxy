@@ -1,0 +1,76 @@
+{
+  "model": "test/vector/native",
+  "config": {
+    "owner": "test",
+    "type": 41,
+    "config": {
+      "x_token_platform_native_result_v1": {
+        "version": 1,
+        "contract": {
+          "artifacts": [],
+          "input_schema": {
+            "type": "object"
+          },
+          "model": "test/vector/native",
+          "output_schema": {
+            "type": "object"
+          },
+          "version": 1
+        },
+        "channelId": 8,
+        "endpoint": "fal-ai/image2svg",
+        "credentialScope": "credential-1",
+        "keyFingerprint": "a1333f12f8174c5ea9975b88b47c8328418c9e3f76cad286d2bd3ebde6dd0457",
+        "deliveryBase": "https://gateway.example"
+      },
+      "upstream_prepayment_v1": {
+        "version": 1,
+        "currency": "USD",
+        "quoteVersion": "release:1",
+        "prepaidMicros": 20000,
+        "routes": [
+          {
+            "routeId": "route",
+            "rule": {
+              "mode": "list_ratio",
+              "ratio": "1"
+            },
+            "estimatedMicros": 10000,
+            "prepaidMicros": 20000,
+            "quantityMetric": "request",
+            "channelId": 8,
+            "provider": "fal",
+            "endpoint": "fal-ai/image2svg",
+            "credentialScope": "credential-1"
+          }
+        ]
+      }
+    }
+  },
+  "documentation": {
+    "inputSchema": {
+      "type": "object"
+    },
+    "requestSchema": {
+      "type": "object",
+      "required": [
+        "model",
+        "input"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "const": "test/vector/native"
+        },
+        "input": {
+          "type": "object",
+          "$id": "urn:musespan:native-input:ab4fc8d36f21f63c54aaab3bde98dd0a25622e6ccbe0b1ab3d5b24ceb38c1aa4"
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object"
+    },
+    "llmsText": "Model: test/vector/native\nPOST /v1/model-tasks with {\"model\":\"test/vector/native\",\"input\":{...}}.\nX-Request-Id is required (1-128 letters, digits, _ or -; a UUID is recommended). The task ID equals the X-Request-Id.\nSubmission is idempotent: if the POST times out, the connection fails, or it returns 429 or 5xx, resend the byte-identical body with the same X-Request-Id. It returns the existing task and is never charged twice. A different body with the same ID returns 409 request_id_conflict.\nPoll GET /v1/model-tasks/{id} every 5 seconds with a total deadline; queued and running are pending, and only status=completed includes output. Null or empty output can be successful. If it returns 404 task_not_found, the POST never arrived: resend it with the same X-Request-Id instead of polling.\nDeclared file URLs are authenticated downloads. Preserve the API authorization header when downloading files."
+  }
+}

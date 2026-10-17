@@ -303,6 +303,9 @@ const unconfirmedImageBatch = 20
 // and ImagePrepaymentRecoveryTask retries it. Tasks with an upstream ID are
 // never touched here: processOneImageUsage owns them.
 func expireUnconfirmedImageSubmissions(ctx context.Context, now time.Time) {
+	if ctx.Err() != nil {
+		return
+	}
 	if model.LogDB == nil || !model.LogDB.Migrator().HasTable(&model.ImageTask{}) {
 		return
 	}
@@ -312,6 +315,9 @@ func expireUnconfirmedImageSubmissions(ctx context.Context, now time.Time) {
 		return
 	}
 	for i := range tasks {
+		if ctx.Err() != nil {
+			return
+		}
 		task := &tasks[i]
 		expired, err := model.ExpireUnconfirmedImageSubmission(task.ID, now)
 		if err != nil {

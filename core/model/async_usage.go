@@ -141,9 +141,13 @@ func GetPendingAsyncUsagesDue(
 	limit int,
 	now time.Time,
 ) ([]*AsyncUsageInfo, error) {
+	return GetPendingAsyncUsagesDueContext(context.Background(), limit, now)
+}
+
+func GetPendingAsyncUsagesDueContext(ctx context.Context, limit int, now time.Time) ([]*AsyncUsageInfo, error) {
 	var infos []*AsyncUsageInfo
 
-	err := LogDB.
+	err := LogDB.WithContext(ctx).
 		Where("status = ?", int(AsyncUsageStatusPending)).
 		Where(
 			LogDB.
@@ -163,11 +167,18 @@ func TryClaimAsyncUsageInfo(
 	leaseUntil time.Time,
 	now time.Time,
 ) (bool, error) {
+	return TryClaimAsyncUsageInfoContext(context.Background(), info, token, leaseUntil, now)
+}
+
+func TryClaimAsyncUsageInfoContext(ctx context.Context, info *AsyncUsageInfo, token string, leaseUntil, now time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if info == nil || info.ID == 0 || token == "" {
 		return false, nil
 	}
 
-	tx := LogDB.
+	tx := LogDB.WithContext(ctx).
 		Model(&AsyncUsageInfo{}).
 		Where("id = ? AND status = ?", info.ID, int(AsyncUsageStatusPending)).
 		Where(

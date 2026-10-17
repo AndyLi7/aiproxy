@@ -812,7 +812,11 @@ func preserveImageAccountingLogs(tx *gorm.DB) *gorm.DB {
 }
 
 func RecoverStaleImageSubmissions(now time.Time) error {
-	return LogDB.Model(&ImageTask{}).
+	return RecoverStaleImageSubmissionsContext(context.Background(), now)
+}
+
+func RecoverStaleImageSubmissionsContext(ctx context.Context, now time.Time) error {
+	return LogDB.WithContext(ctx).Model(&ImageTask{}).
 		Where("status = ? AND updated_at < ?", "submitting", now.Add(-2*time.Minute)).
 		Update("status", "submission_unknown").
 		Error

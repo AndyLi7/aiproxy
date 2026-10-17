@@ -39,7 +39,7 @@ func channelAdmissionTablesExist(db *gorm.DB) (bool, error) {
 	if db == nil {
 		return false, nil
 	}
-	names := []string{"channel_admission_controls", "channel_admission_proofs", "channel_admission_families", "channel_admission_barriers", "channel_admission_uses", "channel_admission_executions", "channel_admission_execution_protocols", "channel_admission_task_executions", "channel_admission_dispatch_handoffs", "channel_admission_recovery_handoffs", "channel_admission_image_recovery_claims", "channel_admission_image_recovery_handoffs"}
+	names := []string{"channel_admission_controls", "channel_admission_proofs", "channel_admission_families", "channel_admission_barriers", "channel_admission_uses", "channel_admission_executions", "channel_admission_execution_protocols", "channel_admission_task_executions", "channel_admission_dispatch_handoffs", "channel_admission_recovery_handoffs", "channel_admission_image_recovery_claims", "channel_admission_image_recovery_handoffs", "channel_migration_protocols", "channel_migration_prepareds", "channel_migration_probe_records"}
 	var count int64
 	var result *gorm.DB
 	switch db.Dialector.Name() {
@@ -85,6 +85,22 @@ func channelAdmissionRuntimeStore(taskDB *gorm.DB) (*ChannelAdmissionStore, erro
 func channelAdmissionNeverActivated(tx *gorm.DB, c *ChannelAdmissionControl) (bool, error) {
 	if c.Epoch != "" {
 		return false, nil
+	}
+	exists, err := migrationStoragePresent(tx)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		if err := migrationStorageReady(tx); err != nil {
+			return false, err
+		}
+		var n int64
+		if err := tx.Model(&ChannelMigrationPrepared{}).Count(&n).Error; err != nil {
+			return false, err
+		}
+		if n != 0 {
+			return false, ErrChannelAdmissionUnavailable
+		}
 	}
 	if c.EpochSequence != 0 || c.Revision != 0 || c.ActiveProofID != "" || c.StorageGeneration != "" {
 		return false, ErrChannelAdmissionUnavailable

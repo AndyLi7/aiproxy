@@ -430,7 +430,7 @@ func SaveModelConfig(config ModelConfig) (err error) {
 		}
 	}()
 
-	return DB.Save(&config).Error
+	return withMigrationConfigWrite([]ModelConfig{config}, nil, func(tx *gorm.DB) error { return tx.Save(&config).Error })
 }
 
 func SaveModelConfigs(configs []ModelConfig) (err error) {
@@ -440,7 +440,7 @@ func SaveModelConfigs(configs []ModelConfig) (err error) {
 		}
 	}()
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withMigrationConfigWrite(configs, nil, func(tx *gorm.DB) error {
 		for _, config := range configs {
 			if err := tx.Save(&config).Error; err != nil {
 				return err
@@ -460,9 +460,7 @@ func DeleteModelConfig(model string) (err error) {
 		}
 	}()
 
-	result := DB.Where("model = ?", model).Delete(&ModelConfig{})
-
-	return result.Error
+	return withMigrationConfigWrite(nil, []string{model}, func(tx *gorm.DB) error { return tx.Where("model = ?", model).Delete(&ModelConfig{}).Error })
 }
 
 func DeleteModelConfigsByModels(models []string) (err error) {
@@ -472,7 +470,7 @@ func DeleteModelConfigsByModels(models []string) (err error) {
 		}
 	}()
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withMigrationConfigWrite(nil, models, func(tx *gorm.DB) error {
 		return tx.
 			Where("model IN (?)", models).
 			Delete(&ModelConfig{}).

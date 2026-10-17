@@ -54,6 +54,8 @@ type ChannelAdmissionStore struct {
 	LogDB          *gorm.DB
 	Executor       ChannelExecutorIdentity
 	LoadDeployment func(context.Context) (VerifiedDeploymentProof, error)
+	// Server-only probe verifier; never populated from an HTTP request.
+	LoadMigrationProbe func(context.Context, ChannelMigrationRequest) (VerifiedMigrationProbe, error)
 }
 
 func (s *ChannelAdmissionStore) deployment(ctx context.Context) (VerifiedDeploymentProof, error) {
@@ -394,7 +396,11 @@ type ChannelSealRequest struct {
 // It only controls new admission: existing open/unknown records and task rows
 // are neither ended nor refunded. Alias channels sharing the digest do not
 // inherit the successor grant. The returned time is read under the same lock.
-func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealRequest) (barrier *ChannelAdmissionBarrier, err error) {
+func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealRequest) (*ChannelAdmissionBarrier, error) {
+	return s.seal(ctx, input, nil)
+}
+
+func (s *ChannelAdmissionStore) seal(ctx context.Context, input ChannelSealRequest, prepared *migrationAuthorization) (barrier *ChannelAdmissionBarrier, err error) {
 	if input.OperationID == "" || len(input.OperationID) > 128 || input.Epoch == "" || len(input.Epoch) > 128 || input.ExpectedRevision < 0 || !validChannelIdentity(input.From) || !validChannelIdentity(input.To) || input.From.ChannelID == input.To.ChannelID || len(input.RevertOf) > 128 {
 		return nil, ErrChannelAdmissionConflict
 	}
@@ -403,11 +409,28 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 		return nil, err
 	}
 	proof, proofErr := s.deploymentForNew(ctx, &ChannelAdmissionBarrier{}, "operation_id", input.OperationID)
+	if prepared != nil {
+		proof = prepared.deployment
+		proofErr = nil
+	}
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
+		if prepared != nil {
+			if err := validateMigrationAuthorization(tx, c, prepared, "seal"); err != nil {
+				return err
+			}
+			if _, err := lockDeploymentProof(tx, c, prepared.deployment, s.Executor); err != nil {
+				return err
+			}
+		}
+		if prepared == nil {
+			if err := guardPreparedChannelMutation(tx, []int{input.From.ChannelID, input.To.ChannelID}); err != nil {
+				return err
+			}
+		}
 		var old ChannelAdmissionBarrier
 		read := tx.First(&old, "operation_id = ?", input.OperationID).Error
 		if read == nil {
-			if old.RequestHash != hash || old.Version != ChannelAdmissionProtocolVersion || old.Epoch != input.Epoch || old.Revision != input.ExpectedRevision+1 || old.RecordedAtMs <= 0 ||
+			if old.RequestHash != hash || old.Version != ChannelAdmissionProtocolVersion || old.Epoch != input.Epoch || (prepared == nil && old.Revision != input.ExpectedRevision+1) || old.RecordedAtMs <= 0 ||
 				old.FromChannelID != input.From.ChannelID || old.FromKeyDigest != input.From.KeyDigest || old.FromIdentityHash != input.From.IdentityHash ||
 				old.ToChannelID != input.To.ChannelID || old.ToKeyDigest != input.To.KeyDigest || old.ToIdentityHash != input.To.IdentityHash {
 				return ErrChannelAdmissionConflict
@@ -417,6 +440,9 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 		}
 		if !errors.Is(read, gorm.ErrRecordNotFound) {
 			return read
+		}
+		if prepared != nil {
+			input.ExpectedRevision = c.Revision
 		}
 		if input.Epoch != c.Epoch || input.ExpectedRevision != c.Revision {
 			return ErrChannelAdmissionConflict
@@ -429,7 +455,11 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 			if err != nil {
 				return err
 			}
-			if ch.Status != ChannelStatusEnabled {
+			wantStatus := ChannelStatusEnabled
+			if prepared != nil && identity.ChannelID == input.To.ChannelID {
+				wantStatus = ChannelStatusDisabled
+			}
+			if ch.Status != wantStatus {
 				return ErrChannelAdmissionConflict
 			}
 		}
@@ -480,7 +510,7 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "key_digest"}}, UpdateAll: true}).Create(&fromGrant).Error; err != nil {
 			return err
 		}
-		if input.From.KeyDigest != input.To.KeyDigest && toFamily != nil {
+		if input.From.KeyDigest != input.To.KeyDigest && (toFamily != nil || prepared != nil) {
 			grant := ChannelAdmissionFamily{KeyDigest: input.To.KeyDigest, AllowedChannelID: input.To.ChannelID, AllowedIdentityHash: input.To.IdentityHash, Revision: revision, OperationID: input.OperationID}
 			if err := tx.Save(&grant).Error; err != nil {
 				return err
@@ -490,8 +520,28 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
+		if prepared != nil {
+			update := tx.Model(&ChannelMigrationPrepared{}).Where("operation_id = ? AND state = ?", input.OperationID, "prepared").Updates(map[string]any{"state": "sealed", "seal_revision": revision})
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != 1 {
+				return ErrChannelAdmissionConflict
+			}
+			if err := finalizeMigrationProbe(tx, prepared.probe); err != nil {
+				return err
+			}
+		}
 		if err := finalizeAdmissionProof(tx, c, proof, revision); err != nil {
 			return err
+		}
+		if prepared != nil {
+			if _, err := lockDeploymentProof(tx, c, proof, s.Executor); err != nil {
+				return err
+			}
+			if err := finalizeMigrationProbe(tx, prepared.probe); err != nil {
+				return err
+			}
 		}
 		barrier = &row
 		return nil

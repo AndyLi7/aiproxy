@@ -24,6 +24,9 @@ func migrationStoragePresent(tx *gorm.DB) (bool, error) {
 	return count > 0, err
 }
 func guardPreparedChannelMutation(tx *gorm.DB, ids []int) error {
+	if err := guardRetiredTargetMutation(tx, ids); err != nil {
+		return err
+	}
 	if err := guardOwnedShadowMutation(tx, ids); err != nil {
 		return err
 	}
@@ -104,6 +107,9 @@ func withMigrationConfigWrite(configs []ModelConfig, deleted []string, write fun
 		for _, p := range preparations {
 			ids[p.FromChannelID] = true
 			ids[p.ToChannelID] = true
+		}
+		if err := addPendingRetiredIDs(tx, ids); err != nil {
+			return err
 		}
 		if len(ids) == 0 {
 			return write(tx)

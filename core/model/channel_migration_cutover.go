@@ -13,9 +13,20 @@ import (
 // reviewed authorization; this API never adopts either. No HTTP/runtime entry
 // is enabled by this local model API.
 func (s *ChannelAdmissionStore) CutoverPrepared(ctx context.Context, input ChannelMigrationRequest) (result *ChannelMigrationPrepared, err error) {
-	if input.Seal.RevertOf != "" {
+	if input.TargetResourceKind != "" || input.Seal.RevertOf != "" {
 		return nil, ErrChannelAdmissionConflict
 	}
+	return s.cutoverPrepared(ctx, input)
+}
+
+func (s *ChannelAdmissionStore) CutoverReversePrepared(ctx context.Context, input ChannelMigrationRequest) (*ChannelMigrationPrepared, error) {
+	if !reverseMigration(input) {
+		return nil, ErrChannelAdmissionConflict
+	}
+	return s.cutoverPrepared(ctx, input)
+}
+
+func (s *ChannelAdmissionStore) cutoverPrepared(ctx context.Context, input ChannelMigrationRequest) (result *ChannelMigrationPrepared, err error) {
 	a, err := s.migrationAuthorization(ctx, input)
 	if err != nil {
 		return nil, err
@@ -26,7 +37,7 @@ func (s *ChannelAdmissionStore) CutoverPrepared(ctx context.Context, input Chann
 	}
 	err = s.controlTransaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		// Keep resource-before-prepared order used by all command writers.
-		if _, err := loadShadowResource(tx, input.Seal.OperationID, input.Seal.To.ChannelID, false); err != nil {
+		if err := lockMigrationTarget(tx, input); err != nil {
 			return err
 		}
 		row, err := loadMigration(tx, input.Seal.OperationID)

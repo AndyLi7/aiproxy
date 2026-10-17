@@ -78,6 +78,10 @@ func probeDecode(c *gin.Context, out any) bool {
 	return decoder.Decode(out) == nil
 }
 func probeCommand(r model.MigrationReadRequest) (model.ChannelMigrationRequest, bool) {
+	// Reverse remains a server-only local API until its runtime reader is integrated.
+	if r.TargetResourceKind != "" {
+		return model.ChannelMigrationRequest{}, false
+	}
 	revision, e := strconv.ParseInt(r.Seal.ExpectedRevision, 10, 64)
 	if e != nil || revision < 0 || strconv.FormatInt(revision, 10) != r.Seal.ExpectedRevision {
 		return model.ChannelMigrationRequest{}, false

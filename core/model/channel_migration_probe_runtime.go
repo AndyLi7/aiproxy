@@ -120,6 +120,12 @@ func probeOwner(tx *gorm.DB, a MigrationProbeAuthorization) error {
 	return nil
 }
 func probeResource(tx *gorm.DB, c *ChannelAdmissionControl, a MigrationProbeAuthorization, features []string) error {
+	if !validMigrationResourceKind(a.Command) {
+		return ErrChannelAdmissionConflict
+	}
+	if reverseMigration(a.Command) {
+		return reverseProbeResource(tx, c, a, features)
+	}
 	r, e := prepareShadowResource(tx, c, a.Command, features)
 	if e != nil {
 		return e
@@ -299,7 +305,7 @@ func ReserveMigrationProbeTask(ctx context.Context, db *gorm.DB, h *MigrationPro
 			return ErrChannelAdmissionConflict
 		}
 		// Lock ordering stays control → owned resource → probe run → owner/task/use.
-		if _, e := loadShadowResource(tx, h.operation, 0, false); e != nil {
+		if _, e := migrationTargetByOperation(tx, h.operation, false); e != nil {
 			return e
 		}
 		r, a, spec, e := loadProbeRun(tx, h.operation)
@@ -383,7 +389,7 @@ func ReserveMigrationProbeTask(ctx context.Context, db *gorm.DB, h *MigrationPro
 
 func probeJSONValid(raw []byte) bool { _, ok := inventoryDecode(raw); return ok }
 func validProbeCommand(r ChannelMigrationRequest) bool {
-	return r.Seal.RevertOf == "" && r.Seal.Epoch != "" && r.Seal.ExpectedRevision >= 0 && validChannelIdentity(r.Seal.From) && validChannelIdentity(r.Seal.To) && r.Seal.From.ChannelID != r.Seal.To.ChannelID && r.FromCredentialID != "" && r.ToCredentialID != "" && len(r.FromCredentialID) <= 128 && len(r.ToCredentialID) <= 128 && fullIdentityDigest(r.ExpectedPinHash) && fullIdentityDigest(r.ProjectionHash) && fullIdentityDigest(r.FamilyHash) && (r.Seal.From.KeyDigest == r.Seal.To.KeyDigest) == (r.FromCredentialID == r.ToCredentialID)
+	return validMigrationResourceKind(r) && r.Seal.Epoch != "" && r.Seal.ExpectedRevision >= 0 && validChannelIdentity(r.Seal.From) && validChannelIdentity(r.Seal.To) && r.Seal.From.ChannelID != r.Seal.To.ChannelID && r.FromCredentialID != "" && r.ToCredentialID != "" && len(r.FromCredentialID) <= 128 && len(r.ToCredentialID) <= 128 && fullIdentityDigest(r.ExpectedPinHash) && fullIdentityDigest(r.ProjectionHash) && fullIdentityDigest(r.FamilyHash) && (r.Seal.From.KeyDigest == r.Seal.To.KeyDigest) == (r.FromCredentialID == r.ToCredentialID)
 }
 
 func probeDeliveryURL(raw string) bool {

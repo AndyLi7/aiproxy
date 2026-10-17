@@ -375,6 +375,9 @@ func (s *ChannelAdmissionStore) CreateMigrationShadow(ctx context.Context, req M
 		if e := shadowStorageReady(tx); e != nil {
 			return e
 		}
+		if e := rejectRetiredOperationCollision(tx, req.OperationID); e != nil {
+			return e
+		}
 		var row ChannelMigrationShadowResource
 		e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, "operation_id = ?", req.OperationID).Error
 		hash, _ := shadowRequestHash(req, row.SourceFamilyHash)

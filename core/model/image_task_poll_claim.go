@@ -18,7 +18,9 @@ func withImagePollClaim(ctx context.Context, info *AsyncUsageInfo, observed *Ima
 	if info == nil || observed == nil || info.ID == 0 || info.ProcessingToken == "" || info.ImageTaskID != observed.ID || LogDB == nil {
 		return ErrImagePollClaimLost
 	}
-	return LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return withImagePollClaimTx(tx, info, observed, write) }, claimTxOptions(LogDB)...)
+	return imagePollTransaction(ctx, info, func(tx *gorm.DB, _ *imageWalletClaimContext) error {
+		return withImagePollClaimTx(tx, info, observed, write)
+	})
 }
 
 func withImagePollClaimTx(tx *gorm.DB, info *AsyncUsageInfo, observed *ImageTask, write func(*gorm.DB, *ImageTask, *AsyncUsageInfo) error) error {

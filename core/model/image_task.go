@@ -464,7 +464,7 @@ func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (boo
 
 	expired := false
 	var granted *ImageTask
-	err = imageWalletPollTransaction(context.Background(), func(tx *gorm.DB, authority *imageWalletClaimContext) error {
+	err = imageWalletPollTransaction(imagePollParentContext(claim), claim, func(tx *gorm.DB, authority *imageWalletClaimContext) error {
 		// Keep the existing task -> usage -> log lock order. Re-read the
 		// original claim only after the task lock; stale workers cannot fail a
 		// newer owner's task, accounting outbox or request log.

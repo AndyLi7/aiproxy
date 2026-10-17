@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -94,7 +93,7 @@ func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
 }
 
 func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {
-	return withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+	return withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
 		if err := writeImageAccountingUsage(tx, current, map[string]any{"status": AsyncUsageStatusMeasurementPending, "processing_token": "", "error": "immutable image measurement pending"}); err != nil {
 			return err
 		}
@@ -133,7 +132,7 @@ func PrepareClaimedImageTaskMeasurement(
 		return err
 	}
 
-	return withImageAccountingClaim(context.Background(), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+	return withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
 		if current.MeasuredImage {
 			return errors.New("image measurement already frozen")
 		}

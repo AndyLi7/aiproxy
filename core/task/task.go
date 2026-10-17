@@ -463,8 +463,19 @@ func claimAsyncUsageContext(ctx context.Context, info *model.AsyncUsageInfo) (bo
 }
 
 func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
-	ctx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
-	defer stopRenew()
+	accepted, err := model.AcceptImagePoll(ctx, info)
+	if err != nil || !accepted {
+		return
+	}
+	workCtx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
+	defer stopRenew() // panic and Goexit join locally, but never record returned.
+	processOneAsyncUsageBody(workCtx, info)
+	stopRenew()
+	if err := model.RecordImagePollReturn(ctx, info); err != nil {
+		log.Errorf("record image poll return: %v", err)
+	}
+}
+func processOneAsyncUsageBody(ctx context.Context, info *model.AsyncUsageInfo) {
 
 	if info.MeasuredImage {
 		if err := model.ValidateImageAccountingClaim(ctx, info); err != nil {
@@ -716,7 +727,8 @@ func startAsyncUsageClaimRenewalAtInterval(
 	exited := make(chan struct{})
 	// Capture immutable claim identity. Renewal never writes business fields on
 	// info: the worker owns NextPollAt when scheduling its next poll/retry.
-	id, token, requestID, upstreamID := info.ID, info.ProcessingToken, info.RequestID, info.UpstreamID
+	claimSnapshot := *info
+	id, requestID, upstreamID := info.ID, info.RequestID, info.UpstreamID
 
 	var stopOnce sync.Once
 
@@ -734,10 +746,9 @@ func startAsyncUsageClaimRenewalAtInterval(
 			case <-ticker.C:
 				leaseUntil := time.Now().Add(asyncUsageProcessingLease)
 
-				renewed, err := model.RenewAsyncUsageClaimContext(
+				renewed, err := model.RenewImagePollClaim(
 					workCtx,
-					id,
-					token,
+					&claimSnapshot,
 					leaseUntil,
 				)
 				if err != nil {

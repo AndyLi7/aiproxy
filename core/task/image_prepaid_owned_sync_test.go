@@ -169,6 +169,12 @@ func TestPrepaidImmediateTerminalSerializesRecovery(t *testing.T) {
 // Uses the current application wallet service and disposable SQLite. The proxy
 // only delays the acknowledgement after the real refund committed.
 func TestPrepaidOwnedSyncRealWalletAcceptedRefundRecovery(t *testing.T) {
+	assertPrepaidOwnedSyncRealWalletAcceptedRefundRecovery(t, false)
+}
+func TestImagePollExecutorRealWalletAcceptedRefundRecovery(t *testing.T) {
+	assertPrepaidOwnedSyncRealWalletAcceptedRefundRecovery(t, true)
+}
+func assertPrepaidOwnedSyncRealWalletAcceptedRefundRecovery(t *testing.T, poll bool) {
 	endpoint := os.Getenv("D34_TEST_WALLET_URL")
 	if endpoint == "" {
 		t.Skip("requires current app disposable prepayment-wallet-server.ts")
@@ -177,6 +183,11 @@ func TestPrepaidOwnedSyncRealWalletAcceptedRefundRecovery(t *testing.T) {
 	db, _, identity := imageRecoveryRuntime(t)
 	installTaskImageRecoveryHandoff(t, db)
 	task := &model.ImageTask{ID: "owned-real-refund", Model: "synthetic/image", GroupID: "u_u", TokenID: 1, Fingerprint: strings.Repeat("a", 64), BillingOperationID: "owned-real-refund-operation", KeyFingerprint: identity.KeyDigest, AdmissionIdentityHash: identity.IdentityHash, ChannelType: model.ChannelTypeFal, UpstreamModel: "synthetic", PrepaymentQuoteJSON: `{"version":1,"quoteVersion":"owned-fixture","currency":"USD","prepaidMicros":600000,"routes":[{"routeId":"primary","channelId":1,"provider":"fal","endpoint":"synthetic","credentialScope":"local-fixture","estimatedMicros":400000,"prepaidMicros":600000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`}
+	if poll {
+		task.ID += "-poll"
+		task.BillingOperationID += "-poll"
+		installTaskImagePoll(t, db)
+	}
 	info := &model.AsyncUsageInfo{RequestID: task.ID, ChannelID: 1, BaseURL: "https://example.invalid", GroupID: task.GroupID, TokenID: task.TokenID, BillingOperationID: task.BillingOperationID}
 	_, created, err := model.ReserveImageTask(task, info)
 	require.NoError(t, err)
@@ -219,7 +230,13 @@ func TestPrepaidOwnedSyncRealWalletAcceptedRefundRecovery(t *testing.T) {
 	}))
 	defer proxy.Close()
 	balance.Default = balance.NewExternalHTTP(proxy.URL, "local-d34-test-only")
-	processOneImageUsage(t.Context(), info)
+	if poll {
+		claimPollFixture(t, db, info, "real-poll", time.Minute)
+		processOneAsyncUsage(t.Context(), info)
+		require.Equal(t, "exited", taskPollRows(t, db)[0].State)
+	} else {
+		processOneImageUsage(t.Context(), info)
+	}
 	require.EqualValues(t, 1, calls.Load(), "old owner must not send get after its refund reply lost the lease")
 	fresh, err := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
 	require.NoError(t, err)

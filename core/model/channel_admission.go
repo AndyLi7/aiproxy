@@ -220,12 +220,18 @@ func finalizeAdmissionProof(tx *gorm.DB, c *ChannelAdmissionControl, p VerifiedD
 	return nil
 }
 
-func storedAdmissionIdentity(tx *gorm.DB, expected ChannelIdentity) (*Channel, error) {
+// snapshotRead is internal only: callers must already own the control SHARE
+// lock and a consistent read snapshot. Default command callers retain UPDATE.
+func storedAdmissionIdentity(tx *gorm.DB, expected ChannelIdentity, snapshotRead ...bool) (*Channel, error) {
 	if !validChannelIdentity(expected) {
 		return nil, ErrChannelAdmissionConflict
 	}
 	var channel Channel
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&channel, expected.ChannelID).Error; err != nil {
+	q := tx
+	if len(snapshotRead) == 0 || !snapshotRead[0] {
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := q.First(&channel, expected.ChannelID).Error; err != nil {
 		return nil, err
 	}
 	identity, err := ChannelIdentityOf(&channel)

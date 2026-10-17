@@ -3,6 +3,10 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"time"
+
+	sqlitedriver "github.com/glebarez/go-sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -56,7 +60,7 @@ func migrationStatesReady(tx *gorm.DB) error {
 	}
 	return nil
 }
-func withMigrationChannelStatus(id, status int) error {
+func withMigrationChannelStatus(ctx context.Context, id, status int) error {
 	write := func(tx *gorm.DB) error {
 		if err := guardPreparedChannelMutation(tx, []int{id}); err != nil {
 			return err
@@ -73,15 +77,50 @@ func withMigrationChannelStatus(id, status int) error {
 		}
 		return HandleUpdateResult(tx.Model(&Channel{}).Where("id = ?", id).Update("status", status), ErrChannelNotFound)
 	}
-	exists, err := migrationStoragePresent(DB)
-	if err != nil {
-		return err
+	db := DB.WithContext(ctx)
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Re-read installation state on every fresh attempt. A newly installed
+		// migration extension must immediately take the existing control path.
+		exists, err := migrationStoragePresent(db)
+		if err != nil {
+			return err
+		}
+		if exists {
+			store := &ChannelAdmissionStore{DB: DB, LogDB: LogDB}
+			return store.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error { return write(tx) }, true)
+		}
+		// This closure is deliberately limited to DB guards/key checks and one
+		// status update: never put network/cache/monitor callbacks in a retried tx.
+		// A retry requires an explicitly successful rollback. BEGIN/COMMIT errors
+		// and uncertain rollback never replay the write callback.
+		retryReady := false
+		err = db.Transaction(func(tx *gorm.DB) error {
+			writeErr := write(tx)
+			if db.Dialector.Name() == "sqlite" && sqliteStatusBusy(writeErr) {
+				if rollbackErr := tx.Rollback().Error; rollbackErr != nil {
+					return errors.Join(writeErr, rollbackErr)
+				}
+				retryReady = true
+			}
+			return writeErr
+		})
+		if err != nil && ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+		if !retryReady || !sqliteStatusBusy(err) || attempt+1 >= sqliteStatusAttempts {
+			return err
+		}
+		wait := time.NewTimer(time.Duration(1<<attempt) * 2 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return ctx.Err()
+		case <-wait.C:
+		}
 	}
-	if !exists {
-		return DB.Transaction(write)
-	}
-	store := &ChannelAdmissionStore{DB: DB, LogDB: LogDB}
-	return store.transaction(context.Background(), func(tx *gorm.DB, c *ChannelAdmissionControl) error { return write(tx) }, true)
 }
 func withMigrationConfigWrite(configs []ModelConfig, deleted []string, write func(*gorm.DB) error) error {
 	exists, err := migrationStoragePresent(DB)
@@ -171,4 +210,13 @@ func migrationConfigReferences(raw []byte, ids map[int]bool) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Primary result code is the low byte; BUSY_SNAPSHOT/RECOVERY/TIMEOUT retain 5.
+// Only the actual SQLite driver error qualifies, not a string/code lookalike.
+const sqliteStatusAttempts = 8
+
+func sqliteStatusBusy(err error) bool {
+	var busy *sqlitedriver.Error
+	return errors.As(err, &busy) && busy.Code()&0xff == 5
 }

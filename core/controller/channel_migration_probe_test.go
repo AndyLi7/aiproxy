@@ -88,9 +88,12 @@ type probeHTTPFixture struct {
 	mu                sync.Mutex
 	deps              migrationProbeDependencies
 	billingReader     model.MigrationProbeBillingReader
+	initialInventory  model.MigrationInventory
+	resourceRequest   model.MigrationShadowRequest
+	resourceReceipt   *model.MigrationShadowReceipt
 }
 
-func newProbeHTTPFixture(t *testing.T) *probeHTTPFixture {
+func newProbeHTTPFixture(t *testing.T, attribution ...bool) *probeHTTPFixture {
 	t.Helper()
 	db, e := model.OpenSQLite(filepath.Join(t.TempDir(), "probe.db"))
 	require.NoError(t, e)
@@ -99,6 +102,10 @@ func newProbeHTTPFixture(t *testing.T) *probeHTTPFixture {
 		require.NoError(t, db.Create(r).Error)
 	}
 	proof := model.VerifiedDeploymentProof{ProofID: "synthetic-probe-http", Epoch: "probe-http-epoch", Sequence: 1, StorageGeneration: "probe-http-storage", ExecutorFenceHash: strings.Repeat("d", 64), IssuedAtMs: time.Now().Add(-time.Minute).UnixMilli(), ValidUntilMs: time.Now().Add(5 * time.Minute).UnixMilli(), RevocationFreshUntilMs: time.Now().Add(5 * time.Minute).UnixMilli()}
+	if len(attribution) > 0 && attribution[0] {
+		proof.ValidUntilMs = time.Now().Add(25 * time.Minute).UnixMilli()
+		proof.RevocationFreshUntilMs = proof.ValidUntilMs
+	}
 	executor := model.ChannelExecutorIdentity{ServiceID: "local-test-gateway", InstanceID: "local-test-instance", BuildSHA: strings.Repeat("f", 64), Epoch: proof.Epoch}
 	proof.Executors = []model.ChannelExecutorIdentity{executor}
 	raw, _ := json.Marshal(proof.Executors)
@@ -111,6 +118,7 @@ func newProbeHTTPFixture(t *testing.T) *probeHTTPFixture {
 	store := &model.ChannelAdmissionStore{DB: db, LogDB: db, Executor: executor, LoadDeployment: func(context.Context) (model.VerifiedDeploymentProof, error) { return proof, nil }}
 	oldDB, oldLog, oldKey := model.DB, model.LogDB, config.AdminKey
 	model.DB, model.LogDB = db, db
+	store.MigrationFeatures = gatewayRuntimeFeatures()
 	config.AdminKey = "synthetic-probe-admin"
 	restore := model.ConfigureChannelAdmissionRuntime(executor, store.LoadDeployment)
 	t.Cleanup(func() {
@@ -122,7 +130,11 @@ func newProbeHTTPFixture(t *testing.T) *probeHTTPFixture {
 	})
 	require.NoError(t, db.Create(&model.Group{ID: "internal-probe", Status: model.GroupStatusInternal}).Error)
 	require.NoError(t, db.Create(&model.Token{ID: 1, GroupID: "internal-probe", Status: model.TokenStatusEnabled, Name: "probe"}).Error)
-	ch := model.Channel{ID: 11, Name: "Primary [shadow v1-logical]", Type: model.ChannelTypeFal, Key: "synthetic-preparation-old", BaseURL: "https://queue.fal.run", Status: 1, Models: []string{"test/native::text-to-video"}, ModelMapping: map[string]string{"test/native::text-to-video": "fal-ai/fixture"}, Sets: []string{"default"}, Priority: 1, Configs: model.ChannelConfigs{"outbound_policy": "public_only"}}
+	oldProviderKey := "synthetic-preparation-old"
+	if len(attribution) > 0 && attribution[0] {
+		oldProviderKey = "synthetic-old-key-id:synthetic-old-key-secret"
+	}
+	ch := model.Channel{ID: 11, Name: "Primary [shadow v1-logical]", Type: model.ChannelTypeFal, Key: oldProviderKey, BaseURL: "https://queue.fal.run", Status: 1, Models: []string{"test/native::text-to-video"}, ModelMapping: map[string]string{"test/native::text-to-video": "fal-ai/fixture"}, Sets: []string{"default"}, Priority: 1, Configs: model.ChannelConfigs{"outbound_policy": "public_only"}}
 	require.NoError(t, db.Create(&ch).Error)
 	raw, e = os.ReadFile("../model/testdata/migration-inventory/publisher-builder.json")
 	require.NoError(t, e)
@@ -132,18 +144,36 @@ func newProbeHTTPFixture(t *testing.T) *probeHTTPFixture {
 		} `json:"config"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &pub))
+	if len(attribution) > 0 && attribution[0] {
+		var cfg map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(pub.Config.Config, &cfg))
+		var binding map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(cfg["x_token_platform_native_result_v1"], &binding))
+		digest := sha256.Sum256([]byte(oldProviderKey))
+		binding["keyFingerprint"], _ = json.Marshal(hex.EncodeToString(digest[:]))
+		cfg["x_token_platform_native_result_v1"], _ = json.Marshal(binding)
+		pub.Config.Config, _ = json.Marshal(cfg)
+	}
 	require.NoError(t, db.Exec("INSERT INTO model_configs(model,config,plugin) VALUES (?,?,?)", "test/native::text-to-video", string(pub.Config.Config), "{}").Error)
-	inv := store.ReadMigrationInventory(t.Context(), nil)
+	inv := store.ReadMigrationInventory(t.Context(), store.MigrationFeatures)
 	require.Equal(t, "ready", inv.State, inv.ReasonCode)
 	newKey := "synthetic-probe-shadow-key"
+	if len(attribution) > 0 && attribution[0] {
+		newKey = "synthetic-target-key-id:synthetic-target-key-secret"
+	}
 	sum = sha256.Sum256([]byte(newKey))
 	source := model.MigrationShadowRequest{Version: 1, OperationID: "http-probe-op", Source: model.MigrationShadowSource{SourceSnapshotHash: inv.SourceSnapshotHash, Epoch: inv.Epoch, Revision: inv.Revision, StorageGeneration: inv.StorageGeneration, From: inv.Channels[0].Identity}, Target: model.MigrationShadowTarget{CredentialID: "new-credential", CredentialDigest: hex.EncodeToString(sum[:]), Projection: model.MigrationShadowProjection{Name: "Owned shadow", Type: model.ChannelTypeFal, BaseURL: "https://queue.fal.run", Models: ch.Models, ModelMapping: ch.ModelMapping, Sets: ch.Sets, Priority: 1}}}
-	created := store.CreateMigrationShadow(t.Context(), source, newKey, nil)
+	if len(attribution) > 0 && attribution[0] {
+		source.Target.Projection.Name = "Primary [migration]"
+		value := `{"outbound_policy":"public_only"}`
+		source.Target.Projection.ConfigsJSON = &value
+	}
+	created := store.CreateMigrationShadow(t.Context(), source, newKey, store.MigrationFeatures)
 	require.Equal(t, "ready", created.State, created.Reason)
 	snap, e := store.ReadMigrationSnapshot(t.Context(), created.Receipt.From, created.Receipt.Shadow)
 	require.NoError(t, e)
 	body := migrationProbeBody{Version: 1, Command: model.MigrationReadRequest{Seal: model.MigrationReadSealRequest{OperationID: source.OperationID, Epoch: snap.Epoch, ExpectedRevision: fmt.Sprint(snap.Revision), From: created.Receipt.From, To: created.Receipt.Shadow}, FromCredentialID: "credential", ToCredentialID: "new-credential", ExpectedPinHash: snap.PinHash, ProjectionHash: snap.ProjectionHash, FamilyHash: snap.FamilyHash}, ResourceRequestHash: created.Receipt.RequestHash, CheckpointHash: created.Receipt.CheckpointHash, Model: "test/native::text-to-video", Input: json.RawMessage(`{"model":"test/native/text-to-video","input":{"prompt":"synthetic provider only","duration":"5"}}`), GroupID: "internal-probe", TokenID: 1, MaxPrepaidMicros: "600000"}
-	f := &probeHTTPFixture{db: db, store: store, body: body}
+	f := &probeHTTPFixture{db: db, store: store, body: body, initialInventory: inv, resourceRequest: source, resourceReceipt: created.Receipt}
 	f.wallet = &probeHTTPWallet{t: t, db: db}
 	f.engine = &nativetask.Engine{DB: db, Wallet: f.wallet}
 	supplier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +201,11 @@ func newProbeHTTPFixture(t *testing.T) *probeHTTPFixture {
 	f.deps = deps
 	r := gin.New()
 	api := r.Group("/api/channel-migrations", RequireMigrationInventoryHeaderAuth, middleware.AdminAuth)
+	api.GET("/operations/:id/shadow", GetMigrationShadow)
+	api.POST("/operations/:id/shadow", CreateMigrationShadow)
+	api.GET("/operations/:id/shadow/lifecycle", GetMigrationShadowLifecycle)
+	api.POST("/operations/:id/shadow/cancel", CancelMigrationShadow)
+	api.POST("/probe-billing-context/read", ReadMigrationProbeBillingContext)
 	api.POST("/operations/:id/probe", deps.create)
 	api.GET("/operations/:id/probe", deps.read)
 	api.POST("/operations/:id/prepare", deps.prepare)

@@ -292,44 +292,61 @@ var (
 )
 
 func AsyncUsagePollTask(ctx context.Context) {
-	go ImagePrepaymentRecoveryTask(ctx)
-	go UpstreamBillingRecoveryTask(ctx)
 	ticker := time.NewTicker(asyncUsagePollInterval)
 	defer ticker.Stop()
+	runAsyncUsagePollTask(ctx, ticker.C, processAsyncUsages, ImagePrepaymentRecoveryTask, UpstreamBillingRecoveryTask)
+}
 
-	for {
+// Child loops own synchronous work and bounded cleanup. Cancellation requests
+// their exit; only their actual return completes this local join.
+func runAsyncUsagePollTask(ctx context.Context, ticks <-chan time.Time, poll func(context.Context) bool, children ...func(context.Context)) {
+	var childrenWG sync.WaitGroup
+	for _, child := range children {
+		if ctx.Err() != nil {
+			break
+		}
+		childrenWG.Add(1)
+		go func(run func(context.Context)) {
+			defer childrenWG.Done()
+			if ctx.Err() == nil {
+				run(ctx)
+			}
+		}(child)
+	}
+	runRecoveryTicks(ctx, ticks, func(ctx context.Context) {
+		for ctx.Err() == nil && poll(ctx) {
+			log.Debugf("async usage poll: batch full, continue immediately batch_size=%d", asyncUsageBatchSize)
+		}
+	})
+	childrenWG.Wait()
+}
+
+// A ready tick and cancellation may coexist; select alone does not prioritize
+// shutdown. Work already started remains owned until it actually returns.
+func runRecoveryTicks(ctx context.Context, ticks <-chan time.Time, work func(context.Context)) {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			for {
-				fullBatch := processAsyncUsages(ctx)
-				if !fullBatch {
-					break
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				log.Debugf(
-					"async usage poll: batch full, continue immediately batch_size=%d",
-					asyncUsageBatchSize,
-				)
+		case _, ok := <-ticks:
+			if !ok || ctx.Err() != nil {
+				return
 			}
+			work(ctx)
 		}
 	}
 }
 
 func processAsyncUsages(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	// An interrupted submit cannot safely be replayed. Keep its reservation.
-	if err := model.RecoverStaleImageSubmissions(time.Now()); err != nil {
+	if err := model.RecoverStaleImageSubmissionsContext(ctx, time.Now()); err != nil {
 		log.WithError(err).Warn("recover interrupted image submissions")
 	}
 
-	infos, err := model.GetPendingAsyncUsages(asyncUsageBatchSize)
+	infos, err := model.GetPendingAsyncUsagesDueContext(ctx, asyncUsageBatchSize, time.Now())
 	if err != nil {
 		notify.ErrorThrottle(
 			"asyncUsagePoll",
@@ -347,7 +364,10 @@ func processAsyncUsages(ctx context.Context) bool {
 
 	claimedInfos := make([]*model.AsyncUsageInfo, 0, len(infos))
 	for _, info := range infos {
-		claimed, err := claimAsyncUsage(info)
+		if ctx.Err() != nil {
+			return false
+		}
+		claimed, err := claimAsyncUsageContext(ctx, info)
 		if err != nil {
 			notify.ErrorThrottle(
 				"asyncUsageClaim",
@@ -381,6 +401,10 @@ func processAsyncUsages(ctx context.Context) bool {
 	var wg sync.WaitGroup
 
 	for _, info := range claimedInfos {
+		if ctx.Err() != nil {
+			wg.Wait()
+			return false
+		}
 		select {
 		case <-ctx.Done():
 			wg.Wait()
@@ -388,6 +412,11 @@ func processAsyncUsages(ctx context.Context) bool {
 		case sem <- struct{}{}:
 		}
 
+		if ctx.Err() != nil {
+			<-sem
+			wg.Wait()
+			return false
+		}
 		wg.Add(1)
 
 		go func(info *model.AsyncUsageInfo) {
@@ -406,11 +435,18 @@ func processAsyncUsages(ctx context.Context) bool {
 }
 
 func claimAsyncUsage(info *model.AsyncUsageInfo) (bool, error) {
+	return claimAsyncUsageContext(context.Background(), info)
+}
+
+func claimAsyncUsageContext(ctx context.Context, info *model.AsyncUsageInfo) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	now := time.Now()
 	token := common.ShortUUID()
 	leaseUntil := now.Add(asyncUsageProcessingLease)
 
-	claimed, err := model.TryClaimAsyncUsageInfo(info, token, leaseUntil, now)
+	claimed, err := model.TryClaimAsyncUsageInfoContext(ctx, info, token, leaseUntil, now)
 	if err != nil || !claimed {
 		return claimed, err
 	}

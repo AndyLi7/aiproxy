@@ -17,10 +17,21 @@ const nativeRecoveryWorkers = 4
 // NativeTaskRecoveryTask is separate from legacy image usage projection. It is
 // the only place native tasks advance: customer reads never poll or archive.
 func NativeTaskRecoveryTask(ctx context.Context) {
-	for i := 0; i < nativeRecoveryWorkers; i++ {
-		go nativeRecoveryWorker(ctx)
+	runNativeTaskRecovery(ctx, nativeRecoveryWorker)
+}
+
+func runNativeTaskRecovery(ctx context.Context, worker func(context.Context)) {
+	var wg sync.WaitGroup
+	for i := 0; i < nativeRecoveryWorkers && ctx.Err() == nil; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ctx.Err() == nil {
+				worker(ctx)
+			}
+		}()
 	}
-	<-ctx.Done()
+	wg.Wait()
 }
 
 func nativeRecoveryWorker(ctx context.Context) {
@@ -31,16 +42,11 @@ func nativeRecoveryWorker(ctx context.Context) {
 	owner := "native-" + hex.EncodeToString(id[:])
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := controller.RecoverNativeTasks(ctx, owner); err != nil {
-				log.Warn("native task recovery deferred")
-			}
+	runRecoveryTicks(ctx, ticker.C, func(ctx context.Context) {
+		if err := controller.RecoverNativeTasks(ctx, owner); err != nil {
+			log.Warn("native task recovery deferred")
 		}
-	}
+	})
 }
 
 // NativeQueueDispatcherTask runs the own task queue dispatcher. On shutdown

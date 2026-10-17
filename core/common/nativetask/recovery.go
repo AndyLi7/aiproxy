@@ -365,8 +365,11 @@ func (e *Engine) RecoverOnce(ctx context.Context, owner string, now time.Time, r
 	}
 	started := time.Now()
 	for iteration := 0; iteration < 20; iteration++ {
+		if err := ctx.Err(); err != nil {
+			return report, err
+		}
 		current := now.Add(time.Since(started))
-		tasks, err := model.ClaimNativeRecovery(e.DB, owner, current, 1)
+		tasks, err := model.ClaimNativeRecovery(e.DB.WithContext(ctx), owner, current, 1)
 		if err != nil {
 			return report, err
 		}

@@ -261,3 +261,20 @@ func ensureAdminKey() error {
 
 	return nil
 }
+
+// Register before main reaches wg.Wait; a cancelled context is not proof that
+// an in-flight recovery or its bounded owned cleanup has returned.
+func startJoinedRecoveryTasks(ctx context.Context, wg *sync.WaitGroup, tasks ...func(context.Context)) {
+	for _, run := range tasks {
+		if ctx.Err() != nil {
+			return
+		}
+		wg.Add(1)
+		go func(run func(context.Context)) {
+			defer wg.Done()
+			if ctx.Err() == nil {
+				run(ctx)
+			}
+		}(run)
+	}
+}

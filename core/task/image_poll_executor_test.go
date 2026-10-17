@@ -296,7 +296,9 @@ func TestImagePollExecutorTimeoutCancelActualHTTP(t *testing.T) {
 			installTaskImagePoll(t, db)
 			lease := time.Minute
 			if strings.HasPrefix(mode, "expired") {
-				lease = 450 * time.Millisecond
+				// Leave room for instrumented setup; the handler waits for the actual
+				// captured deadline, so expiry is still deterministic.
+				lease = 2 * time.Second
 			}
 			claimPollFixture(t, db, info, "timeout", lease)
 			deadline = info.NextPollAt
@@ -412,6 +414,70 @@ func TestImagePollExecutorArchiveReceipts(t *testing.T) {
 				require.Error(t, model.RecordImagePollReturn(t.Context(), info))
 				require.Equal(t, "accepted", taskPollRows(t, db)[0].State)
 			}
+		})
+	}
+}
+
+func TestImagePollExecutorFirstMeasurementParksAndReturns(t *testing.T) {
+	for _, mode := range []string{"park", "complete", "tampered-price", "wrong-mode", "prepaid-conflict"} {
+		t.Run(mode, func(t *testing.T) {
+			db, task, info := immediatePrepaidFixture(t, "completed")
+			if mode != "prepaid-conflict" {
+				require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", task.ID).Update("prepayment_quote_json", "").Error)
+			}
+			info.Price = model.Price{ImageBilling: &model.ImageBillingPolicy{Version: 1, Scenario: "generation", OutputPixelTiers: []model.ImageBillingTier{{AmountMicros: 300000, UnitQuantity: 1}}}}
+
+			if mode == "complete" {
+				w := int64(10)
+				inputs := int64(0)
+				data, err := json.Marshal([]model.ImageOutput{{URL: "https://example.invalid/image.png", Width: &w, Height: &w}})
+				require.NoError(t, err)
+				require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", task.ID).Update("data", string(data)).Error)
+				info.UsageContext = model.UsageContext{ImageUsage: &model.ImageUsage{Version: 1, State: "incomplete", Scenario: "generation", InputCount: &inputs, Outputs: []model.ImageUsageOutput{}}}
+			}
+			if mode == "prepaid-conflict" {
+				info.MeasuredImage = true
+			}
+			require.NoError(t, db.Save(info).Error)
+			consumer := &pricingCaptureConsumer{}
+			old := balance.Default
+			balance.Default = pricingCaptureBalance{consumer: consumer}
+			t.Cleanup(func() { balance.Default = old })
+			require.NoError(t, model.CacheSetGroup(&model.GroupCache{ID: info.GroupID, Status: model.GroupStatusEnabled}))
+			t.Cleanup(func() { _ = model.CacheDeleteGroup(info.GroupID) })
+			installTaskImagePoll(t, db)
+			claimPollFixture(t, db, info, "first-measurement", time.Minute)
+			if mode == "tampered-price" {
+				info.Price = model.Price{ImageBilling: &model.ImageBillingPolicy{Version: 1, Scenario: "edit"}}
+			}
+			if mode == "wrong-mode" {
+				info.MeasuredImage = true
+			}
+			processOneAsyncUsage(t.Context(), info)
+			var got model.AsyncUsageInfo
+			require.NoError(t, db.First(&got, info.ID).Error)
+			if mode == "tampered-price" || mode == "wrong-mode" || mode == "prepaid-conflict" {
+				require.Zero(t, consumer.attempts)
+				require.Equal(t, model.AsyncUsageStatusPending, got.Status)
+				require.Equal(t, "first-measurement", got.ProcessingToken)
+				return
+			}
+			require.True(t, got.MeasuredImage)
+			expected := model.AsyncUsageStatusMeasurementPending
+			if mode == "complete" {
+				expected = model.AsyncUsageStatusCompleted
+				require.Equal(t, 1, consumer.attempts)
+				require.InDelta(t, .3, got.Amount.UsedAmount, .000001)
+			} else {
+				require.Zero(t, consumer.attempts)
+			}
+			require.Equal(t, expected, got.Status)
+			require.Empty(t, got.ProcessingToken)
+			var entry model.Log
+			require.NoError(t, db.First(&entry, info.LogID).Error)
+			require.Equal(t, expected, entry.AsyncUsageStatus)
+			require.Equal(t, "exited", taskPollRows(t, db)[0].State)
+			require.Equal(t, "unproven", taskPollRows(t, db)[0].ContinuationState)
 		})
 	}
 }

@@ -42,13 +42,20 @@ func pollRows(t *testing.T, db *gorm.DB) []model.ChannelAdmissionImagePollHandof
 	require.NoError(t, db.Order("offered_at_ms,id").Find(&rows).Error)
 	return rows
 }
-func pollFixtureOn(t *testing.T, f *admissionFixture, duration time.Duration) (*model.ImageTask, *model.AsyncUsageInfo) {
+func pollFixtureOn(t *testing.T, f *admissionFixture, duration time.Duration, measuredMode ...bool) (*model.ImageTask, *model.AsyncUsageInfo) {
 	t.Helper()
 	installImagePoll(t, f.store.DB)
 	task, _ := reserveAdmissionImage(t, f, "poll", 0)
 	// Persistent prepaid binding exercises generic receipt path without synthetic
 	// ordinary price/log setup; no wallet is invoked in these model tests.
-	require.NoError(t, f.store.DB.Model(&model.ImageTask{}).Where("id=?", task.ID).Update("prepayment_quote_json", `{"version":1}`).Error)
+	quote := `{"version":1}`
+	if len(measuredMode) > 0 {
+		quote = ""
+	}
+	require.NoError(t, f.store.DB.Model(&model.ImageTask{}).Where("id=?", task.ID).Update("prepayment_quote_json", quote).Error)
+	if len(measuredMode) > 0 {
+		require.NoError(t, f.store.DB.Model(&model.AsyncUsageInfo{}).Where("id=?", task.UsageID).Update("measured_image", measuredMode[0]).Error)
+	}
 	require.NoError(t, f.store.DB.Model(&model.AsyncUsageInfo{}).Where("id=?", task.UsageID).Updates(map[string]any{"billing_operation_id": task.BillingOperationID, "status": model.AsyncUsageStatusPending, "next_poll_at": time.Now().Add(-time.Second)}).Error)
 	task, e := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
 	require.NoError(t, e)
@@ -57,6 +64,9 @@ func pollFixtureOn(t *testing.T, f *admissionFixture, duration time.Duration) (*
 	won, e := model.TryClaimAsyncUsageInfo(&u, "poll-original", time.Now().Add(duration), time.Now())
 	require.NoError(t, e)
 	require.True(t, won)
+	if len(measuredMode) > 0 {
+		require.NoError(t, f.store.DB.Model(&model.Log{}).Where("id=?", u.LogID).Updates(map[string]any{"billing_operation_id": u.BillingOperationID, "async_usage_status": model.AsyncUsageStatusPending}).Error)
+	}
 	require.Len(t, pollRows(t, f.store.DB), 1)
 	return task, &u
 }

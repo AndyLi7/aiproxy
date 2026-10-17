@@ -41,8 +41,11 @@ type imagePollRelease struct {
 	TerminalCancel bool
 }
 
+// MeasuredImage is a protected business-state transition (false -> true on
+// first measurement), not stable invocation identity. Accounting transactions
+// still compare the exact persisted mode, price, usage and amount before work.
 func imagePollUsageHash(u *AsyncUsageInfo) string {
-	h, _ := admissionHash([]any{"image-poll-usage-v1", u.ID, u.ImageTaskID, u.GroupID, u.TokenID, u.LogID, u.RequestID, u.BillingOperationID, u.Mode, u.ChannelID, u.BaseURL, u.UpstreamID, u.TokenName, u.Capability, u.MeasuredImage, u.UsageModelID, u.UsageSource, u.UsageAtMs, u.RequestAt.UnixMilli(), u.Model, u.InternalImageTask, u.PricingCurrency, u.PricingVersion})
+	h, _ := admissionHash([]any{"image-poll-usage-v1", u.ID, u.ImageTaskID, u.GroupID, u.TokenID, u.LogID, u.RequestID, u.BillingOperationID, u.Mode, u.ChannelID, u.BaseURL, u.UpstreamID, u.TokenName, u.Capability, u.UsageModelID, u.UsageSource, u.UsageAtMs, u.RequestAt.UnixMilli(), u.Model, u.InternalImageTask, u.PricingCurrency, u.PricingVersion})
 	return h
 }
 func imagePollTaskHash(t *ImageTask) string {

@@ -154,7 +154,7 @@ func (s *ChannelAdmissionStore) FinalizeMigrationProbe(ctx context.Context, op s
 		if e := probeRuntimeStorageReady(tx); e != nil {
 			return e
 		}
-		resource, e := loadShadowResource(tx, op, 0, false)
+		resource, e := migrationTargetByOperation(tx, op, false)
 		if e != nil || resource == nil {
 			return ErrChannelAdmissionConflict
 		}
@@ -241,6 +241,21 @@ func (s *ChannelAdmissionStore) FinalizeMigrationProbe(ctx context.Context, op s
 // It does not expose Seal/Commit: post-seal reauthorization/reverse and a real
 // fleet/cache/recovery-watermark issuer remain separate rollout prerequisites.
 func (s *ChannelAdmissionStore) PrepareMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader) (*ChannelMigrationPrepared, error) {
+	return s.prepareMigrationFromProbe(ctx, op, reader, false)
+}
+
+func (s *ChannelAdmissionStore) PrepareReverseMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader) (*ChannelMigrationPrepared, error) {
+	return s.prepareMigrationFromProbe(ctx, op, reader, true)
+}
+
+func (s *ChannelAdmissionStore) prepareMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader, reverse bool) (*ChannelMigrationPrepared, error) {
+	original, e := s.MigrationProbeAuthorization(ctx, op)
+	if e != nil {
+		return nil, e
+	}
+	if reverse != reverseMigration(original.Command) || !validMigrationResourceKind(original.Command) {
+		return nil, ErrChannelAdmissionConflict
+	}
 	var fact VerifiedMigrationProbe
 	var found bool
 	read := s.migrationReadTransaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) (MigrationReadResult, error) {
@@ -270,7 +285,6 @@ func (s *ChannelAdmissionStore) PrepareMigrationFromProbe(ctx context.Context, o
 	if read.State != "ready" {
 		return nil, ErrChannelAdmissionConflict
 	}
-	var e error
 	if !found {
 		fact, e = s.FinalizeMigrationProbe(ctx, op, reader)
 		if e != nil {
@@ -288,6 +302,9 @@ func (s *ChannelAdmissionStore) PrepareMigrationFromProbe(ctx context.Context, o
 			return VerifiedMigrationProbe{}, ErrChannelAdmissionConflict
 		}
 		return fact, nil
+	}
+	if reverse {
+		return copyStore.PrepareReverseMigration(ctx, a.Command)
 	}
 	return copyStore.PrepareMigration(ctx, a.Command)
 }

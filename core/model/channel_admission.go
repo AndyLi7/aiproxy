@@ -484,7 +484,7 @@ func (s *ChannelAdmissionStore) sealTx(tx *gorm.DB, c *ChannelAdmissionControl, 
 			}
 			wantStatus := ChannelStatusEnabled
 			if prepared != nil && identity.ChannelID == input.To.ChannelID {
-				wantStatus = ChannelStatusDisabled
+				wantStatus = migrationTargetStatus(prepared.request)
 			}
 			if ch.Status != wantStatus {
 				return ErrChannelAdmissionConflict

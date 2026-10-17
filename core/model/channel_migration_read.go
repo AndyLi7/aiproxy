@@ -57,12 +57,13 @@ type MigrationReadSealRequest struct {
 	RevertOf         string          `json:"revertOf"`
 }
 type MigrationReadRequest struct {
-	Seal             MigrationReadSealRequest `json:"seal"`
-	FromCredentialID string                   `json:"fromCredentialId"`
-	ToCredentialID   string                   `json:"toCredentialId"`
-	ExpectedPinHash  string                   `json:"expectedPinHash"`
-	ProjectionHash   string                   `json:"projectionHash"`
-	FamilyHash       string                   `json:"familyHash"`
+	TargetResourceKind string                   `json:"targetResourceKind,omitempty"`
+	Seal               MigrationReadSealRequest `json:"seal"`
+	FromCredentialID   string                   `json:"fromCredentialId"`
+	ToCredentialID     string                   `json:"toCredentialId"`
+	ExpectedPinHash    string                   `json:"expectedPinHash"`
+	ProjectionHash     string                   `json:"projectionHash"`
+	FamilyHash         string                   `json:"familyHash"`
 }
 type MigrationReadReceipt struct {
 	OperationID       string `json:"operationId"`
@@ -266,7 +267,7 @@ func (s *ChannelAdmissionStore) ReadPreparedMigrationFacts(ctx context.Context, 
 		}
 		r.ConfigModels = &snap.ConfigModels
 		r.Readback = &MigrationReadback{
-			Request: MigrationReadRequest{MigrationReadSealRequest{req.Seal.OperationID, req.Seal.Epoch, migrationDecimal(req.Seal.ExpectedRevision), req.Seal.From, req.Seal.To, req.Seal.RevertOf}, req.FromCredentialID, req.ToCredentialID, req.ExpectedPinHash, req.ProjectionHash, req.FamilyHash},
+			Request: MigrationReadRequest{req.TargetResourceKind, MigrationReadSealRequest{req.Seal.OperationID, req.Seal.Epoch, migrationDecimal(req.Seal.ExpectedRevision), req.Seal.From, req.Seal.To, req.Seal.RevertOf}, req.FromCredentialID, req.ToCredentialID, req.ExpectedPinHash, req.ProjectionHash, req.FamilyHash},
 			Receipt: MigrationReadReceipt{row.OperationID, row.RequestHash, row.StorageGeneration, row.ProbeHash, row.ProbeFactHash, row.State, migrationDecimal(row.SealRevision), migrationDecimal(row.CommitRevision), migrationDecimal(row.CommittedAtMs), row.AfterPinHash, row.FromChannelID, row.ToChannelID},
 			From:    req.Seal.From, To: req.Seal.To, FromEnabled: from.Status == ChannelStatusEnabled, ToEnabled: to.Status == ChannelStatusEnabled, PinHash: snap.PinHash, ProjectionHash: snap.ProjectionHash, FamilyHash: snap.FamilyHash,
 		}

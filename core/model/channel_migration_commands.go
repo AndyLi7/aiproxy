@@ -49,14 +49,16 @@ type ChannelMigrationPrepared struct {
 // ExpectedPinHash is a gateway-generated opaque digest of the complete raw
 // model_config table, NOT the application's normalized migrationPinSetHash.
 // This avoids lossy float64/JS-number or default/omitempty round trips.
-// This batch only supports forward migrations: Seal.RevertOf must be empty.
+// Empty TargetResourceKind preserves the original forward JSON/hash. Reverse
+// requires the dedicated retired-target resource and server-only commands.
 type ChannelMigrationRequest struct {
-	Seal             ChannelSealRequest `json:"seal"`
-	FromCredentialID string             `json:"fromCredentialId"`
-	ToCredentialID   string             `json:"toCredentialId"`
-	ExpectedPinHash  string             `json:"expectedPinHash"`
-	ProjectionHash   string             `json:"projectionHash"`
-	FamilyHash       string             `json:"familyHash"`
+	TargetResourceKind string             `json:"targetResourceKind,omitempty"`
+	Seal               ChannelSealRequest `json:"seal"`
+	FromCredentialID   string             `json:"fromCredentialId"`
+	ToCredentialID     string             `json:"toCredentialId"`
+	ExpectedPinHash    string             `json:"expectedPinHash"`
+	ProjectionHash     string             `json:"projectionHash"`
+	FamilyHash         string             `json:"familyHash"`
 }
 
 // The verifier must validate durable restricted-probe execution/settlement,
@@ -175,7 +177,7 @@ func migrationStorageReady(tx *gorm.DB) error {
 	return migrationStatesReady(tx)
 }
 func (s *ChannelAdmissionStore) migrationAuthorization(ctx context.Context, input ChannelMigrationRequest) (*migrationAuthorization, error) {
-	if s == nil || s.LoadMigrationProbe == nil || input.Seal.RevertOf != "" || input.FromCredentialID == "" || input.ToCredentialID == "" || len(input.FromCredentialID) > 128 || len(input.ToCredentialID) > 128 || !fullIdentityDigest(input.ExpectedPinHash) || !fullIdentityDigest(input.ProjectionHash) || !fullIdentityDigest(input.FamilyHash) ||
+	if s == nil || s.LoadMigrationProbe == nil || !validMigrationResourceKind(input) || input.FromCredentialID == "" || input.ToCredentialID == "" || len(input.FromCredentialID) > 128 || len(input.ToCredentialID) > 128 || !fullIdentityDigest(input.ExpectedPinHash) || !fullIdentityDigest(input.ProjectionHash) || !fullIdentityDigest(input.FamilyHash) ||
 		(input.Seal.From.KeyDigest == input.Seal.To.KeyDigest) != (input.FromCredentialID == input.ToCredentialID) {
 		return nil, ErrChannelAdmissionUnavailable
 	}
@@ -236,7 +238,7 @@ func loadMigration(tx *gorm.DB, id string, snapshotRead ...bool) (*ChannelMigrat
 		return nil, ErrChannelAdmissionConflict
 	}
 	hash, _ := admissionHash(request)
-	if row.RequestHash != hash || row.OperationID != request.Seal.OperationID || row.FromChannelID != request.Seal.From.ChannelID || row.ToChannelID != request.Seal.To.ChannelID || !fullIdentityDigest(row.ProbeHash) || !fullIdentityDigest(row.ProbeFactHash) || row.StorageGeneration == "" {
+	if !validMigrationResourceKind(request) || row.RequestHash != hash || row.OperationID != request.Seal.OperationID || row.FromChannelID != request.Seal.From.ChannelID || row.ToChannelID != request.Seal.To.ChannelID || !fullIdentityDigest(row.ProbeHash) || !fullIdentityDigest(row.ProbeFactHash) || row.StorageGeneration == "" {
 		return nil, ErrChannelAdmissionConflict
 	}
 	switch row.State {
@@ -259,14 +261,14 @@ func loadMigration(tx *gorm.DB, id string, snapshotRead ...bool) (*ChannelMigrat
 }
 func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *migrationAuthorization, stage string, features []string) error {
 	// All command writers already hold control; acquire owned resource before Prepared.
-	if _, err := loadShadowResource(tx, a.request.Seal.OperationID, a.request.Seal.To.ChannelID, false); err != nil {
+	if err := lockMigrationTarget(tx, a.request); err != nil {
 		return err
 	}
 	row, err := loadMigration(tx, a.request.Seal.OperationID)
 	if err != nil {
 		return err
 	}
-	if err := validatePreparedShadowLink(tx, c, row, a.request, false); err != nil {
+	if err := validatePreparedTargetLink(tx, c, row, a.request, false); err != nil {
 		return err
 	}
 	encoded, _ := json.Marshal(a.request)
@@ -286,7 +288,15 @@ func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *
 		}
 	}
 	if stage == "seal" {
-		if row.State == "prepared" && row.ShadowCheckpointHash != "" {
+		if row.State == "prepared" && reverseMigration(a.request) {
+			r, e := loadRetiredResource(tx, row.OperationID, false)
+			if e != nil {
+				return e
+			}
+			if e = retiredCurrent(tx, c, r, a.request, features); e != nil {
+				return e
+			}
+		} else if row.State == "prepared" && row.ShadowCheckpointHash != "" {
 			r, e := loadShadowResource(tx, row.OperationID, row.ToChannelID, false)
 			if e != nil || r == nil {
 				return ErrChannelAdmissionConflict
@@ -307,7 +317,7 @@ func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *
 				return ErrChannelAdmissionConflict
 			}
 		}
-		if err := migrationSnapshotMatches(tx, a.request, ChannelStatusDisabled); err != nil {
+		if err := migrationSnapshotMatches(tx, a.request, migrationTargetStatus(a.request)); err != nil {
 			return err
 		}
 	}
@@ -320,6 +330,9 @@ func validateMigrationAuthorization(tx *gorm.DB, c *ChannelAdmissionControl, a *
 // PrepareMigration freezes the reviewed snapshot only after a server-side probe
 // verifier binds its evidence to this exact request. It never enables a channel.
 func (s *ChannelAdmissionStore) PrepareMigration(ctx context.Context, input ChannelMigrationRequest) (result *ChannelMigrationPrepared, err error) {
+	if input.TargetResourceKind != "" || input.Seal.RevertOf != "" {
+		return nil, ErrChannelAdmissionConflict
+	}
 	a, err := s.migrationAuthorization(ctx, input)
 	if err != nil {
 		return nil, err
@@ -360,7 +373,7 @@ func (s *ChannelAdmissionStore) PrepareMigration(ctx context.Context, input Chan
 		if family != input.FamilyHash {
 			return ErrChannelAdmissionConflict
 		}
-		if err := migrationSnapshotMatches(tx, input, ChannelStatusDisabled); err != nil {
+		if err := migrationSnapshotMatches(tx, input, migrationTargetStatus(input)); err != nil {
 			return err
 		}
 		if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
@@ -410,6 +423,9 @@ func (s *ChannelAdmissionStore) PrepareMigration(ctx context.Context, input Chan
 	return
 }
 func (s *ChannelAdmissionStore) SealPrepared(ctx context.Context, input ChannelMigrationRequest) (*ChannelAdmissionBarrier, error) {
+	if input.TargetResourceKind != "" || input.Seal.RevertOf != "" {
+		return nil, ErrChannelAdmissionConflict
+	}
 	a, err := s.migrationAuthorization(ctx, input)
 	if err != nil {
 		return nil, err
@@ -489,6 +505,9 @@ func migrationCurrentHead(tx *gorm.DB, row *ChannelMigrationPrepared, input Chan
 // snapshot CAS, raw JSON pin edits and the durable receipt commit atomically.
 // Unknown outcomes are resolved by ReadPreparedMigration, never by status alone.
 func (s *ChannelAdmissionStore) CommitPreparedPins(ctx context.Context, input ChannelMigrationRequest, sealRevision int64) (result *ChannelMigrationPrepared, err error) {
+	if input.TargetResourceKind != "" || input.Seal.RevertOf != "" {
+		return nil, ErrChannelAdmissionConflict
+	}
 	a, err := s.migrationAuthorization(ctx, input)
 	if err != nil {
 		return nil, err
@@ -535,7 +554,7 @@ func readPreparedMigrationTx(tx *gorm.DB, c *ChannelAdmissionControl, operationI
 		if hash != row.RequestHash || row.StorageGeneration != c.StorageGeneration || req.Seal.Epoch != c.Epoch {
 			return ErrChannelAdmissionConflict
 		}
-		if err := validatePreparedShadowLink(tx, c, row, req, snapshotRead); err != nil {
+		if err := validatePreparedTargetLink(tx, c, row, req, snapshotRead); err != nil {
 			return err
 		}
 		if row.State == "abandoned" {
@@ -561,7 +580,7 @@ func readPreparedMigrationTx(tx *gorm.DB, c *ChannelAdmissionControl, operationI
 					return ErrChannelAdmissionConflict
 				}
 			}
-			if err := migrationSnapshotMatches(tx, req, ChannelStatusDisabled, snapshotRead); err != nil {
+			if err := migrationSnapshotMatches(tx, req, migrationTargetStatus(req), snapshotRead); err != nil {
 				return err
 			}
 		} else {
@@ -950,7 +969,7 @@ func (s *ChannelAdmissionStore) commitPreparedPinsTx(tx *gorm.DB, c *ChannelAdmi
 			result = row
 			return finalizeMigrationProbe(tx, a.probe)
 		}
-		if err := migrationSnapshotMatches(tx, input, ChannelStatusDisabled); err != nil {
+		if err := migrationSnapshotMatches(tx, input, migrationTargetStatus(input)); err != nil {
 			return err
 		}
 		if _, err := lockDeploymentProof(tx, c, a.deployment, s.Executor); err != nil {
@@ -973,13 +992,16 @@ func (s *ChannelAdmissionStore) commitPreparedPinsTx(tx *gorm.DB, c *ChannelAdmi
 				return ErrChannelAdmissionConflict
 			}
 		}
-		update := tx.Model(&Channel{}).Where("id = ? AND status = ?", input.Seal.To.ChannelID, ChannelStatusDisabled).UpdateColumn("status", ChannelStatusEnabled)
-		if update.Error != nil {
-			return update.Error
+		if !reverseMigration(input) {
+			update := tx.Model(&Channel{}).Where("id = ? AND status = ?", input.Seal.To.ChannelID, ChannelStatusDisabled).UpdateColumn("status", ChannelStatusEnabled)
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != 1 {
+				return ErrChannelAdmissionConflict
+			}
 		}
-		if update.RowsAffected != 1 {
-			return ErrChannelAdmissionConflict
-		}
+
 		after, err := migrationConfigRows(tx)
 		if err != nil {
 			return err

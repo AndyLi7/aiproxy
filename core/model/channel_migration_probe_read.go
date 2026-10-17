@@ -46,7 +46,7 @@ func probeObservationTx(tx *gorm.DB, c *ChannelAdmissionControl, op string) (Mig
 	if e := probeRuntimeStorageReady(tx); e != nil {
 		return MigrationProbeResult{}, e
 	}
-	resource, e := loadShadowResource(tx, op, 0, true)
+	resource, e := migrationTargetByOperation(tx, op, true)
 	if e != nil {
 		return MigrationProbeResult{}, e
 	}
@@ -74,7 +74,7 @@ func probeObservationTx(tx *gorm.DB, c *ChannelAdmissionControl, op string) (Mig
 	if e != nil {
 		return MigrationProbeResult{}, e
 	}
-	if resource == nil || !shadowContextMatches(c, resource) || run.ResourceRequestHash != resource.RequestHash || run.CheckpointHash != resource.CheckpointHash || a.Command.Seal.From.ChannelID != resource.FromChannelID || a.Command.Seal.To != shadowIdentity(resource) || run.StorageGeneration != c.StorageGeneration || a.Command.Seal.Epoch != c.Epoch {
+	if resource == nil || (resource.Epoch != c.Epoch || resource.StorageGeneration != c.StorageGeneration || resource.Revision > c.Revision || resource.Kind != a.Command.TargetResourceKind) || run.ResourceRequestHash != resource.RequestHash || run.CheckpointHash != resource.CheckpointHash || a.Command.Seal.From.ChannelID != resource.FromChannelID || a.Command.Seal.To != resource.Target || run.StorageGeneration != c.StorageGeneration || a.Command.Seal.Epoch != c.Epoch {
 		return MigrationProbeResult{}, ErrChannelAdmissionConflict
 	}
 	result := probeResult(op, "pending", "task_not_bound")

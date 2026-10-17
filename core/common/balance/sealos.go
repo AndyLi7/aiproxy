@@ -375,7 +375,7 @@ func (s *Sealos) fetchRealNameFromAPI(ctx context.Context, userUID string) (bool
 	if err := actionguard.Check(ctx); err != nil {
 		return false, err
 	}
-	resp, err := sealosHTTPClient.Do(req)
+	resp, err := actionguard.DoHTTP(sealosHTTPClient, req)
 	if err != nil {
 		return false, err
 	}
@@ -450,7 +450,7 @@ func (s *Sealos) fetchBalanceFromAPI(
 	if err := actionguard.Check(ctx); err != nil {
 		return nil, err
 	}
-	resp, err := sealosHTTPClient.Do(req)
+	resp, err := actionguard.DoHTTP(sealosHTTPClient, req)
 	if err != nil {
 		return nil, err
 	}
@@ -574,7 +574,7 @@ func (s *SealosPostGroupConsumer) postConsume(
 	if err := actionguard.Check(ctx); err != nil {
 		return err
 	}
-	resp, err := sealosHTTPClient.Do(req)
+	resp, err := actionguard.DoHTTP(sealosHTTPClient, req)
 	if err != nil {
 		return err
 	}

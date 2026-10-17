@@ -37,3 +37,21 @@ MySQL can return RowsAffected=0 for unchanged idempotent writes. While holding t
 Final focused race after this compatibility fix: `/private/tmp/b2-accounting-noop-final.jsonl`, 145 pass / 1 optional real-wallet fixture skip / 0 fail. This overlaps the tests above and is not an additive unique-test total. The real wallet test was separately executed as described above. Final build passed.
 
 The existing measured-zero receipt-window fallback remains: after its window, the worker alerts and application catch-up handles the receipt. This batch does not claim that fallback proves receipt confirmation or use closure.
+
+## Independent review fixes: ACCOUNTING-CLAIM-R1 / R2
+
+The prior 58985a64 baseline was not accepted: the independent reviewer reproduced redirected HTTP actions after owner loss, and a persisted mismatched task/usage billing operation incorrectly selecting the prepaid exemption. This follow-up fixes those two defects without changing the earlier batch boundary.
+
+- R1: ExternalHTTP balance/consume and Sealos real-name/balance/consume use `actionguard.DoHTTP`. With a scope it clones the shared HTTP client and wraps CheckRedirect. The existing redirect policy runs first, then the original scope is checked before the redirected request is sent. The default ten-redirect limit, explicit redirect denial and ErrUseLastResponse are preserved. Unscoped requests still call the original client directly. This guards application-visible redirects, not requests already sent or opaque internal Transport retries. MeasuredZero retains its existing no-redirect policy.
+- R2: The prepaid exclusion additionally requires a nonempty durable task billing operation equal to the durable usage billing operation. Mismatched or both-empty operations use strict claim validation and cannot write a completed evidence log through legacy fallback. Existing task/group/token/usage identity checks remain; positive fixtures now carry a real nonempty frozen operation. This addresses corrupted/inconsistent persisted identities, not a claim that clients can directly mutate those rows.
+
+Verification of this follow-up:
+
+- Final race packages: actionguard 5 pass, balance 80 pass, task 186 pass / 5 fixture skips; `/private/tmp/accounting-r1-r2-final-packages.jsonl`.
+- Final focused model race: 133 pass, zero skips/failures; `/private/tmp/accounting-r1-r2-final-model.jsonl`. Includes reviewer original operation-mismatch receipt regression and both-empty expired receipt rejection.
+- Both balance backends: 307 and 308, live owner, lost owner and no scope. Live/legacy redirects preserve the exact POST body; lost owner emits only the original request. Existing callback policy, callback-induced loss, ErrUseLastResponse and default ten-hop limit also tested.
+- Current app 3e93cbe real local wallet fixture: original accepted consume/local receipt rejection/recovery replay keeps one ledger debit and frozen operation. `/private/tmp/b2-accounting-wallet-bi2yzqie/gateway.jsonl`; cleanup.json confirms fixture stopped, in-memory SQLite only. This supplements the corresponding task skip. The other four skips are two existing PG stop/join cases plus SECWalletIntegration and UsageAttributionLedgerMatchesLogs, not run in this follow-up.
+- Core build passed; `/private/tmp/accounting-r1-r2-final-build.log`. No new PostgreSQL/MySQL instance test claimed for this HTTP/persisted-predicate fix; earlier transaction evidence remains historical.
+- Mandatory security script plus manual changed-file review passed; staged scan at `/private/tmp/accounting-r1-r2-security-staged.log`. No secrets or live configuration included.
+
+Prepaid Sync/terminal refund ownership and complete executor/use closure remain out of this batch. No push, deployment, production access, provider invocation or paid generation. Parent performs independent exact-SHA review; release sequence remains local tests → PR review → exact staging verification → merge/main verification → fresh user confirmation before production.

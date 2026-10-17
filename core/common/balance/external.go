@@ -356,7 +356,7 @@ func (e *ExternalHTTP) fetchBalanceFromAPI(ctx context.Context, group string) (f
 	if err := actionguard.Check(ctx); err != nil {
 		return 0, err
 	}
-	resp, err := externalHTTPClient.Do(req)
+	resp, err := actionguard.DoHTTP(externalHTTPClient, req)
 	if err != nil {
 		return 0, err
 	}
@@ -486,7 +486,7 @@ func (e *ExternalHTTP) postConsume(
 	if err := actionguard.Check(ctx); err != nil {
 		return 0, err
 	}
-	resp, err := externalHTTPClient.Do(req)
+	resp, err := actionguard.DoHTTP(externalHTTPClient, req)
 	if err != nil {
 		return 0, err
 	}

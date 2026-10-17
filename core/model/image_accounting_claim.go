@@ -28,7 +28,8 @@ func UsesImageAccountingClaim(info *AsyncUsageInfo) bool {
 	if LogDB == nil || LogDB.Where("id=?", info.ID).First(&stored).Error != nil || stored.MeasuredImage || stored.ImageTaskID != info.ImageTaskID || stored.GroupID != info.GroupID || stored.TokenID != info.TokenID || stored.BillingOperationID != info.BillingOperationID {
 		return true
 	}
-	if LogDB != nil && LogDB.Where("id=? AND group_id=? AND token_id=?", info.ImageTaskID, info.GroupID, info.TokenID).First(&task).Error == nil && task.PrepaymentQuoteJSON != "" && (task.UsageID == 0 || task.UsageID == info.ID) {
+	// A prepaid quote cannot exempt an unbound or different billing operation.
+	if LogDB != nil && LogDB.Where("id=? AND group_id=? AND token_id=?", info.ImageTaskID, info.GroupID, info.TokenID).First(&task).Error == nil && task.PrepaymentQuoteJSON != "" && task.BillingOperationID != "" && task.BillingOperationID == stored.BillingOperationID && (task.UsageID == 0 || task.UsageID == info.ID) {
 		return false
 	}
 	return true

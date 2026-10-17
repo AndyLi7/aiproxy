@@ -172,22 +172,35 @@ func TestPostgresImageAccountingReceiptLocks(t *testing.T) {
 }
 
 func TestImageAccountingPrepaidScopeUsesPersistedBinding(t *testing.T) {
-	for _, variant := range []string{"prepaid", "measured-conflict", "wrong-task", "wrong-group", "missing-task"} {
+	for _, variant := range []string{"prepaid", "prepaid-operation", "measured-conflict", "wrong-task", "wrong-group", "wrong-operation", "empty-operation", "missing-task"} {
 		t.Run(variant, func(t *testing.T) {
 			db := asyncRenewalDB(t)
 			info := accountingModelFixture(t, db, true, time.Now().Add(time.Minute))
 			require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", info.ImageTaskID).Update("prepayment_quote_json", `{"frozen":true}`).Error)
+			info.BillingOperationID = "fixture-prepaid-operation"
+			require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Where("id=?", info.ID).Update("billing_operation_id", info.BillingOperationID).Error)
+			require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", info.ImageTaskID).Update("billing_operation_id", info.BillingOperationID).Error)
 			switch variant {
+			case "prepaid-operation":
+				info.BillingOperationID = "frozen-operation"
+				require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Where("id=?", info.ID).Update("billing_operation_id", info.BillingOperationID).Error)
+				require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", info.ImageTaskID).Update("billing_operation_id", info.BillingOperationID).Error)
 			case "measured-conflict":
 				require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Where("id=?", info.ID).Update("measured_image", true).Error)
 			case "wrong-task":
 				info.ImageTaskID = "unbound"
 			case "wrong-group":
 				info.GroupID = "unbound"
+			case "empty-operation":
+				info.BillingOperationID = ""
+				require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Where("id=?", info.ID).Update("billing_operation_id", "").Error)
+				require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", info.ImageTaskID).Update("billing_operation_id", "").Error)
+			case "wrong-operation":
+				require.NoError(t, db.Model(&model.ImageTask{}).Where("id=?", info.ImageTaskID).Update("billing_operation_id", "different-operation").Error)
 			case "missing-task":
 				require.NoError(t, db.Where("id=?", info.ImageTaskID).Delete(&model.ImageTask{}).Error)
 			}
-			require.Equal(t, variant != "prepaid", model.UsesImageAccountingClaim(info))
+			require.Equal(t, variant != "prepaid" && variant != "prepaid-operation", model.UsesImageAccountingClaim(info))
 		})
 	}
 }

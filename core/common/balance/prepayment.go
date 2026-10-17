@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/model"
 )
 
@@ -352,6 +353,9 @@ func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCom
 	req.Header.Set("Content-Type", "application/json")
 	client := *externalHTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	if err := actionguard.Check(ctx); err != nil {
+		return receipt, false, err
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return receipt, neverDelivered(err), errors.New("prepayment outcome unknown; retry original billing operation")

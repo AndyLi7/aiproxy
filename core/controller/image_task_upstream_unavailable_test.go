@@ -168,10 +168,10 @@ func exhaustedFalAccount(t *testing.T, calls *int) *httptest.Server {
 
 // The 2026-10-08 incident on the image lane: fal answers an exhausted account
 // with 403. The task fails at once with upstream_unavailable, the hold is
-// released and refunded in full in the same request, the request log carries
+// refunded in full by the owned recovery, the request log carries
 // the code, and operators get one log line with the status and fal's reason
 // (never the key or the prompt).
-func TestImageTaskProviderUnavailableFailsAndRefundsAtOnce(t *testing.T) {
+func TestImageTaskProviderUnavailableDefersToOwnedRefund(t *testing.T) {
 	hook := new(logtest.Hook)
 	oldHooks := logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.AddHook(hook)
@@ -190,15 +190,21 @@ func TestImageTaskProviderUnavailableFailsAndRefundsAtOnce(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Equal(t, "failed", response.Status)
 	require.Equal(t, &model.ImageTaskError{Code: "upstream_unavailable", Message: model.UpstreamUnavailableMessage}, response.Error)
-	require.NotNil(t, response.Billing)
-	require.Equal(t, "refunded", response.Billing.Status)
+	require.Nil(t, response.Billing)
 	// No failover follows (the channel is pinned), so the failure is stored
-	// first and one Sync releases the attempt and settles the hold.
-	require.Equal(t, []string{"admit", "begin_attempt", "reject_attempt", "settle:failed/platform_failure", "get"}, wallet.Actions())
+	// first; the separately claimed recovery releases and settles the hold.
+	require.Equal(t, []string{"admit", "begin_attempt"}, wallet.Actions())
 
 	saved, err := model.GetImageTask("locked-account", "g", 1)
 	require.NoError(t, err)
-	require.True(t, saved.BillingSettled)
+	require.False(t, saved.BillingSettled)
+	won, err := model.ClaimImagePrepaymentRecovery(t.Context(), saved, time.Now())
+	require.NoError(t, err)
+	require.True(t, won)
+	receipt, err := imageprepayment.SyncOwned(t.Context(), saved)
+	require.NoError(t, err)
+	require.Equal(t, "refunded", receipt.Status)
+	require.Equal(t, []string{"admit", "begin_attempt", "reject_attempt", "settle:failed/platform_failure", "get"}, wallet.Actions())
 	var entry model.Log
 	require.NoError(t, db.Where("request_id = ?", "locked-account").First(&entry).Error)
 	require.Equal(t, "upstream_unavailable", entry.ErrorCode)
@@ -230,7 +236,7 @@ func TestImageTaskProviderUnavailableFailsAndRefundsAtOnce(t *testing.T) {
 // "submitting": it would surface 15 minutes later as generation_timeout. The
 // task fails at once with upstream_unavailable, and the next Sync (prepayment
 // recovery) releases the attempt and refunds the hold.
-func TestImageTaskProviderUnavailableFailsWhenWalletReleaseFails(t *testing.T) {
+func TestImageTaskProviderUnavailableKeepsRefundPendingUntilRecovery(t *testing.T) {
 	wallet := newPrepaidWallet(t)
 	wallet.SetRejectDown(true)
 	providerCalls := 0
@@ -245,7 +251,7 @@ func TestImageTaskProviderUnavailableFailsWhenWalletReleaseFails(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Equal(t, "failed", response.Status)
 	require.Equal(t, &model.ImageTaskError{Code: "upstream_unavailable", Message: model.UpstreamUnavailableMessage}, response.Error)
-	require.Equal(t, []string{"admit", "begin_attempt", "reject_attempt"}, wallet.Actions())
+	require.Equal(t, []string{"admit", "begin_attempt"}, wallet.Actions())
 
 	saved, err := model.GetImageTask("wallet-blip", "g", 1)
 	require.NoError(t, err)
@@ -258,10 +264,13 @@ func TestImageTaskProviderUnavailableFailsWhenWalletReleaseFails(t *testing.T) {
 	require.Equal(t, model.AsyncUsageStatusFailed, entry.AsyncUsageStatus)
 
 	wallet.SetRejectDown(false)
-	receipt, err := imageprepayment.Sync(t.Context(), saved)
+	won, err := model.ClaimImagePrepaymentRecovery(t.Context(), saved, time.Now())
+	require.NoError(t, err)
+	require.True(t, won)
+	receipt, err := imageprepayment.SyncOwned(t.Context(), saved)
 	require.NoError(t, err)
 	require.Equal(t, "refunded", receipt.Status)
-	require.Equal(t, []string{"admit", "begin_attempt", "reject_attempt", "reject_attempt", "settle:failed/platform_failure", "get"}, wallet.Actions())
+	require.Equal(t, []string{"admit", "begin_attempt", "reject_attempt", "settle:failed/platform_failure", "get"}, wallet.Actions())
 	settled, err := model.GetImageTask("wallet-blip", "g", 1)
 	require.NoError(t, err)
 	require.True(t, settled.BillingSettled)
@@ -339,6 +348,12 @@ func TestImageFailoverPrepaidReleaseBeforeSwitch(t *testing.T) {
 				require.Equal(t, 1, backupCalls)
 				require.Equal(t, "queued", task.Status)
 				require.Len(t, task.Attempts, 2)
+				require.Equal(t, []string{"begin_attempt", "reject_attempt", "begin_attempt"}, wallet.Actions())
+				won, err := model.ClaimImagePrepaymentRecovery(t.Context(), task, time.Now())
+				require.NoError(t, err)
+				require.True(t, won)
+				_, err = imageprepayment.SyncOwned(t.Context(), task)
+				require.NoError(t, err)
 				require.Equal(t, []string{"begin_attempt", "reject_attempt", "begin_attempt", "accept_attempt", "get"}, wallet.Actions())
 				return
 			}
@@ -351,19 +366,22 @@ func TestImageFailoverPrepaidReleaseBeforeSwitch(t *testing.T) {
 			require.Equal(t, "no_candidates", task.Attempts[0].Decision)
 			require.Equal(t, first.ID, task.Attempts[0].ChannelID)
 			require.False(t, task.BillingSettled)
-			// The release before the switch failed; the Sync after the failure
-			// was stored retried it once.
-			require.Equal(t, []string{"begin_attempt", "reject_attempt", "reject_attempt"}, wallet.Actions())
+			// The release before the switch failed. The persisted terminal keeps
+			// billing pending until the independently claimed recovery can retry.
+			require.Equal(t, []string{"begin_attempt", "reject_attempt"}, wallet.Actions())
 			var entry model.Log
 			require.NoError(t, db.Where("request_id = ?", original.ID).First(&entry).Error)
 			require.Equal(t, "upstream_unavailable", entry.ErrorCode)
 			require.Equal(t, first.ID, entry.ChannelID)
 
 			wallet.SetRejectDown(false)
-			receipt, err := imageprepayment.Sync(t.Context(), task)
+			won, err := model.ClaimImagePrepaymentRecovery(t.Context(), task, time.Now())
+			require.NoError(t, err)
+			require.True(t, won)
+			receipt, err := imageprepayment.SyncOwned(t.Context(), task)
 			require.NoError(t, err)
 			require.Equal(t, "refunded", receipt.Status)
-			require.Equal(t, []string{"begin_attempt", "reject_attempt", "reject_attempt", "reject_attempt", "settle:failed/platform_failure", "get"}, wallet.Actions())
+			require.Equal(t, []string{"begin_attempt", "reject_attempt", "reject_attempt", "settle:failed/platform_failure", "get"}, wallet.Actions())
 			settled, err := model.GetImageTask(original.ID, "g", 1)
 			require.NoError(t, err)
 			require.True(t, settled.BillingSettled)

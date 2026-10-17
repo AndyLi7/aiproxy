@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/stretchr/testify/require"
 )
 
@@ -280,4 +282,29 @@ func TestPrepaymentNotFoundConfirmedOnlyByAppEnvelope(t *testing.T) {
 	}
 	require.False(t, WalletConfirmedNotFound(ErrPrepaymentNotFound))
 	require.False(t, WalletConfirmedNotFound(errors.New("prepayment not found")))
+}
+
+func TestPrepaymentRetryRechecksOriginalOwnerBeforeHTTP(t *testing.T) {
+	for _, lost := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lost-%v", lost), func(t *testing.T) {
+			valid := true
+			client, script := useScriptedWallet(t, func() (*http.Response, error) { valid = !lost; return edge502() }, receipt)
+			ownerErr := errors.New("original owner lost")
+			ctx := actionguard.With(submitCtx(t), func(context.Context) error {
+				if !valid {
+					return ownerErr
+				}
+				return nil
+			})
+			_, err := client.Prepayment(ctx, PrepaymentCommand{Action: "begin_attempt", Group: "user", BillingOperationID: "op-1"})
+			if lost {
+				require.ErrorIs(t, err, ownerErr)
+				require.Len(t, script.bodies, 1)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, script.bodies, 2)
+				require.Equal(t, script.bodies[0], script.bodies[1])
+			}
+		})
+	}
 }

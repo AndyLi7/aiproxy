@@ -18,50 +18,55 @@ func withImagePollClaim(ctx context.Context, info *AsyncUsageInfo, observed *Ima
 	if info == nil || observed == nil || info.ID == 0 || info.ProcessingToken == "" || info.ImageTaskID != observed.ID || LogDB == nil {
 		return ErrImagePollClaimLost
 	}
-	clock, err := asyncUsageLeaseClockSQL(LogDB)
+	return LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return withImagePollClaimTx(tx, info, observed, write) }, claimTxOptions(LogDB)...)
+}
+
+func withImagePollClaimTx(tx *gorm.DB, info *AsyncUsageInfo, observed *ImageTask, write func(*gorm.DB, *ImageTask, *AsyncUsageInfo) error) error {
+	if info == nil || observed == nil || info.ID == 0 || info.ProcessingToken == "" || info.ImageTaskID != observed.ID {
+		return ErrImagePollClaimLost
+	}
+	clock, err := asyncUsageLeaseClockSQL(tx)
 	if err != nil {
 		return err
 	}
-	return LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var task ImageTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=?", observed.ID).First(&task).Error; err != nil {
-			return err
-		}
-		if imageRecoveryCoreHash(&task) != imageRecoveryCoreHash(observed) || task.ValidationContract != observed.ValidationContract || task.UpstreamID != observed.UpstreamID || task.UpstreamModel != observed.UpstreamModel || task.KeyFingerprint != observed.KeyFingerprint || task.ChannelType != observed.ChannelType || task.ArchiveRequired != observed.ArchiveRequired {
-			return ErrImagePollClaimLost
-		}
-		var current AsyncUsageInfo
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND image_task_id=? AND group_id=? AND token_id=? AND status=? AND processing_token=?", info.ID, task.ID, task.GroupID, task.TokenID, AsyncUsageStatusPending, info.ProcessingToken).First(&current).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrImagePollClaimLost
-		}
-		if err != nil {
-			return err
-		}
-		if (task.UsageID != 0 && task.UsageID != current.ID) || current.LogID != info.LogID || current.RequestID != info.RequestID || current.ChannelID != info.ChannelID || current.Mode != info.Mode || current.BillingOperationID != info.BillingOperationID {
-			return ErrImagePollClaimLost
-		}
-		var now int64
-		if err := tx.Raw("SELECT " + clock).Scan(&now).Error; err != nil {
-			return err
-		}
-		if now <= 0 || current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now {
-			return ErrImagePollClaimLost
-		}
-		deadline := current.NextPollAt.UnixMilli()
-		if err := write(tx, &task, &current); err != nil {
-			return err
-		}
-		status, token := current.Status, current.ProcessingToken
-		var count int64
-		if err := tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=?", current.ID, status, token).Where("? > "+clock, deadline).Count(&count).Error; err != nil {
-			return err
-		}
-		if count != 1 {
-			return ErrImagePollClaimLost
-		}
-		return nil
-	}, claimTxOptions(LogDB)...)
+	var task ImageTask
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=?", observed.ID).First(&task).Error; err != nil {
+		return err
+	}
+	if imageRecoveryCoreHash(&task) != imageRecoveryCoreHash(observed) || task.ValidationContract != observed.ValidationContract || task.UpstreamID != observed.UpstreamID || task.UpstreamModel != observed.UpstreamModel || task.KeyFingerprint != observed.KeyFingerprint || task.ChannelType != observed.ChannelType || task.ArchiveRequired != observed.ArchiveRequired {
+		return ErrImagePollClaimLost
+	}
+	var current AsyncUsageInfo
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND image_task_id=? AND group_id=? AND token_id=? AND status=? AND processing_token=?", info.ID, task.ID, task.GroupID, task.TokenID, AsyncUsageStatusPending, info.ProcessingToken).First(&current).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrImagePollClaimLost
+	}
+	if err != nil {
+		return err
+	}
+	if (task.UsageID != 0 && task.UsageID != current.ID) || current.LogID != info.LogID || current.RequestID != info.RequestID || current.ChannelID != info.ChannelID || current.Mode != info.Mode || current.BillingOperationID != info.BillingOperationID {
+		return ErrImagePollClaimLost
+	}
+	var now int64
+	if err := tx.Raw("SELECT " + clock).Scan(&now).Error; err != nil {
+		return err
+	}
+	if now <= 0 || current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now {
+		return ErrImagePollClaimLost
+	}
+	deadline := current.NextPollAt.UnixMilli()
+	if err := write(tx, &task, &current); err != nil {
+		return err
+	}
+	status, token := current.Status, current.ProcessingToken
+	var count int64
+	if err := tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=?", current.ID, status, token).Where("? > "+clock, deadline).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrImagePollClaimLost
+	}
+	return nil
 }
 
 func ValidateClaimedImageTask(ctx context.Context, info *AsyncUsageInfo, task *ImageTask) error {
@@ -73,18 +78,18 @@ func ValidateClaimedImageTask(ctx context.Context, info *AsyncUsageInfo, task *I
 	})
 }
 
-// A winning terminal transaction releases only this poll claim. The caller may
-// then use the existing terminal refund mechanism; that later wallet work is NOT
-// fenced by this transaction and does not prove executor exit or use closure.
+// A winning terminal transaction can hand wallet work to the existing sidecar
+// in the same transaction. Its private handle is attached only after commit.
+// This does not prove executor exit, remote completion, or use closure.
 func SetClaimedImageTaskResult(ctx context.Context, info *AsyncUsageInfo, observed *ImageTask, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
-	return withImagePollClaim(ctx, info, observed, func(tx *gorm.DB, task *ImageTask, current *AsyncUsageInfo) error {
+	return withImageWalletPollClaim(ctx, info, observed, func(tx *gorm.DB, task *ImageTask, current *AsyncUsageInfo, claimTerminal func() error) error {
 		// A durable completed result still wins over a late failure from this
 		// valid owner. Do not fail its outbox; the caller settles the saved result.
 		if status == "failed" && task.Status == "completed" {
 			return nil
 		}
 		if task.Status == "failed" {
-			return failImagePollReceipt(tx, task, current, task.Error, "image generation failed")
+			return failImagePollReceipt(tx, task, current, task.Error, "image generation failed", claimTerminal)
 		}
 		if err := writeImageTaskResult(tx, task.ID, status, data, taskError, false, metadata...); err != nil {
 			return err
@@ -92,7 +97,7 @@ func SetClaimedImageTaskResult(ctx context.Context, info *AsyncUsageInfo, observ
 		if status != "failed" {
 			return nil
 		}
-		return failImagePollReceipt(tx, task, current, taskError, "image generation failed")
+		return failImagePollReceipt(tx, task, current, taskError, "image generation failed", claimTerminal)
 	})
 }
 
@@ -106,7 +111,7 @@ func FailClaimedImageTaskUsage(ctx context.Context, info *AsyncUsageInfo, task *
 		return failImagePollReceipt(tx, current, usage, nil, message)
 	})
 }
-func failImagePollReceipt(tx *gorm.DB, task *ImageTask, current *AsyncUsageInfo, taskError *ImageTaskError, message string) error {
+func failImagePollReceipt(tx *gorm.DB, task *ImageTask, current *AsyncUsageInfo, taskError *ImageTaskError, message string, beforeLog ...func() error) error {
 	at := time.Now().UTC()
 	result := tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=?", current.ID, AsyncUsageStatusPending, current.ProcessingToken).Updates(map[string]any{"status": AsyncUsageStatusFailed, "processing_token": "", "error": message, "updated_at": at})
 	if result.Error != nil {
@@ -116,6 +121,11 @@ func failImagePollReceipt(tx *gorm.DB, task *ImageTask, current *AsyncUsageInfo,
 		return ErrImagePollClaimLost
 	}
 	current.Status, current.ProcessingToken = AsyncUsageStatusFailed, ""
+	for _, prepare := range beforeLog {
+		if err := prepare(); err != nil {
+			return err
+		}
+	}
 	// Keep the existing missing-log grace, but never overwrite an unrelated or
 	// completed receipt. A missing legacy log is not evidence of complete delivery.
 	if current.LogID <= 0 {

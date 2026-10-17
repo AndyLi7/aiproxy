@@ -100,14 +100,22 @@ func ClaimImagePrepaymentRecovery(ctx context.Context, task *ImageTask, now time
 		return false, err
 	}
 	if store == nil {
-		return legacy(LogDB)
+		won, err := legacy(LogDB)
+		if err == nil && won {
+			task.imageSyncPermit = &imageSyncPermit{}
+		}
+		return won, err
 	}
 	present, err := imageRecoveryClaimStoragePresent(LogDB)
 	if err != nil {
 		return false, err
 	}
 	if !present {
-		return legacy(LogDB)
+		won, err := legacy(LogDB)
+		if err == nil && won {
+			task.imageSyncPermit = &imageSyncPermit{}
+		}
+		return won, err
 	}
 	owner, err := newAdmissionGeneration()
 	if err != nil {
@@ -131,72 +139,8 @@ func ClaimImagePrepaymentRecovery(ctx context.Context, task *ImageTask, now time
 			claimed, e = legacy(tx)
 			return e
 		}
-		use, e := imageReservationUse(tx, task)
-		if e != nil {
-			return e
-		}
-		generation := ""
-		if use != nil {
-			generation = use.ID
-		}
-		if task.AdmissionGeneration != "" && task.AdmissionGeneration != generation {
-			return ErrChannelAdmissionConflict
-		}
-		snapshot := *task
-		snapshot.AdmissionGeneration = generation
-		current, e := lockAdmissionImageTask(tx, &snapshot)
-		if e != nil {
-			return e
-		}
-		if imageRecoveryTaskHash(current) != imageRecoveryTaskHash(task) {
-			return ErrChannelAdmissionConflict
-		}
-		if e = sameImageWalletSnapshot(current, task); e != nil {
-			return e
-		}
-		id := imageAdmissionResource(current)
-		var old []ChannelAdmissionImageRecoveryClaim
-		if e = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Find(&old).Error; e != nil {
-			return e
-		}
-		// Only after BOTH task and sidecar locks: a slow earlier item or a
-		// lock wait must not reuse the batch timestamp as a fresh lease.
-		clock, e := channelAdmissionTime(tx)
-		if e != nil {
-			return e
-		}
-		if current.PrepaymentQuoteJSON == "" || current.BillingSettled || (current.BillingNextCheckAt != nil && current.BillingNextCheckAt.After(clock)) {
-			return nil
-		}
-		until := clock.UTC().Add(2 * time.Minute).Truncate(time.Microsecond)
-		if len(old) > 0 {
-			previous := old[0]
-			if previous.Version != 1 || previous.StorageGeneration != c.StorageGeneration || !fullIdentityDigest(previous.TaskHash) ||
-				(previous.Owner == "" && previous.UntilMicros != 0) || (previous.Owner != "" && (!fullIdentityDigest(previous.Owner) || previous.UntilMicros <= 0)) {
-				return ErrChannelAdmissionConflict
-			}
-			// A stale scheduling timestamp cannot steal a still-live unique claim.
-			if previous.Owner != "" && previous.UntilMicros > clock.UnixMicro() {
-				return nil
-			}
-		}
-		row := ChannelAdmissionImageRecoveryClaim{ID: id, Version: 1, Owner: owner, UntilMicros: until.UnixMicro(), StorageGeneration: c.StorageGeneration, UseID: generation, TaskHash: imageRecoveryTaskHash(current)}
-		if e = tx.Save(&row).Error; e != nil {
-			return e
-		}
-		result := tx.Model(&ImageTask{}).Where("id = ? AND group_id = ? AND token_id = ?", task.ID, task.GroupID, task.TokenID).Update("billing_next_check_at", until)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrChannelAdmissionConflict
-		}
-		if e = checkImageRecoveryClaim(tx, c, current, &row, false); e != nil {
-			return e
-		}
-		claimed = true
-		handle = &imageBillingRecoveryClaim{store: store, row: row}
-		return nil
+		handle, claimed, e = claimImageRecoveryInTransaction(tx, c, store, task, owner, false)
+		return e
 	}, true)
 	if err != nil {
 		return false, err
@@ -204,6 +148,9 @@ func ClaimImagePrepaymentRecovery(ctx context.Context, task *ImageTask, now time
 	if handle != nil {
 		task.imageRecoveryClaim = handle
 		task.AdmissionGeneration = handle.row.UseID
+	}
+	if claimed {
+		task.imageSyncPermit = &imageSyncPermit{}
 	}
 	return claimed, nil
 }
@@ -319,4 +266,76 @@ func releaseImageRecoveryClaim(tx *gorm.DB, row ChannelAdmissionImageRecoveryCla
 		return ErrChannelAdmissionConflict
 	}
 	return nil
+}
+
+// Caller already holds the admission control lock. The optional priority is
+// granted only inside a winning terminal transaction, never from a task ID.
+func claimImageRecoveryInTransaction(tx *gorm.DB, c *ChannelAdmissionControl, store *ChannelAdmissionStore, task *ImageTask, owner string, priority bool) (*imageBillingRecoveryClaim, bool, error) {
+	use, e := imageReservationUse(tx, task)
+	if e != nil {
+		return nil, false, e
+	}
+	generation := ""
+	if use != nil {
+		generation = use.ID
+	}
+	if task.AdmissionGeneration != "" && task.AdmissionGeneration != generation {
+		return nil, false, ErrChannelAdmissionConflict
+	}
+	snapshot := *task
+	snapshot.AdmissionGeneration = generation
+	current, e := lockAdmissionImageTask(tx, &snapshot)
+	if e != nil {
+		return nil, false, e
+	}
+	if imageRecoveryTaskHash(current) != imageRecoveryTaskHash(task) {
+		return nil, false, ErrChannelAdmissionConflict
+	}
+	if e = sameImageWalletSnapshot(current, task); e != nil {
+		return nil, false, e
+	}
+	if priority && current.Status != "failed" {
+		return nil, false, ErrChannelAdmissionConflict
+	}
+	id := imageAdmissionResource(current)
+	var old []ChannelAdmissionImageRecoveryClaim
+	if e = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Find(&old).Error; e != nil {
+		return nil, false, e
+	}
+	// Only after BOTH task and sidecar locks: a slow earlier item or a
+	// lock wait must not reuse the batch timestamp as a fresh lease.
+	clock, e := channelAdmissionTime(tx)
+	if e != nil {
+		return nil, false, e
+	}
+	if current.PrepaymentQuoteJSON == "" || current.BillingSettled || (!priority && current.BillingNextCheckAt != nil && current.BillingNextCheckAt.After(clock)) {
+		return nil, false, nil
+	}
+	until := clock.UTC().Add(2 * time.Minute).Truncate(time.Microsecond)
+	if len(old) > 0 {
+		previous := old[0]
+		if previous.Version != 1 || previous.StorageGeneration != c.StorageGeneration || !fullIdentityDigest(previous.TaskHash) ||
+			(previous.Owner == "" && previous.UntilMicros != 0) || (previous.Owner != "" && (!fullIdentityDigest(previous.Owner) || previous.UntilMicros <= 0)) {
+			return nil, false, ErrChannelAdmissionConflict
+		}
+		// A stale scheduling timestamp cannot steal a still-live unique claim.
+		if previous.Owner != "" && (priority || previous.UntilMicros > clock.UnixMicro()) {
+			return nil, false, nil
+		}
+	}
+	row := ChannelAdmissionImageRecoveryClaim{ID: id, Version: 1, Owner: owner, UntilMicros: until.UnixMicro(), StorageGeneration: c.StorageGeneration, UseID: generation, TaskHash: imageRecoveryTaskHash(current)}
+	if e = tx.Save(&row).Error; e != nil {
+		return nil, false, e
+	}
+	result := tx.Model(&ImageTask{}).Where("id = ? AND group_id = ? AND token_id = ?", task.ID, task.GroupID, task.TokenID).Update("billing_next_check_at", until)
+	if result.Error != nil {
+		return nil, false, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, false, ErrChannelAdmissionConflict
+	}
+	if e = checkImageRecoveryClaim(tx, c, current, &row, false); e != nil {
+		return nil, false, e
+	}
+	return &imageBillingRecoveryClaim{store: store, row: row}, true, nil
 }

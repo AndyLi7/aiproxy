@@ -300,7 +300,7 @@ func TestImageTaskMeasuredAdmissionBeforePaidSubmit(t *testing.T) {
 			if tc.status == 202 {
 				require.Equal(t, 1, calls)
 				if prepaid {
-					require.Equal(t, []string{"admit", "begin_attempt", "accept_attempt", "get"}, prepaymentActions)
+					require.Equal(t, []string{"admit", "begin_attempt"}, prepaymentActions)
 					if realWallet {
 						var stored model.ImageTask
 						require.NoError(t, db.First(&stored).Error)

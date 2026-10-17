@@ -27,6 +27,9 @@ func persistChannelPatchWithAdmission(channel *Channel, patch *ChannelPatch) err
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", channel.ID).Error; err != nil {
 			return err
 		}
+		if err := guardPreparedChannelMutation(tx, []int{channel.ID}); err != nil {
+			return err
+		}
 		if patch.emptiesKeyOfEnabled(&current) {
 			return ErrChannelKeyEmpty
 		}
@@ -75,6 +78,9 @@ func deleteChannelsWithAdmission(ids []int, single bool) error {
 }
 
 func guardAdmissionChannelMutation(tx *gorm.DB, ids []int) error {
+	if err := guardPreparedChannelMutation(tx, ids); err != nil {
+		return err
+	}
 	checks := []*gorm.DB{
 		tx.Model(&ChannelAdmissionBarrier{}).Where("from_channel_id IN ? OR to_channel_id IN ?", ids, ids),
 		tx.Model(&ChannelAdmissionUse{}).Where("channel_id IN ?", ids),

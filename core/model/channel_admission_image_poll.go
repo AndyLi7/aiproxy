@@ -406,13 +406,22 @@ func (h *imagePollHandle) matches(info *AsyncUsageInfo) bool {
 // Legacy receipt APIs lack a context argument. A successfully accepted private
 // invocation supplies its immutable parent; unscoped calls retain compatibility.
 func imagePollParentContext(info *AsyncUsageInfo) context.Context {
+	if info != nil && info.measuredClaim != nil && info.measuredClaim.parentCtx != nil {
+		return info.measuredClaim.parentCtx
+	}
 	if info != nil && info.imagePoll != nil && info.imagePoll.parentCtx != nil {
 		return info.imagePoll.parentCtx
 	}
 	return context.Background()
 }
 func imagePollTransaction(ctx context.Context, info *AsyncUsageInfo, work func(*gorm.DB, *imageWalletClaimContext) error) error {
+	if info != nil && info.measuredClaim != nil {
+		return measuredClaimTransaction(ctx, info, work)
+	}
 	if info == nil || info.imagePoll == nil {
+		if e := validateUnownedMeasured(ctx, info); e != nil {
+			return e
+		}
 		return LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return work(tx, nil) }, claimTxOptions(LogDB)...)
 	}
 	h := info.imagePoll
@@ -466,7 +475,13 @@ func AcceptImagePoll(ctx context.Context, info *AsyncUsageInfo) (bool, error) {
 	if info == nil {
 		return false, ErrImagePollClaimLost
 	}
+	if info.measuredClaim != nil {
+		return acceptMeasuredClaim(ctx, info)
+	}
 	if info.imagePoll == nil {
+		if e := validateUnownedMeasured(ctx, info); e != nil {
+			return false, e
+		}
 		if info.ImageTaskID != "" {
 			if _, err := imagePollStoragePresent(LogDB.WithContext(ctx)); err != nil {
 				return false, err
@@ -508,6 +523,9 @@ func AcceptImagePoll(ctx context.Context, info *AsyncUsageInfo) (bool, error) {
 // Call only after the worker and renewal goroutine have normally returned.
 // Panic/Goexit do not reach this call. Expired old records remain active.
 func RecordImagePollReturn(ctx context.Context, info *AsyncUsageInfo) error {
+	if info != nil && info.measuredClaim != nil {
+		return returnMeasuredClaim(ctx, info)
+	}
 	if info == nil || info.imagePoll == nil {
 		return nil
 	}
@@ -568,7 +586,10 @@ func RenewImagePollClaim(ctx context.Context, info *AsyncUsageInfo, until time.T
 	if info == nil {
 		return false, nil
 	}
-	if info.imagePoll == nil {
+	if info.imagePoll == nil && info.measuredClaim == nil {
+		if e := validateUnownedMeasured(ctx, info); e != nil {
+			return false, e
+		}
 		return RenewAsyncUsageClaimContext(ctx, info.ID, info.ProcessingToken, until)
 	}
 	renewed := false

@@ -32,7 +32,10 @@ func AdmitRelayAttempt(ctx context.Context, channel *Channel, scope RelayAdmissi
 // AdmitRelayExecution records the active call atomically with new admission
 // when the reviewed execution extension is installed. Nil handle on v1-only
 // storage grants no completion/coverage fact; that use remains open.
-func AdmitRelayExecution(ctx context.Context, channel *Channel, scope RelayAdmissionScope) (*ChannelAdmissionUse, *RelayExecutionHandle, error) {
+func AdmitRelayExecution(ctx context.Context, channel *Channel, scope RelayAdmissionScope, intents ...*MeasuredRelayIntent) (*ChannelAdmissionUse, *RelayExecutionHandle, error) {
+	if len(intents) > 1 {
+		return nil, nil, ErrChannelAdmissionConflict
+	}
 	var execution *RelayExecutionHandle
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil || store == nil {
@@ -76,6 +79,9 @@ func AdmitRelayExecution(ctx context.Context, channel *Channel, scope RelayAdmis
 			return e
 		}
 		execution, e = store.startRelayExecution(tx, c, use, nonce)
+		if e == nil && len(intents) == 1 && intents[0] != nil {
+			e = intents[0].start(tx, c, execution, use, scope)
+		}
 		return e
 	})
 	if err != nil {

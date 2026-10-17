@@ -35,6 +35,7 @@ var asyncUsageSchemaCache sync.Map
 type AsyncUsageInfo struct {
 	imageTerminalWallet *ImageTask
 	imagePoll           *imagePollHandle
+	measuredClaim       *measuredClaimHandle
 	// Server-owned admission snapshot; never accepted from public JSON requests.
 	InternalImageTask bool   `json:"-"`
 	MeasuredImage     bool   `json:"measured_image,omitempty"`
@@ -179,6 +180,9 @@ func TryClaimAsyncUsageInfoContext(ctx context.Context, info *AsyncUsageInfo, to
 		return false, nil
 	}
 
+	if handled, won, err := tryClaimMeasured(ctx, info, token, leaseUntil, now); handled {
+		return won, err
+	}
 	if handled, won, err := tryClaimImagePoll(ctx, info, token, leaseUntil, now); handled {
 		return won, err
 	}

@@ -15,12 +15,13 @@ import (
 
 // HandleResult contains all the information needed for consumption recording
 type HandleResult struct {
-	Error        adaptor.Error
-	Usage        model.Usage
-	UsageContext model.UsageContext
-	UpstreamID   string
-	AsyncUsage   bool
-	BodyDetail   *BodyDetail
+	Error            adaptor.Error
+	Usage            model.Usage
+	UsageContext     model.UsageContext
+	UpstreamID       string
+	AsyncUsage       bool
+	BodyDetail       *BodyDetail
+	MeasuredProducer *model.MeasuredRelayIntent `json:"-"`
 }
 
 func ShouldSkipRequestBodyDetailForStatus(statusCode int) bool {
@@ -87,20 +88,22 @@ func Handle(
 		logHandleError(log, respErr, detail, config.DebugEnabled)
 
 		return &HandleResult{
-			Error:        respErr,
-			Usage:        result.Usage,
-			UsageContext: result.UsageContext,
-			UpstreamID:   result.UpstreamID,
-			AsyncUsage:   result.AsyncUsage,
-			BodyDetail:   detail,
+			Error:            respErr,
+			Usage:            result.Usage,
+			UsageContext:     result.UsageContext,
+			UpstreamID:       result.UpstreamID,
+			AsyncUsage:       result.AsyncUsage,
+			BodyDetail:       detail,
+			MeasuredProducer: meta.MeasuredRelay,
 		}
 	}
 
 	return &HandleResult{
-		Usage:        result.Usage,
-		UsageContext: result.UsageContext,
-		UpstreamID:   result.UpstreamID,
-		AsyncUsage:   result.AsyncUsage,
-		BodyDetail:   detail,
+		Usage:            result.Usage,
+		UsageContext:     result.UsageContext,
+		UpstreamID:       result.UpstreamID,
+		AsyncUsage:       result.AsyncUsage,
+		BodyDetail:       detail,
+		MeasuredProducer: meta.MeasuredRelay,
 	}
 }

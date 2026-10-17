@@ -41,6 +41,7 @@ type Meta struct {
 	BillingOperationID string
 	// Internal durable use reference, never supplied through request metadata.
 	ChannelAdmissionUseID string
+	MeasuredRelay         *model.MeasuredRelayIntent `json:"-"`
 	OriginModel           string
 	RoutingModel          string
 	ActualModel           string

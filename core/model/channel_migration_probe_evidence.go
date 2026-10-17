@@ -17,10 +17,10 @@ import (
 var ErrMigrationProbePending = errors.New("migration probe evidence pending")
 var ErrMigrationProbeMissingProvenance = errors.New("migration probe billing provenance unavailable")
 
-// The future internal wallet reader must authenticate the owner and read its
-// hold, accepted route, reconciliation and immutable fetch provenance in one
-// snapshot. Old matched bills lack account/key provenance and MUST return
-// missing_provenance, never infer historical identity from today's credentials.
+// The app coordinator authenticates the original probe context and settled
+// monetary facts, then records a separate current workspace/bill attribution.
+// It never substitutes current credentials for missing original probe identity
+// or claims historical continuous workspace membership.
 type MigrationProbeBillingRequest struct {
 	MigrationOperationID string `json:"migrationOperationId"`
 	FromKeyDigest        string `json:"fromKeyDigest"`
@@ -115,7 +115,7 @@ func probeBillValid(t *NativeTask, b MigrationProbeBillingEvidence, a MigrationP
 
 // FinalizeMigrationProbe performs no network operation while holding a DB lock.
 // A nil reader is an explicit unsupported provenance boundary, not a guessed
-// legacy fallback. The production controller currently has no provenance reader.
+// legacy fallback. The actual internal HTTP reader is installed by the controller.
 func (s *ChannelAdmissionStore) FinalizeMigrationProbe(ctx context.Context, op string, reader MigrationProbeBillingReader) (out VerifiedMigrationProbe, err error) {
 	observation := s.ReadMigrationProbe(ctx, op)
 	if observation.State != "pending" || observation.Observation == nil {

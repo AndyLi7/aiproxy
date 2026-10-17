@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -26,9 +27,9 @@ func migrationProbeDefaults() migrationProbeDependencies {
 		store: func() (*model.ChannelAdmissionStore, error) {
 			return model.MigrationProbeRuntimeStore(model.DB, model.LogDB, gatewayRuntimeFeatures())
 		}, native: nativeTrialDefaults(),
-		// Existing wallet matched bills lack immutable fetch-account/key provenance.
-		// No production reader is installed until that source is independently proven.
-		billing: nil,
+		// The internal app coordinator validates original context and actual settled
+		// facts, then appends current workspace attribution without rewriting money.
+		billing: balance.ReadMigrationProbeBilling,
 	}
 }
 

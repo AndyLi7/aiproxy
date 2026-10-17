@@ -20,6 +20,7 @@ func SetAPIRouter(router *gin.Engine) {
 
 	inventoryRouter := api.Group("", controller.RequireMigrationInventoryHeaderAuth, middleware.AdminAuth)
 	inventoryRouter.GET("/channel-migrations/inventory", controller.GetMigrationInventory)
+	inventoryRouter.POST("/channel-migrations/probe-billing-context/read", controller.ReadMigrationProbeBillingContext)
 	inventoryRouter.POST("/channel-migrations/operations/:id/probe", controller.CreateMigrationProbe)
 	inventoryRouter.GET("/channel-migrations/operations/:id/probe", controller.GetMigrationProbe)
 	inventoryRouter.POST("/channel-migrations/operations/:id/prepare", controller.PrepareMigrationProbe)

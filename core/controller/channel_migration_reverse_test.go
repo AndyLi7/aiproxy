@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/common/ownedartifact"
 	"github.com/labring/aiproxy/core/model"
@@ -19,7 +20,7 @@ import (
 // The real engine sends HTTP only to this existing local synthetic supplier;
 // reverse commands stay server-only and billing provenance is explicitly synthetic.
 func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
-	for _, mode := range []string{"success", "unknown", "wrong-billing"} {
+	for _, mode := range []string{"success", "unknown", "wrong-billing", "cancelled-billing"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newProbeHTTPFixture(t)
 			forward, ok := probeCommand(f.body.Command)
@@ -83,6 +84,36 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			require.NoError(t, e)
 			require.Equal(t, "completed", completed.Status)
 			frozen := *completed
+			input := model.MigrationProbeBillingContextRequest{BillingOperationID: completed.BillingOperationID, TaskID: completed.ID, GroupID: completed.GroupID}
+			readOriginal := func() model.MigrationProbeBillingContext {
+				t.Helper()
+				code, raw := f.call(t, "POST", "/api/channel-migrations/probe-billing-context/read", input, config.AdminKey)
+				require.Equal(t, 200, code)
+				var envelope struct {
+					Data model.MigrationProbeBillingContextResult `json:"data"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &envelope))
+				require.Equal(t, "ready", envelope.Data.State, envelope.Data.Reason)
+				require.Equal(t, model.MigrationReuseRetiredTarget, envelope.Data.Context.TargetResourceKind)
+				require.Equal(t, req.Seal.RevertOf, envelope.Data.Context.RevertOf)
+				require.Equal(t, completed.PrepaymentQuoteJSON, frozen.PrepaymentQuoteJSON)
+				for _, secret := range []string{"synthetic-probe-shadow-key", "synthetic provider only", `"input"`, `"quoteJson"`} {
+					require.NotContains(t, string(raw), secret)
+				}
+				return *envelope.Data.Context
+			}
+			originalContext := readOriginal()
+			if mode == "cancelled-billing" {
+				_, e = f.store.CancelRetiredTargetResource(t.Context(), r.OperationID, r.RequestHash, r.CheckpointHash)
+				require.NoError(t, e)
+				read := readOriginal()
+				originalContext.ResourceState = "cancelled"
+				require.Equal(t, originalContext, read)
+				_, e = f.store.PrepareReverseMigrationFromProbe(t.Context(), r.OperationID, nil)
+				require.Error(t, e)
+				require.Equal(t, 1, f.providerCalls)
+				return
+			}
 			reader := func(_ context.Context, b model.MigrationProbeBillingRequest) (model.MigrationProbeBillingEvidence, error) {
 				return model.MigrationProbeBillingEvidence{Binding: b, EvidenceID: "reverse-local-bill", ProvenanceHash: strings.Repeat("d", 64), AccountMembershipEvidenceHash: strings.Repeat("e", 64), AccountMembershipEvidenceKind: "fal-workspace-key-membership-v1", Currency: "USD", CostMicros: 600000, CustomerDueMicros: 900000, ChargedMicros: 900000, SettledAtMs: time.Now().Add(-time.Second).UnixMilli()}, nil
 			}
@@ -110,6 +141,9 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			result, e := f.store.CutoverReversePrepared(t.Context(), req)
 			require.NoError(t, e)
 			require.Equal(t, "committed", result.State)
+			readContext := readOriginal()
+			originalContext.ResourceState = "consumed"
+			require.Equal(t, originalContext, readContext)
 			var after model.NativeTask
 			require.NoError(t, f.db.First(&after, "id=?", spec.TaskID).Error)
 			require.Equal(t, frozen.PrepaymentQuoteJSON, after.PrepaymentQuoteJSON)
@@ -121,9 +155,9 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			require.Len(t, uses, 1)
 			require.Equal(t, "open", uses[0].State)
 			// New resource kind is not silently discarded by the existing HTTP decoder.
-			input := f.body.Command
-			input.TargetResourceKind = model.MigrationReuseRetiredTarget
-			_, ok = probeCommand(input)
+			commandInput := f.body.Command
+			commandInput.TargetResourceKind = model.MigrationReuseRetiredTarget
+			_, ok = probeCommand(commandInput)
 			require.False(t, ok)
 
 		})

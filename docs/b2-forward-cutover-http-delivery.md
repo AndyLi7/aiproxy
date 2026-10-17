@@ -110,3 +110,15 @@ independent recovery watermark or cache-switch acknowledgement. Those remain
 required before enabling real migrations. It does not expose reverse, recover an
 old sealed operation, close use/executor evidence, disable old channels, revoke
 keys, or claim production readiness. No new paid generation is authorized.
+
+## Fixture-only follow-up
+
+The app-first loopback run found the actual first task state can be `queued`,
+while the fixture previously waited only for `pending`. The fixture now permits
+both legal pre-poll states, still requiring the original nonempty use binding;
+production code is unchanged. An external loopback client verified GET remained
+absent before its explicit first POST, then real Submit/Poll completed and the
+fixture confirmed exactly one provider submission/task/use. Evidence:
+`/private/tmp/b2-cutover-http-final/queued-fixture-final.jsonl`. Metadata/app
+credential files were removed on exit. No new provider request was sent outside
+the synthetic loopback server; this is not the app author's final UI evidence.

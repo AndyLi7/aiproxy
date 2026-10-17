@@ -11,6 +11,12 @@ import (
 // No external debit can start before this transaction succeeds. Pending evidence
 // is immutable; a billing worker must never repeat inference to repair it.
 func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
+	if err := validateMeasuredLegacy(LogDB, info); err != nil {
+		return err
+	}
+	return createMeasuredImageSettlement(LogDB, entry, info)
+}
+func createMeasuredImageSettlement(db *gorm.DB, entry *Log, info *AsyncUsageInfo) error {
 	if entry == nil || info == nil || info.Amount.ImageBillingResult == nil {
 		return errors.New("missing measured image settlement")
 	}
@@ -38,7 +44,7 @@ func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
 	entry.Amount = info.Amount
 	info.NextPollAt = time.Now().Add(AsyncUsageDefaultPollDelay)
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
@@ -71,6 +77,12 @@ func measuredImageSettlementStatus(info *AsyncUsageInfo) (AsyncUsageStatus, erro
 // call row. The outbox claims only pending rows and evidence must never be
 // charged, so a pending status is stored as failed.
 func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
+	if err := validateMeasuredLegacy(LogDB, info); err != nil {
+		return err
+	}
+	return createMeasuredImageAttemptEvidence(LogDB, info)
+}
+func createMeasuredImageAttemptEvidence(db *gorm.DB, info *AsyncUsageInfo) error {
 	if info == nil || info.Amount.ImageBillingResult == nil {
 		return errors.New("missing measured image attempt evidence")
 	}
@@ -89,7 +101,7 @@ func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
 	info.LogID = 0
 	info.NextPollAt = time.Now().Add(AsyncUsageDefaultPollDelay)
 
-	return LogDB.Create(info).Error
+	return db.Create(info).Error
 }
 
 func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {

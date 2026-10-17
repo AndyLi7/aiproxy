@@ -42,7 +42,7 @@ func admitRelayAttempt(c *gin.Context, m *meta.Meta) (*model.RelayExecutionHandl
 		SkipTLSVerify: m.Channel.SkipTLSVerify, Configs: m.ChannelConfigs,
 	}, model.RelayAdmissionScope{GroupID: m.Group.ID, TokenID: m.Token.ID,
 		BillingOperationID: m.BillingOperationID, RequestID: m.RequestID,
-		Mode: int(m.Mode), Model: m.OriginModel})
+		Mode: int(m.Mode), Model: m.OriginModel}, m.MeasuredRelay)
 	if err != nil {
 		return nil, relaymodel.WrapperOpenAIErrorWithMessage(
 			"channel admission unavailable", "channel_admission_unavailable", http.StatusServiceUnavailable)

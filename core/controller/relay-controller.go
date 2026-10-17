@@ -452,6 +452,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	)
 	c.Set("failover_policy", failover.Policy{MaxRetries: retryTimes, Deadline: retryDeadline})
 	c.Set("failover_pinned", initialChannel.designatedChannel)
+	meta.MeasuredRelay = model.NewMeasuredRelayIntent(price, meta.RequestAt, meta.ModelConfig.DisableResolutionFuzzyMatch)
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
@@ -1035,6 +1036,7 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 			state.ignoreChannelIDs = make(map[int64]struct{})
 		}
 		state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
+		state.meta.MeasuredRelay = model.NewMeasuredRelayIntent(state.price, state.meta.RequestAt, state.meta.ModelConfig.DisableResolutionFuzzyMatch)
 		state.result, retry = RelayHelper(c, state.meta, relayController)
 		i++
 
@@ -1364,7 +1366,7 @@ func recordMeasuredImageResult(
 	if !downstreamResult {
 		// A non-final attempt writes no request-log row: one HTTP request is one
 		// call row, written by the final attempt.
-		if err := recordMeasuredImageAttempt(meta, info, code, retryTimes, firstByteAt, detail); err != nil {
+		if err := recordMeasuredImageAttemptOwned(c.Request.Context(), result.MeasuredProducer, price, meta, info, code, retryTimes, firstByteAt, detail); err != nil {
 			log.Errorf(
 				"persist measured image attempt failed, request_id=%s: %v",
 				meta.RequestID,
@@ -1373,7 +1375,7 @@ func recordMeasuredImageResult(
 
 			return
 		}
-	} else if err := model.CreateMeasuredImageSettlement(entry, info); err != nil {
+	} else if err := model.CreateMeasuredImageSettlementOwned(c.Request.Context(), result.MeasuredProducer, price, entry, info); err != nil {
 		log.Errorf(
 			"persist measured image settlement failed, request_id=%s: %v",
 			meta.RequestID,
@@ -1401,6 +1403,9 @@ func recordMeasuredImageResult(
 		downstreamResult,
 	)
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
+	if err := model.RecordMeasuredProducerReturn(c.Request.Context(), result.MeasuredProducer); err != nil {
+		log.Errorf("measured producer return: %v", err)
+	}
 }
 
 // recordMeasuredImageAttempt stores a non-final attempt's evidence in the
@@ -1413,7 +1418,10 @@ func recordMeasuredImageAttempt(
 	firstByteAt time.Time,
 	detail *model.RequestDetail,
 ) error {
-	if err := model.CreateMeasuredImageAttemptEvidence(info); err != nil {
+	return recordMeasuredImageAttemptOwned(context.Background(), nil, model.Price{}, meta, info, code, retryTimes, firstByteAt, detail)
+}
+func recordMeasuredImageAttemptOwned(ctx context.Context, producer *model.MeasuredRelayIntent, price model.Price, meta *meta.Meta, info *model.AsyncUsageInfo, code, retryTimes int, firstByteAt time.Time, detail *model.RequestDetail) error {
+	if err := model.CreateMeasuredImageAttemptEvidenceOwned(ctx, producer, price, info); err != nil {
 		return err
 	}
 

@@ -90,14 +90,22 @@ type ChannelMigrationSnapshot struct {
 // ReadMigrationSnapshot returns hashes only, never channel credentials/raw rows.
 func (s *ChannelAdmissionStore) ReadMigrationSnapshot(ctx context.Context, from, shadow ChannelIdentity) (result ChannelMigrationSnapshot, err error) {
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
-		if _, err := storedAdmissionIdentity(tx, from); err != nil {
+		result, err = readMigrationSnapshotTx(tx, c, from, shadow, false)
+		return err
+	})
+	return
+}
+
+func readMigrationSnapshotTx(tx *gorm.DB, c *ChannelAdmissionControl, from, shadow ChannelIdentity, snapshotRead bool) (result ChannelMigrationSnapshot, err error) {
+	err = func() error {
+		if _, err := storedAdmissionIdentity(tx, from, snapshotRead); err != nil {
 			return err
 		}
 		result.ConfigModels = []string{}
 		result.Epoch = c.Epoch
 		result.Revision = c.Revision
 		result.StorageGeneration = c.StorageGeneration
-		if _, err := storedAdmissionIdentity(tx, shadow); err != nil {
+		if _, err := storedAdmissionIdentity(tx, shadow, snapshotRead); err != nil {
 			return err
 		}
 		rows, err := migrationConfigRows(tx)
@@ -121,7 +129,7 @@ func (s *ChannelAdmissionStore) ReadMigrationSnapshot(ctx context.Context, from,
 		}
 		result.FamilyHash, err = migrationFamilyHash(tx, from.KeyDigest, shadow.KeyDigest)
 		return err
-	})
+	}()
 	return
 }
 
@@ -192,12 +200,16 @@ func finalizeMigrationProbe(tx *gorm.DB, p VerifiedMigrationProbe) error {
 	}
 	return nil
 }
-func loadMigration(tx *gorm.DB, id string) (*ChannelMigrationPrepared, error) {
+func loadMigration(tx *gorm.DB, id string, snapshotRead ...bool) (*ChannelMigrationPrepared, error) {
 	if err := migrationStorageReady(tx); err != nil {
 		return nil, err
 	}
 	var row ChannelMigrationPrepared
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, "operation_id = ?", id).Error; err != nil {
+	q := tx
+	if len(snapshotRead) == 0 || !snapshotRead[0] {
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := q.First(&row, "operation_id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	var request ChannelMigrationRequest
@@ -350,12 +362,12 @@ func (s *ChannelAdmissionStore) SealPrepared(ctx context.Context, input ChannelM
 	}
 	return s.seal(ctx, input.Seal, a)
 }
-func migrationSnapshotMatches(tx *gorm.DB, input ChannelMigrationRequest, toStatus int) error {
-	from, err := storedAdmissionIdentity(tx, input.Seal.From)
+func migrationSnapshotMatches(tx *gorm.DB, input ChannelMigrationRequest, toStatus int, snapshotRead ...bool) error {
+	from, err := storedAdmissionIdentity(tx, input.Seal.From, snapshotRead...)
 	if err != nil {
 		return err
 	}
-	to, err := storedAdmissionIdentity(tx, input.Seal.To)
+	to, err := storedAdmissionIdentity(tx, input.Seal.To, snapshotRead...)
 	if err != nil {
 		return err
 	}
@@ -517,20 +529,28 @@ func (s *ChannelAdmissionStore) CommitPreparedPins(ctx context.Context, input Ch
 	}
 	return
 }
-func migrationCommittedMatches(tx *gorm.DB, row *ChannelMigrationPrepared, input ChannelMigrationRequest) error {
+func migrationCommittedMatches(tx *gorm.DB, row *ChannelMigrationPrepared, input ChannelMigrationRequest, snapshotRead ...bool) error {
 	if row.State != "committed" || row.CommitRevision <= row.SealRevision || row.CommittedAtMs <= 0 || !fullIdentityDigest(row.AfterPinHash) {
 		return ErrChannelAdmissionConflict
 	}
 	copy := input
 	copy.ExpectedPinHash = row.AfterPinHash
-	return migrationSnapshotMatches(tx, copy, ChannelStatusEnabled)
+	return migrationSnapshotMatches(tx, copy, ChannelStatusEnabled, snapshotRead...)
 }
 
 // ReadPreparedMigration requires the CURRENT family head and, for committed
 // state, every atomic postcondition. Historical receipts cannot authorize work.
 func (s *ChannelAdmissionStore) ReadPreparedMigration(ctx context.Context, operationID string) (result *ChannelMigrationPrepared, err error) {
 	err = s.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
-		row, err := loadMigration(tx, operationID)
+		result, err = readPreparedMigrationTx(tx, c, operationID, false)
+		return err
+	})
+	return
+}
+
+func readPreparedMigrationTx(tx *gorm.DB, c *ChannelAdmissionControl, operationID string, snapshotRead bool) (result *ChannelMigrationPrepared, err error) {
+	err = func() error {
+		row, err := loadMigration(tx, operationID, snapshotRead)
 		if err != nil {
 			return err
 		}
@@ -552,7 +572,7 @@ func (s *ChannelAdmissionStore) ReadPreparedMigration(ctx context.Context, opera
 			}
 		}
 		if row.State == "committed" {
-			if err := migrationCommittedMatches(tx, row, req); err != nil {
+			if err := migrationCommittedMatches(tx, row, req, snapshotRead); err != nil {
 				return err
 			}
 		} else if row.State == "prepared" || row.State == "sealed" {
@@ -565,14 +585,18 @@ func (s *ChannelAdmissionStore) ReadPreparedMigration(ctx context.Context, opera
 					return ErrChannelAdmissionConflict
 				}
 			}
-			if err := migrationSnapshotMatches(tx, req, ChannelStatusDisabled); err != nil {
+			if err := migrationSnapshotMatches(tx, req, ChannelStatusDisabled, snapshotRead); err != nil {
 				return err
 			}
 		} else {
 			return ErrChannelAdmissionConflict
 		}
 		var probe ChannelMigrationProbeRecord
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&probe, "evidence_hash = ?", row.ProbeHash).Error; err != nil {
+		q := tx
+		if !snapshotRead {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := q.First(&probe, "evidence_hash = ?", row.ProbeHash).Error; err != nil {
 			return err
 		}
 		if probe.Revoked || probe.FactHash != row.ProbeFactHash {
@@ -580,7 +604,7 @@ func (s *ChannelAdmissionStore) ReadPreparedMigration(ctx context.Context, opera
 		}
 		result = row
 		return nil
-	})
+	}()
 	return
 }
 

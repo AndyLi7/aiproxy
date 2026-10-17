@@ -589,25 +589,19 @@ func DeleteChannelsByIDs(ids []int) (err error) {
 // UpdateChannelStatusByID sets a channel's status. Enabling a disabled channel
 // whose key is empty is refused (ErrChannelKeyEmpty); re-enabling a channel
 // that is already enabled changes nothing and is not refused.
-func UpdateChannelStatusByID(id, status int) (err error) {
-	if status == ChannelStatusEnabled {
-		stored, err := GetChannelByID(id)
-		if err != nil {
-			return err
-		}
+func UpdateChannelStatusByID(id, status int) error {
+	return UpdateChannelStatusByIDContext(context.Background(), id, status)
+}
 
-		if stored.Status != ChannelStatusEnabled && channelKeyEmpty(stored.Key) {
-			return ErrChannelKeyEmpty
-		}
-	}
-
+// UpdateChannelStatusByIDContext propagates request cancellation through each
+// complete DB attempt. Key and migration guards execute inside that attempt.
+func UpdateChannelStatusByIDContext(ctx context.Context, id, status int) (err error) {
 	defer func() {
 		if err == nil {
 			rebuildModelCachesAfterWrite()
 		}
 	}()
-
-	return withMigrationChannelStatus(id, status)
+	return withMigrationChannelStatus(ctx, id, status)
 }
 
 func UpdateChannelUsedAmount(id int, amount float64, requestCount, retryCount int) error {

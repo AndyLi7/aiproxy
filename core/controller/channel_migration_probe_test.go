@@ -97,6 +97,12 @@ func newProbeHTTPFixture(t *testing.T, attribution ...bool) *probeHTTPFixture {
 	t.Helper()
 	db, e := model.OpenSQLite(filepath.Join(t.TempDir(), "probe.db"))
 	require.NoError(t, e)
+	return newProbeHTTPFixtureDB(t, db, attribution...)
+}
+
+func newProbeHTTPFixtureDB(t *testing.T, db *gorm.DB, attribution ...bool) *probeHTTPFixture {
+	t.Helper()
+	var e error
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ModelConfig{}, &model.Group{}, &model.Token{}, &model.NativeTask{}, &model.ChannelAdmissionControl{}, &model.ChannelAdmissionProof{}, &model.ChannelAdmissionFamily{}, &model.ChannelAdmissionBarrier{}, &model.ChannelAdmissionUse{}, &model.ChannelMigrationProtocol{}, &model.ChannelMigrationPrepared{}, &model.ChannelMigrationProbeRecord{}, &model.ChannelMigrationShadowProtocol{}, &model.ChannelMigrationShadowResource{}, &model.ChannelMigrationProbeRuntimeProtocol{}, &model.ChannelMigrationProbeRun{}, &model.ChannelAdmissionExecutionProtocol{}, &model.ChannelAdmissionExecution{}, &model.ChannelAdmissionTaskExecution{}))
 	for _, r := range []any{&model.ChannelMigrationProtocol{ID: 1, Version: 1}, &model.ChannelMigrationShadowProtocol{ID: 1, Version: 2}, &model.ChannelMigrationProbeRuntimeProtocol{ID: 1, Version: 1}, &model.ChannelAdmissionExecutionProtocol{ID: 1, Version: 1}, &model.ChannelAdmissionExecutionProtocol{ID: 2, Version: model.NativeExecutionProtocolVersion}} {
 		require.NoError(t, db.Create(r).Error)
@@ -209,6 +215,9 @@ func newProbeHTTPFixture(t *testing.T, attribution ...bool) *probeHTTPFixture {
 	api.POST("/operations/:id/probe", deps.create)
 	api.GET("/operations/:id/probe", deps.read)
 	api.POST("/operations/:id/prepare", deps.prepare)
+	api.POST("/operations/:id/cutover", CutoverMigrationProbe)
+	api.GET("/operations/:id", GetPreparedMigrationFacts)
+	api.POST("/snapshot/read", ReadMigrationSnapshotFacts)
 	f.server = httptest.NewServer(r)
 	t.Cleanup(f.server.Close)
 	return f

@@ -112,6 +112,21 @@ func (s *ChannelAdmissionStore) ReadMigrationInventory(ctx context.Context, feat
 		if err = q.First(&control, 1).Error; err != nil {
 			return err
 		}
+		result, err = migrationInventoryTx(tx, &control, features)
+		return err
+	}, options)
+	if err != nil {
+		return unsupported
+	}
+	return result
+}
+
+// migrationInventoryTx keeps the original complete inventory producer inside the
+// caller's transaction. It performs no writes and never obtains a second snapshot.
+func migrationInventoryTx(tx *gorm.DB, c *ChannelAdmissionControl, features []string) (result MigrationInventory, err error) {
+	result = inventoryState("unsupported", "inventory_unavailable")
+	control := *c
+	err = func() error {
 		if control.Version != ChannelAdmissionProtocolVersion || control.Revision < 0 {
 			return ErrChannelAdmissionUnavailable
 		}
@@ -271,11 +286,8 @@ func (s *ChannelAdmissionStore) ReadMigrationInventory(ctx context.Context, feat
 		}
 		result = out
 		return nil
-	}, options)
-	if err != nil {
-		return unsupported
-	}
-	return result
+	}()
+	return
 }
 
 // No secret value is included in an error. Raw JSON strings (config/plugin and

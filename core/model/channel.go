@@ -416,7 +416,7 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 		}
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withMigrationChannelCreate(func(tx *gorm.DB) error {
 		return tx.Create(&channels).Error
 	})
 }

@@ -31,7 +31,7 @@ func imageSubmissionUsageFacts(u *AsyncUsageInfo) string {
 
 // No new deadline: this records an already-started action's result. It cannot
 // authorize any external action. A winning timeout/terminal state always wins.
-func withImageSubmissionReceipt(ctx context.Context, task *ImageTask, write func(*gorm.DB, *ImageTask) error) error {
+func withImageSubmissionReceipt(ctx context.Context, task *ImageTask, write func(*gorm.DB, *ImageTask) error, receiptKind string) error {
 	if task == nil || task.imageSubmitReceipt == nil || !task.imageSubmitReceipt.ready || ctx == nil {
 		return ErrImageTaskConflict
 	}
@@ -95,6 +95,9 @@ func withImageSubmissionReceipt(ctx context.Context, task *ImageTask, write func
 		if imageSubmissionUsageFacts(&usage) != actor.usageFacts || usage.Status != AsyncUsageStatusNone || usage.ProcessingToken != "" || usage.GroupID != current.GroupID || usage.TokenID != current.TokenID || usage.BillingOperationID != current.BillingOperationID || usage.ChannelID != actor.identity.ChannelID || usage.BaseURL != actor.baseURL {
 			return ErrImageTaskConflict
 		}
+		if e := lockImageProducerReceipt(tx, control, task); e != nil {
+			return e
+		}
 		var entry Log
 		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&entry, "id=? AND request_id=? AND group_id=? AND token_id=?", usage.LogID, current.ID, current.GroupID, current.TokenID).Error; e != nil {
 			return e
@@ -104,7 +107,10 @@ func withImageSubmissionReceipt(ctx context.Context, task *ImageTask, write func
 		if logPrice == "" || logPrice != usagePrice || entry.BillingOperationID.String() != current.BillingOperationID || entry.ChannelID != usage.ChannelID || entry.AsyncUsageStatus != AsyncUsageStatusPending {
 			return ErrImageTaskConflict
 		}
-		return write(tx, &current)
+		if e := write(tx, &current); e != nil {
+			return e
+		}
+		return imageProducerRecordReceipt(tx, control, task, receiptKind, "")
 	}
 	if store != nil {
 		return store.transaction(ctx, work, true)
@@ -113,12 +119,12 @@ func withImageSubmissionReceipt(ctx context.Context, task *ImageTask, write func
 }
 
 func AcceptSubmittedImageTask(ctx context.Context, task *ImageTask, upstream string) error {
-	return withImageSubmissionReceipt(ctx, task, func(tx *gorm.DB, current *ImageTask) error { return acceptImageTask(tx, current.ID, upstream) })
+	return withImageSubmissionReceipt(ctx, task, func(tx *gorm.DB, current *ImageTask) error { return acceptImageTask(tx, current.ID, upstream) }, "queued")
 }
 func CompleteSubmittedImageTask(ctx context.Context, task *ImageTask, data []ImageOutput, metadata ...ImageResultMetadata) error {
 	return withImageSubmissionReceipt(ctx, task, func(tx *gorm.DB, current *ImageTask) error {
 		return completeSyncImageTask(tx, current.ID, data, metadata...)
-	})
+	}, "sync_result")
 }
 func SetSubmittedImageTaskResult(ctx context.Context, task *ImageTask, status string, taskError *ImageTaskError) error {
 	if status != "failed" && status != "submission_unknown" {
@@ -154,5 +160,5 @@ func SetSubmittedImageTaskResult(ctx context.Context, task *ImageTask, status st
 			return ErrImageTaskConflict
 		}
 		return nil
-	})
+	}, status)
 }

@@ -78,16 +78,23 @@ func lockAdmissionImageTask(tx *gorm.DB, task *ImageTask) (*ImageTask, error) {
 	return &current, nil
 }
 
-func reserveImageTaskWithAdmission(task *ImageTask, info *AsyncUsageInfo, operational ...OperationalFields) (saved *ImageTask, created bool, err error) {
+func reserveImageTaskWithAdmission(ctx context.Context, task *ImageTask, info *AsyncUsageInfo, operational ...OperationalFields) (saved *ImageTask, created bool, err error) {
+	present, err := imageProducerStoragePresent(LogDB.WithContext(ctx))
+	if err != nil {
+		return nil, false, err
+	}
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil {
 		return nil, false, err
 	}
 	if store == nil {
-		return reserveImageTask(LogDB, task, info, operational...)
+		if present {
+			return nil, false, ErrChannelAdmissionUnavailable
+		}
+		return reserveImageTask(LogDB.WithContext(ctx), task, info, operational...)
 	}
 	var count int64
-	if err = LogDB.Model(&ImageTask{}).Where("id = ?", task.ID).Count(&count).Error; err != nil {
+	if err = LogDB.WithContext(ctx).Model(&ImageTask{}).Where("id = ?", task.ID).Count(&count).Error; err != nil {
 		return nil, false, err
 	}
 	if count > 0 {
@@ -112,7 +119,7 @@ func reserveImageTaskWithAdmission(task *ImageTask, info *AsyncUsageInfo, operat
 		}
 		return e
 	}
-	use, _, err := store.admit(context.Background(), input, reserve, func(tx *gorm.DB, c *ChannelAdmissionControl) (bool, error) {
+	use, _, err := store.admit(ctx, input, reserve, func(tx *gorm.DB, c *ChannelAdmissionControl) (bool, error) {
 		inactive, e := channelAdmissionNeverActivated(tx, c)
 		if e != nil {
 			return false, e
@@ -152,6 +159,10 @@ func reserveImageTaskWithAdmission(task *ImageTask, info *AsyncUsageInfo, operat
 		}
 		protected = true
 		return false, nil
+	}, func(tx *gorm.DB, c *ChannelAdmissionControl, use *ChannelAdmissionUse) error {
+		var e error
+		saved.imageProducer, e = startImageProducer(tx, c, store, saved, use)
+		return e
 	})
 	if err != nil {
 		return nil, false, err
@@ -166,14 +177,18 @@ func reserveImageTaskWithAdmission(task *ImageTask, info *AsyncUsageInfo, operat
 }
 
 func releaseImageTaskWithAdmission(id string, evidence *ImageTask) error {
+	return releaseImageTaskWithAdmissionContext(context.Background(), id, evidence)
+}
+
+func releaseImageTaskWithAdmissionContext(ctx context.Context, id string, evidence *ImageTask) error {
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil {
 		return err
 	}
 	if store == nil {
-		return releaseImageTaskReservation(LogDB, id)
+		return releaseImageTaskReservation(LogDB.WithContext(ctx), id)
 	}
-	return store.transaction(context.Background(), func(tx *gorm.DB, c *ChannelAdmissionControl) error {
+	return store.transaction(ctx, func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		inactive, e := channelAdmissionNeverActivated(tx, c)
 		if e != nil {
 			return e
@@ -201,10 +216,34 @@ func releaseImageTaskWithAdmission(id string, evidence *ImageTask) error {
 		if e != nil {
 			return e
 		}
+		present, e := imageProducerStoragePresent(tx)
+		if e != nil {
+			return e
+		}
+		if evidence.imageProducer == nil {
+			if e = imageProducerMissingSource(tx, evidence, present); e != nil {
+				return e
+			}
+		}
+		if evidence.imageProducer != nil {
+			var usage AsyncUsageInfo
+			if e = tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&usage, "id=? AND image_task_id=?", current.UsageID, current.ID).Error; e != nil {
+				return e
+			}
+			if usage.BillingOperationID != current.BillingOperationID || usage.GroupID != current.GroupID || usage.TokenID != current.TokenID || usage.Status != AsyncUsageStatusNone {
+				return ErrChannelAdmissionConflict
+			}
+			if use == nil {
+				return ErrChannelAdmissionConflict
+			}
+			if e = imageProducerRecordReceipt(tx, c, evidence, "reservation_released", imageReleaseHash(*use)); e != nil {
+				return e
+			}
+		}
 		if e = releaseImageTaskReservation(tx, id); e != nil {
 			return e
 		}
-		if use == nil {
+		if use == nil || evidence.imageProducer != nil {
 			return nil
 		}
 		now, e := channelAdmissionTime(tx)
@@ -256,6 +295,7 @@ func prepareImageTaskAttempt(ctx context.Context, task *ImageTask, identity Chan
 	}
 	input := ChannelAdmissionRequest{RequestID: nonce, ResourceKey: imageAttemptResource(task, index), GroupID: task.GroupID, TokenID: task.TokenID, Lane: "image", RequestHash: imageAttemptHash(task, index, identity), Identity: identity}
 	var frozenID string
+	var producerAttempt *ChannelAdmissionImageProducer
 	use, created, err := store.admit(ctx, input, func(tx *gorm.DB) error {
 		current, e := lockAdmissionImageTask(tx, task)
 		if e != nil {
@@ -349,10 +389,21 @@ func prepareImageTaskAttempt(ctx context.Context, task *ImageTask, identity Chan
 		if e = tx.Create(&row).Error; e != nil {
 			return true, e
 		}
+		producerAttempt, e = imageProducerAttempt(tx, c, task, &row, index)
+		if e != nil {
+			return true, e
+		}
 		return true, checkImageAdmissionSubmitTime(tx, current)
+	}, func(tx *gorm.DB, c *ChannelAdmissionControl, use *ChannelAdmissionUse) error {
+		var e error
+		producerAttempt, e = imageProducerAttempt(tx, c, task, use, index)
+		return e
 	})
 	if err != nil {
 		return "", err
+	}
+	if producerAttempt != nil {
+		task.imageProducer.rows[producerAttempt.ID] = *producerAttempt
 	}
 	if frozenID != "" {
 		return frozenID, nil

@@ -59,6 +59,7 @@ type ImageTask struct {
 	imageRecoveryClaim   *imageBillingRecoveryClaim
 	imageSyncPermit      *imageSyncPermit
 	imageSubmitReceipt   *imageSubmitReceipt
+	imageProducer        *imageProducerHandle
 
 	// Server-only transient generation/identity captured by the real admission
 	// path. Persistent authority lives in channel_admission_uses.
@@ -133,9 +134,13 @@ func ReserveImageTask(
 	info *AsyncUsageInfo,
 	operational ...OperationalFields,
 ) (*ImageTask, bool, error) {
-	saved, created, err := reserveImageTaskWithAdmission(task, info, operational...)
+	return ReserveImageTaskContext(context.Background(), task, info, operational...)
+}
+
+func ReserveImageTaskContext(ctx context.Context, task *ImageTask, info *AsyncUsageInfo, operational ...OperationalFields) (*ImageTask, bool, error) {
+	saved, created, err := reserveImageTaskWithAdmission(ctx, task, info, operational...)
 	if err == nil && created && saved.RequestSummary != "" {
-		if detailErr := LogDB.Create(&RequestDetail{LogID: info.LogID, RequestBody: saved.RequestSummary}).Error; detailErr != nil {
+		if detailErr := LogDB.WithContext(ctx).Create(&RequestDetail{LogID: info.LogID, RequestBody: saved.RequestSummary}).Error; detailErr != nil {
 			log.WithError(detailErr).WithField("log_id", info.LogID).Warn("save image request summary")
 		}
 	}
@@ -320,7 +325,11 @@ func ReleaseImageTaskReservation(id string) error {
 
 // ReleaseImageTaskReservationGeneration is for a definite wallet refusal only.
 func ReleaseImageTaskReservationGeneration(task *ImageTask) error {
-	return releaseImageTaskWithAdmission(task.ID, task)
+	return ReleaseImageTaskReservationGenerationContext(context.Background(), task)
+}
+
+func ReleaseImageTaskReservationGenerationContext(ctx context.Context, task *ImageTask) error {
+	return releaseImageTaskWithAdmissionContext(ctx, task.ID, task)
 }
 
 func releaseImageTaskReservation(database *gorm.DB, id string) error {

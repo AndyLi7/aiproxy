@@ -30,8 +30,11 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 		wantAttempts    int
 		wantStatus      string
 		active, adopt   bool
+		producer        bool
 		wantCode        string
 	}{
+		{name: "producer 429 then backup", active: true, producer: true, primaryStatus: 429, retries: 2, wantAttempts: 2, wantStatus: "queued"},
+		{name: "producer unknown stays", active: true, producer: true, primaryStatus: 503, retries: 2, wantAttempts: 1, wantStatus: "submission_unknown"},
 		{name: "C active 429 then backup", active: true, primaryStatus: 429, retries: 2, wantAttempts: 2, wantStatus: "queued"},
 		{name: "C active all connections fail", active: true, allFail: true, retries: 10, wantAttempts: 2, wantStatus: "failed", wantCode: "upstream_unavailable"},
 		{name: "C adopts preactivation 429 then backup", active: true, adopt: true, primaryStatus: 429, retries: 2, wantAttempts: 2, wantStatus: "queued"},
@@ -107,6 +110,9 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 				original.KeyFingerprint = model.ImageChannelKeyFingerprint(first.Key)
 				if !tc.adopt {
 					activate()
+					if tc.producer {
+						installControllerImageProducer(t, db)
+					}
 					identity, e := model.ChannelIdentityOf(first)
 					require.NoError(t, e)
 					original.AdmissionIdentityHash = identity.IdentityHash
@@ -122,6 +128,18 @@ func TestImageFailoverDurableRoutingAndReplay(t *testing.T) {
 				activate()
 			}
 			dispatchImageTaskWithFailover(c, saved, &fal.Adaptor{}, mt, []byte(`{"prompt":"test","num_images":1}`))
+			if tc.producer {
+				rows := controllerProducerRows(t, db)
+				require.Len(t, rows, tc.wantAttempts+1)
+				for _, row := range rows {
+					require.Equal(t, "active", row.State)
+					require.Equal(t, "unproven", row.ContinuationState)
+				}
+				require.NoError(t, model.RecordImageProducerReturn(t.Context(), saved, false))
+				for _, row := range controllerProducerRows(t, db) {
+					require.Equal(t, "returned", row.State)
+				}
+			}
 			task, err := model.GetImageTask(original.ID, "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantStatus, task.Status)

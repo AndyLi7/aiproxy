@@ -136,6 +136,7 @@ func setupDeadlineTask(t *testing.T, age time.Duration, status string, fal *dead
 		t.Cleanup(walletServer.Close)
 		balance.Default = balance.NewExternalHTTP(walletServer.URL, "test")
 		task.BillingOperationID = "op-deadline"
+		info.BillingOperationID = task.BillingOperationID
 		task.PrepaymentQuoteJSON = `{"version":1,"quoteVersion":"q","currency":"USD","prepaidMicros":600000,"routes":[{"routeId":"primary","channelId":1,"provider":"fal","endpoint":"fal-ai/minimax/image-01","credentialScope":"channel-1","estimatedMicros":400000,"prepaidMicros":600000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`
 	}
 	_, _, err = model.ReserveImageTask(task, info)

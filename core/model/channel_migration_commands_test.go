@@ -178,6 +178,8 @@ func TestPreparedMigrationRollbackAndNormalMutationGuards(t *testing.T) {
 	model.DB, model.LogDB = f.store.DB, f.store.DB
 	t.Cleanup(func() { model.DB, model.LogDB = oldDB, oldLog })
 	require.Error(t, model.UpdateChannelStatusByID(3, model.ChannelStatusEnabled))
+	// Idempotent status writes must not bypass an active migration guard.
+	require.Error(t, model.UpdateChannelStatusByID(1, model.ChannelStatusEnabled))
 	require.Error(t, model.DeleteModelConfig("example"))
 	var cfg model.ModelConfig
 	require.NoError(t, f.store.DB.Where("model = ?", "example").First(&cfg).Error)
@@ -197,6 +199,7 @@ func TestPreparedMigrationRollbackAndNormalMutationGuards(t *testing.T) {
 	require.NoError(t, model.DeleteModelConfig("unrelated"))
 	seal, err := f.store.SealPrepared(ctx, req)
 	require.NoError(t, err)
+	require.Error(t, model.UpdateChannelStatusByID(1, model.ChannelStatusEnabled))
 	name := "fail-migration-receipt"
 	require.NoError(t, f.store.DB.Callback().Update().After("gorm:update").Register(name, func(tx *gorm.DB) {
 		if tx.Statement.Table == "channel_migration_prepareds" {

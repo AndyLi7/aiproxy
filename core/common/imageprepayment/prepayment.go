@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/model"
@@ -41,6 +42,9 @@ func Call(ctx context.Context, task *model.ImageTask, command balance.Prepayment
 	}
 	if err := model.ValidateImagePrepaymentRecovery(ctx, task); err != nil {
 		return balance.PrepaymentReceipt{}, err
+	}
+	if model.ImagePrepaymentRecoveryOwned(task) {
+		ctx = actionguard.With(ctx, func(checkCtx context.Context) error { return model.ValidateImagePrepaymentRecovery(checkCtx, task) })
 	}
 	command.Group = task.GroupID
 	command.BillingOperationID = task.BillingOperationID
@@ -141,4 +145,36 @@ func Sync(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt
 	task.Billing = &model.ImageTaskBilling{Currency: "USD", Status: receipt.Status, PrepaidMicros: receipt.PrepaidMicros, ActualMicros: receipt.ChargedMicros, RefundMicros: receipt.RefundMicros}
 	err = model.SaveImageTaskBilling(task)
 	return receipt, err
+}
+
+// SyncOwned is the shared recovery/immediate runner. Only a private eligibility
+// minted by a successful claim or terminal transaction can start it. A normal
+// error return records an error exit; panic/Goexit must retain active evidence.
+func SyncOwned(ctx context.Context, task *model.ImageTask) (balance.PrepaymentReceipt, error) {
+	if err := model.StartImagePrepaymentSync(task); err != nil {
+		return balance.PrepaymentReceipt{}, err
+	}
+	handoff, err := model.PrepareImageRecoveryHandoff(ctx, task)
+	if err != nil {
+		return balance.PrepaymentReceipt{}, err
+	}
+	if handoff != nil {
+		accepted, err := handoff.Accept(ctx)
+		if err != nil {
+			return balance.PrepaymentReceipt{}, err
+		}
+		if !accepted {
+			return balance.PrepaymentReceipt{}, model.ErrChannelAdmissionConflict
+		}
+	}
+	receipt, syncErr := Sync(ctx, task)
+	exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var releaseErr error
+	if handoff != nil {
+		releaseErr = handoff.ReleaseAndRecordExit(exitCtx, syncErr != nil)
+	} else {
+		releaseErr = model.ReleaseImagePrepaymentRecovery(exitCtx, task)
+	}
+	cancel()
+	return receipt, errors.Join(syncErr, releaseErr)
 }

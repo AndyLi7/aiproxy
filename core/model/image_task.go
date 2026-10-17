@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -56,6 +57,7 @@ type ImageTaskError struct {
 type ImageTask struct {
 	admissionPreparation *imageAdmissionPreparation
 	imageRecoveryClaim   *imageBillingRecoveryClaim
+	imageSyncPermit      *imageSyncPermit
 
 	// Server-only transient generation/identity captured by the real admission
 	// path. Persistent authority lives in channel_admission_uses.
@@ -461,7 +463,8 @@ func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (boo
 	}
 
 	expired := false
-	err = LogDB.Transaction(func(tx *gorm.DB) error {
+	var granted *ImageTask
+	err = imageWalletPollTransaction(context.Background(), func(tx *gorm.DB, authority *imageWalletClaimContext) error {
 		// Keep the existing task -> usage -> log lock order. Re-read the
 		// original claim only after the task lock; stale workers cannot fail a
 		// newer owner's task, accounting outbox or request log.
@@ -514,6 +517,10 @@ func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (boo
 			return errAsyncUsageClaimExpired
 		}
 
+		granted, err = prepareImageWalletSync(tx, authority, &task, &current, true)
+		if err != nil {
+			return err
+		}
 		logReceipt := tx.Model(&Log{}).
 			Where("request_id = ? AND id = ? AND group_id = ? AND token_id = ? AND async_usage_status = ?", id, current.LogID, current.GroupID, current.TokenID, AsyncUsageStatusPending).
 			Updates(map[string]any{
@@ -534,8 +541,8 @@ func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (boo
 		if count != 1 {
 			return errAsyncUsageClaimExpired
 		}
-		return nil
-	}, claimTxOptions(LogDB)...)
+		return finishImageWalletClaimCheck(tx, authority, granted)
+	})
 	if errors.Is(err, errAsyncUsageClaimExpired) {
 		return false, nil
 	}
@@ -543,6 +550,9 @@ func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (boo
 		return false, err
 	}
 
+	if expired {
+		claim.imageTerminalWallet = granted
+	}
 	return expired, nil
 }
 

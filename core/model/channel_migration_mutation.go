@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func migrationStoragePresent(tx *gorm.DB) (bool, error) {
@@ -60,10 +61,10 @@ func withMigrationChannelStatus(id, status int) error {
 		// Check the key again under the same transaction/lock as the write.
 		if status == ChannelStatusEnabled {
 			var ch Channel
-			if err := tx.First(&ch, id).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&ch, id).Error; err != nil {
 				return err
 			}
-			if channelKeyEmpty(ch.Key) {
+			if ch.Status != ChannelStatusEnabled && channelKeyEmpty(ch.Key) {
 				return ErrChannelKeyEmpty
 			}
 		}

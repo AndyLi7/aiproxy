@@ -153,9 +153,8 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 			}
 			task.Status = "queued"
 			task.UpstreamID = upstream
-			if task.PrepaymentQuoteJSON != "" {
-				_, _ = imageprepayment.Sync(ctx, task)
-			}
+			// Wallet reconciliation is owned by prepayment recovery. Submission
+			// identity alone is not a poll or recovery lease.
 			c.JSON(202, task)
 			return
 		}
@@ -220,16 +219,9 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 		}
 		task.Status = status
 		task.Error = taskError
-		if status == "failed" && task.PrepaymentQuoteJSON != "" {
-			// The provider created nothing and the failure is already
-			// persisted: release the attempt (reject_attempt) and refund the
-			// hold now. Prepayment recovery replays the same idempotent calls
-			// for a failed, unsettled task if the wallet is down.
-			if _, err := imageprepayment.Sync(ctx, task); err != nil {
-				common.GetLogger(c).WithFields(logrus.Fields{"lane": "image", "task_id": task.ID}).
-					WithError(err).Warn("image task not-accepted refund deferred to prepayment recovery")
-			}
-		}
+		// Failed remains unsettled. The existing recovery runner performs the
+		// same-operation full refund; a submission does not mint a wallet lease.
+
 		c.JSON(202, task)
 		return
 	}

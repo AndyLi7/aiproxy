@@ -1,0 +1,191 @@
+{
+  "model": "test/native/text-to-video",
+  "config": {
+    "owner": "test",
+    "type": 41,
+    "config": {
+      "x_token_platform_native_result_v1": {
+        "version": 1,
+        "contract": {
+          "artifacts": [
+            {
+              "path": [
+                "video",
+                "url"
+              ]
+            }
+          ],
+          "input_schema": {
+            "properties": {
+              "duration": {
+                "default": "5",
+                "enum": [
+                  "5",
+                  "10"
+                ],
+                "type": "string"
+              },
+              "generate_audio": {
+                "default": false,
+                "type": "boolean"
+              },
+              "prompt": {
+                "default": "A sample prompt",
+                "type": "string"
+              },
+              "resolution": {
+                "default": "720p",
+                "enum": [
+                  "720p",
+                  "1080p"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "prompt"
+            ],
+            "type": "object"
+          },
+          "model": "test/native/text-to-video",
+          "output_schema": {
+            "properties": {
+              "video": {
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "version": 1
+        },
+        "channelId": 11,
+        "endpoint": "fal-ai/fixture",
+        "credentialScope": "credential",
+        "keyFingerprint": "48c2455bdac9a0a6b04db29d92cf23f4c9f3f27ac5cfba8aed641cbaa6ff463c",
+        "deliveryBase": "https://gateway.example"
+      },
+      "upstream_prepayment_v1": {
+        "settlementPolicy": "actual-cost-v1",
+        "version": 1,
+        "currency": "USD",
+        "quoteVersion": "release:1",
+        "prepaidMicros": 600000,
+        "routes": [
+          {
+            "routeId": "route",
+            "rule": {
+              "mode": "list_ratio",
+              "ratio": "1.5"
+            },
+            "estimatedMicros": 600000,
+            "prepaidMicros": 600000,
+            "quantityMetric": "request",
+            "channelId": 11,
+            "provider": "fal",
+            "endpoint": "fal-ai/fixture",
+            "credentialScope": "credential"
+          }
+        ]
+      }
+    }
+  },
+  "documentation": {
+    "inputSchema": {
+      "properties": {
+        "duration": {
+          "default": "5",
+          "enum": [
+            "5",
+            "10"
+          ],
+          "type": "string"
+        },
+        "generate_audio": {
+          "default": false,
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": "A sample prompt",
+          "type": "string"
+        },
+        "resolution": {
+          "default": "720p",
+          "enum": [
+            "720p",
+            "1080p"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "requestSchema": {
+      "type": "object",
+      "required": [
+        "model",
+        "input"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "const": "test/native/text-to-video"
+        },
+        "input": {
+          "properties": {
+            "duration": {
+              "default": "5",
+              "enum": [
+                "5",
+                "10"
+              ],
+              "type": "string"
+            },
+            "generate_audio": {
+              "default": false,
+              "type": "boolean"
+            },
+            "prompt": {
+              "default": "A sample prompt",
+              "type": "string"
+            },
+            "resolution": {
+              "default": "720p",
+              "enum": [
+                "720p",
+                "1080p"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "type": "object",
+          "$id": "urn:musespan:native-input:b4d7877f507058312a4bec582095f2968e2506b1962b8ef6a7e472b13e74a01f"
+        }
+      }
+    },
+    "outputSchema": {
+      "properties": {
+        "video": {
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "llmsText": "Model: test/native/text-to-video\nPOST /v1/model-tasks with {\"model\":\"test/native/text-to-video\",\"input\":{...}}.\nX-Request-Id is required (1-128 letters, digits, _ or -; a UUID is recommended). The task ID equals the X-Request-Id.\nSubmission is idempotent: if the POST times out, the connection fails, or it returns 429 or 5xx, resend the byte-identical body with the same X-Request-Id. It returns the existing task and is never charged twice. A different body with the same ID returns 409 request_id_conflict.\nPoll GET /v1/model-tasks/{id} every 5 seconds with a total deadline; queued and running are pending, and only status=completed includes output. Null or empty output can be successful. If it returns 404 task_not_found, the POST never arrived: resend it with the same X-Request-Id instead of polling.\nDeclared file URLs are authenticated downloads. Preserve the API authorization header when downloading files."
+  }
+}

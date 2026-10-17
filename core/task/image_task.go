@@ -29,8 +29,8 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	if err := model.ValidateClaimedImageTask(ctx, info, task); err != nil {
 		return
 	}
-	// Bind only external poll/archive actions. Terminal refunds below deliberately
-	// retain their existing post-commit mechanism, not a cleared poll claim.
+	// Poll/archive and wallet sidecar are separate capabilities. A terminal
+	// refund uses only its winning transaction's private wallet handle.
 	pollCtx := actionguard.With(ctx, func(checkCtx context.Context) error { return model.ValidateClaimedImageTask(checkCtx, info, task) })
 
 	if task.Status == "result_processing" {
@@ -233,7 +233,9 @@ func expireImageGeneration(
 		refundCtx, cancel := context.WithTimeout(detached, imageTimeoutRefundTimeout)
 		failed, err := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
 		if err == nil {
-			_, err = imageprepayment.Sync(refundCtx, failed)
+			if granted := model.ImageTerminalWalletTask(info, failed); granted != nil {
+				_, err = imageprepayment.SyncOwned(refundCtx, granted)
+			}
 		}
 		cancel()
 
@@ -275,7 +277,12 @@ func refundFailedImageTask(ctx context.Context, info *model.AsyncUsageInfo, task
 		return
 	}
 	refundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imageTimeoutRefundTimeout)
-	_, err := imageprepayment.Sync(refundCtx, task)
+	granted := model.ImageTerminalWalletTask(info, task)
+	if granted == nil {
+		cancel()
+		return
+	}
+	_, err := imageprepayment.SyncOwned(refundCtx, granted)
 	cancel()
 	if err != nil {
 		log.WithField("task_id", task.ID).WithField("channel_id", info.ChannelID).WithError(err).
@@ -325,15 +332,9 @@ func expireUnconfirmedImageSubmissions(ctx context.Context, now time.Time) {
 		if _, ok := balance.Default.(*balance.ExternalHTTP); !ok {
 			continue
 		}
-		refundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imageTimeoutRefundTimeout)
-		failed, err := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
-		if err == nil {
-			_, err = imageprepayment.Sync(refundCtx, failed)
-		}
-		cancel()
-		if err != nil {
-			entry.WithError(err).Warn("unconfirmed image submission timed out; refund deferred to prepayment recovery")
-		}
+		// No poll owner or private wallet handoff exists in this sweep. Keep
+		// failed/unsettled and let the existing recovery claim own the refund.
+		entry.Info("unconfirmed image refund deferred to owned prepayment recovery")
 	}
 }
 
@@ -383,25 +384,34 @@ func completeImageTaskUsage(
 		return
 	}
 	if task.PrepaymentQuoteJSON != "" {
-		receipt, err := imageprepayment.Sync(ctx, task)
-		if err != nil {
+		if !task.BillingSettled {
+			won, claimErr := model.ClaimImagePrepaymentFromPoll(ctx, info, task)
+			if claimErr != nil {
+				retryImageUsage(info, claimErr)
+				return
+			}
+			if !won {
+				touchAsyncUsagePollCursor(info)
+				return
+			}
+			receipt, err := imageprepayment.SyncOwned(ctx, task)
+			if err != nil {
+				retryImageUsage(info, err)
+				return
+			}
+			if receipt.ChargedMicros == nil {
+				touchAsyncUsagePollCursor(info)
+				return
+			}
+		}
+		// Both recovery-first and Sync-then-lost-poll resumes use the persisted
+		// receipt; no repeat get/debit and no in-memory billing bypass.
+		if err := model.CompleteClaimedPrepaidImageUsage(ctx, info, task); err != nil {
 			retryImageUsage(info, err)
-			return
 		}
-		if receipt.ChargedMicros == nil {
-			touchAsyncUsagePollCursor(info)
-			return
-		}
-		// The D34 wallet has already finalized this exact operation. Keep usage/log
-		// accounting, but never invoke legacy post-consumption for a prepaid task.
-		info.BalanceConsumed = true
-		info.Price = model.Price{}
-		info.MeasuredImage = false
-		info.Usage = model.Usage{ImageOutputTokens: model.ZeroNullInt64(len(outputs))}
-		info.Amount = model.Amount{UsedAmount: float64(*receipt.ChargedMicros) / 1000000, ImageOutputAmount: float64(*receipt.ChargedMicros) / 1000000}
-		completePolledAsyncUsage(ctx, info, info.Usage, info.UsageContext)
 		return
 	}
+
 	// Freeze the no-customer-billing decision at admission, independent of current
 	// group status, credentials, release or retail price configuration.
 	if info.InternalImageTask {

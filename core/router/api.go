@@ -18,6 +18,9 @@ func SetAPIRouter(router *gin.Engine) {
 	healthRouter := api.Group("")
 	healthRouter.GET("/status", controller.GetStatus)
 
+	inventoryRouter := api.Group("", controller.RequireMigrationInventoryHeaderAuth, middleware.AdminAuth)
+	inventoryRouter.GET("/channel-migrations/inventory", controller.GetMigrationInventory)
+
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)
 	apiRouter.POST("/native-contract/validate", controller.ValidateNativeContract)

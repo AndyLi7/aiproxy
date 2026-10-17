@@ -33,6 +33,7 @@ const (
 var asyncUsageSchemaCache sync.Map
 
 type AsyncUsageInfo struct {
+	imageTerminalWallet *ImageTask
 	// Server-owned admission snapshot; never accepted from public JSON requests.
 	InternalImageTask bool   `json:"-"`
 	MeasuredImage     bool   `json:"measured_image,omitempty"`

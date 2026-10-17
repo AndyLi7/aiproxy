@@ -227,6 +227,22 @@ func releaseImageTaskWithAdmission(id string, evidence *ImageTask) error {
 // never permit another caller to replay the attempt. Frozen first attempts
 // retain their original admission; failover routes require new admission.
 func PrepareImageTaskAttempt(ctx context.Context, task *ImageTask, identity ChannelIdentity, index int) (string, error) {
+	if task == nil {
+		return "", ErrImageTaskConflict
+	}
+	previous := task.imageSubmitReceipt
+	task.imageSubmitReceipt = nil
+	attempt, err := prepareImageTaskAttempt(ctx, task, identity, index)
+	if err == nil {
+		task.imageSubmitReceipt = &imageSubmitReceipt{identity: identity, index: index, generation: task.AdmissionGeneration, attempt: attempt}
+		if previous != nil {
+			task.imageSubmitReceipt.usageFacts = previous.usageFacts
+		}
+	}
+	return attempt, err
+}
+
+func prepareImageTaskAttempt(ctx context.Context, task *ImageTask, identity ChannelIdentity, index int) (string, error) {
 	store, err := channelAdmissionRuntimeStore(LogDB)
 	if err != nil {
 		return "", err

@@ -357,10 +357,15 @@ func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 			}
 			saved, created, err := model.ReserveImageTask(
 				original,
-				&model.AsyncUsageInfo{RequestID: original.ID},
+				&model.AsyncUsageInfo{RequestID: original.ID, GroupID: original.GroupID, TokenID: original.TokenID},
 			)
 			require.NoError(t, err)
 			require.True(t, created)
+			attempt, err := model.PrepareImageTaskAttempt(t.Context(), saved, model.ChannelIdentity{}, 0)
+			require.NoError(t, err)
+			saved.AdmissionAttempt = attempt
+			saved.Attempts = []model.ImageTaskAttempt{{Decision: "in_flight"}}
+			require.NoError(t, model.SaveImageTaskAttempt(saved, 0, 0, ""))
 
 			a := &syncTaskFake{
 				err:    tc.err,

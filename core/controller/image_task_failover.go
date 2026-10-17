@@ -144,10 +144,10 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 		}
 		if err == nil {
 			if synchronous {
-				finishSyncImageTask(c, task, result, nil)
+				finishSyncImageTask(c, ctx, task, result, nil)
 				return
 			}
-			if model.AcceptImageTask(task.ID, upstream) != nil {
+			if model.AcceptSubmittedImageTask(ctx, task, upstream) != nil {
 				imageTaskHTTPError(c, 503, "task_store_unavailable")
 				return
 			}
@@ -197,11 +197,10 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 				imageTaskHTTPError(c, 503, "task_store_unavailable")
 				return
 			}
-			persisted.AdmissionGeneration = task.AdmissionGeneration
-			persisted.AdmissionIdentityHash = task.AdmissionIdentityHash
-			persisted.AdmissionAttempt = task.AdmissionAttempt
-			persisted.Attempts = task.Attempts
-			*task = persisted
+			task.ValidationContract = persisted.ValidationContract
+			task.UpstreamModel = persisted.UpstreamModel
+			task.ChannelType = persisted.ChannelType
+			task.KeyFingerprint = persisted.KeyFingerprint
 			if model.SaveImageTaskAttempt(task, len(task.Attempts), mt.Channel.ID, mt.Channel.BaseURL) != nil {
 				imageTaskHTTPError(c, 503, "task_store_unavailable")
 				return
@@ -213,7 +212,7 @@ func dispatchImageTaskWithFailover(c *gin.Context, task *model.ImageTask, execut
 			status = "failed"
 			taskError = adaptor.NotAcceptedTaskError(err)
 		}
-		if model.SetImageTaskResult(task.ID, status, nil, taskError) != nil {
+		if model.SetSubmittedImageTaskResult(ctx, task, status, taskError) != nil {
 			imageTaskHTTPError(c, 503, "task_store_unavailable")
 			return
 		}

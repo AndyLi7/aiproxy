@@ -79,15 +79,15 @@ func probeDecode(c *gin.Context, out any) bool {
 	return decoder.Decode(out) == nil
 }
 func probeCommand(r model.MigrationReadRequest) (model.ChannelMigrationRequest, bool) {
-	// Reverse remains a server-only local API until its runtime reader is integrated.
-	if r.TargetResourceKind != "" {
+	// Only the explicit pair selects the retired-target protocol.
+	if !((r.TargetResourceKind == "" && r.Seal.RevertOf == "") || (r.TargetResourceKind == model.MigrationReuseRetiredTarget && model.ValidMigrationReadOperationID(r.Seal.RevertOf))) {
 		return model.ChannelMigrationRequest{}, false
 	}
 	revision, e := strconv.ParseInt(r.Seal.ExpectedRevision, 10, 64)
 	if e != nil || revision < 0 || strconv.FormatInt(revision, 10) != r.Seal.ExpectedRevision {
 		return model.ChannelMigrationRequest{}, false
 	}
-	return model.ChannelMigrationRequest{Seal: model.ChannelSealRequest{OperationID: r.Seal.OperationID, Epoch: r.Seal.Epoch, ExpectedRevision: revision, From: r.Seal.From, To: r.Seal.To, RevertOf: r.Seal.RevertOf}, FromCredentialID: r.FromCredentialID, ToCredentialID: r.ToCredentialID, ExpectedPinHash: r.ExpectedPinHash, ProjectionHash: r.ProjectionHash, FamilyHash: r.FamilyHash}, true
+	return model.ChannelMigrationRequest{TargetResourceKind: r.TargetResourceKind, Seal: model.ChannelSealRequest{OperationID: r.Seal.OperationID, Epoch: r.Seal.Epoch, ExpectedRevision: revision, From: r.Seal.From, To: r.Seal.To, RevertOf: r.Seal.RevertOf}, FromCredentialID: r.FromCredentialID, ToCredentialID: r.ToCredentialID, ExpectedPinHash: r.ExpectedPinHash, ProjectionHash: r.ProjectionHash, FamilyHash: r.FamilyHash}, true
 }
 func (d migrationProbeDependencies) create(c *gin.Context) {
 	op := c.Param("id")
@@ -185,7 +185,8 @@ func (d migrationProbeDependencies) prepare(c *gin.Context) {
 		probeHTTPError(c, model.ErrChannelAdmissionConflict)
 		return
 	}
-	if _, e = s.PrepareMigrationFromProbe(c.Request.Context(), op, d.billing); e != nil {
+	_, e = s.PrepareBoundMigrationFromProbe(c.Request.Context(), op, body.AuthorizationHash, d.billing)
+	if e != nil {
 		probeHTTPError(c, e)
 		return
 	}

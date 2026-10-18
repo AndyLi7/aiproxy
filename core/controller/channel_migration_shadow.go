@@ -54,6 +54,14 @@ func CreateMigrationShadow(c *gin.Context) {
 func shadowInputShape(raw []byte, kind string) bool {
 	fields := map[string]string{}
 	switch kind {
+	case "retired":
+		fields = map[string]string{"version": "", "command": "retired-command", "sourceSnapshotHash": ""}
+	case "retired-read":
+		fields = map[string]string{"version": "", "request": "retired"}
+	case "retired-command":
+		fields = map[string]string{"targetResourceKind": "", "seal": "retired-seal", "fromCredentialId": "", "toCredentialId": "", "expectedPinHash": "", "projectionHash": "", "familyHash": ""}
+	case "retired-seal":
+		fields = map[string]string{"operationId": "", "epoch": "", "expectedRevision": "", "from": "identity", "to": "identity", "revertOf": ""}
 	case "cancel":
 		fields = map[string]string{"version": "", "resourceRequestHash": "", "checkpointHash": ""}
 	case "root":

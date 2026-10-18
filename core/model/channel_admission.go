@@ -50,10 +50,11 @@ func (p VerifiedDeploymentProof) Fingerprint() (string, error) { return admissio
 // the error), so frozen-work compatibility cannot mistake it for an outage.
 // New admission/Seal always reject every source error regardless of class.
 type ChannelAdmissionStore struct {
-	DB             *gorm.DB
-	LogDB          *gorm.DB
-	Executor       ChannelExecutorIdentity
-	LoadDeployment func(context.Context) (VerifiedDeploymentProof, error)
+	controlledRuntime bool
+	DB                *gorm.DB
+	LogDB             *gorm.DB
+	Executor          ChannelExecutorIdentity
+	LoadDeployment    func(context.Context) (VerifiedDeploymentProof, error)
 	// Server-only probe verifier; never populated from an HTTP request.
 	LoadMigrationProbe func(context.Context, ChannelMigrationRequest) (VerifiedMigrationProbe, error)
 	// Trusted local runtime feature projection, never supplied by a browser.
@@ -415,6 +416,9 @@ func (s *ChannelAdmissionStore) Seal(ctx context.Context, input ChannelSealReque
 }
 
 func (s *ChannelAdmissionStore) seal(ctx context.Context, input ChannelSealRequest, prepared *migrationAuthorization) (barrier *ChannelAdmissionBarrier, err error) {
+	if s.controlledRuntime {
+		return nil, ErrChannelAdmissionUnavailable
+	}
 	if input.OperationID == "" || len(input.OperationID) > 128 || input.Epoch == "" || len(input.Epoch) > 128 || input.ExpectedRevision < 0 || !validChannelIdentity(input.From) || !validChannelIdentity(input.To) || input.From.ChannelID == input.To.ChannelID || len(input.RevertOf) > 128 {
 		return nil, ErrChannelAdmissionConflict
 	}

@@ -30,7 +30,7 @@ func cutoverProbeFacts(tx *gorm.DB, c *ChannelAdmissionControl, op string, b Mig
 	if e := probeRuntimeStorageReady(tx); e != nil {
 		return zero, fact, e
 	}
-	resource, e := loadShadowResource(tx, op, 0, !lock)
+	resource, e := migrationTargetByOperation(tx, op, !lock)
 	if e != nil || resource == nil || resource.LifecycleState != "consumed" {
 		return zero, fact, ErrChannelAdmissionConflict
 	}
@@ -38,7 +38,7 @@ func cutoverProbeFacts(tx *gorm.DB, c *ChannelAdmissionControl, op string, b Mig
 	if e != nil {
 		return zero, fact, e
 	}
-	if run.AuthorizationHash != b.AuthorizationHash || run.CommandHash != b.RequestHash || run.StorageGeneration != b.StorageGeneration || run.StorageGeneration != c.StorageGeneration || run.EvidenceJSON == "" || run.UseID == "" {
+	if !validMigrationResourceKind(a.Command) || resource.Kind != a.Command.TargetResourceKind || resource.RequestHash != run.ResourceRequestHash || resource.CheckpointHash != run.CheckpointHash || resource.Target != a.Command.Seal.To || run.AuthorizationHash != b.AuthorizationHash || run.CommandHash != b.RequestHash || run.StorageGeneration != b.StorageGeneration || run.StorageGeneration != c.StorageGeneration || run.EvidenceJSON == "" || run.UseID == "" {
 		return zero, fact, ErrChannelAdmissionConflict
 	}
 	q := tx
@@ -97,9 +97,8 @@ func (s *ChannelAdmissionStore) CutoverMigrationFromProbe(ctx context.Context, o
 		}
 		return nil, ErrChannelAdmissionUnavailable
 	}
-	// This HTTP-backed operation remains forward-only; reverse has its own
-	// server-only command and has not acquired this route authorization.
-	if command.TargetResourceKind != "" || command.Seal.RevertOf != "" {
+	// Resource kind comes from the persisted authorization, never the HTTP body.
+	if !validMigrationResourceKind(command) {
 		return nil, ErrChannelAdmissionConflict
 	}
 	copyStore := *s

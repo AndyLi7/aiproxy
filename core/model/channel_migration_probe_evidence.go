@@ -241,19 +241,37 @@ func (s *ChannelAdmissionStore) FinalizeMigrationProbe(ctx context.Context, op s
 // It does not expose Seal/Commit: post-seal reauthorization/reverse and a real
 // fleet/cache/recovery-watermark issuer remain separate rollout prerequisites.
 func (s *ChannelAdmissionStore) PrepareMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader) (*ChannelMigrationPrepared, error) {
-	return s.prepareMigrationFromProbe(ctx, op, reader, false)
+	return s.prepareMigrationFromProbe(ctx, op, reader, false, "")
 }
 
 func (s *ChannelAdmissionStore) PrepareReverseMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader) (*ChannelMigrationPrepared, error) {
-	return s.prepareMigrationFromProbe(ctx, op, reader, true)
+	return s.prepareMigrationFromProbe(ctx, op, reader, true, "")
 }
 
-func (s *ChannelAdmissionStore) prepareMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader, reverse bool) (*ChannelMigrationPrepared, error) {
+// PrepareBoundMigrationFromProbe selects the explicit kind from the persisted,
+// exact authorization. HTTP callers cannot pass a replacement command/kind.
+func (s *ChannelAdmissionStore) PrepareBoundMigrationFromProbe(ctx context.Context, op, authorizationHash string, reader MigrationProbeBillingReader) (*ChannelMigrationPrepared, error) {
+	if !ValidMigrationReadOperationID(op) || !fullIdentityDigest(authorizationHash) {
+		return nil, ErrChannelAdmissionConflict
+	}
+	a, e := s.MigrationProbeAuthorization(ctx, op)
+	if e != nil {
+		return nil, e
+	}
+	hash, _ := admissionHash(a)
+	if hash != authorizationHash || !validMigrationResourceKind(a.Command) {
+		return nil, ErrChannelAdmissionConflict
+	}
+	return s.prepareMigrationFromProbe(ctx, op, reader, reverseMigration(a.Command), authorizationHash)
+}
+
+func (s *ChannelAdmissionStore) prepareMigrationFromProbe(ctx context.Context, op string, reader MigrationProbeBillingReader, reverse bool, expectedAuthorization string) (*ChannelMigrationPrepared, error) {
 	original, e := s.MigrationProbeAuthorization(ctx, op)
 	if e != nil {
 		return nil, e
 	}
-	if reverse != reverseMigration(original.Command) || !validMigrationResourceKind(original.Command) {
+	originalHash, _ := admissionHash(original)
+	if (expectedAuthorization != "" && originalHash != expectedAuthorization) || reverse != reverseMigration(original.Command) || !validMigrationResourceKind(original.Command) {
 		return nil, ErrChannelAdmissionConflict
 	}
 	var fact VerifiedMigrationProbe
@@ -294,6 +312,10 @@ func (s *ChannelAdmissionStore) prepareMigrationFromProbe(ctx context.Context, o
 	a, e := s.MigrationProbeAuthorization(ctx, op)
 	if e != nil {
 		return nil, e
+	}
+	currentHash, _ := admissionHash(a)
+	if currentHash != originalHash {
+		return nil, ErrChannelAdmissionConflict
 	}
 	copyStore := *s
 	copyStore.LoadMigrationProbe = func(_ context.Context, r ChannelMigrationRequest) (VerifiedMigrationProbe, error) {

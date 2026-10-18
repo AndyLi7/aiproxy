@@ -17,8 +17,9 @@ import (
 // an activated database refuses new work; a never-activated database keeps its
 // legacy behavior. Tests install only explicitly synthetic local snapshots.
 type channelAdmissionRuntime struct {
-	executor ChannelExecutorIdentity
-	load     func(context.Context) (VerifiedDeploymentProof, error)
+	controlled bool
+	executor   ChannelExecutorIdentity
+	load       func(context.Context) (VerifiedDeploymentProof, error)
 }
 
 var admissionRuntime atomic.Pointer[channelAdmissionRuntime]
@@ -76,6 +77,13 @@ func channelAdmissionRuntimeStore(taskDB *gorm.DB) (*ChannelAdmissionStore, erro
 	}
 	store := &ChannelAdmissionStore{DB: DB, LogDB: taskDB}
 	if runtime != nil {
+		if runtime.controlled {
+			var control ChannelAdmissionControl
+			if e := DB.First(&control, 1).Error; e != nil || control.Epoch == "" {
+				return nil, ErrChannelAdmissionUnavailable
+			}
+		}
+		store.controlledRuntime = runtime.controlled
 		store.Executor = runtime.executor
 		store.LoadDeployment = runtime.load
 	}
@@ -83,6 +91,11 @@ func channelAdmissionRuntimeStore(taskDB *gorm.DB) (*ChannelAdmissionStore, erro
 }
 
 func channelAdmissionNeverActivated(tx *gorm.DB, c *ChannelAdmissionControl) (bool, error) {
+	// Recheck inside the caller transaction: a prefix restore after the runtime
+	// store was loaded cannot re-enable the never-activated legacy shortcut.
+	if runtime := admissionRuntime.Load(); runtime != nil && runtime.controlled && c.Epoch == "" {
+		return false, ErrChannelAdmissionUnavailable
+	}
 	if c.Epoch != "" {
 		return false, nil
 	}

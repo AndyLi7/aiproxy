@@ -177,6 +177,9 @@ func migrationStorageReady(tx *gorm.DB) error {
 	return migrationStatesReady(tx)
 }
 func (s *ChannelAdmissionStore) migrationAuthorization(ctx context.Context, input ChannelMigrationRequest) (*migrationAuthorization, error) {
+	if s != nil && s.controlledRuntime {
+		return nil, ErrChannelAdmissionUnavailable
+	}
 	if s == nil || s.LoadMigrationProbe == nil || !validMigrationResourceKind(input) || input.FromCredentialID == "" || input.ToCredentialID == "" || len(input.FromCredentialID) > 128 || len(input.ToCredentialID) > 128 || !fullIdentityDigest(input.ExpectedPinHash) || !fullIdentityDigest(input.ProjectionHash) || !fullIdentityDigest(input.FamilyHash) ||
 		(input.Seal.From.KeyDigest == input.Seal.To.KeyDigest) != (input.FromCredentialID == input.ToCredentialID) {
 		return nil, ErrChannelAdmissionUnavailable

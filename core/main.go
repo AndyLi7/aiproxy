@@ -15,17 +15,23 @@ import (
 	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/controller"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/runtimeguard"
 	"github.com/labring/aiproxy/core/task"
 	requesttraceruntime "github.com/labring/aiproxy/core/trace"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 var (
-	listen    string
-	pprofPort int
+	listen            string
+	pprofPort         int
+	controlledReadFD  int
+	controlledWriteFD int
 )
 
 func init() {
+	flag.IntVar(&controlledReadFD, "controlled-runtime-read-fd", 0, "private supervisor pipe; local controlled mode only")
+	flag.IntVar(&controlledWriteFD, "controlled-runtime-write-fd", 0, "private supervisor pipe; local controlled mode only")
 	flag.StringVar(&listen, "listen", "0.0.0.0:3000", "http server listen")
 	flag.IntVar(&pprofPort, "pprof-port", 15000, "pport http server port")
 }
@@ -59,8 +65,39 @@ func main() {
 
 	printLoadedEnvFiles()
 
-	if err := initializeServices(pprofPort); err != nil {
-		log.Fatal("failed to initialize services: " + err.Error())
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var initErr error
+	if controlledReadFD != 0 || controlledWriteFD != 0 {
+		if controlledReadFD < 3 || controlledWriteFD < 3 || controlledReadFD == controlledWriteFD {
+			log.Fatal("controlled runtime private session required")
+		}
+		in, out := os.NewFile(uintptr(controlledReadFD), "controlled-in"), os.NewFile(uintptr(controlledWriteFD), "controlled-out")
+		defer in.Close()
+		defer out.Close()
+		h, r, boot, e := runtimeguard.ChildHandshake(in, out)
+		if e != nil {
+			log.Fatal("controlled runtime handshake failed")
+		}
+		var controlledDB *gorm.DB
+		controlledDB, initErr = runtimeguard.OpenControlledStorage(h)
+		if initErr == nil {
+			model.DB = controlledDB
+			model.LogDB = controlledDB
+		}
+		if initErr == nil {
+			ready := make(chan error, 1)
+			go func() { _ = runtimeguard.RunChild(ctx, h, r, in, out, boot, ready); stop() }()
+			initErr = <-ready
+		}
+		if initErr == nil {
+			initErr = initializeOptionAndCaches()
+		}
+	} else {
+		initErr = initializeServices(pprofPort)
+	}
+	if initErr != nil {
+		log.Fatal("failed to initialize services: " + initErr.Error())
 	}
 
 	defer func() {
@@ -68,9 +105,6 @@ func main() {
 			log.Fatal("failed to close database: " + err.Error())
 		}
 	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	traceKeys, traceKeyErr := requesttraceruntime.ParseTrustedKeys(
 		env.String("REQUEST_TRACE_SERVICE_KEYS", ""),

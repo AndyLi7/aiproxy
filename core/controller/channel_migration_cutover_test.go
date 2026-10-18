@@ -153,6 +153,10 @@ func TestMigrationCutoverHTTPRejectsAmbiguousJSON(t *testing.T) {
 
 func TestMigrationCutoverHTTPExpiredReplayOnlyReadsFacts(t *testing.T) {
 	f := newProbeHTTPFixture(t)
+	// Prepare has its own real provider/transfer/billing path. Narrow the proof
+	// only after it succeeds: this test measures expiry of committed replay,
+	// not a race between that unrelated setup and a ten-second deadline.
+	b := prepareHTTPProbeForCutover(t, f)
 	proof, e := f.store.LoadDeployment(t.Context())
 	require.NoError(t, e)
 	deadline := time.Now().Add(10 * time.Second)
@@ -164,13 +168,19 @@ func TestMigrationCutoverHTTPExpiredReplayOnlyReadsFacts(t *testing.T) {
 	f.store.LoadDeployment = func(context.Context) (model.VerifiedDeploymentProof, error) { return proof, nil }
 	restore := model.ConfigureChannelAdmissionRuntime(f.store.Executor, f.store.LoadDeployment)
 	defer restore()
-	b := prepareHTTPProbeForCutover(t, f)
 	_, raw := f.call(t, "POST", "/api/channel-migrations/operations/http-probe-op/cutover", b, config.AdminKey)
 	require.Contains(t, string(raw), `"state":"committed"`)
 	first := string(raw)
+	// Prove the updated fingerprint and prepared facts are compatible while
+	// this exact proof is still valid, before testing natural expiry.
+	_, raw = f.call(t, "POST", "/api/channel-migrations/operations/http-probe-op/cutover", b, config.AdminKey)
+	require.Equal(t, first, string(raw))
 	if wait := time.Until(deadline.Add(30 * time.Millisecond)); wait > 0 {
 		time.Sleep(wait)
 	}
+	var dbNow int64
+	require.NoError(t, f.db.Raw("SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)").Scan(&dbNow).Error)
+	require.GreaterOrEqual(t, dbNow, proof.ValidUntilMs, "same proof must actually expire by the database clock")
 	_, raw = f.call(t, "POST", "/api/channel-migrations/operations/http-probe-op/cutover", b, config.AdminKey)
 	require.NotContains(t, string(raw), `"state":"committed"`)
 	_, raw = f.call(t, "GET", "/api/channel-migrations/operations/http-probe-op", nil, config.AdminKey)

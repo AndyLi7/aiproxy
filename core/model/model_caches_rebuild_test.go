@@ -29,6 +29,10 @@ func useCacheRebuildDB(t *testing.T) (*gorm.DB, *Channel) {
 		modelCaches.Store(previousCaches)
 		require.NoError(t, sqlDB.Close())
 	})
+	// A coherent cache read now holds a read transaction. WAL lets this test
+	// commit the writer while that old snapshot remains paused, preserving its
+	// original overwrite race. Production DSNs are unchanged.
+	require.NoError(t, db.Exec("PRAGMA journal_mode=WAL").Error)
 	require.NoError(t, db.AutoMigrate(&Channel{}, &ModelConfig{}))
 	require.NoError(t, db.Create(&ModelConfig{Model: rebuildTestModel, Type: mode.NativeTasks}).Error)
 	channel := &Channel{Name: "rebuild", Type: ChannelTypeFal, Key: "k", Models: []string{rebuildTestModel}}

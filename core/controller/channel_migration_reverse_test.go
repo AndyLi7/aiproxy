@@ -18,7 +18,7 @@ import (
 )
 
 // The real engine sends HTTP only to this existing local synthetic supplier;
-// reverse commands stay server-only and billing provenance is explicitly synthetic.
+// reverse HTTP keeps exact resource binding; billing provenance is synthetic.
 func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 	for _, mode := range []string{"success", "unknown", "wrong-billing", "cancelled-billing"} {
 		t.Run(mode, func(t *testing.T) {
@@ -138,15 +138,30 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			prepared, e := f.store.PrepareReverseMigrationFromProbe(t.Context(), req.Seal.OperationID, nil)
 			require.NoError(t, e)
 			require.Equal(t, "prepared", prepared.State)
-			// Integration boundary: a valid reverse probe cannot use the forward HTTP route.
+			// The shared HTTP route now accepts explicit reverse resources. A wrong
+			// binding must still be refused before the exact original binding commits.
 			var run model.ChannelMigrationProbeRun
 			require.NoError(t, f.db.First(&run, "operation_id=?", req.Seal.OperationID).Error)
 			binding := model.MigrationProbeCutoverBinding{Version: 1, AuthorizationHash: run.AuthorizationHash, RequestHash: prepared.RequestHash, ProbeFactHash: prepared.ProbeFactHash, StorageGeneration: prepared.StorageGeneration}
-			_, denied := f.call(t, "POST", "/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover", binding, config.AdminKey)
+			invalidBinding := binding
+			invalidBinding.AuthorizationHash = strings.Repeat("0", 64)
+			_, denied := f.call(t, "POST", "/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover", invalidBinding, config.AdminKey)
 			require.Contains(t, string(denied), `"state":"conflict"`)
 			var unchanged model.ChannelMigrationPrepared
 			require.NoError(t, f.db.First(&unchanged, "operation_id=?", req.Seal.OperationID).Error)
 			require.Equal(t, *prepared, unchanged)
+			code, committedRaw := f.call(t, "POST", "/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover", binding, config.AdminKey)
+			require.Equal(t, 200, code)
+			var committed struct {
+				Data model.MigrationReadResult `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(committedRaw, &committed))
+			require.Equal(t, "ready", committed.Data.State)
+			require.NotNil(t, committed.Data.Readback)
+			require.Equal(t, model.MigrationReuseRetiredTarget, committed.Data.Readback.Request.TargetResourceKind)
+			require.Equal(t, "committed", committed.Data.Readback.Receipt.State)
+			require.Equal(t, f.store.ReadPreparedMigrationFacts(t.Context(), req.Seal.OperationID), committed.Data)
+			// The original model replay returns the same committed operation.
 			result, e := f.store.CutoverReversePrepared(t.Context(), req)
 			require.NoError(t, e)
 			require.Equal(t, "committed", result.State)

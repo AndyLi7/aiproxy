@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -63,8 +62,7 @@ func ownedFile(path string, limit int64) ([]byte, error) {
 	if e != nil || !st.Mode().IsRegular() || st.Size() > limit {
 		return nil, ErrUntrusted
 	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	if !ok || int(sys.Uid) != os.Geteuid() || st.Mode().Perm()&0022 != 0 {
+	if !trustedFileOwner(st) {
 		return nil, ErrUntrusted
 	}
 	return os.ReadFile(path)

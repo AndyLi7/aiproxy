@@ -36,6 +36,8 @@ type MigrationProbeBillingContext struct {
 	ResourceState        string                       `json:"resourceState"`
 	TaskStatus           string                       `json:"taskStatus"`
 	BillingSettled       bool                         `json:"billingSettled"`
+	TargetResourceKind   string                       `json:"targetResourceKind,omitempty"`
+	RevertOf             string                       `json:"revertOf,omitempty"`
 }
 type MigrationProbeBillingContextResult struct {
 	Version           int                           `json:"version"`
@@ -130,15 +132,11 @@ func probeBillingContextTx(tx *gorm.DB, c *ChannelAdmissionControl, input Migrat
 	if len(run.AuthorizationJSON) > 384*1024 || len(run.SpecJSON) > 1024*1024 || !validProbeCommand(a.Command) || !ValidMigrationReadOperationID(run.OperationID) {
 		return MigrationProbeBillingContextResult{}, ErrChannelAdmissionConflict
 	}
-	life, e := readShadowLifecycleFactsTx(tx, c, run.OperationID, true)
+	lifecycle, e := probeBillingOriginalResourceTx(tx, c, run, a, spec)
 	if e != nil {
 		return MigrationProbeBillingContextResult{}, e
 	}
-	if life.State != "ready" || life.Observation == nil {
-		return MigrationProbeBillingContextResult{}, ErrChannelAdmissionConflict
-	}
-	creation := life.Observation.Creation
-	if run.StorageGeneration != c.StorageGeneration || a.Command.Seal.Epoch != c.Epoch || run.ResourceRequestHash != creation.RequestHash || run.CheckpointHash != creation.CheckpointHash || a.Command.Seal.From != creation.From || a.Command.Seal.To != creation.Shadow || a.Command.ToCredentialID != life.Observation.ResourceRequest.Target.CredentialID || a.GroupID != spec.GroupID || a.TokenID != spec.TokenID || string(a.Input) != string(spec.Input) || spec.ChannelID != creation.Shadow.ChannelID || spec.KeyDigest != creation.Shadow.KeyDigest || spec.IdentityHash != creation.Shadow.IdentityHash || spec.CredentialScope != a.Command.ToCredentialID || input.GroupID != spec.GroupID || input.BillingOperationID != "native:"+spec.TaskID || life.Observation.ResourceRequest.Target.Projection.ModelMapping[a.Model] != spec.Endpoint || !shadowModelsExist(life.Observation.ResourceRequest.Target.Projection.Models, []string{a.Model}) {
+	if run.StorageGeneration != c.StorageGeneration || a.Command.Seal.Epoch != c.Epoch || a.GroupID != spec.GroupID || a.TokenID != spec.TokenID || string(a.Input) != string(spec.Input) || spec.ChannelID != a.Command.Seal.To.ChannelID || spec.KeyDigest != a.Command.Seal.To.KeyDigest || spec.IdentityHash != a.Command.Seal.To.IdentityHash || spec.CredentialScope != a.Command.ToCredentialID || input.GroupID != spec.GroupID || input.BillingOperationID != "native:"+spec.TaskID {
 		return MigrationProbeBillingContextResult{}, ErrChannelAdmissionConflict
 	}
 	if run.UseID == "" {
@@ -173,7 +171,7 @@ func probeBillingContextTx(tx *gorm.DB, c *ChannelAdmissionControl, input Migrat
 		return MigrationProbeBillingContextResult{}, ErrChannelAdmissionConflict
 	}
 	out := probeBillingContextResult("ready", "")
-	out.Context = &MigrationProbeBillingContext{run.OperationID, run.AuthorizationHash, run.CommandHash, run.ResourceRequestHash, run.CheckpointHash, run.SpecHash, run.UseID, run.TaskHash, a.Command.Seal.From, a.Command.Seal.To, a.Command.FromCredentialID, a.Command.ToCredentialID, probeBillingRequest(&t, a), life.Observation.Lifecycle.State, t.Status, t.BillingSettled}
+	out.Context = &MigrationProbeBillingContext{run.OperationID, run.AuthorizationHash, run.CommandHash, run.ResourceRequestHash, run.CheckpointHash, run.SpecHash, run.UseID, run.TaskHash, a.Command.Seal.From, a.Command.Seal.To, a.Command.FromCredentialID, a.Command.ToCredentialID, probeBillingRequest(&t, a), lifecycle, t.Status, t.BillingSettled, a.Command.TargetResourceKind, a.Command.Seal.RevertOf}
 	return out, nil
 }
 func (s *ChannelAdmissionStore) ReadMigrationProbeBillingContext(ctx context.Context, input MigrationProbeBillingContextRequest) MigrationProbeBillingContextResult {

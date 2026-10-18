@@ -177,6 +177,11 @@ func migrationStorageReady(tx *gorm.DB) error {
 	return migrationStatesReady(tx)
 }
 func (s *ChannelAdmissionStore) migrationAuthorization(ctx context.Context, input ChannelMigrationRequest) (*migrationAuthorization, error) {
+	if s != nil && s.DB != nil {
+		if _, e := channelRoutingStorageReady(s.DB.WithContext(ctx)); e != nil {
+			return nil, e
+		}
+	}
 	if s != nil && s.controlledRuntime {
 		return nil, ErrChannelAdmissionUnavailable
 	}
@@ -993,6 +998,11 @@ func (s *ChannelAdmissionStore) commitPreparedPinsTx(tx *gorm.DB, c *ChannelAdmi
 			}
 			if update.RowsAffected != 1 {
 				return ErrChannelAdmissionConflict
+			}
+		}
+		for _, id := range []int{input.Seal.From.ChannelID, input.Seal.To.ChannelID} {
+			if e := bumpChannelRoutingRevision(tx, id); e != nil {
+				return e
 			}
 		}
 		if !reverseMigration(input) {

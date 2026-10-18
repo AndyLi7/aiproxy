@@ -71,16 +71,18 @@ func HasProviderContracts(raw []byte) bool {
 	return exists
 }
 
+// ValidProviderBindingIdentity checks the existing provider contract identity format.
+func ValidProviderBindingIdentity(b ProviderBinding) bool {
+	return b.Provider != "" && b.ID != "" && b.Revision != "" && providerHash.MatchString(b.ContractHash)
+}
+
 func bound(raw []byte, b ProviderBinding) (*boundProvider, error) {
 	var c struct {
 		Version   int                      `json:"provider_contract_version"`
 		Providers map[string]boundProvider `json:"providers"`
 	}
 	if len(raw) > 256*1024 || json.Unmarshal(raw, &c) != nil || c.Version != 1 ||
-		b.Provider == "" ||
-		b.ID == "" ||
-		b.Revision == "" ||
-		!providerHash.MatchString(b.ContractHash) {
+		!ValidProviderBindingIdentity(b) {
 		return nil, ErrProviderContract
 	}
 

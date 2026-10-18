@@ -442,7 +442,13 @@ func (s *ChannelAdmissionStore) CreateMigrationShadow(ctx context.Context, req M
 		if !shadowModelsExist(models, ch.Models) {
 			return ErrChannelAdmissionConflict
 		}
+		if _, e = channelRoutingStorageReady(tx); e != nil {
+			return e
+		}
 		if e = tx.Create(ch).Error; e != nil {
+			return e
+		}
+		if e = initializeChannelRoutingState(tx, []int{ch.ID}); e != nil {
 			return e
 		}
 		var persisted Channel

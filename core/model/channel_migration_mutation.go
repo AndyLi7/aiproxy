@@ -65,6 +65,18 @@ func migrationStatesReady(tx *gorm.DB) error {
 }
 func withMigrationChannelStatus(ctx context.Context, id, status int) error {
 	write := func(tx *gorm.DB) error {
+		present, e := channelRoutingStorageReady(tx)
+		if e != nil {
+			return e
+		}
+		if present {
+			if _, e = lockRoutingChannel(tx, id); e != nil {
+				return e
+			}
+		}
+		if e := bumpChannelRoutingRevision(tx, id); e != nil {
+			return e
+		}
 		if err := guardPreparedChannelMutation(tx, []int{id}); err != nil {
 			return err
 		}

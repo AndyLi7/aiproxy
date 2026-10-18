@@ -417,7 +417,17 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 	}
 
 	return withMigrationChannelCreate(func(tx *gorm.DB) error {
-		return tx.Create(&channels).Error
+		if _, e := channelRoutingStorageReady(tx); e != nil {
+			return e
+		}
+		if e := tx.Create(&channels).Error; e != nil {
+			return e
+		}
+		ids := make([]int, 0, len(channels))
+		for _, ch := range channels {
+			ids = append(ids, ch.ID)
+		}
+		return initializeChannelRoutingState(tx, ids)
 	})
 }
 
@@ -465,6 +475,9 @@ func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
 }
 
 func persistChannelPatch(db *gorm.DB, channel *Channel, update *ChannelPatch) error {
+	if e := bumpChannelRoutingRevision(db, channel.ID); e != nil {
+		return e
+	}
 	result := db.Model(channel).
 		Clauses(clause.Returning{}).
 		Where("id = ?", channel.ID).

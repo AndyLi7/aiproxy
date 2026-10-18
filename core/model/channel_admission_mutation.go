@@ -19,7 +19,18 @@ func persistChannelPatchWithAdmission(channel *Channel, patch *ChannelPatch) err
 		return err
 	}
 	if store == nil {
-		return persistChannelPatch(DB, channel, patch)
+		return DB.Transaction(func(tx *gorm.DB) error {
+			present, e := channelRoutingStorageReady(tx)
+			if e != nil {
+				return e
+			}
+			if present {
+				if _, e = lockRoutingChannel(tx, channel.ID); e != nil {
+					return e
+				}
+			}
+			return persistChannelPatch(tx, channel, patch)
+		})
 	}
 	return store.transaction(context.Background(), func(tx *gorm.DB, c *ChannelAdmissionControl) error {
 		inactive, err := channelAdmissionNeverActivated(tx, c)
@@ -50,6 +61,22 @@ func deleteChannelsWithAdmission(ids []int, single bool) error {
 		return err
 	}
 	write := func(tx *gorm.DB) error {
+		protected, e := channelRoutingStorageReady(tx)
+		if e != nil {
+			return e
+		}
+		if protected {
+			ordered := append([]int{}, ids...)
+			sort.Ints(ordered)
+			for _, id := range ordered {
+				if _, e = lockRoutingChannel(tx, id); e != nil {
+					return e
+				}
+				if e = bumpChannelRoutingRevision(tx, id); e != nil {
+					return e
+				}
+			}
+		}
 		result := tx.Where("id IN ?", ids).Delete(&Channel{})
 		if single {
 			return HandleUpdateResult(result, ErrChannelNotFound)

@@ -23,6 +23,8 @@ func SetAPIRouter(router *gin.Engine) {
 	inventoryRouter.GET("/channels/:id/routing", controller.GetChannelRouting)
 	inventoryRouter.GET("/channels/:id/routing/requests/:requestId", controller.GetChannelRouting)
 	inventoryRouter.PATCH("/channels/:id/routing", controller.PatchChannelRouting)
+	inventoryRouter.GET("/access-configurations/:id", controller.GetAccessConfiguration)
+	inventoryRouter.PUT("/access-configurations/:id", controller.EnsureAccessConfiguration)
 	inventoryRouter.POST("/channel-migrations/probe-billing-context/read", controller.ReadMigrationProbeBillingContext)
 	inventoryRouter.POST("/channel-migrations/operations/:id/probe", controller.CreateMigrationProbe)
 	inventoryRouter.GET("/channel-migrations/operations/:id/probe", controller.GetMigrationProbe)

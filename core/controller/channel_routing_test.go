@@ -35,7 +35,7 @@ func routingHTTPFixture(t *testing.T) (*httptest.Server, *model.Channel) {
 		model.DB, model.LogDB, config.AdminKey = oldDB, oldLog, oldKey
 		require.NoError(t, pool.Close())
 	})
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelTest{}, &model.ModelConfig{}, &model.ChannelRoutingState{}, &model.ChannelRoutingReceipt{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelTest{}, &model.ModelConfig{}, &model.ChannelRoutingState{}, &model.ChannelRoutingReceipt{}, &model.ChannelAccessConfiguration{}))
 	require.NoError(t, db.Create(&model.ModelConfig{Model: "routing-test", Type: mode.ChatCompletions}).Error)
 	ch := &model.Channel{Name: "fal / fixture [shadow v3]", Type: model.ChannelTypeOpenAI, Key: "synthetic-routing-provider-key", BaseURL: "https://example.invalid", Models: []string{"routing-test"}, ModelMapping: map[string]string{"routing-test": "upstream"}, Sets: []string{"synthetic-group"}, Priority: 1}
 	require.NoError(t, db.Create(ch).Error)
@@ -44,6 +44,9 @@ func routingHTTPFixture(t *testing.T) (*httptest.Server, *model.Channel) {
 	r := gin.New()
 	api := r.Group("/api/channels", RequireMigrationInventoryHeaderAuth, middleware.AdminAuth)
 	api.GET("/:id/routing", GetChannelRouting)
+	access := r.Group("/api/access-configurations", RequireMigrationInventoryHeaderAuth, middleware.AdminAuth)
+	access.GET("/:id", GetAccessConfiguration)
+	access.PUT("/:id", EnsureAccessConfiguration)
 	legacy := r.Group("/api", middleware.AdminAuth)
 	legacy.GET("/channels/", GetChannels)
 	legacy.GET("/channels/all", GetAllChannels)

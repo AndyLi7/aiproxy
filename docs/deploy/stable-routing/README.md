@@ -28,8 +28,9 @@ backupOnly,providerBindings}`. Hashes are opaque server values. Arrays retain
 order. Provider bindings use the existing four fields provider/id/revision/
 contractHash, with the existing `sha256:` hash format. Empty bindings are `{}`;
 unknown existing binding fields refuse a complete snapshot instead of being
-silently deleted. Empty sets are valid. Explicit empty models are refused just
-as for ordinary PUT. Models must already exist unless the existing
+silently deleted. Empty sets are valid. Explicit empty models remain refused for legacy channels. A channel with an
+access-configuration creation receipt may return to an empty route set, with empty
+model mapping and provider bindings, while preserving its physical ID and identity. Models must already exist unless the existing
 DisableModelConfig setting disables that old validation.
 
 PATCH requires exactly version/requestId/expectedIdentity/expectedRevision/

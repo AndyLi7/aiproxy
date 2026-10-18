@@ -13,6 +13,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const ChannelRoutingSource = "gateway-channel-routing-v1"
@@ -104,7 +105,7 @@ func validRoutingRequest(q ChannelRoutingRequest) bool {
 	_, rev := routingDecimal(q.ExpectedRevision)
 	_, until := routingDecimal(q.NotAfterMs)
 	p := q.Routing
-	if q.Version != 1 || !ValidMigrationReadOperationID(q.RequestID) || !validChannelIdentity(q.ExpectedIdentity) || !rev || !until || !fullIdentityDigest(q.ExpectedRoutingHash) || len(p.Name) == 0 || len(p.Name) > 64 || len(p.Models) == 0 || len(p.Models) > 1024 || p.ModelMapping == nil || len(p.ModelMapping) > 1024 || p.Sets == nil || len(p.Sets) > 128 || p.ProviderBindings == nil || len(p.ProviderBindings) > 1024 {
+	if q.Version != 1 || !ValidMigrationReadOperationID(q.RequestID) || !validChannelIdentity(q.ExpectedIdentity) || !rev || !until || !fullIdentityDigest(q.ExpectedRoutingHash) || len(p.Name) == 0 || utf8.RuneCountInString(p.Name) > 64 || p.Models == nil || len(p.Models) > 1024 || p.ModelMapping == nil || len(p.ModelMapping) > 1024 || p.Sets == nil || len(p.Sets) > 128 || p.ProviderBindings == nil || len(p.ProviderBindings) > 1024 {
 		return false
 	}
 	for _, list := range [][]string{p.Models, p.Sets} {
@@ -426,6 +427,11 @@ func PatchChannelRouting(ctx context.Context, id int, q ChannelRoutingRequest) C
 		}
 		if e = guardPreparedChannelMutation(tx, []int{id}); e != nil {
 			return e
+		}
+		// Only explicitly provisioned access configurations may return to an
+		// empty routing set (e.g. compensation of their first publication).
+		if len(q.Routing.Models) == 0 && (len(q.Routing.ModelMapping) != 0 || len(q.Routing.ProviderBindings) != 0 || !accessConfigurationOwnsChannel(tx, id)) {
+			return ErrChannelAdmissionConflict
 		}
 		if !config.DisableModelConfig {
 			var count int64

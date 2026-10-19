@@ -15,7 +15,7 @@ Status: **not ready to merge or release to production**. This records checks and
 1. SQLite admission time used a Julian-day floating-point expression which can truncate one millisecond. This caused fresh image submission fixtures to be rejected as future-dated. Use integer seconds plus fractional digits for both the read and CAS guard clock. Regression exercises every fractional millisecond and second boundaries.
 2. Check cursor/close errors in routing-storage readiness; fail closed on a storage error.
 3. Preserve the exhaustive call-status matrix but format row diagnostics only on failure.
-4. Increase core package test timeout from 60s to 300s. The complete local model package took 177.484s under concurrent verification; no cases or assertions are removed.
+4. Increase core package test timeout from 60s to 600s (the normal Go default). The complete local model package took 177.484s under concurrent verification; no cases or assertions are removed.
 5. Pin golangci-lint 2.15.0, replacing 2.13.2 which cannot read the current Go export format.
 6. Normalize GHCR repository names to lowercase in image build/publish jobs. No workflow triggers or deployment destinations are added.
 
@@ -51,3 +51,16 @@ The full Semgrep scan reports 69 findings while the PR differential scan passed 
 ## Production data preparation (review only)
 
 Minimal existing reviewed SQL concerns gateway routing state/receipt tables, access-configuration identity table/index, and the app reconciliation `claim_owner`/`claim_deadline` nullable fields. Inspect actual production schema and channel inventory first. Retain verified backups and stop incompatible old writers as documented. Do not infer production inventory from staging, install the optional migration-system schema family, remove historical billing records, or run these SQL files merely because main was merged.
+
+## Cloud follow-up at 3ebb1c43
+
+- Push Release run 39192684087 passed: both image architectures, all six OS/architecture binaries, image/cluster publication. These are build artifacts for the feature branch, not a Railway deployment.
+- CI confirms MCP and OpenAPI lint now pass. Core lint reaches real findings, but the action stdout buffer overflows (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`). Its pre-existing automatic-fix diagnostic step still reports 1,260 findings after formatting; this is not a clean result.
+- Store full core lint text/JSON as downloadable CI artifacts instead of sending megabytes through the action buffer. Retain nonzero lint exit status and all rules; remove the temporary auto-fix/diff logging step, which neither committed repairs nor changed the failed gate.
+- Full Semgrep push run 39192684111 scans 1,383 files and reports 69 blocking findings with exit 1. Its pre-existing `continue-on-error: true` makes the overall workflow appear successful. Differential PR run 39192686742 reports zero findings and exit 0. Report these separately; the overall green badge is insufficient.
+- Existing staging health recheck: app, aiproxy, edge HTTP 200; anonymous admin inventory HTTP 401. No staging redeployment in this pre-merge audit yet.
+- App main workflow publishes a `latest` image. Empty repository hooks do not exclude image/GitHub-App-based production updates. Verify deployment-side source/auto-update configuration before any merge.
+
+- Push CI run 39192684086: **Test AI Proxy passed** on 3ebb1c43, along with MCP tests and MCP/OpenAPI lint. Overall CI remains failed due to core lint. New report-output mode was locally verified: all 12,994 current findings retained in JSON/text, exit status 1, only 623 bytes on stdout. The 12,989 count above refers to the earlier candidate comparison.
+
+- The parallel PR CI run 39192686744 still hit the 300s **whole model-package** limit, while starting `TestNativeClaimRechecksAgeAtUpdateAfterWorkerPause` (0s elapsed). Its exhaustive call-status matrix had already passed in 135.32s; no assertion failure occurred. The identical push model package passed in 270.950s. Use the normal Go 10-minute package budget to accommodate measured hosted-runner variation, preserving all cases and assertions; no sleep or retry-until-green was added. The failed run remains recorded.

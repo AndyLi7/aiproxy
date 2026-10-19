@@ -43,7 +43,7 @@ jobs:
         run: |
           # The controller/model suites include concurrency and database matrices.
           # Keep all cases; bound each package independently from job duration.
-          go test -v -timeout 300s -count=1 ./...
+          go test -v -timeout 600s -count=1 ./...
 
   golangci-lint-aiproxy:
     name: Lint AI Proxy
@@ -62,25 +62,21 @@ jobs:
         with:
           version: v2.15.0
           working-directory: core
-          args: --color=always --path-mode=abs
+          # Keep every finding without overflowing the action's stdout buffer.
+          args: >-
+            --path-mode=abs --output.text.path=../lint-core.txt
+            --output.json.path=../lint-core.json --output.text.colors=false
 
-      - name: Run Fix Linter
-        uses: golangci/golangci-lint-action@v9
-        if: ${{ failure() }}
+      - name: Upload full lint diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
         with:
-          install-mode: none
-          working-directory: core
-          args: --fix --color=always --path-mode=abs
-
-      - name: Auto Fix Diff Content
-        if: ${{ failure() }}
-        run: |
-          if git diff --exit-code --color=always; then
-            echo "No changes detected after auto-fix"
-          else
-            git diff --color=always
-            exit 1
-          fi
+          name: lint-core-${{ github.event_name }}
+          path: |
+            lint-core.txt
+            lint-core.json
+          if-no-files-found: warn
+          retention-days: 7
 
   test-mcpservers:
     name: Test MCP Servers

@@ -22,24 +22,63 @@ func TestAdmissionNativeExecutionFrozenAnchorRejectsConflictingFacts(t *testing.
 			db := f.store.DB
 			installNativeExecution(t, db)
 			task := executionNativeTask(t, f)
-			require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", task.ID).Updates(map[string]any{"recovery_owner": "claim", "recovery_until": time.Now().Add(time.Minute).Unix()}).Error)
+			require.NoError(
+				t,
+				db.Model(&model.NativeTask{}).
+					Where("id = ?", task.ID).
+					Updates(map[string]any{"recovery_owner": "claim", "recovery_until": time.Now().Add(time.Minute).Unix()}).
+					Error,
+			)
 			task, err := model.GetNativeTask(db, task.ID, task.GroupID, task.TokenID)
 			require.NoError(t, err)
+
 			originalUntil := task.RecoveryUntil
-			h, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "claim", originalUntil)
+			h, err := model.BeginNativeTaskExecution(
+				t.Context(),
+				db,
+				task,
+				model.NativeExecutionPoll,
+				"claim",
+				originalUntil,
+			)
 			require.NoError(t, err)
 			require.NoError(t, h.RecordReturn(t.Context(), false))
 			row := nativeExecutionRows(t, db)[0]
+
 			executor := f.store.Executor
 			switch change {
 			case "storage":
-				require.NoError(t, db.Model(&model.ChannelAdmissionControl{}).Where("id = 1").Update("storage_generation", "restored").Error)
+				require.NoError(
+					t,
+					db.Model(&model.ChannelAdmissionControl{}).
+						Where("id = 1").
+						Update("storage_generation", "restored").
+						Error,
+				)
 			case "use":
-				require.NoError(t, db.Model(&model.ChannelAdmissionUse{}).Where("id = ?", row.UseID).Update("admitted_at_ms", row.StartedAtMs+1).Error)
+				require.NoError(
+					t,
+					db.Model(&model.ChannelAdmissionUse{}).
+						Where("id = ?", row.UseID).
+						Update("admitted_at_ms", row.StartedAtMs+1).
+						Error,
+				)
 			case "task":
-				require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", task.ID).Update("billing_operation_id", "different").Error)
+				require.NoError(
+					t,
+					db.Model(&model.NativeTask{}).
+						Where("id = ?", task.ID).
+						Update("billing_operation_id", "different").
+						Error,
+				)
 			case "channel":
-				require.NoError(t, db.Model(&model.Channel{}).Where("id = 1").Update("base_url", "https://different.invalid").Error)
+				require.NoError(
+					t,
+					db.Model(&model.Channel{}).
+						Where("id = 1").
+						Update("base_url", "https://different.invalid").
+						Error,
+				)
 			case "record-version":
 				require.NoError(t, db.Model(&row).Update("version", 99).Error)
 			case "record-kind":
@@ -47,7 +86,10 @@ func TestAdmissionNativeExecutionFrozenAnchorRejectsConflictingFacts(t *testing.
 			case "record-state":
 				require.NoError(t, db.Model(&row).Update("state", "closed").Error)
 			case "record-hash":
-				require.NoError(t, db.Model(&row).Update("task_hash", strings.Repeat("a", 64)).Error)
+				require.NoError(
+					t,
+					db.Model(&row).Update("task_hash", strings.Repeat("a", 64)).Error,
+				)
 			case "other-conflicting-row":
 				row.ID = strings.Repeat("c", 64)
 				row.TaskHash = strings.Repeat("a", 64)
@@ -55,19 +97,50 @@ func TestAdmissionNativeExecutionFrozenAnchorRejectsConflictingFacts(t *testing.
 			case "executor":
 				executor.InstanceID = "different-instance"
 			case "owner":
-				require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", task.ID).Update("recovery_owner", "new-claim").Error)
+				require.NoError(
+					t,
+					db.Model(&model.NativeTask{}).
+						Where("id = ?", task.ID).
+						Update("recovery_owner", "new-claim").
+						Error,
+				)
 			case "expired":
-				require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", task.ID).Update("recovery_until", time.Now().Add(-time.Second).Unix()).Error)
+				require.NoError(
+					t,
+					db.Model(&model.NativeTask{}).
+						Where("id = ?", task.ID).
+						Update("recovery_until", time.Now().Add(-time.Second).Unix()).
+						Error,
+				)
 			case "shortened":
-				require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", task.ID).Update("recovery_until", originalUntil-1).Error)
+				require.NoError(
+					t,
+					db.Model(&model.NativeTask{}).
+						Where("id = ?", task.ID).
+						Update("recovery_until", originalUntil-1).
+						Error,
+				)
 			case "missing-column":
-				require.NoError(t, db.Exec("ALTER TABLE channel_admission_task_executions DROP COLUMN kind").Error)
+				require.NoError(
+					t,
+					db.Exec("ALTER TABLE channel_admission_task_executions DROP COLUMN kind").Error,
+				)
 			}
+
 			restore := model.ConfigureChannelAdmissionRuntime(executor, nil)
 			defer restore()
+
 			current, err := model.GetNativeTask(db, task.ID, task.GroupID, task.TokenID)
 			require.NoError(t, err)
-			next, err := model.BeginNativeTaskExecution(t.Context(), db, current, model.NativeExecutionPoll, "claim", originalUntil)
+
+			next, err := model.BeginNativeTaskExecution(
+				t.Context(),
+				db,
+				current,
+				model.NativeExecutionPoll,
+				"claim",
+				originalUntil,
+			)
 			if change == "none" {
 				require.NoError(t, err)
 				require.NotNil(t, next)
@@ -76,6 +149,7 @@ func TestAdmissionNativeExecutionFrozenAnchorRejectsConflictingFacts(t *testing.
 				require.Error(t, err)
 				require.Nil(t, next)
 			}
+
 			require.Equal(t, "open", runtimeUses(t, db)[0].State)
 		})
 	}
@@ -88,7 +162,9 @@ func TestAdmissionNativeExecutionNoAnchorDistinguishesOutageFromInvalidProof(t *
 			db := f.store.DB
 			task := executionNativeTask(t, f)
 			installNativeExecution(t, db)
+
 			proof := f.proof
+
 			load := func(context.Context) (model.VerifiedDeploymentProof, error) {
 				return model.VerifiedDeploymentProof{}, errors.New("temporarily unavailable")
 			}
@@ -102,9 +178,18 @@ func TestAdmissionNativeExecutionNoAnchorDistinguishesOutageFromInvalidProof(t *
 					return proof, errors.New("rejected snapshot")
 				}
 			case "revoked":
-				require.NoError(t, db.Model(&model.ChannelAdmissionProof{}).Where("id = ?", proof.ProofID).Update("revoked", true).Error)
+				require.NoError(
+					t,
+					db.Model(&model.ChannelAdmissionProof{}).
+						Where("id = ?", proof.ProofID).
+						Update("revoked", true).
+						Error,
+				)
 			case "missing-local-proof":
-				require.NoError(t, db.Where("id = ?", proof.ProofID).Delete(&model.ChannelAdmissionProof{}).Error)
+				require.NoError(
+					t,
+					db.Where("id = ?", proof.ProofID).Delete(&model.ChannelAdmissionProof{}).Error,
+				)
 			case "proof-mismatch":
 				proof.ExecutorFenceHash = strings.Repeat("a", 64)
 				load = func(context.Context) (model.VerifiedDeploymentProof, error) { return proof, nil }
@@ -115,17 +200,33 @@ func TestAdmissionNativeExecutionNoAnchorDistinguishesOutageFromInvalidProof(t *
 				proof.ValidUntilMs = time.Now().Add(-time.Second).UnixMilli()
 				hash, err := proof.Fingerprint()
 				require.NoError(t, err)
-				require.NoError(t, db.Model(&model.ChannelAdmissionProof{}).Where("id = ?", proof.ProofID).Update("fact_hash", hash).Error)
+				require.NoError(
+					t,
+					db.Model(&model.ChannelAdmissionProof{}).
+						Where("id = ?", proof.ProofID).
+						Update("fact_hash", hash).
+						Error,
+				)
+
 				load = func(context.Context) (model.VerifiedDeploymentProof, error) { return proof, nil }
 			}
+
 			restore := model.ConfigureChannelAdmissionRuntime(f.store.Executor, load)
 			defer restore()
-			h, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
+
+			h, err := model.BeginNativeTaskExecution(
+				t.Context(),
+				db,
+				task,
+				model.NativeExecutionPoll,
+				"",
+			)
 			if mode == "outage" {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
 			}
+
 			require.Nil(t, h)
 			require.Empty(t, nativeExecutionRows(t, db))
 			require.Equal(t, "open", runtimeUses(t, db)[0].State)
@@ -143,32 +244,72 @@ func TestAdmissionNativeExecutionNewExecutorRequiresValidSnapshot(t *testing.T) 
 			f.proof.Executors = append(f.proof.Executors, nextExecutor)
 			raw, err := json.Marshal(f.proof.Executors)
 			require.NoError(t, err)
+
 			sum := sha256.Sum256(raw)
 			f.proof.MembershipHash = hex.EncodeToString(sum[:])
 			hash, err := f.proof.Fingerprint()
 			require.NoError(t, err)
-			require.NoError(t, db.Model(&model.ChannelAdmissionControl{}).Where("id = 1").Update("membership_hash", f.proof.MembershipHash).Error)
-			require.NoError(t, db.Model(&model.ChannelAdmissionProof{}).Where("id = ?", f.proof.ProofID).Update("fact_hash", hash).Error)
+			require.NoError(
+				t,
+				db.Model(&model.ChannelAdmissionControl{}).
+					Where("id = 1").
+					Update("membership_hash", f.proof.MembershipHash).
+					Error,
+			)
+			require.NoError(
+				t,
+				db.Model(&model.ChannelAdmissionProof{}).
+					Where("id = ?", f.proof.ProofID).
+					Update("fact_hash", hash).
+					Error,
+			)
 			installNativeExecution(t, db)
 			task := executionNativeTask(t, f)
-			h, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
+			h, err := model.BeginNativeTaskExecution(
+				t.Context(),
+				db,
+				task,
+				model.NativeExecutionPoll,
+				"",
+			)
 			require.NoError(t, err)
 			require.NoError(t, h.RecordReturn(t.Context(), false))
+
 			load := f.store.LoadDeployment
 			switch mode {
 			case "missing":
 				load = nil
 			case "revoked":
-				require.NoError(t, db.Model(&model.ChannelAdmissionProof{}).Where("id = ?", f.proof.ProofID).Update("revoked", true).Error)
+				require.NoError(
+					t,
+					db.Model(&model.ChannelAdmissionProof{}).
+						Where("id = ?", f.proof.ProofID).
+						Update("revoked", true).
+						Error,
+				)
 			case "expired":
 				f.proof.ValidUntilMs = time.Now().Add(-time.Second).UnixMilli()
 				hash, err = f.proof.Fingerprint()
 				require.NoError(t, err)
-				require.NoError(t, db.Model(&model.ChannelAdmissionProof{}).Where("id = ?", f.proof.ProofID).Update("fact_hash", hash).Error)
+				require.NoError(
+					t,
+					db.Model(&model.ChannelAdmissionProof{}).
+						Where("id = ?", f.proof.ProofID).
+						Update("fact_hash", hash).
+						Error,
+				)
 			}
+
 			restore := model.ConfigureChannelAdmissionRuntime(nextExecutor, load)
 			defer restore()
-			second, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
+
+			second, err := model.BeginNativeTaskExecution(
+				t.Context(),
+				db,
+				task,
+				model.NativeExecutionPoll,
+				"",
+			)
 			if mode == "valid" {
 				require.NoError(t, err)
 				require.NotNil(t, second)
@@ -178,6 +319,7 @@ func TestAdmissionNativeExecutionNewExecutorRequiresValidSnapshot(t *testing.T) 
 				require.Nil(t, second)
 				require.Len(t, nativeExecutionRows(t, db), 1)
 			}
+
 			require.Equal(t, "open", runtimeUses(t, db)[0].State)
 		})
 	}
@@ -191,11 +333,16 @@ func TestAdmissionNativeExecutionDurableAnchorDoesNotCallSnapshotSource(t *testi
 	h, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
 	require.NoError(t, err)
 	require.NoError(t, h.RecordReturn(t.Context(), false))
-	restore := model.ConfigureChannelAdmissionRuntime(f.store.Executor, func(context.Context) (model.VerifiedDeploymentProof, error) {
-		t.Fatal("existing anchor must not call snapshot source")
-		return model.VerifiedDeploymentProof{}, nil
-	})
+
+	restore := model.ConfigureChannelAdmissionRuntime(
+		f.store.Executor,
+		func(context.Context) (model.VerifiedDeploymentProof, error) {
+			t.Fatal("existing anchor must not call snapshot source")
+			return model.VerifiedDeploymentProof{}, nil
+		},
+	)
 	defer restore()
+
 	h, err = model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
 	require.NoError(t, err)
 	require.NoError(t, h.RecordReturn(t.Context(), false))
@@ -210,15 +357,35 @@ func TestAdmissionNativeExecutionFirstCoverageExpiresDuringWriteRollsBack(t *tes
 	f.proof.ValidUntilMs = deadline.UnixMilli()
 	hash, err := f.proof.Fingerprint()
 	require.NoError(t, err)
-	require.NoError(t, db.Model(&model.ChannelAdmissionProof{}).Where("id = ?", f.proof.ProofID).Update("fact_hash", hash).Error)
-	require.NoError(t, db.Callback().Create().After("gorm:create").Register("test:execution-proof-expiry", func(tx *gorm.DB) {
-		if tx.Statement.Table == "channel_admission_task_executions" {
-			if delay := time.Until(deadline.Add(30 * time.Millisecond)); delay > 0 {
-				time.Sleep(delay)
-			}
+	require.NoError(
+		t,
+		db.Model(&model.ChannelAdmissionProof{}).
+			Where("id = ?", f.proof.ProofID).
+			Update("fact_hash", hash).
+			Error,
+	)
+
+	require.NoError(
+		t,
+		db.Callback().
+			Create().
+			After("gorm:create").
+			Register("test:execution-proof-expiry", func(tx *gorm.DB) {
+				if tx.Statement.Table == "channel_admission_task_executions" {
+					if delay := time.Until(deadline.Add(30 * time.Millisecond)); delay > 0 {
+						time.Sleep(delay)
+					}
+				}
+			}),
+	)
+	defer func() {
+		if err := db.
+			Callback().Create().
+			Remove("test:execution-proof-expiry"); err != nil {
+			t.Error(err)
 		}
-	}))
-	defer db.Callback().Create().Remove("test:execution-proof-expiry")
+	}()
+
 	h, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
 	require.Error(t, err)
 	require.Nil(t, h)

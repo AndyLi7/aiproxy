@@ -10,11 +10,13 @@ func WithFailover(err Error, failure failover.Failure) Error {
 	return &failoverError{wrappedError: err, failure: failure}
 }
 
-type wrappedError = Error
-type failoverError struct {
-	wrappedError
-	failure failover.Failure
-}
+type (
+	wrappedError  = Error
+	failoverError struct {
+		wrappedError
+		failure failover.Failure
+	}
+)
 
 func (e *failoverError) FailoverFailure() failover.Failure { return e.failure }
 func (e *failoverError) Unwrap() error                     { return e.wrappedError }

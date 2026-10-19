@@ -37,7 +37,9 @@ RUN go build -trimpath -ldflags "-s -w" -o aiproxy
 
 FROM alpine:latest
 
-RUN mkdir -p /aiproxy
+RUN addgroup -S -g 10001 aiproxy && \
+    adduser -S -D -H -u 10001 -G aiproxy aiproxy && \
+    mkdir -p /aiproxy && chown aiproxy:aiproxy /aiproxy
 
 WORKDIR /aiproxy
 
@@ -46,7 +48,12 @@ RUN apk add --no-cache ca-certificates tzdata ffmpeg curl && \
 
 COPY --from=builder /aiproxy/core/aiproxy /usr/local/bin/aiproxy
 
-ENV PUID=0 PGID=0 UMASK=022
+ENV PUID=10001 PGID=10001 UMASK=022
+
+# Existing bind mounts must permit UID/GID 10001 to write database, logs and
+# generated local configuration. Provision volume permissions before upgrading;
+# the application does not change ownership of existing data on startup.
+USER 10001:10001
 
 ENV FFMPEG_ENABLED=true
 

@@ -353,8 +353,9 @@ func TestWriterCloseDeadlineReturnsBeforeCanceledSinkFinishesCleanup(t *testing.
 		}
 	case <-time.After(time.Second):
 		releaseCleanup()
-		<-closeResult
-		t.Fatal("Close waited for sink cleanup after its context was canceled")
+
+		err := <-closeResult
+		t.Fatalf("Close waited for sink cleanup after its context was canceled: %v", err)
 	}
 
 	if got := w.Stats(); got != (WriterStats{Accepted: 1}) {

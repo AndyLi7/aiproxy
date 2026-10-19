@@ -16,6 +16,7 @@ func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
 	}
 	return createMeasuredImageSettlement(LogDB, entry, info)
 }
+
 func createMeasuredImageSettlement(db *gorm.DB, entry *Log, info *AsyncUsageInfo) error {
 	if entry == nil || info == nil || info.Amount.ImageBillingResult == nil {
 		return errors.New("missing measured image settlement")
@@ -82,6 +83,7 @@ func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
 	}
 	return createMeasuredImageAttemptEvidence(LogDB, info)
 }
+
 func createMeasuredImageAttemptEvidence(db *gorm.DB, info *AsyncUsageInfo) error {
 	if info == nil || info.Amount.ImageBillingResult == nil {
 		return errors.New("missing measured image attempt evidence")
@@ -105,12 +107,29 @@ func createMeasuredImageAttemptEvidence(db *gorm.DB, info *AsyncUsageInfo) error
 }
 
 func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {
-	return withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
-		if err := writeImageAccountingUsage(tx, current, map[string]any{"status": AsyncUsageStatusMeasurementPending, "processing_token": "", "error": "immutable image measurement pending"}); err != nil {
-			return err
-		}
-		return writeImageAccountingLog(tx, entry, map[string]any{"async_usage_status": AsyncUsageStatusMeasurementPending})
-	})
+	return withImageAccountingClaim(
+		imagePollParentContext(info),
+		info,
+		func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			if err := writeImageAccountingUsage(
+				tx,
+				current,
+				map[string]any{
+					"status":           AsyncUsageStatusMeasurementPending,
+					"processing_token": "",
+					"error":            "immutable image measurement pending",
+				},
+			); err != nil {
+				return err
+			}
+
+			return writeImageAccountingLog(
+				tx,
+				entry,
+				map[string]any{"async_usage_status": AsyncUsageStatusMeasurementPending},
+			)
+		},
+	)
 }
 
 // PrepareClaimedImageTaskMeasurement freezes both the outbox and audit evidence
@@ -144,17 +163,24 @@ func PrepareClaimedImageTaskMeasurement(
 		return err
 	}
 
-	return withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
-		if current.MeasuredImage {
-			return errors.New("image measurement already frozen")
-		}
-		if err := writeImageAccountingUsage(tx, current, values); err != nil {
-			return err
-		}
-		logValues, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount")
-		if err != nil {
-			return err
-		}
-		return writeImageAccountingLog(tx, entry, logValues)
-	})
+	return withImageAccountingClaim(
+		imagePollParentContext(info),
+		info,
+		func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			if current.MeasuredImage {
+				return errors.New("image measurement already frozen")
+			}
+
+			if err := writeImageAccountingUsage(tx, current, values); err != nil {
+				return err
+			}
+
+			logValues, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount")
+			if err != nil {
+				return err
+			}
+
+			return writeImageAccountingLog(tx, entry, logValues)
+		},
+	)
 }

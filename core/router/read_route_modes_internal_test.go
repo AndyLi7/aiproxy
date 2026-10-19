@@ -22,7 +22,7 @@ var catchAllSamples = []string{"x", "x:generateContent", "x:predictLongRunning",
 func probePaths(pattern string) []string {
 	paths := []string{""}
 
-	for _, segment := range strings.Split(strings.TrimPrefix(pattern, "/"), "/") {
+	for segment := range strings.SplitSeq(strings.TrimPrefix(pattern, "/"), "/") {
 		values := []string{segment}
 
 		switch {
@@ -89,6 +89,7 @@ func TestReadRouteModesMatchHandlers(t *testing.T) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				last.panicked = recovered
+
 				c.AbortWithStatus(http.StatusInternalServerError)
 			}
 		}()
@@ -108,7 +109,12 @@ func TestReadRouteModesMatchHandlers(t *testing.T) {
 		}
 
 		for _, path := range probePaths(route.Path) {
-			request := httptest.NewRequestWithContext(t.Context(), route.Method, path, strings.NewReader(`{}`))
+			request := httptest.NewRequestWithContext(
+				t.Context(),
+				route.Method,
+				path,
+				strings.NewReader(`{}`),
+			)
 			request.Header.Set("Authorization", "Bearer "+config.AdminKey)
 			request.Header.Set("Content-Type", "application/json")
 
@@ -122,13 +128,26 @@ func TestReadRouteModesMatchHandlers(t *testing.T) {
 			if model.IsReadMode(last.mode) {
 				reads++
 
-				require.True(t, last.listed, "%s resolves to read mode %s but is not in readRouteModes", description, last.mode)
+				require.True(
+					t,
+					last.listed,
+					"%s resolves to read mode %s but is not in readRouteModes",
+					description,
+					last.mode,
+				)
 				require.Equal(t, last.mode, last.readMode, description)
 
 				continue
 			}
 
-			require.False(t, last.listed, "%s is listed as read mode %s but its handler sets %s", description, last.readMode, last.mode)
+			require.False(
+				t,
+				last.listed,
+				"%s is listed as read mode %s but its handler sets %s",
+				description,
+				last.readMode,
+				last.mode,
+			)
 		}
 	}
 

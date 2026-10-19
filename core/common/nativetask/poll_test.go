@@ -1,13 +1,15 @@
+//nolint:testpackage // White-box coverage needs the package-private setup fixture or implementation.
 package nativetask
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"testing"
+
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 type pollStub struct {
@@ -16,15 +18,21 @@ type pollStub struct {
 	calls  int
 }
 
-func (p *pollStub) PollNative(_ context.Context, endpoint, id string, c *nativeresult.CompiledTask) (nativeresult.PollResult, error) {
+func (p *pollStub) PollNative(
+	_ context.Context,
+	endpoint, id string,
+	c *nativeresult.CompiledTask,
+) (nativeresult.PollResult, error) {
 	p.calls++
 	return p.result, p.err
 }
+
 func TestNativePollRunsAcceptedTaskToDelivered(t *testing.T) {
 	e, plan, w, p := setup(t)
 	ctx := context.Background()
 	task, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
+
 	poll := &pollStub{result: nativeresult.PollResult{Status: "running"}}
 	resolve := func(_ context.Context, recorded *model.NativeTask) (Poller, error) {
 		require.Equal(t, task.Endpoint, recorded.Endpoint)
@@ -39,28 +47,36 @@ func TestNativePollRunsAcceptedTaskToDelivered(t *testing.T) {
 	running, err = e.Poll(ctx, "req", "g", 1, resolve, nil)
 	require.NoError(t, err)
 	require.Equal(t, "running", running.Status)
-	poll.result = nativeresult.PollResult{Status: "result_received", Output: json.RawMessage(`{"seed":9007199254740993,"labels":[]}`)}
+	poll.result = nativeresult.PollResult{
+		Status: "result_received",
+		Output: json.RawMessage(`{"seed":9007199254740993,"labels":[]}`),
+	}
 	done, err := e.Poll(ctx, "req", "g", 1, resolve, nil)
 	require.NoError(t, err)
 	require.Equal(t, "completed", done.Status)
 	require.Contains(t, done.DeliveredOutput, "9007199254740993")
+
 	_, err = e.Poll(ctx, "req", "g", 1, resolve, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, poll.calls)
 	require.Equal(t, 1, p.calls)
+
 	delivered := false
 	for _, command := range w.commands {
 		if command.Action == "delivered" {
 			delivered = true
 		}
 	}
+
 	require.True(t, delivered)
 }
+
 func TestNativePollFailureAndCredentialIsolation(t *testing.T) {
 	e, plan, w, _ := setup(t)
 	ctx := context.Background()
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
+
 	calls := 0
 	resolve := func(context.Context, *model.NativeTask) (Poller, error) {
 		calls++
@@ -69,18 +85,31 @@ func TestNativePollFailureAndCredentialIsolation(t *testing.T) {
 	_, err = e.Poll(ctx, "req", "other", 1, resolve, nil)
 	require.Error(t, err)
 	require.Zero(t, calls)
+
 	_, err = e.Poll(ctx, "req", "g", 1, resolve, nil)
 	require.Error(t, err)
 	require.Equal(t, 1, calls)
-	poll := &pollStub{result: nativeresult.PollResult{Status: "failed", ErrorCode: "upstream_task_failed"}}
-	failed, err := e.Poll(ctx, "req", "g", 1, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+
+	poll := &pollStub{
+		result: nativeresult.PollResult{Status: "failed", ErrorCode: "upstream_task_failed"},
+	}
+	failed, err := e.Poll(
+		ctx,
+		"req",
+		"g",
+		1,
+		func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+		nil,
+	)
 	require.NoError(t, err)
 	require.Equal(t, "failed", failed.Status)
 	require.Empty(t, failed.DeliveredOutput)
+
 	refunded := false
 	for _, c := range w.commands {
 		if c.Action == "settle" && c.Outcome.Kind == "failed" {
 			require.Equal(t, "platform_failure", c.Outcome.Reason)
+
 			refunded = true
 		}
 	}
@@ -90,10 +119,12 @@ func TestNativePollFailureAndCredentialIsolation(t *testing.T) {
 
 func refundedWith(w *walletStub, reason string) bool {
 	for _, c := range w.commands {
-		if c.Action == "settle" && c.Outcome != nil && c.Outcome.Kind == "failed" && c.Outcome.Reason == reason {
+		if c.Action == "settle" && c.Outcome != nil && c.Outcome.Kind == "failed" &&
+			c.Outcome.Reason == reason {
 			return true
 		}
 	}
+
 	return false
 }
 

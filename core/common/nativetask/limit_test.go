@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private newReadLimiter fixture or implementation.
 package nativetask
 
 import (
@@ -16,56 +17,71 @@ import (
 
 func TestStatusReadsAreRateLimitedPerKey(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
+
 	l := newReadLimiter(func() time.Time { return now })
-	for i := 0; i < statusReadBurst; i++ {
+	for i := range statusReadBurst {
 		require.True(t, l.allowStatus("g", 1), i)
 	}
+
 	require.False(t, l.allowStatus("g", 1))
 	// Another key is unaffected.
 	require.True(t, l.allowStatus("g", 2))
+
 	now = now.Add(time.Second)
-	for i := 0; i < statusReadsPerSecond; i++ {
+
+	for i := range statusReadsPerSecond {
 		require.True(t, l.allowStatus("g", 1), i)
 	}
+
 	require.False(t, l.allowStatus("g", 1))
 }
 
 func TestArtifactDownloadsAreBoundedPerKeyAndGlobally(t *testing.T) {
 	l := newReadLimiter(time.Now)
-	var releases []func()
-	for i := 0; i < artifactDownloadsPerKey; i++ {
+
+	releases := make([]func(), 0, artifactDownloadsPerKey)
+	for range artifactDownloadsPerKey {
 		release, ok := l.acquireDownload("g", 1)
 		require.True(t, ok)
+
 		releases = append(releases, release)
 	}
+
 	_, ok := l.acquireDownload("g", 1)
 	require.False(t, ok)
 	releases[0]()
 	releases[0]() // releasing twice frees one slot only
+
 	release, ok := l.acquireDownload("g", 1)
 	require.True(t, ok)
 	_, ok = l.acquireDownload("g", 1)
 	require.False(t, ok)
 	release()
+
 	for _, r := range releases[1:] {
 		r()
 	}
 	// One account's keys share a group cap below the global one.
-	var groupReleases []func()
-	for i := 0; i < artifactDownloadsPerGroup; i++ {
+	groupReleases := make([]func(), 0, artifactDownloadsPerGroup)
+	for i := range artifactDownloadsPerGroup {
 		release, ok := l.acquireDownload("g", 100+i)
 		require.True(t, ok)
+
 		groupReleases = append(groupReleases, release)
 	}
+
 	_, ok = l.acquireDownload("g", 999)
 	require.False(t, ok)
+
 	for _, r := range groupReleases {
 		r()
 	}
-	for i := 0; i < artifactDownloadsGlobal; i++ {
+
+	for i := range artifactDownloadsGlobal {
 		_, ok := l.acquireDownload("group-"+strconv.Itoa(i), 1)
 		require.True(t, ok)
 	}
+
 	_, ok = l.acquireDownload("another", 1)
 	require.False(t, ok)
 }
@@ -73,14 +89,33 @@ func TestArtifactDownloadsAreBoundedPerKeyAndGlobally(t *testing.T) {
 func TestStatusReadOverLimitReturns429WithoutReadingTheTask(t *testing.T) {
 	e, _, _, _ := setup(t)
 	now := time.Unix(1_800_000_000, 0)
-	h := &HTTP{Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil }, limiter: newReadLimiter(func() time.Time { return now })}
-	for i := 0; i < statusReadBurst; i++ {
+
+	h := &HTTP{
+		Engine:   e,
+		Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
+		limiter:  newReadLimiter(func() time.Time { return now }),
+	}
+	for range statusReadBurst {
 		w := httptest.NewRecorder()
-		h.Get(w, httptest.NewRequest(http.MethodGet, "/v1/model-tasks/missing", nil), "missing")
+		h.Get(
+			w,
+			httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodGet,
+				"/v1/model-tasks/missing",
+				nil,
+			),
+			"missing",
+		)
 		require.Equal(t, 404, w.Code)
 	}
+
 	w := httptest.NewRecorder()
-	h.Get(w, httptest.NewRequest(http.MethodGet, "/v1/model-tasks/missing", nil), "missing")
+	h.Get(
+		w,
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/model-tasks/missing", nil),
+		"missing",
+	)
 	require.Equal(t, 429, w.Code)
 	require.Contains(t, w.Body.String(), "rate_limit_exceeded")
 }
@@ -88,7 +123,11 @@ func TestStatusReadOverLimitReturns429WithoutReadingTheTask(t *testing.T) {
 func TestLargeArtifactsStreamAndNeverDeliverACorruptedTail(t *testing.T) {
 	data := bytes.Repeat([]byte("0123456789abcdef"), (bufferedArtifactLimit/16)+4096)
 	sum := sha256.Sum256(data)
-	receipt := ownedartifact.Receipt{Key: "k", Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
+	receipt := ownedartifact.Receipt{
+		Key:    "k",
+		Size:   int64(len(data)),
+		SHA256: hex.EncodeToString(sum[:]),
+	}
 	file := artifactFile{name: "task.bin", receipt: receipt}
 
 	ok := httptest.NewRecorder()
@@ -112,10 +151,12 @@ func TestLargeArtifactsStreamAndNeverDeliverACorruptedTail(t *testing.T) {
 
 func mustParseLength(t *testing.T, value string) int64 {
 	t.Helper()
+
 	var n int64
 	for _, c := range value {
 		require.True(t, c >= '0' && c <= '9')
 		n = n*10 + int64(c-'0')
 	}
+
 	return n
 }

@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private mustJSON fixture or implementation.
 package registryvalidation
 
 import (
@@ -11,58 +12,90 @@ func TestSourceRolesPreserveNativeValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var cases []struct {
-		Endpoint          string
-		Contract, Request json.RawMessage
+		Endpoint string          `json:"Endpoint"`
+		Contract json.RawMessage `json:"Contract"`
+		Request  json.RawMessage `json:"Request"`
 	}
 	if err = json.Unmarshal(data, &cases); err != nil {
 		t.Fatal(err)
 	}
+
 	if len(cases) != 4 {
 		t.Fatal("missing source fixtures")
 	}
+
 	for _, f := range cases {
 		t.Run(f.Endpoint, func(t *testing.T) {
 			var c struct {
 				ID        string `json:"entry_id"`
-				Providers map[string]struct{ Upstream ProviderSpec }
+				Providers map[string]struct {
+					Upstream ProviderSpec `json:"Upstream"`
+				} `json:"Providers"`
 			}
 			if err := json.Unmarshal(f.Contract, &c); err != nil {
 				t.Fatal(err)
 			}
+
 			p := c.Providers["fal"].Upstream
-			b := ProviderBinding{Provider: "fal", ID: p.ID, Revision: p.Revision, ContractHash: p.ContractHash}
+			b := ProviderBinding{
+				Provider:     "fal",
+				ID:           p.ID,
+				Revision:     p.Revision,
+				ContractHash: p.ContractHash,
+			}
+
 			var body map[string]any
 			if err := json.Unmarshal(f.Request, &body); err != nil {
 				t.Fatal(err)
 			}
+
 			field := "safe"
+
 			values := []any{true, false}
 			if f.Endpoint == "fal-ai/inpaint" {
 				field = "model_name"
-				values = []any{"stabilityai/stable-diffusion-xl-base-1.0", "runwayml/stable-diffusion-v1-5"}
+				values = []any{
+					"stabilityai/stable-diffusion-xl-base-1.0",
+					"runwayml/stable-diffusion-v1-5",
+				}
 			}
+
 			for _, value := range values {
 				body[field] = value
-				payload, _ := json.Marshal(body)
+				payload := mustJSON(t, body)
+
 				normalized, ve := ValidateImage(f.Contract, c.ID, payload)
 				if ve != nil {
 					t.Fatal(ve)
 				}
-				mapped, err := MapBoundProviderInput(f.Contract, b, "fal-image", p.Endpoint, "async", normalized)
+
+				mapped, err := MapBoundProviderInput(
+					f.Contract,
+					b,
+					"fal-image",
+					p.Endpoint,
+					"async",
+					normalized,
+				)
 				if err != nil {
 					t.Fatal(err)
 				}
+
 				var sent map[string]any
 				if err = json.Unmarshal(mapped, &sent); err != nil {
 					t.Fatal(err)
 				}
+
 				if sent[field] != value {
 					t.Fatalf("native parameter changed: %v != %v", sent[field], value)
 				}
 			}
+
 			body[field] = 1.5
-			payload, _ := json.Marshal(body)
+
+			payload := mustJSON(t, body)
 			if _, ve := ValidateImage(f.Contract, c.ID, payload); ve == nil {
 				t.Fatal("wrong parameter type accepted")
 			}

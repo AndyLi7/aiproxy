@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private newProbeHTTPFixture fixture or implementation.
 package controller
 
 import (
@@ -25,13 +26,28 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			f := newProbeHTTPFixture(t)
 			forward, ok := probeCommand(f.body.Command)
 			require.True(t, ok)
-			raw, _ := json.Marshal(forward)
+
+			raw := mustJSON(t, forward)
 			hash := sha256.Sum256(raw)
 			proof, _ := f.store.LoadDeployment(t.Context())
-			fact := model.VerifiedMigrationProbe{RequestHash: hex.EncodeToString(hash[:]), EvidenceHash: strings.Repeat("a", 64), StorageGeneration: proof.StorageGeneration, IssuedAtMs: proof.IssuedAtMs, ValidUntilMs: proof.ValidUntilMs}
+			fact := model.VerifiedMigrationProbe{
+				RequestHash:       hex.EncodeToString(hash[:]),
+				EvidenceHash:      strings.Repeat("a", 64),
+				StorageGeneration: proof.StorageGeneration,
+				IssuedAtMs:        proof.IssuedAtMs,
+				ValidUntilMs:      proof.ValidUntilMs,
+			}
 			ph, e := fact.Fingerprint()
 			require.NoError(t, e)
-			require.NoError(t, f.db.Create(&model.ChannelMigrationProbeRecord{EvidenceHash: fact.EvidenceHash, FactHash: ph}).Error)
+			require.NoError(
+				t,
+				f.db.Create(
+					&model.ChannelMigrationProbeRecord{
+						EvidenceHash: fact.EvidenceHash,
+						FactHash:     ph,
+					},
+				).Error,
+			)
 			f.store.LoadMigrationProbe = func(context.Context, model.ChannelMigrationRequest) (model.VerifiedMigrationProbe, error) {
 				return fact, nil
 			}
@@ -42,138 +58,321 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			require.NoError(t, f.db.AutoMigrate(&model.ChannelMigrationRetiredTargetResource{}))
 			inv := f.store.ReadMigrationInventory(t.Context(), f.store.MigrationFeatures)
 			require.Equal(t, "ready", inv.State, inv.ReasonCode)
-			snap, e := f.store.ReadMigrationSnapshot(t.Context(), forward.Seal.To, forward.Seal.From)
+			snap, e := f.store.ReadMigrationSnapshot(
+				t.Context(),
+				forward.Seal.To,
+				forward.Seal.From,
+			)
 			require.NoError(t, e)
-			req := model.ChannelMigrationRequest{TargetResourceKind: model.MigrationReuseRetiredTarget, Seal: model.ChannelSealRequest{OperationID: "reverse-native-runtime", Epoch: snap.Epoch, ExpectedRevision: snap.Revision, From: forward.Seal.To, To: forward.Seal.From, RevertOf: forward.Seal.OperationID}, FromCredentialID: forward.ToCredentialID, ToCredentialID: forward.FromCredentialID, ExpectedPinHash: snap.PinHash, ProjectionHash: snap.ProjectionHash, FamilyHash: snap.FamilyHash}
-			r, e := f.store.PrepareRetiredTargetResource(t.Context(), model.MigrationRetiredTargetRequest{Version: 1, Command: req, SourceSnapshotHash: inv.SourceSnapshotHash})
+
+			req := model.ChannelMigrationRequest{
+				TargetResourceKind: model.MigrationReuseRetiredTarget,
+				Seal: model.ChannelSealRequest{
+					OperationID:      "reverse-native-runtime",
+					Epoch:            snap.Epoch,
+					ExpectedRevision: snap.Revision,
+					From:             forward.Seal.To,
+					To:               forward.Seal.From,
+					RevertOf:         forward.Seal.OperationID,
+				},
+				FromCredentialID: forward.ToCredentialID,
+				ToCredentialID:   forward.FromCredentialID,
+				ExpectedPinHash:  snap.PinHash,
+				ProjectionHash:   snap.ProjectionHash,
+				FamilyHash:       snap.FamilyHash,
+			}
+			r, e := f.store.PrepareRetiredTargetResource(
+				t.Context(),
+				model.MigrationRetiredTargetRequest{
+					Version:            1,
+					Command:            req,
+					SourceSnapshotHash: inv.SourceSnapshotHash,
+				},
+			)
 			require.NoError(t, e)
-			a := model.MigrationProbeAuthorization{Command: req, ResourceRequestHash: r.RequestHash, CheckpointHash: r.CheckpointHash, Model: f.body.Model, Input: f.body.Input, GroupID: f.body.GroupID, TokenID: f.body.TokenID, MaxPrepaidMicros: 600000}
+
+			a := model.MigrationProbeAuthorization{
+				Command:             req,
+				ResourceRequestHash: r.RequestHash,
+				CheckpointHash:      r.CheckpointHash,
+				Model:               f.body.Model,
+				Input:               f.body.Input,
+				GroupID:             f.body.GroupID,
+				TokenID:             f.body.TokenID,
+				MaxPrepaidMicros:    600000,
+			}
 			h, e := f.store.BeginMigrationProbe(t.Context(), a)
 			require.NoError(t, e)
 			spec, e := h.Spec()
 			require.NoError(t, e)
 			ch, e := f.deps.native.channel(spec.ChannelID)
 			require.NoError(t, e)
+
 			if mode == "unknown" {
 				f.loseProviderReply = true
 			}
+
 			local := *f.engine
 			local.Provider = f.deps.native.provider(ch)
-			queued, e := local.Submit(t.Context(), spec.TaskID, spec.GroupID, spec.TokenID, spec.Input, nativetask.Plan{MigrationProbe: h, AdmissionIdentityHash: spec.IdentityHash, KeyFingerprint: spec.KeyDigest, Contract: spec.Contract, ChannelID: spec.ChannelID, Endpoint: spec.Endpoint, CredentialScope: spec.CredentialScope, QuoteJSON: spec.QuoteJSON, DeliveryBase: spec.DeliveryBase, Direct: true})
+			queued, e := local.Submit(
+				t.Context(),
+				spec.TaskID,
+				spec.GroupID,
+				spec.TokenID,
+				spec.Input,
+				nativetask.Plan{
+					MigrationProbe:        h,
+					AdmissionIdentityHash: spec.IdentityHash,
+					KeyFingerprint:        spec.KeyDigest,
+					Contract:              spec.Contract,
+					ChannelID:             spec.ChannelID,
+					Endpoint:              spec.Endpoint,
+					CredentialScope:       spec.CredentialScope,
+					QuoteJSON:             spec.QuoteJSON,
+					DeliveryBase:          spec.DeliveryBase,
+					Direct:                true,
+				},
+			)
 
 			if mode == "unknown" {
 				require.Error(t, e)
 				observed := f.store.ReadMigrationProbe(t.Context(), req.Seal.OperationID)
 				require.Equal(t, "unknown", observed.State)
-				_, e = f.store.PrepareReverseMigrationFromProbe(t.Context(), req.Seal.OperationID, nil)
+				_, e = f.store.PrepareReverseMigrationFromProbe(
+					t.Context(),
+					req.Seal.OperationID,
+					nil,
+				)
 				require.Error(t, e)
 				_, e = f.store.BeginMigrationProbe(t.Context(), a)
 				require.NoError(t, e)
-				_, e = local.Submit(t.Context(), spec.TaskID, spec.GroupID, spec.TokenID, spec.Input, nativetask.Plan{MigrationProbe: h, AdmissionIdentityHash: spec.IdentityHash, KeyFingerprint: spec.KeyDigest, Contract: spec.Contract, ChannelID: spec.ChannelID, Endpoint: spec.Endpoint, CredentialScope: spec.CredentialScope, QuoteJSON: spec.QuoteJSON, DeliveryBase: spec.DeliveryBase, Direct: true})
+				_, e = local.Submit(
+					t.Context(),
+					spec.TaskID,
+					spec.GroupID,
+					spec.TokenID,
+					spec.Input,
+					nativetask.Plan{
+						MigrationProbe:        h,
+						AdmissionIdentityHash: spec.IdentityHash,
+						KeyFingerprint:        spec.KeyDigest,
+						Contract:              spec.Contract,
+						ChannelID:             spec.ChannelID,
+						Endpoint:              spec.Endpoint,
+						CredentialScope:       spec.CredentialScope,
+						QuoteJSON:             spec.QuoteJSON,
+						DeliveryBase:          spec.DeliveryBase,
+						Direct:                true,
+					},
+				)
 				require.Error(t, e)
 				require.Equal(t, 1, f.providerCalls)
+
 				return
 			}
+
 			require.NoError(t, e)
 			require.Equal(t, "queued", queued.Status)
-			completed, e := f.engine.Poll(t.Context(), spec.TaskID, spec.GroupID, spec.TokenID, func(context.Context, *model.NativeTask) (nativetask.Poller, error) {
-				return probeCompletedPoller{}, nil
-			}, func(_ context.Context, id string, index int, _ string) (ownedartifact.Receipt, error) {
-				return ownedartifact.Receipt{Key: fmt.Sprintf("native-results/%s/%d/%s.bin", id, index, strings.Repeat("a", 64)), SHA256: strings.Repeat("b", 64), Size: 23}, nil
-			})
+			completed, e := f.engine.Poll(
+				t.Context(),
+				spec.TaskID,
+				spec.GroupID,
+				spec.TokenID,
+				func(context.Context, *model.NativeTask) (nativetask.Poller, error) {
+					return probeCompletedPoller{}, nil
+				},
+				func(_ context.Context, id string, index int, _ string) (ownedartifact.Receipt, error) {
+					return ownedartifact.Receipt{
+						Key: fmt.Sprintf(
+							"native-results/%s/%d/%s.bin",
+							id,
+							index,
+							strings.Repeat("a", 64),
+						),
+						SHA256: strings.Repeat("b", 64),
+						Size:   23,
+					}, nil
+				},
+			)
 			require.NoError(t, e)
 			require.Equal(t, "completed", completed.Status)
 			frozen := *completed
-			input := model.MigrationProbeBillingContextRequest{BillingOperationID: completed.BillingOperationID, TaskID: completed.ID, GroupID: completed.GroupID}
+			input := model.MigrationProbeBillingContextRequest{
+				BillingOperationID: completed.BillingOperationID,
+				TaskID:             completed.ID,
+				GroupID:            completed.GroupID,
+			}
 			readOriginal := func() model.MigrationProbeBillingContext {
 				t.Helper()
-				code, raw := f.call(t, "POST", "/api/channel-migrations/probe-billing-context/read", input, config.AdminKey)
+				code, raw := f.call(
+					t,
+					"POST",
+					"/api/channel-migrations/probe-billing-context/read",
+					input,
+					config.AdminKey,
+				)
 				require.Equal(t, 200, code)
+
 				var envelope struct {
 					Data model.MigrationProbeBillingContextResult `json:"data"`
 				}
 				require.NoError(t, json.Unmarshal(raw, &envelope))
 				require.Equal(t, "ready", envelope.Data.State, envelope.Data.Reason)
-				require.Equal(t, model.MigrationReuseRetiredTarget, envelope.Data.Context.TargetResourceKind)
+				require.Equal(
+					t,
+					model.MigrationReuseRetiredTarget,
+					envelope.Data.Context.TargetResourceKind,
+				)
 				require.Equal(t, req.Seal.RevertOf, envelope.Data.Context.RevertOf)
 				require.Equal(t, completed.PrepaymentQuoteJSON, frozen.PrepaymentQuoteJSON)
+
 				for _, secret := range []string{"synthetic-probe-shadow-key", "synthetic provider only", `"input"`, `"quoteJson"`} {
 					require.NotContains(t, string(raw), secret)
 				}
+
 				return *envelope.Data.Context
 			}
+
 			originalContext := readOriginal()
 			if mode == "cancelled-billing" {
-				_, e = f.store.CancelRetiredTargetResource(t.Context(), r.OperationID, r.RequestHash, r.CheckpointHash)
+				_, e = f.store.CancelRetiredTargetResource(
+					t.Context(),
+					r.OperationID,
+					r.RequestHash,
+					r.CheckpointHash,
+				)
 				require.NoError(t, e)
+
 				read := readOriginal()
 				originalContext.ResourceState = "cancelled"
 				require.Equal(t, originalContext, read)
 				_, e = f.store.PrepareReverseMigrationFromProbe(t.Context(), r.OperationID, nil)
 				require.Error(t, e)
 				require.Equal(t, 1, f.providerCalls)
+
 				return
 			}
+
+			//nolint:unparam // The injected billing-reader interface requires an error result even for this successful fixture.
 			reader := func(_ context.Context, b model.MigrationProbeBillingRequest) (model.MigrationProbeBillingEvidence, error) {
-				return model.MigrationProbeBillingEvidence{Binding: b, EvidenceID: "reverse-local-bill", ProvenanceHash: strings.Repeat("d", 64), AccountMembershipEvidenceHash: strings.Repeat("e", 64), AccountMembershipEvidenceKind: "fal-workspace-key-membership-v1", Currency: "USD", CostMicros: 600000, CustomerDueMicros: 900000, ChargedMicros: 900000, SettledAtMs: time.Now().Add(-time.Second).UnixMilli()}, nil
+				return model.MigrationProbeBillingEvidence{
+					Binding:                       b,
+					EvidenceID:                    "reverse-local-bill",
+					ProvenanceHash:                strings.Repeat("d", 64),
+					AccountMembershipEvidenceHash: strings.Repeat("e", 64),
+					AccountMembershipEvidenceKind: "fal-workspace-key-membership-v1",
+					Currency:                      "USD",
+					CostMicros:                    600000,
+					CustomerDueMicros:             900000,
+					ChargedMicros:                 900000,
+					SettledAtMs:                   time.Now().Add(-time.Second).UnixMilli(),
+				}, nil
 			}
 			_, e = f.store.PrepareReverseMigrationFromProbe(t.Context(), req.Seal.OperationID, nil)
 			require.ErrorIs(t, e, model.ErrMigrationProbeMissingProvenance)
 
 			if mode == "wrong-billing" {
-				_, e = f.store.PrepareReverseMigrationFromProbe(t.Context(), req.Seal.OperationID, func(ctx context.Context, r model.MigrationProbeBillingRequest) (model.MigrationProbeBillingEvidence, error) {
-					bill, e := reader(ctx, r)
-					bill.Binding.KeyDigest = strings.Repeat("0", 64)
-					return bill, e
-				})
+				_, e = f.store.PrepareReverseMigrationFromProbe(
+					t.Context(),
+					req.Seal.OperationID,
+					func(ctx context.Context, r model.MigrationProbeBillingRequest) (model.MigrationProbeBillingEvidence, error) {
+						bill, e := reader(ctx, r)
+						bill.Binding.KeyDigest = strings.Repeat("0", 64)
+						return bill, e
+					},
+				)
 				require.Error(t, e)
+
 				var n int64
-				require.NoError(t, f.db.Model(&model.ChannelMigrationPrepared{}).Where("operation_id=?", req.Seal.OperationID).Count(&n).Error)
+				require.NoError(
+					t,
+					f.db.Model(&model.ChannelMigrationPrepared{}).
+						Where("operation_id=?", req.Seal.OperationID).
+						Count(&n).
+						Error,
+				)
 				require.Zero(t, n)
 				require.Equal(t, 1, f.providerCalls)
+
 				return
 			}
+
 			fact, e = f.store.FinalizeMigrationProbe(t.Context(), req.Seal.OperationID, reader)
 			require.NoError(t, e)
-			prepared, e := f.store.PrepareReverseMigrationFromProbe(t.Context(), req.Seal.OperationID, nil)
+			prepared, e := f.store.PrepareReverseMigrationFromProbe(
+				t.Context(),
+				req.Seal.OperationID,
+				nil,
+			)
 			require.NoError(t, e)
 			require.Equal(t, "prepared", prepared.State)
 			// The shared HTTP route now accepts explicit reverse resources. A wrong
 			// binding must still be refused before the exact original binding commits.
 			var run model.ChannelMigrationProbeRun
 			require.NoError(t, f.db.First(&run, "operation_id=?", req.Seal.OperationID).Error)
-			binding := model.MigrationProbeCutoverBinding{Version: 1, AuthorizationHash: run.AuthorizationHash, RequestHash: prepared.RequestHash, ProbeFactHash: prepared.ProbeFactHash, StorageGeneration: prepared.StorageGeneration}
+			binding := model.MigrationProbeCutoverBinding{
+				Version:           1,
+				AuthorizationHash: run.AuthorizationHash,
+				RequestHash:       prepared.RequestHash,
+				ProbeFactHash:     prepared.ProbeFactHash,
+				StorageGeneration: prepared.StorageGeneration,
+			}
 			invalidBinding := binding
 			invalidBinding.AuthorizationHash = strings.Repeat("0", 64)
-			_, denied := f.call(t, "POST", "/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover", invalidBinding, config.AdminKey)
+			_, denied := f.call(
+				t,
+				"POST",
+				"/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover",
+				invalidBinding,
+				config.AdminKey,
+			)
 			require.Contains(t, string(denied), `"state":"conflict"`)
+
 			var unchanged model.ChannelMigrationPrepared
 			require.NoError(t, f.db.First(&unchanged, "operation_id=?", req.Seal.OperationID).Error)
 			require.Equal(t, *prepared, unchanged)
-			code, committedRaw := f.call(t, "POST", "/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover", binding, config.AdminKey)
+			code, committedRaw := f.call(
+				t,
+				"POST",
+				"/api/channel-migrations/operations/"+req.Seal.OperationID+"/cutover",
+				binding,
+				config.AdminKey,
+			)
 			require.Equal(t, 200, code)
+
 			var committed struct {
 				Data model.MigrationReadResult `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(committedRaw, &committed))
 			require.Equal(t, "ready", committed.Data.State)
 			require.NotNil(t, committed.Data.Readback)
-			require.Equal(t, model.MigrationReuseRetiredTarget, committed.Data.Readback.Request.TargetResourceKind)
+			require.Equal(
+				t,
+				model.MigrationReuseRetiredTarget,
+				committed.Data.Readback.Request.TargetResourceKind,
+			)
 			require.Equal(t, "committed", committed.Data.Readback.Receipt.State)
-			require.Equal(t, f.store.ReadPreparedMigrationFacts(t.Context(), req.Seal.OperationID), committed.Data)
+			require.Equal(
+				t,
+				f.store.ReadPreparedMigrationFacts(t.Context(), req.Seal.OperationID),
+				committed.Data,
+			)
 			// The original model replay returns the same committed operation.
 			result, e := f.store.CutoverReversePrepared(t.Context(), req)
 			require.NoError(t, e)
 			require.Equal(t, "committed", result.State)
+
 			readContext := readOriginal()
 			originalContext.ResourceState = "consumed"
 			require.Equal(t, originalContext, readContext)
+
 			var after model.NativeTask
 			require.NoError(t, f.db.First(&after, "id=?", spec.TaskID).Error)
 			require.Equal(t, frozen.PrepaymentQuoteJSON, after.PrepaymentQuoteJSON)
 			require.Equal(t, frozen.BillingReceiptJSON, after.BillingReceiptJSON)
 			require.Equal(t, frozen.FrozenContract, after.FrozenContract)
 			require.Equal(t, 1, f.providerCalls)
+
 			var uses []model.ChannelAdmissionUse
 			require.NoError(t, f.db.Find(&uses).Error)
 			require.Len(t, uses, 1)
@@ -183,7 +382,6 @@ func TestReverseMigrationActualNativeProbeToCutover(t *testing.T) {
 			commandInput.TargetResourceKind = model.MigrationReuseRetiredTarget
 			_, ok = probeCommand(commandInput)
 			require.False(t, ok)
-
 		})
 	}
 }

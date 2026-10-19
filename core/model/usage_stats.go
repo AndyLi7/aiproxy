@@ -166,7 +166,10 @@ func GetGroupCallTotals(
 			return nil, err
 		}
 
-		result.BySource = append(result.BySource, SourceCallCounts{Source: source, CallCounts: counts})
+		result.BySource = append(
+			result.BySource,
+			SourceCallCounts{Source: source, CallCounts: counts},
+		)
 		result.Totals.add(counts)
 	}
 
@@ -204,7 +207,16 @@ func GetGroupKeyCallStats(
 	}
 
 	if len(tokenIDs) > 0 {
-		if err := readKeyWindowCounts(db, group, tokenIDs, start, end, now, unit, stats); err != nil {
+		if err := readKeyWindowCounts(
+			db,
+			group,
+			tokenIDs,
+			start,
+			end,
+			now,
+			unit,
+			stats,
+		); err != nil {
 			return nil, err
 		}
 	}
@@ -268,7 +280,11 @@ func GetGroupKeyCallStats(
 					return nil, ctxErr
 				}
 
-				log.Warnf("usage: last call of key %d before the window is unavailable: %v", tokenID, err)
+				log.Warnf(
+					"usage: last call of key %d before the window is unavailable: %v",
+					tokenID,
+					err,
+				)
 
 				entry.LastRequestUnavailable = true
 			}

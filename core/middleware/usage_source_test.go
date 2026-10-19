@@ -29,7 +29,10 @@ func TestUsageSourceThroughTokenAuth(t *testing.T) {
 	t.Cleanup(func() { model.DB, common.RedisEnabled = oldDB, oldRedis })
 
 	for _, group := range []string{"u_source", "u_source_disabled"} {
-		require.NoError(t, db.Create(&model.Group{ID: group, Status: model.GroupStatusEnabled}).Error)
+		require.NoError(
+			t,
+			db.Create(&model.Group{ID: group, Status: model.GroupStatusEnabled}).Error,
+		)
 	}
 
 	create := func(group, name string, status int) model.Token {
@@ -40,7 +43,11 @@ func TestUsageSourceThroughTokenAuth(t *testing.T) {
 	}
 	hidden := create("u_source", model.PlaygroundCredentialName, model.TokenStatusEnabled)
 	visible := create("u_source", "playground", model.TokenStatusEnabled)
-	disabledHidden := create("u_source_disabled", model.PlaygroundCredentialName, model.TokenStatusDisabled)
+	disabledHidden := create(
+		"u_source_disabled",
+		model.PlaygroundCredentialName,
+		model.TokenStatusDisabled,
+	)
 
 	for _, tc := range []struct {
 		name       string
@@ -65,7 +72,12 @@ func TestUsageSourceThroughTokenAuth(t *testing.T) {
 			router.POST("/v1/model-tasks", TokenAuth, func(c *gin.Context) {
 				if tc.operation != "" {
 					SetCallBillingOperationID(c, tc.operation)
-					SetOperationalFailure(c, model.FailureStageRouting, "native_execution_unavailable", "unavailable")
+					SetOperationalFailure(
+						c,
+						model.FailureStageRouting,
+						"native_execution_unavailable",
+						"unavailable",
+					)
 					c.Status(http.StatusServiceUnavailable)
 
 					return
@@ -75,8 +87,13 @@ func TestUsageSourceThroughTokenAuth(t *testing.T) {
 				c.Status(http.StatusPaymentRequired)
 			})
 
-			request := httptest.NewRequest(http.MethodPost, "/v1/model-tasks", strings.NewReader(`{}`))
+			request := httptest.NewRequestWithContext(t.Context(),
+				http.MethodPost,
+				"/v1/model-tasks",
+				strings.NewReader(`{}`),
+			)
 			request.Header.Set("Authorization", "Bearer "+tc.key)
+
 			if tc.header != "" {
 				request.Header.Set(OperationalLogSourceHeader, tc.header)
 			}

@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"github.com/labring/aiproxy/core/controller"
-	log "github.com/sirupsen/logrus"
 	"sync"
 	"time"
+
+	"github.com/labring/aiproxy/core/controller"
+	log "github.com/sirupsen/logrus"
 )
 
 // nativeRecoveryWorkers bound concurrent provider polls and archives per
@@ -23,14 +24,13 @@ func NativeTaskRecoveryTask(ctx context.Context) {
 func runNativeTaskRecovery(ctx context.Context, worker func(context.Context)) {
 	var wg sync.WaitGroup
 	for i := 0; i < nativeRecoveryWorkers && ctx.Err() == nil; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if ctx.Err() == nil {
 				worker(ctx)
 			}
-		}()
+		})
 	}
+
 	wg.Wait()
 }
 
@@ -39,9 +39,12 @@ func nativeRecoveryWorker(ctx context.Context) {
 	if _, err := rand.Read(id[:]); err != nil {
 		return
 	}
+
 	owner := "native-" + hex.EncodeToString(id[:])
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+
 	runRecoveryTicks(ctx, ticker.C, func(ctx context.Context) {
 		if err := controller.RecoverNativeTasks(ctx, owner); err != nil {
 			log.Warn("native task recovery deferred")
@@ -54,5 +57,6 @@ func nativeRecoveryWorker(ctx context.Context) {
 // handed to their leases), so wg.Wait covers them (spec §6.8).
 func NativeQueueDispatcherTask(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
+
 	controller.RunNativeQueueDispatcher(ctx)
 }

@@ -25,7 +25,13 @@ func TestRejectionsOnReadRoutesAreNotCalls(t *testing.T) {
 	common.RedisEnabled = false
 	t.Cleanup(func() { common.RedisEnabled = oldRedis })
 
-	token := model.TokenCache{ID: 61, Key: "route-mode-disabled", Name: "off", Group: "g", Status: model.TokenStatusDisabled}
+	token := model.TokenCache{
+		ID:     61,
+		Key:    "route-mode-disabled",
+		Name:   "off",
+		Group:  "g",
+		Status: model.TokenStatusDisabled,
+	}
 	require.NoError(t, model.CacheSetToken(&token))
 	t.Cleanup(func() { require.NoError(t, model.CacheDeleteToken(token.Key)) })
 
@@ -50,7 +56,12 @@ func TestRejectionsOnReadRoutesAreNotCalls(t *testing.T) {
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			logs := captureOperationalLogs(t)
-			request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(`{}`))
+			request := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				tc.path,
+				strings.NewReader(`{}`),
+			)
 			request.Header.Set("Authorization", "Bearer "+token.Key)
 
 			w := httptest.NewRecorder()

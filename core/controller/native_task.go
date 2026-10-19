@@ -5,6 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/config"
@@ -16,10 +21,6 @@ import (
 	"github.com/labring/aiproxy/core/relay/adaptor/fal"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"gorm.io/gorm"
-	"io"
-	"net/http"
-	"strings"
-	"time"
 )
 
 const NativeResultConfigKey model.ModelConfigKey = "x_token_platform_native_result_v1"
@@ -41,9 +42,16 @@ func NativeTaskEngine() (*nativetask.Engine, bool) {
 	if !ok || !model.NativeTaskStorageReady(model.LogDB) {
 		return nil, false
 	}
-	return &nativetask.Engine{DB: model.LogDB, Wallet: wallet, InputMeter: !config.DisableNativeInputMeter,
+
+	return &nativetask.Engine{
+		DB:                  model.LogDB,
+		Wallet:              wallet,
+		InputMeter:          !config.DisableNativeInputMeter,
 		AbandonReservations: !config.DisableNativeReservationStopLoss,
-		QueueProviders:      map[string]nativetask.QueueProvider{"fal": nativetask.FalQueueProvider(model.GetChannelByID)}}, true
+		QueueProviders: map[string]nativetask.QueueProvider{
+			"fal": nativetask.FalQueueProvider(model.GetChannelByID),
+		},
+	}, true
 }
 
 // nativeFailureStage mirrors image tasks so native rejections are filtered and
@@ -60,6 +68,7 @@ func nativeFailureStage(status int) model.FailureStage {
 		return model.FailureStageRouting
 	}
 }
+
 func recordNativeFailure(c *gin.Context, status int, code, message string) {
 	middleware.SetOperationalFailure(c, nativeFailureStage(status), code, message)
 }
@@ -70,22 +79,32 @@ func nativeTaskError(c *gin.Context, status int, code string) {
 	nativetask.WriteError(c.Writer, status, code)
 	c.Abort()
 }
+
 func nativeTaskRuntime(c *gin.Context) {
 	if _, ok := NativeTaskEngine(); !ok {
 		nativeTaskError(c, 503, "native_execution_unavailable")
 		return
 	}
+
 	c.Next()
 }
+
 func NativeTasks() []gin.HandlerFunc {
-	return []gin.HandlerFunc{nativeTaskRuntime, replayNativeTask, middleware.NewDistribute(mode.NativeTasks), submitNativeTask}
+	return []gin.HandlerFunc{
+		nativeTaskRuntime,
+		replayNativeTask,
+		middleware.NewDistribute(mode.NativeTasks),
+		submitNativeTask,
+	}
 }
+
 func nativeHTTP(c *gin.Context) (*nativetask.HTTP, bool) {
 	engine, ok := NativeTaskEngine()
 	if !ok {
 		nativeTaskError(c, 503, "native_execution_unavailable")
 		return nil, false
 	}
+
 	return &nativetask.HTTP{Engine: engine, Identity: func(*http.Request) (string, int, error) {
 		return middleware.GetGroup(c).ID, middleware.GetToken(c).ID, nil
 	}, ResolvePoller: nativetask.ResolveFalPoller(model.GetChannelByID), OnError: func(status int, code, message string) {
@@ -108,6 +127,7 @@ func nativePublicModel(c *gin.Context) func(string) string {
 			caches = typed
 		}
 	}
+
 	return func(capabilityModel string) string {
 		if caches == nil {
 			return capabilityModel
@@ -121,17 +141,22 @@ func nativePublicModel(c *gin.Context) func(string) string {
 // in place of its own capability ID; else "".
 func nativeAcceptedModel(c *gin.Context, mc model.ModelConfig) string {
 	requested := middleware.GetRequestedModel(c)
+
 	identity, ok := model.PublicCapabilityIdentityFromConfig(mc)
-	if !ok || requested == "" || requested == identity.CapabilityModel || !identity.Accepts(requested) {
+	if !ok || requested == "" || requested == identity.CapabilityModel ||
+		!identity.Accepts(requested) {
 		return ""
 	}
+
 	return requested
 }
+
 func submitNativeTask(c *gin.Context) {
 	handler, ok := nativeHTTP(c)
 	if !ok {
 		return
 	}
+
 	handler.ResolvePlan = func(_ *http.Request, _ []byte) (nativetask.Plan, nativetask.Provider, error) {
 		return resolveNativePlan(c)
 	}
@@ -149,47 +174,81 @@ func resolveNativePlan(c *gin.Context) (nativetask.Plan, nativetask.Provider, er
 		// wrong model or endpoint. Every later failure is a server-side route.
 		// Suggest only the model's own IDs on its other endpoint.
 		var suggested []string
-		if suggestion := middleware.NativeModelSuggestions(c, middleware.GetRequestModel(c)); suggestion.OtherEndpoint {
+		if suggestion := middleware.NativeModelSuggestions(
+			c,
+			middleware.GetRequestModel(c),
+		); suggestion.OtherEndpoint {
 			suggested = suggestion.Models
 		}
+
 		return nativetask.Plan{}, nil, &nativetask.NotNativeModelError{SuggestedModels: suggested}
 	}
+
 	binding, ok := parseNativeRouteBinding(mc)
 	if !ok {
 		return rejectNativeRoute(c, nativeRouteBindingInvalid, binding, nil, nil)
 	}
+
 	selected, err := getInitialChannel(c, middleware.GetRoutingModel(c), mode.NativeTasks)
 	if err != nil || selected == nil || selected.channel == nil {
 		return rejectNativeRoute(c, nativeRouteBoundChannelUnavailable, binding, nil, err)
 	}
+
 	channel := selected.channel
-	if channel.ID != binding.ChannelID || channel.Type != model.ChannelTypeFal || (channel.BaseURL != "" && strings.TrimRight(channel.BaseURL, "/") != "https://queue.fal.run") {
+	if channel.ID != binding.ChannelID || channel.Type != model.ChannelTypeFal ||
+		(channel.BaseURL != "" && strings.TrimRight(channel.BaseURL, "/") != "https://queue.fal.run") {
 		return rejectNativeRoute(c, nativeRouteChannelIdentityMismatch, binding, channel, nil)
 	}
-	if channel.Key == "" || model.ImageChannelKeyFingerprint(channel.Key) != binding.KeyFingerprint {
+
+	if channel.Key == "" ||
+		model.ImageChannelKeyFingerprint(channel.Key) != binding.KeyFingerprint {
 		return rejectNativeRoute(c, nativeRouteKeyFingerprintMismatch, binding, channel, nil)
 	}
+
 	quote, rawQuote, err := mc.ImagePrepaymentQuote()
 	if err != nil || quote == nil {
 		return rejectNativeRoute(c, nativeRouteQuoteInvalid, binding, channel, err)
 	}
+
 	identity, err := model.ChannelIdentityOf(channel)
 	if err != nil {
 		return rejectNativeRoute(c, nativeRouteChannelIdentityMismatch, binding, channel, err)
 	}
-	return nativetask.Plan{AdmissionIdentityHash: identity.IdentityHash, Contract: binding.Contract, ChannelID: channel.ID, Endpoint: binding.Endpoint, CredentialScope: binding.CredentialScope, KeyFingerprint: binding.KeyFingerprint, DeliveryBase: binding.DeliveryBase, QuoteJSON: rawQuote, InputMeter: mc.InputMeterJSON(),
-		AcceptedModel: nativeAcceptedModel(c, mc),
-		Log:           nativeTaskLogInfo(c)}, &fal.Client{Key: channel.Key}, nil
+
+	return nativetask.Plan{
+		AdmissionIdentityHash: identity.IdentityHash,
+		Contract:              binding.Contract,
+		ChannelID:             channel.ID,
+		Endpoint:              binding.Endpoint,
+		CredentialScope:       binding.CredentialScope,
+		KeyFingerprint:        binding.KeyFingerprint,
+		DeliveryBase:          binding.DeliveryBase,
+		QuoteJSON:             rawQuote,
+		InputMeter:            mc.InputMeterJSON(),
+		AcceptedModel:         nativeAcceptedModel(c, mc),
+		Log:                   nativeTaskLogInfo(c),
+	}, &fal.Client{Key: channel.Key}, nil
 }
 
 // nativeTaskLogInfo is the call row of a public native submission: the
 // request start and the source derived from the authenticated key. The wallet
 // admission may restamp both with the hold's (an admit replay).
 func nativeTaskLogInfo(c *gin.Context) *model.NativeTaskLog {
-	return &model.NativeTaskLog{RequestAt: middleware.GetRequestAt(c), TokenName: middleware.GetToken(c).Name, Endpoint: "POST /v1/model-tasks",
-		RequestSource: middleware.OperationalFieldsFromContext(c).RequestSource, IP: c.ClientIP(), Mode: int(mode.NativeTasks),
-		RequestedModel: middleware.GetRequestedModel(c)}
+	return &model.NativeTaskLog{
+		RequestAt: middleware.GetRequestAt(
+			c,
+		),
+		TokenName: middleware.GetToken(c).Name,
+		Endpoint:  "POST /v1/model-tasks",
+		RequestSource: middleware.OperationalFieldsFromContext(
+			c,
+		).RequestSource,
+		IP:             c.ClientIP(),
+		Mode:           int(mode.NativeTasks),
+		RequestedModel: middleware.GetRequestedModel(c),
+	}
 }
+
 func GetNativeTask(c *gin.Context) {
 	if handler, ok := nativeHTTP(c); ok {
 		handler.Get(c.Writer, c.Request, c.Param("id"))
@@ -217,11 +276,18 @@ func GetNativeQueueStatus(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "native execution unavailable")
 		return
 	}
+
 	status, err := engine.ReadQueueStatus()
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusServiceUnavailable, "native queue status unavailable")
+		middleware.ErrorResponse(
+			c,
+			http.StatusServiceUnavailable,
+			"native queue status unavailable",
+		)
+
 		return
 	}
+
 	c.Header("Cache-Control", "no-store")
 	middleware.SuccessResponse(c, status)
 }
@@ -231,12 +297,21 @@ func GetNativeTaskArtifact(c *gin.Context) {
 		handler.GetArtifact(c.Writer, c.Request, c.Param("id"), c.Param("index"))
 	}
 }
+
 func RecoverNativeTasks(ctx context.Context, owner string) error {
 	engine, ok := NativeTaskEngine()
 	if !ok {
 		return nil
 	}
-	_, err := engine.RecoverOnce(ctx, owner, time.Now(), nativetask.ResolveFalPoller(model.GetChannelByID), nil)
+
+	_, err := engine.RecoverOnce(
+		ctx,
+		owner,
+		time.Now(),
+		nativetask.ResolveFalPoller(model.GetChannelByID),
+		nil,
+	)
+
 	return err
 }
 
@@ -248,29 +323,35 @@ func replayNativeTask(c *gin.Context) {
 		nativeTaskError(c, 401, "authentication_required")
 		return
 	}
+
 	id := c.GetHeader("X-Request-Id")
 	if !imageRequestID.MatchString(id) {
 		nativeTaskError(c, 400, "invalid_request_id")
 		return
 	}
+
 	task, err := model.GetNativeTask(model.LogDB, id, group.ID, token.ID)
 	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && task.Status == "reserved") {
 		c.Next()
 		return
 	}
+
 	if err != nil {
 		nativeTaskError(c, 503, "task_store_unavailable")
 		return
 	}
+
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, nativeresult.MaxBytes+1))
 	if err != nil || len(raw) > nativeresult.MaxBytes {
 		nativeTaskError(c, 400, "invalid_request")
 		return
 	}
+
 	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 	if handler, ok := nativeHTTP(c); ok {
 		handler.Create(c.Writer, c.Request)
 	}
+
 	c.Abort()
 }
 
@@ -281,7 +362,13 @@ func nativeRuntimeFeatures() []string {
 	if !ok {
 		return nil
 	}
-	features := []string{"native_task_v1", "native_prepayment_recovery_v1", "native_private_trial_v1", "actual_cost_prepayment_v1"}
+
+	features := []string{
+		"native_task_v1",
+		"native_prepayment_recovery_v1",
+		"native_private_trial_v1",
+		"actual_cost_prepayment_v1",
+	}
 	if ownedartifact.Configured() {
 		features = append(features, "native_owned_artifact_v1")
 	}
@@ -295,5 +382,6 @@ func nativeRuntimeFeatures() []string {
 	if !config.DisablePublicAPIIDs {
 		features = append(features, model.PublicAPIIDFeature)
 	}
+
 	return features
 }

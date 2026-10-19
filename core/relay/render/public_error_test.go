@@ -1,9 +1,11 @@
+//nolint:testpackage // Tests publicStreamData private serialization and exported renderers together.
 package render
 
 import (
-	"github.com/stretchr/testify/require"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestStreamErrorsDoNotExposeUpstreamDetails(t *testing.T) {
@@ -14,6 +16,7 @@ func TestStreamErrorsDoNotExposeUpstreamDetails(t *testing.T) {
 	} {
 		for _, protocol := range []string{"openai", "anthropic", "gemini"} {
 			w := httptest.NewRecorder()
+
 			data := []byte(raw)
 			switch protocol {
 			case "openai":
@@ -23,6 +26,7 @@ func TestStreamErrorsDoNotExposeUpstreamDetails(t *testing.T) {
 			case "gemini":
 				require.NoError(t, (&GeminiSSE{Data: data}).Render(w))
 			}
+
 			require.NotContains(t, w.Body.String(), "private-")
 			require.NotContains(t, w.Body.String(), "balance")
 			require.Contains(t, w.Body.String(), "temporarily unavailable")
@@ -30,6 +34,7 @@ func TestStreamErrorsDoNotExposeUpstreamDetails(t *testing.T) {
 		}
 	}
 }
+
 func TestStreamContentIsNotRedactedAsAnError(t *testing.T) {
 	for _, raw := range []string{`{"choices":[{"delta":{"content":"error: balance example"}}]}`, `{"type":"response.output_text.delta","delta":"private-key example"}`, `[DONE]`} {
 		w := httptest.NewRecorder()
@@ -39,11 +44,20 @@ func TestStreamContentIsNotRedactedAsAnError(t *testing.T) {
 }
 
 func TestFlatAndNativeStreamErrorEnvelopes(t *testing.T) {
-	flat := publicStreamData([]byte(`{"type":"error","code":"private","message":"private","param":"secret"}`), "", false)
+	flat := publicStreamData(
+		[]byte(`{"type":"error","code":"private","message":"private","param":"secret"}`),
+		"",
+		false,
+	)
 	require.Contains(t, string(flat), `"code":"upstream_unavailable"`)
 	require.NotContains(t, string(flat), `"error":`)
 	require.NotContains(t, string(flat), "secret")
-	native := publicStreamData([]byte(`{"error":{"code":402,"message":"private","details":["secret"]}}`), "", true)
+
+	native := publicStreamData(
+		[]byte(`{"error":{"code":402,"message":"private","details":["secret"]}}`),
+		"",
+		true,
+	)
 	require.Contains(t, string(native), `"code":503`)
 	require.Contains(t, string(native), `"status":"UNAVAILABLE"`)
 	require.NotContains(t, string(native), "secret")

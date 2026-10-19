@@ -53,36 +53,36 @@ type NativeTask struct {
 	// DispatchAfter is the earliest time it may be claimed.
 	DispatchAfter *time.Time `json:"-"`
 
-	RecoveryOwner       string    `gorm:"size:64" json:"-"`
-	RecoveryUntil       int64     `gorm:"index" json:"-"`
-	NextRecoveryAt      int64     `gorm:"index" json:"-"`
-	BillingSettled      bool      `gorm:"index" json:"-"`
-	DeliveryBase        string    `gorm:"size:512" json:"-"`
-	ArtifactManifest    string    `gorm:"type:text" json:"-"`
-	DeliveredOutput     string    `gorm:"type:text" json:"-"`
-	BillingReceiptJSON  string    `gorm:"type:text" json:"-"`
-	FrozenContract      string    `gorm:"type:text" json:"-"`
-	NativeInput         string    `gorm:"type:text" json:"-"`
-	ChannelID           int       `json:"-"`
-	Endpoint            string    `gorm:"size:256" json:"-"`
-	KeyFingerprint      string    `gorm:"size:64" json:"-"`
-	CredentialScope     string    `gorm:"size:128" json:"-"`
-	PrepaymentQuoteJSON string    `gorm:"type:text" json:"-"`
-	BillingOperationID  string    `gorm:"size:200" json:"-"`
-	ErrorCode           string    `gorm:"size:64" json:"-"`
-	PublicError         string    `gorm:"type:text" json:"-"`
-	UpstreamID          string    `gorm:"size:256" json:"-"`
-	ID                  string    `gorm:"primaryKey;size:128" json:"-"`
+	RecoveryOwner       string    `gorm:"size:64"                                                                json:"-"`
+	RecoveryUntil       int64     `gorm:"index"                                                                  json:"-"`
+	NextRecoveryAt      int64     `gorm:"index"                                                                  json:"-"`
+	BillingSettled      bool      `gorm:"index"                                                                  json:"-"`
+	DeliveryBase        string    `gorm:"size:512"                                                               json:"-"`
+	ArtifactManifest    string    `gorm:"type:text"                                                              json:"-"`
+	DeliveredOutput     string    `gorm:"type:text"                                                              json:"-"`
+	BillingReceiptJSON  string    `gorm:"type:text"                                                              json:"-"`
+	FrozenContract      string    `gorm:"type:text"                                                              json:"-"`
+	NativeInput         string    `gorm:"type:text"                                                              json:"-"`
+	ChannelID           int       `                                                                              json:"-"`
+	Endpoint            string    `gorm:"size:256"                                                               json:"-"`
+	KeyFingerprint      string    `gorm:"size:64"                                                                json:"-"`
+	CredentialScope     string    `gorm:"size:128"                                                               json:"-"`
+	PrepaymentQuoteJSON string    `gorm:"type:text"                                                              json:"-"`
+	BillingOperationID  string    `gorm:"size:200"                                                               json:"-"`
+	ErrorCode           string    `gorm:"size:64"                                                                json:"-"`
+	PublicError         string    `gorm:"type:text"                                                              json:"-"`
+	UpstreamID          string    `gorm:"size:256"                                                               json:"-"`
+	ID                  string    `gorm:"primaryKey;size:128"                                                    json:"-"`
 	GroupID             string    `gorm:"size:64;not null;index;index:idx_native_tasks_group_created,priority:1" json:"-"`
-	TokenID             int       `gorm:"not null" json:"-"`
-	Model               string    `gorm:"size:256;not null" json:"-"`
-	Fingerprint         string    `gorm:"size:64;not null" json:"-"`
-	OutputSchema        string    `gorm:"type:text;not null" json:"-"`
-	OutputSchemaHash    string    `gorm:"size:64;not null" json:"-"`
-	Status              string    `gorm:"size:32;not null;index:idx_native_tasks_status_queue_scope,priority:1" json:"-"`
-	NativeOutput        string    `gorm:"type:text" json:"-"`
-	CreatedAt           time.Time `gorm:"index:idx_native_tasks_group_created,priority:2" json:"-"`
-	UpdatedAt           time.Time `json:"-"`
+	TokenID             int       `gorm:"not null"                                                               json:"-"`
+	Model               string    `gorm:"size:256;not null"                                                      json:"-"`
+	Fingerprint         string    `gorm:"size:64;not null"                                                       json:"-"`
+	OutputSchema        string    `gorm:"type:text;not null"                                                     json:"-"`
+	OutputSchemaHash    string    `gorm:"size:64;not null"                                                       json:"-"`
+	Status              string    `gorm:"size:32;not null;index:idx_native_tasks_status_queue_scope,priority:1"  json:"-"`
+	NativeOutput        string    `gorm:"type:text"                                                              json:"-"`
+	CreatedAt           time.Time `gorm:"index:idx_native_tasks_group_created,priority:2"                        json:"-"`
+	UpdatedAt           time.Time `                                                                              json:"-"`
 }
 
 // nativePublicError is the stored form of NativeTask.PublicError.
@@ -101,10 +101,13 @@ func nativeFailureDetail(code string, issues []nativeresult.ParameterIssue) (str
 		}
 		return "", nil
 	}
+
 	if !nativeresult.ValidParameterIssues(issues) {
 		return "", ErrNativeTaskConflict
 	}
+
 	raw, err := json.Marshal(nativePublicError{Issues: issues})
+
 	return string(raw), err
 }
 
@@ -116,19 +119,24 @@ func NativeTaskPublicError(code string, issues []nativeresult.ParameterIssue) st
 	if err != nil {
 		return ""
 	}
+
 	return detail
 }
 
 // NativeTaskIssues returns the parameter issues of a failed invalid_parameters
 // task, or nil. Stored values that do not validate are never shown.
 func NativeTaskIssues(task *NativeTask) []nativeresult.ParameterIssue {
-	if task == nil || task.Status != "failed" || task.ErrorCode != InvalidParametersCode || task.PublicError == "" {
+	if task == nil || task.Status != "failed" || task.ErrorCode != InvalidParametersCode ||
+		task.PublicError == "" {
 		return nil
 	}
+
 	var stored nativePublicError
-	if json.Unmarshal([]byte(task.PublicError), &stored) != nil || !nativeresult.ValidParameterIssues(stored.Issues) {
+	if json.Unmarshal([]byte(task.PublicError), &stored) != nil ||
+		!nativeresult.ValidParameterIssues(stored.Issues) {
 		return nil
 	}
+
 	return stored.Issues
 }
 
@@ -139,12 +147,19 @@ func ReserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 }
 
 func reserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) {
-	if task.ID == "" || len(task.ID) > 128 || task.GroupID == "" || len(task.GroupID) > 64 || task.TokenID <= 0 || task.Model == "" || len(task.Model) > 256 || task.Fingerprint == "" || len(task.Fingerprint) > 64 {
+	if task.ID == "" || len(task.ID) > 128 || task.GroupID == "" || len(task.GroupID) > 64 ||
+		task.TokenID <= 0 ||
+		task.Model == "" ||
+		len(task.Model) > 256 ||
+		task.Fingerprint == "" ||
+		len(task.Fingerprint) > 64 {
 		return nil, false, ErrNativeTaskConflict
 	}
+
 	if _, err := nativeresult.Compile([]byte(task.OutputSchema)); err != nil {
 		return nil, false, err
 	}
+
 	digest := sha256.Sum256([]byte(task.OutputSchema))
 	task.OutputSchemaHash = hex.EncodeToString(digest[:])
 	task.UpstreamID = ""
@@ -164,32 +179,55 @@ func reserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 	task.DispatchOwner = ""
 	task.DispatchUntil = nil
 	task.DispatchAfter = nil
+
 	var saved NativeTask
+
 	created := false
+
 	err := db.Transaction(func(tx *gorm.DB) error {
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&task)
 		if result.Error != nil {
 			return result.Error
 		}
+
 		created = result.RowsAffected == 1
 		if !created {
 			// A retry marks its reservation as in use, so stale-reservation cleanup
 			// cannot delete it while this request is talking to the wallet.
-			if err := tx.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", task.ID, task.GroupID, task.TokenID, "reserved").Update("updated_at", time.Now()).Error; err != nil {
+			if err := tx.Model(&NativeTask{}).
+				Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", task.ID, task.GroupID, task.TokenID, "reserved").
+				Update("updated_at", time.Now()).
+				Error; err != nil {
 				return err
 			}
 		}
-		if err := tx.Where("id = ? AND group_id = ? AND token_id = ?", task.ID, task.GroupID, task.TokenID).First(&saved).Error; err != nil {
+
+		if err := tx.Where("id = ? AND group_id = ? AND token_id = ?", task.ID, task.GroupID, task.TokenID).
+			First(&saved).
+			Error; err != nil {
 			return ErrNativeTaskConflict
 		}
-		if saved.KeyFingerprint != task.KeyFingerprint || saved.DeliveryBase != task.DeliveryBase || saved.Fingerprint != task.Fingerprint || saved.Model != task.Model || saved.OutputSchemaHash != task.OutputSchemaHash || saved.FrozenContract != task.FrozenContract || saved.NativeInput != task.NativeInput || saved.ChannelID != task.ChannelID || saved.Endpoint != task.Endpoint || saved.CredentialScope != task.CredentialScope || saved.PrepaymentQuoteJSON != task.PrepaymentQuoteJSON || saved.BillingOperationID != task.BillingOperationID {
+
+		if saved.KeyFingerprint != task.KeyFingerprint || saved.DeliveryBase != task.DeliveryBase ||
+			saved.Fingerprint != task.Fingerprint ||
+			saved.Model != task.Model ||
+			saved.OutputSchemaHash != task.OutputSchemaHash ||
+			saved.FrozenContract != task.FrozenContract ||
+			saved.NativeInput != task.NativeInput ||
+			saved.ChannelID != task.ChannelID ||
+			saved.Endpoint != task.Endpoint ||
+			saved.CredentialScope != task.CredentialScope ||
+			saved.PrepaymentQuoteJSON != task.PrepaymentQuoteJSON ||
+			saved.BillingOperationID != task.BillingOperationID {
 			return ErrNativeTaskConflict
 		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, false, err
 	}
+
 	return &saved, created, nil
 }
 
@@ -197,12 +235,24 @@ func reserveNativeTask(db *gorm.DB, task NativeTask) (*NativeTask, bool, error) 
 // a refused or abandoned submission leaves no row for recovery to poll. Only a
 // reservation untouched since notAfter is removed: a concurrent retry of the
 // same request refreshes it first and keeps it.
-func ReleaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time, evidence ...NativeReservationRelease) (bool, error) {
+func ReleaseNativeReservation(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	notAfter time.Time,
+	evidence ...NativeReservationRelease,
+) (bool, error) {
 	return releaseNativeReservationWithAdmission(db, id, group, token, notAfter, evidence...)
 }
 
-func releaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter time.Time) (bool, error) {
-	result := db.Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND updated_at <= ?", id, group, token, "reserved", "", notAfter).Delete(&NativeTask{})
+func releaseNativeReservation(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	notAfter time.Time,
+) (bool, error) {
+	result := db.Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND updated_at <= ?", id, group, token, "reserved", "", notAfter).
+		Delete(&NativeTask{})
 	return result.RowsAffected == 1, result.Error
 }
 
@@ -212,13 +262,21 @@ func releaseNativeReservation(db *gorm.DB, id, group string, token int, notAfter
 // exclude each other: once this wins, that Submit's transition matches no row
 // and it never calls the provider. It runs before any wallet write of the
 // refund. abandoned reports whether this call made the change.
-func AbandonNativeReservation(db *gorm.DB, id, group string, token int, reservedBefore time.Time) (bool, error) {
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND created_at <= ?", id, group, token, "reserved", "", reservedBefore).Updates(map[string]any{"status": "failed", "error_code": NotStartedCode, "public_error": "", "updated_at": time.Now()})
+func AbandonNativeReservation(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	reservedBefore time.Time,
+) (bool, error) {
+	r := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ? AND created_at <= ?", id, group, token, "reserved", "", reservedBefore).
+		Updates(map[string]any{"status": "failed", "error_code": NotStartedCode, "public_error": "", "updated_at": time.Now()})
 	return r.RowsAffected == 1, r.Error
 }
 
 func GetNativeTask(db *gorm.DB, id, group string, token int) (*NativeTask, error) {
 	var task NativeTask
+
 	err := db.Where("id = ? AND group_id = ? AND token_id = ?", id, group, token).First(&task).Error
 	return &task, err
 }
@@ -227,6 +285,7 @@ func GetNativeTask(db *gorm.DB, id, group string, token int) (*NativeTask, error
 // administrative reads on behalf of the group's owner across all their keys.
 func GetNativeTaskInGroup(db *gorm.DB, id, group string) (*NativeTask, error) {
 	var task NativeTask
+
 	err := db.Where("id = ? AND group_id = ?", id, group).First(&task).Error
 	return &task, err
 }
@@ -239,30 +298,39 @@ func saveNativeTaskResult(db *gorm.DB, id, group string, token int, raw []byte) 
 	if err != nil {
 		return err
 	}
+
 	validator, err := nativeresult.Compile([]byte(task.OutputSchema))
 	if err != nil {
 		return err
 	}
+
 	validated, err := validator.Validate(raw)
 	if err != nil {
 		return err
 	}
+
 	if task.Status == "result_received" {
 		if bytes.Equal([]byte(task.NativeOutput), validated) {
 			return nil
 		}
 		return ErrNativeTaskConflict
 	}
+
 	if task.Status != "running" && task.Status != "queued" {
 		return ErrNativeTaskConflict
 	}
-	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND output_schema_hash = ?", id, group, token, task.Status, task.OutputSchemaHash).Updates(map[string]any{"status": "result_received", "native_output": string(validated), "updated_at": time.Now()})
+
+	result := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND output_schema_hash = ?", id, group, token, task.Status, task.OutputSchemaHash).
+		Updates(map[string]any{"status": "result_received", "native_output": string(validated), "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
 	}
+
 	if result.RowsAffected != 1 {
 		return ErrNativeTaskConflict
 	}
+
 	return nil
 }
 
@@ -272,13 +340,16 @@ func AcceptNativeTask(db *gorm.DB, id, group string, token int, upstreamID strin
 	if upstreamID == "" || len(upstreamID) > 256 {
 		return ErrNativeTaskConflict
 	}
+
 	task, err := GetNativeTask(db, id, group, token)
 	if err != nil {
 		return err
 	}
+
 	if task.UpstreamID == upstreamID && task.Status != "reserved" {
 		return nil
 	}
+
 	if (task.Status != "reserved" && task.Status != "submitting") || task.UpstreamID != "" {
 		return ErrNativeTaskConflict
 	}
@@ -286,32 +357,48 @@ func AcceptNativeTask(db *gorm.DB, id, group string, token int, upstreamID strin
 	// records the provider identity: AsyncGenerationDeadline counts from here,
 	// not from a reservation an earlier ambiguous attempt may have left behind.
 	now := time.Now()
-	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, task.Status, "").Updates(map[string]any{"status": "queued", "upstream_id": upstreamID, "created_at": now, "updated_at": now})
+
+	result := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, task.Status, "").
+		Updates(map[string]any{"status": "queued", "upstream_id": upstreamID, "created_at": now, "updated_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
+
 	if result.RowsAffected != 1 {
 		return ErrNativeTaskConflict
 	}
+
 	return nil
 }
 
 // TransitionNativeSubmission is a compare-and-set transition owned by the executor.
 // issues name the rejected fields of a failed InvalidParametersCode submission.
-func TransitionNativeSubmission(db *gorm.DB, id, group string, token int, from, to, code string, issues ...nativeresult.ParameterIssue) error {
-	allowed := (from == "reserved" && to == "submitting") || (from == "submitting" && (to == "submission_unknown" || to == "failed"))
+func TransitionNativeSubmission(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	from, to, code string,
+	issues ...nativeresult.ParameterIssue,
+) error {
+	allowed := (from == "reserved" && to == "submitting") ||
+		(from == "submitting" && (to == "submission_unknown" || to == "failed"))
 	if !allowed || (code == InvalidParametersCode && to != "failed") {
 		return ErrNativeTaskConflict
 	}
+
 	detail, err := nativeFailureDetail(code, issues)
 	if err != nil {
 		return err
 	}
+
 	now := time.Now()
+
 	changes := map[string]any{"status": to, "error_code": code, "updated_at": now}
 	if to == "failed" {
 		changes["public_error"] = detail
 	}
+
 	if to == "submitting" {
 		// created_at becomes the submission time: AsyncGenerationDeadline for a
 		// submission that is never confirmed counts from here, so a reservation
@@ -319,58 +406,83 @@ func TransitionNativeSubmission(db *gorm.DB, id, group string, token int, from, 
 		// call is still in flight. AcceptNativeTask moves it again on acceptance.
 		changes["created_at"] = now
 	}
-	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, from, "").Updates(changes)
+
+	result := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND status = ? AND upstream_id = ?", id, group, token, from, "").
+		Updates(changes)
 	if result.Error != nil {
 		return result.Error
 	}
+
 	if result.RowsAffected != 1 {
 		return ErrNativeTaskConflict
 	}
+
 	return nil
 }
 
 func SaveNativeTaskBillingReceipt(db *gorm.DB, id, group string, token int, receipt string) error {
-	result := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ?", id, group, token).Updates(map[string]any{"billing_receipt_json": receipt, "updated_at": time.Now()})
+	result := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ?", id, group, token).
+		Updates(map[string]any{"billing_receipt_json": receipt, "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
 	}
+
 	if result.RowsAffected != 1 {
 		return ErrNativeTaskConflict
 	}
+
 	return nil
 }
 
 // UpdateNativePoll only advances accepted tasks; a stale queued response cannot
 // regress running work, and terminal results cannot be overwritten by polling.
 // issues name the rejected fields of an InvalidParametersCode failure.
-func updateNativePoll(db *gorm.DB, id, group string, token int, status, code string, issues ...nativeresult.ParameterIssue) error {
+func updateNativePoll(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	status, code string,
+	issues ...nativeresult.ParameterIssue,
+) error {
 	if status != "queued" && status != "running" && status != "failed" {
 		return ErrNativeTaskConflict
 	}
+
 	if status == "failed" && !acceptedFailureCode(code) {
 		return ErrNativeTaskConflict
 	}
+
 	detail, err := nativeFailureDetail(code, issues)
 	if err != nil {
 		return err
 	}
+
 	task, err := GetNativeTask(db, id, group, token)
 	if err != nil {
 		return err
 	}
+
 	if task.Status == status || (task.Status == "running" && status == "queued") {
 		return nil
 	}
+
 	if task.Status != "queued" && task.Status != "running" {
 		return ErrNativeTaskConflict
 	}
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, task.Status).Updates(map[string]any{"status": status, "error_code": code, "public_error": detail, "updated_at": time.Now()})
+
+	r := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND status = ?", id, group, token, task.Status).
+		Updates(map[string]any{"status": status, "error_code": code, "public_error": detail, "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}
+
 	if r.RowsAffected != 1 {
 		return ErrNativeTaskConflict
 	}
+
 	return nil
 }
 
@@ -378,7 +490,8 @@ func updateNativePoll(db *gorm.DB, id, group string, token int, status, code str
 // accepted that polling or delivery may record. Billing refunds each in full
 // (execution_finished, then settle failed/platform_failure).
 func acceptedFailureCode(code string) bool {
-	return code == "upstream_task_failed" || code == "upstream_result_rejected" || code == InvalidParametersCode
+	return code == "upstream_task_failed" || code == "upstream_result_rejected" ||
+		code == InvalidParametersCode
 }
 
 // FailAcceptedNativeTask ends an accepted task that can never deliver: the
@@ -387,25 +500,39 @@ func acceptedFailureCode(code string) bool {
 // is ended by ExpireNativeGeneration instead. Billing then refunds the customer
 // (platform_failure). issues name the rejected fields of an
 // InvalidParametersCode failure.
-func failAcceptedNativeTask(db *gorm.DB, id, group string, token int, code string, issues ...nativeresult.ParameterIssue) error {
+func failAcceptedNativeTask(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	code string,
+	issues ...nativeresult.ParameterIssue,
+) error {
 	if !acceptedFailureCode(code) {
 		return ErrNativeTaskConflict
 	}
+
 	detail, err := nativeFailureDetail(code, issues)
 	if err != nil {
 		return err
 	}
-	r := nativeRecoveryFence(db.Model(&NativeTask{})).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).Updates(map[string]any{"status": "failed", "error_code": code, "public_error": detail, "updated_at": time.Now()})
+
+	r := nativeRecoveryFence(
+		db.Model(&NativeTask{}),
+	).Where("id = ? AND group_id = ? AND token_id = ? AND status IN ?", id, group, token, []string{"queued", "running", "result_received"}).
+		Updates(map[string]any{"status": "failed", "error_code": code, "public_error": detail, "updated_at": time.Now()})
 	if r.Error != nil {
 		return r.Error
 	}
+
 	if r.RowsAffected == 1 {
 		return nil
 	}
+
 	task, err := GetNativeTask(db, id, group, token)
 	if err == nil && task.Status == "failed" {
 		return nil
 	}
+
 	return ErrNativeTaskConflict
 }
 
@@ -417,7 +544,9 @@ func failAcceptedNativeTask(db *gorm.DB, id, group string, token int, code strin
 // whether this call made the change; only that caller cancels upstream.
 // Billing then refunds the customer in full (platform_failure).
 func expireNativeGeneration(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id <> ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"queued", "running"}, now.Add(-AsyncGenerationDeadline)).Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
+	r := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id <> ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"queued", "running"}, now.Add(-AsyncGenerationDeadline)).
+		Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
 	return r.RowsAffected == 1, r.Error
 }
 
@@ -430,39 +559,81 @@ func expireNativeGeneration(db *gorm.DB, id, group string, token int, now time.T
 // refunds the customer in full (platform_failure); there is no ID to cancel
 // and the task is never resubmitted. expired reports whether this call made
 // the change.
-func expireUnconfirmedNativeSubmission(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
-	r := db.Model(&NativeTask{}).Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id = ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"submitting", "submission_unknown"}, now.Add(-AsyncGenerationDeadline)).Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
+func expireUnconfirmedNativeSubmission(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	now time.Time,
+) (bool, error) {
+	r := db.Model(&NativeTask{}).
+		Where("id = ? AND group_id = ? AND token_id = ? AND upstream_id = ? AND status IN ? AND created_at <= ?", id, group, token, "", []string{"submitting", "submission_unknown"}, now.Add(-AsyncGenerationDeadline)).
+		Updates(map[string]any{"status": "failed", "error_code": AsyncGenerationTimeoutCode, "updated_at": time.Now()})
 	return r.RowsAffected == 1, r.Error
 }
 
 func SaveNativeTaskResult(db *gorm.DB, id, group string, token int, raw []byte) error {
-	return WithNativeRecoveryGuard(db, id, func(tx *gorm.DB) error { return saveNativeTaskResult(tx, id, group, token, raw) })
+	return WithNativeRecoveryGuard(
+		db,
+		id,
+		func(tx *gorm.DB) error { return saveNativeTaskResult(tx, id, group, token, raw) },
+	)
 }
 
-func UpdateNativePoll(db *gorm.DB, id, group string, token int, status, code string, issues ...nativeresult.ParameterIssue) error {
-	return WithNativeRecoveryGuard(db, id, func(tx *gorm.DB) error { return updateNativePoll(tx, id, group, token, status, code, issues...) })
+func UpdateNativePoll(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	status, code string,
+	issues ...nativeresult.ParameterIssue,
+) error {
+	return WithNativeRecoveryGuard(
+		db,
+		id,
+		func(tx *gorm.DB) error { return updateNativePoll(tx, id, group, token, status, code, issues...) },
+	)
 }
 
-func FailAcceptedNativeTask(db *gorm.DB, id, group string, token int, code string, issues ...nativeresult.ParameterIssue) error {
-	return WithNativeRecoveryGuard(db, id, func(tx *gorm.DB) error { return failAcceptedNativeTask(tx, id, group, token, code, issues...) })
+func FailAcceptedNativeTask(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	code string,
+	issues ...nativeresult.ParameterIssue,
+) error {
+	return WithNativeRecoveryGuard(
+		db,
+		id,
+		func(tx *gorm.DB) error { return failAcceptedNativeTask(tx, id, group, token, code, issues...) },
+	)
 }
 
 func ExpireNativeGeneration(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
 	var changed bool
+
 	err := WithNativeRecoveryGuard(db, id, func(tx *gorm.DB) error {
 		var err error
+
 		changed, err = expireNativeGeneration(tx, id, group, token, now)
 		return err
 	})
+
 	return changed && err == nil, err
 }
 
-func ExpireUnconfirmedNativeSubmission(db *gorm.DB, id, group string, token int, now time.Time) (bool, error) {
+func ExpireUnconfirmedNativeSubmission(
+	db *gorm.DB,
+	id, group string,
+	token int,
+	now time.Time,
+) (bool, error) {
 	var changed bool
+
 	err := WithNativeRecoveryGuard(db, id, func(tx *gorm.DB) error {
 		var err error
+
 		changed, err = expireUnconfirmedNativeSubmission(tx, id, group, token, now)
 		return err
 	})
+
 	return changed && err == nil, err
 }

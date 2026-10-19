@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand/v2"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,7 +18,6 @@ import (
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/config"
-	"github.com/labring/aiproxy/core/common/conv"
 	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/common/oncall"
 	"github.com/labring/aiproxy/core/common/pprof"
@@ -194,13 +194,29 @@ const (
 	keyChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
 
-func generateAdminKey() string {
+func generateAdminKey() (string, error) {
+	return generateAdminKeyFrom(rand.Reader)
+}
+
+// Reject the short final bucket so each of the 62 characters is equally likely.
+func generateAdminKeyFrom(source io.Reader) (string, error) {
 	key := make([]byte, 48)
-	for i := range key {
-		key[i] = keyChars[rand.IntN(len(keyChars))]
+
+	var sample [1]byte
+	for i := 0; i < len(key); {
+		if _, err := io.ReadFull(source, sample[:]); err != nil {
+			return "", fmt.Errorf("generate admin key: %w", err)
+		}
+
+		if int(sample[0]) >= 256-256%len(keyChars) {
+			continue
+		}
+
+		key[i] = keyChars[int(sample[0])%len(keyChars)]
+		i++
 	}
 
-	return conv.BytesToString(key)
+	return string(key), nil
 }
 
 func writeToEnvFile(envFile, key, value string) error {
@@ -244,7 +260,12 @@ func ensureAdminKey() error {
 
 	log.Info("AdminKey is not set, generating new AdminKey...")
 
-	config.AdminKey = generateAdminKey()
+	key, err := generateAdminKey()
+	if err != nil {
+		return err
+	}
+
+	config.AdminKey = key
 
 	envFile := ".env.aiproxy.local"
 
@@ -264,14 +285,20 @@ func ensureAdminKey() error {
 
 // Register before main reaches wg.Wait; a cancelled context is not proof that
 // an in-flight recovery or its bounded owned cleanup has returned.
-func startJoinedRecoveryTasks(ctx context.Context, wg *sync.WaitGroup, tasks ...func(context.Context)) {
+func startJoinedRecoveryTasks(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	tasks ...func(context.Context),
+) {
 	for _, run := range tasks {
 		if ctx.Err() != nil {
 			return
 		}
+
 		wg.Add(1)
 		go func(run func(context.Context)) {
 			defer wg.Done()
+
 			if ctx.Err() == nil {
 				run(ctx)
 			}

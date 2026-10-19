@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	// Random recipe selection has no security or credential role.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand"
 	"slices"
 	"strings"

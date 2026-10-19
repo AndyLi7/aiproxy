@@ -1,7 +1,9 @@
+//nolint:testpackage // White-box coverage needs the package-private mustJSON fixture or implementation.
 package registryvalidation
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"testing"
 )
@@ -14,6 +16,7 @@ func TestFalUpgradeCompiledParameterBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			var c struct {
 				ID        string `json:"entry_id"`
 				Providers map[string]struct {
@@ -23,8 +26,15 @@ func TestFalUpgradeCompiledParameterBehavior(t *testing.T) {
 			if err = json.Unmarshal(raw, &c); err != nil {
 				t.Fatal(err)
 			}
+
 			s := c.Providers["fal"].Upstream
-			binding := ProviderBinding{Provider: "fal", ID: s.ID, Revision: s.Revision, ContractHash: s.ContractHash}
+			binding := ProviderBinding{
+				Provider:     "fal",
+				ID:           s.ID,
+				Revision:     s.Revision,
+				ContractHash: s.ContractHash,
+			}
+
 			cases := []struct {
 				name    string
 				fields  map[string]any
@@ -65,13 +75,17 @@ func TestFalUpgradeCompiledParameterBehavior(t *testing.T) {
 					}{"number mask", map[string]any{"mask_image_url": 12}, true, 0},
 				)
 			}
+
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					payload := map[string]any{"model": c.ID, "prompt": "A red ceramic cup on a table"}
-					for k, v := range tc.fields {
-						payload[k] = v
+					payload := map[string]any{
+						"model":  c.ID,
+						"prompt": "A red ceramic cup on a table",
 					}
-					body, _ := json.Marshal(payload)
+					maps.Copy(payload, tc.fields)
+
+					body := mustJSON(t, payload)
+
 					normalized, validationErr := ValidateImage(raw, c.ID, body)
 					if tc.invalid {
 						if validationErr == nil {
@@ -79,23 +93,36 @@ func TestFalUpgradeCompiledParameterBehavior(t *testing.T) {
 						}
 						return
 					}
+
 					if validationErr != nil {
 						t.Fatalf("public validation: %+v", validationErr)
 					}
-					mapped, err := MapBoundProviderInput(raw, binding, "fal-image", s.Endpoint, "async", normalized)
+
+					mapped, err := MapBoundProviderInput(
+						raw,
+						binding,
+						"fal-image",
+						s.Endpoint,
+						"async",
+						normalized,
+					)
 					if err != nil {
 						t.Fatalf("provider mapping: %v", err)
 					}
+
 					var forwarded map[string]any
-					json.Unmarshal(mapped, &forwarded)
+					checkError(t, json.Unmarshal(mapped, &forwarded))
+
 					for key, want := range tc.fields {
 						actual, exists := forwarded[key]
-						a, _ := json.Marshal(actual)
-						w, _ := json.Marshal(want)
+						a := mustJSON(t, actual)
+
+						w := mustJSON(t, want)
 						if !exists || string(a) != string(w) {
 							t.Fatalf("%s changed: %s != %s", key, a, w)
 						}
 					}
+
 					evidence, err := ResolveImageMetering(raw, binding, mapped, 1, 1024, true)
 					if err != nil || evidence.InputCount != int64(tc.count) {
 						t.Fatalf("metering: %+v %v", evidence, err)

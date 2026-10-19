@@ -12,6 +12,7 @@ import (
 // was acquired. Redirects and adapters making multiple calls remain conservative.
 func TraceTransport(ctx context.Context) (context.Context, func(error) Failure) {
 	var started, connected, tlsStarted, wroteRequest atomic.Bool
+
 	trace := &httptrace.ClientTrace{
 		DNSStart:          func(httptrace.DNSStartInfo) { started.Store(true) },
 		ConnectStart:      func(string, string) { started.Store(true) },
@@ -20,6 +21,7 @@ func TraceTransport(ctx context.Context) (context.Context, func(error) Failure) 
 		WroteRequest:      func(httptrace.WroteRequestInfo) { connected.Store(true); wroteRequest.Store(true) },
 		TLSHandshakeStart: func() { tlsStarted.Store(true) },
 	}
+
 	return httptrace.WithClientTrace(ctx, trace), func(err error) Failure {
 		f := FromError(err)
 		if f.Acceptance != Unknown {
@@ -41,14 +43,23 @@ func TraceTransport(ctx context.Context) (context.Context, func(error) Failure) 
 				f.Evidence = "transport_error_without_trace"
 			}
 		}
+
 		if !started.Load() || connected.Load() {
 			return f
 		}
-		var dns *net.DNSError
-		var op *net.OpError
+
+		var (
+			dns *net.DNSError
+			op  *net.OpError
+		)
 		if errors.As(err, &dns) || (errors.As(err, &op) && op.Op == "dial") {
-			return Failure{Acceptance: NotAccepted, Class: Transient, Evidence: "transport_failed_before_connection"}
+			return Failure{
+				Acceptance: NotAccepted,
+				Class:      Transient,
+				Evidence:   "transport_failed_before_connection",
+			}
 		}
+
 		return f
 	}
 }

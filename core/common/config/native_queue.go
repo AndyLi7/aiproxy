@@ -86,7 +86,10 @@ func ParseNativeQueueLimits(value string) (map[string]int, error) {
 
 		limit, err := strconv.ParseInt(number.String(), 10, 32)
 		if err != nil || limit < 1 {
-			return nil, fmt.Errorf("NativeQueueLimits limit for %q must be an integer of at least 1", scope)
+			return nil, fmt.Errorf(
+				"NativeQueueLimits limit for %q must be an integer of at least 1",
+				scope,
+			)
 		}
 
 		limits[scope] = int(limit)

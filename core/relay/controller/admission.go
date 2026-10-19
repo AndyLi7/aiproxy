@@ -36,19 +36,27 @@ func admitRelayAttempt(c *gin.Context, m *meta.Meta) (*model.RelayExecutionHandl
 	if !relayNeedsAdmission(m.Mode, c.Request.Method) {
 		return nil, nil
 	}
+
 	use, execution, err := model.AdmitRelayExecution(c.Request.Context(), &model.Channel{
 		ID: m.Channel.ID, Type: m.Channel.Type, Key: m.Channel.Key,
 		BaseURL: m.Channel.BaseURL, ProxyURL: m.Channel.ProxyURL,
 		SkipTLSVerify: m.Channel.SkipTLSVerify, Configs: m.ChannelConfigs,
-	}, model.RelayAdmissionScope{GroupID: m.Group.ID, TokenID: m.Token.ID,
+	}, model.RelayAdmissionScope{
+		GroupID: m.Group.ID, TokenID: m.Token.ID,
 		BillingOperationID: m.BillingOperationID, RequestID: m.RequestID,
-		Mode: int(m.Mode), Model: m.OriginModel}, m.MeasuredRelay)
+		Mode: int(m.Mode), Model: m.OriginModel,
+	}, m.MeasuredRelay)
 	if err != nil {
 		return nil, relaymodel.WrapperOpenAIErrorWithMessage(
-			"channel admission unavailable", "channel_admission_unavailable", http.StatusServiceUnavailable)
+			"channel admission unavailable",
+			"channel_admission_unavailable",
+			http.StatusServiceUnavailable,
+		)
 	}
+
 	if use != nil {
 		m.ChannelAdmissionUseID = use.ID
 	}
+
 	return execution, nil
 }

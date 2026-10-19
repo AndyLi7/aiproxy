@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 )

@@ -13,10 +13,20 @@ import (
 // acceptance time age into the past.
 func acceptedImageTask(t *testing.T, id string, age time.Duration) {
 	t.Helper()
-	_, _, err := model.ReserveImageTask(&model.ImageTask{ID: id, GroupID: "g", TokenID: 1}, &model.AsyncUsageInfo{RequestID: id, GroupID: "g", TokenID: 1})
+
+	_, _, err := model.ReserveImageTask(
+		&model.ImageTask{ID: id, GroupID: "g", TokenID: 1},
+		&model.AsyncUsageInfo{RequestID: id, GroupID: "g", TokenID: 1},
+	)
 	require.NoError(t, err)
 	require.NoError(t, model.AcceptImageTask(id, "upstream-"+id))
-	require.NoError(t, model.LogDB.Model(&model.ImageTask{}).Where("id = ?", id).Update("queued_at", time.Now().UTC().Add(-age)).Error)
+	require.NoError(
+		t,
+		model.LogDB.Model(&model.ImageTask{}).
+			Where("id = ?", id).
+			Update("queued_at", time.Now().UTC().Add(-age)).
+			Error,
+	)
 }
 
 func setupDeadlineDB(t *testing.T) {
@@ -24,6 +34,7 @@ func setupDeadlineDB(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "deadline.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
@@ -34,6 +45,7 @@ func setupDeadlineDB(t *testing.T) {
 // the task, its accounting outbox and its log row fail together, once.
 func TestExpireImageGenerationIsCompareAndSet(t *testing.T) {
 	setupDeadlineDB(t)
+
 	now := time.Now()
 
 	acceptedImageTask(t, "young", model.AsyncGenerationDeadline-time.Minute)
@@ -41,27 +53,62 @@ func TestExpireImageGenerationIsCompareAndSet(t *testing.T) {
 	acceptedImageTask(t, "running", time.Hour)
 	require.NoError(t, model.SetImageTaskResult("running", "in_progress", nil, nil))
 	acceptedImageTask(t, "processing", time.Hour)
-	require.NoError(t, model.SetImageTaskResult("processing", "result_processing", []model.ImageOutput{{URL: "https://source/image"}}, nil))
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"processing",
+			"result_processing",
+			[]model.ImageOutput{{URL: "https://source/image"}},
+			nil,
+		),
+	)
 	acceptedImageTask(t, "done", time.Hour)
-	require.NoError(t, model.SetImageTaskResult("done", "completed", []model.ImageOutput{{URL: "https://source/image"}}, nil))
-	_, _, err := model.ReserveImageTask(&model.ImageTask{ID: "unknown", GroupID: "g", TokenID: 1}, &model.AsyncUsageInfo{RequestID: "unknown"})
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"done",
+			"completed",
+			[]model.ImageOutput{{URL: "https://source/image"}},
+			nil,
+		),
+	)
+
+	_, _, err := model.ReserveImageTask(
+		&model.ImageTask{ID: "unknown", GroupID: "g", TokenID: 1},
+		&model.AsyncUsageInfo{RequestID: "unknown"},
+	)
 	require.NoError(t, err)
 	require.NoError(t, model.SetImageTaskResult("unknown", "submission_unknown", nil, nil))
-	require.NoError(t, model.LogDB.Model(&model.ImageTask{}).Where("id = ?", "unknown").Update("created_at", now.UTC().Add(-time.Hour)).Error)
+	require.NoError(
+		t,
+		model.LogDB.Model(&model.ImageTask{}).
+			Where("id = ?", "unknown").
+			Update("created_at", now.UTC().Add(-time.Hour)).
+			Error,
+	)
 
 	var runningClaim *model.AsyncUsageInfo
 	for id, want := range map[string]bool{"young": false, "queued": true, "running": true, "processing": false, "done": false, "unknown": false} {
 		var claim model.AsyncUsageInfo
 		require.NoError(t, model.LogDB.First(&claim, "image_task_id=?", id).Error)
-		require.NoError(t, model.LogDB.Model(&model.AsyncUsageInfo{}).Where("id=?", claim.ID).Updates(map[string]any{"processing_token": "deadline-owner", "next_poll_at": time.Now().Add(time.Minute)}).Error)
+		require.NoError(
+			t,
+			model.LogDB.Model(&model.AsyncUsageInfo{}).
+				Where("id=?", claim.ID).
+				Updates(map[string]any{"processing_token": "deadline-owner", "next_poll_at": time.Now().Add(time.Minute)}).
+				Error,
+		)
+
 		claim.ProcessingToken = "deadline-owner"
 		if id == "running" {
 			runningClaim = &claim
 		}
+
 		expired, err := model.ExpireImageGeneration(id, now, &claim)
 		require.NoError(t, err)
 		require.Equal(t, want, expired, id)
 	}
+
 	again, err := model.ExpireImageGeneration("running", now, runningClaim)
 	require.NoError(t, err)
 	require.False(t, again, "a second call never re-fails")
@@ -76,13 +123,21 @@ func TestExpireImageGenerationIsCompareAndSet(t *testing.T) {
 	task, err := model.GetImageTask("running", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "failed", task.Status)
-	require.Equal(t, &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode, Message: model.AsyncGenerationTimeoutMessage}, task.Error)
+	require.Equal(
+		t,
+		&model.ImageTaskError{
+			Code:    model.AsyncGenerationTimeoutCode,
+			Message: model.AsyncGenerationTimeoutMessage,
+		},
+		task.Error,
+	)
 	require.NotNil(t, task.CompletedAt)
 	require.NotNil(t, task.RunningAt, "phase history is kept")
 
 	var usage model.AsyncUsageInfo
 	require.NoError(t, model.LogDB.First(&usage, "image_task_id = ?", "running").Error)
 	require.Equal(t, model.AsyncUsageStatusFailed, usage.Status)
+
 	var entry model.Log
 	require.NoError(t, model.LogDB.First(&entry, usage.LogID).Error)
 	require.Equal(t, 502, entry.Code)
@@ -92,7 +147,16 @@ func TestExpireImageGenerationIsCompareAndSet(t *testing.T) {
 	require.EqualValues(t, "upstream-running", entry.UpstreamID)
 
 	// A result arriving after expiry is discarded: failed is terminal.
-	require.NoError(t, model.SetImageTaskResult("running", "completed", []model.ImageOutput{{URL: "https://late/image"}}, nil))
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"running",
+			"completed",
+			[]model.ImageOutput{{URL: "https://late/image"}},
+			nil,
+		),
+	)
+
 	task, err = model.GetImageTask("running", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "failed", task.Status)
@@ -103,10 +167,18 @@ func TestExpireImageGenerationIsCompareAndSet(t *testing.T) {
 func TestImageGenerationDeadlineCountsFromAcceptance(t *testing.T) {
 	now := time.Now()
 	accepted := now.Add(-model.AsyncGenerationDeadline + time.Minute)
-	task := &model.ImageTask{Status: "in_progress", UpstreamID: "u", CreatedAt: now.Add(-time.Hour), QueuedAt: &accepted}
+	task := &model.ImageTask{
+		Status:     "in_progress",
+		UpstreamID: "u",
+		CreatedAt:  now.Add(-time.Hour),
+		QueuedAt:   &accepted,
+	}
 	require.False(t, model.ImageGenerationExpired(task, now))
 	require.True(t, model.ImageGenerationExpired(task, now.Add(time.Minute)))
-	require.True(t, model.ImageGenerationDeadline(task).Equal(accepted.Add(model.AsyncGenerationDeadline)))
+	require.True(
+		t,
+		model.ImageGenerationDeadline(task).Equal(accepted.Add(model.AsyncGenerationDeadline)),
+	)
 	task.Status = "result_processing"
 	require.False(t, model.ImageGenerationExpired(task, now.Add(time.Hour)))
 	task.Status, task.UpstreamID = "queued", ""

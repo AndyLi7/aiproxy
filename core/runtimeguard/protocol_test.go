@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box regression exercises private model or runtime invariants.
 package runtimeguard
 
 import (
@@ -7,35 +8,64 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"github.com/labring/aiproxy/core/model"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/labring/aiproxy/core/model"
+	"github.com/stretchr/testify/require"
 )
 
 func signedFixture(t *testing.T) (*Verifier, Command, ed25519.PrivateKey) {
 	t.Helper()
+
 	pub, key, e := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, e)
-	h := Hello{Version: 1, Session: strings.Repeat("a", 64), PublicKey: pub, ArtifactHash: strings.Repeat("b", 64), Namespace: "local-test-namespace", ServiceID: "gateway", Epoch: "test-epoch"}
+
+	h := Hello{
+		Version:      1,
+		Session:      strings.Repeat("a", 64),
+		PublicKey:    pub,
+		ArtifactHash: strings.Repeat("b", 64),
+		Namespace:    "local-test-namespace",
+		ServiceID:    "gateway",
+		Epoch:        "test-epoch",
+	}
 	boot := strings.Repeat("c", 64)
 	v, e := NewVerifier(h, boot)
 	require.NoError(t, e)
+
 	now := time.Now()
-	p := model.VerifiedDeploymentProof{ProofID: strings.Repeat("d", 64), Epoch: h.Epoch, Sequence: 1, StorageGeneration: h.Namespace, ExecutorFenceHash: strings.Repeat("e", 64), IssuedAtMs: now.Add(-time.Second).UnixMilli(), ValidUntilMs: now.Add(time.Minute).UnixMilli(), RevocationFreshUntilMs: now.Add(time.Minute).UnixMilli(), Executors: []model.ChannelExecutorIdentity{{ServiceID: h.ServiceID, InstanceID: boot, BuildSHA: h.ArtifactHash, Epoch: h.Epoch}}}
-	p.MembershipHash = hashValue(p.Executors)
+	p := model.VerifiedDeploymentProof{
+		ProofID:                strings.Repeat("d", 64),
+		Epoch:                  h.Epoch,
+		Sequence:               1,
+		StorageGeneration:      h.Namespace,
+		ExecutorFenceHash:      strings.Repeat("e", 64),
+		IssuedAtMs:             now.Add(-time.Second).UnixMilli(),
+		ValidUntilMs:           now.Add(time.Minute).UnixMilli(),
+		RevocationFreshUntilMs: now.Add(time.Minute).UnixMilli(),
+		Executors: []model.ChannelExecutorIdentity{
+			{ServiceID: h.ServiceID, InstanceID: boot, BuildSHA: h.ArtifactHash, Epoch: h.Epoch},
+		},
+	}
+	p.MembershipHash, e = hashValue(p.Executors)
+	require.NoError(t, e)
+
 	return v, Command{1, "activate", h.Session, boot, h.Namespace, p}, key
 }
+
 func TestSignedPrivateBootScope(t *testing.T) {
 	for _, mode := range []string{"valid", "other-key", "old-boot", "old-session", "other-namespace", "tampered", "same-proof-extended", "sequence-rollback", "member-changed", "expiry", "generation", "watermark"} {
 		t.Run(mode, func(t *testing.T) {
 			v, c, key := signedFixture(t)
-			if mode == "same-proof-extended" || mode == "sequence-rollback" || mode == "member-changed" {
+			if mode == "same-proof-extended" || mode == "sequence-rollback" ||
+				mode == "member-changed" {
 				require.NoError(t, v.stage(c))
 			}
+
 			switch mode {
 			case "other-key":
 				_, key, _ = ed25519.GenerateKey(rand.Reader)
@@ -53,8 +83,20 @@ func TestSignedPrivateBootScope(t *testing.T) {
 			case "member-changed":
 				c.Proof.Sequence++
 				c.Proof.ProofID = strings.Repeat("f", 64)
-				c.Proof.Executors = append(c.Proof.Executors, model.ChannelExecutorIdentity{ServiceID: "rogue", InstanceID: strings.Repeat("f", 64), BuildSHA: strings.Repeat("b", 64), Epoch: c.Proof.Epoch})
-				c.Proof.MembershipHash = hashValue(c.Proof.Executors)
+				c.Proof.Executors = append(
+					c.Proof.Executors,
+					model.ChannelExecutorIdentity{
+						ServiceID:  "rogue",
+						InstanceID: strings.Repeat("f", 64),
+						BuildSHA:   strings.Repeat("b", 64),
+						Epoch:      c.Proof.Epoch,
+					},
+				)
+
+				var hashErr error
+
+				c.Proof.MembershipHash, hashErr = hashValue(c.Proof.Executors)
+				require.NoError(t, hashErr)
 			case "expiry":
 				c.Proof.ValidUntilMs = time.Now().Add(-time.Second).UnixMilli()
 			case "generation":
@@ -62,14 +104,19 @@ func TestSignedPrivateBootScope(t *testing.T) {
 			case "watermark":
 				c.Proof.StorageWatermark = 1
 			}
-			signed := sign(key, c)
+
+			signed, signErr := sign(key, c)
+			require.NoError(t, signErr)
+
 			if mode == "tampered" {
 				signed.Payload[0] = 'x'
 			}
+
 			parsed, e := v.Verify(signed)
 			if e == nil {
 				e = v.stage(parsed)
 			}
+
 			if mode == "valid" {
 				require.NoError(t, e)
 				_, e = v.Load(context.Background())
@@ -80,6 +127,7 @@ func TestSignedPrivateBootScope(t *testing.T) {
 		})
 	}
 }
+
 func TestLedgerIsDurableNotRestoreAuthority(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "session")
 	l, e := NewLedger(dir)
@@ -87,6 +135,7 @@ func TestLedgerIsDurableNotRestoreAuthority(t *testing.T) {
 	require.NoError(t, l.Append("proof_issued", map[string]string{"id": "synthetic"}))
 	require.NoError(t, l.Append("proof_revoked", map[string]string{"id": "synthetic"}))
 	require.NoError(t, l.Close())
+
 	raw, e := os.ReadFile(filepath.Join(dir, "issuance.log"))
 	require.NoError(t, e)
 	require.NoError(t, VerifyLedger(bytes.NewReader(raw)))
@@ -94,13 +143,23 @@ func TestLedgerIsDurableNotRestoreAuthority(t *testing.T) {
 	mut := append([]byte(nil), raw...)
 	mut[12] = 'x'
 	require.Error(t, VerifyLedger(bytes.NewReader(mut)))
+
 	_, e = NewLedger(dir)
 	require.Error(t, e, "old session cannot be reissued after DB prefix restore")
 }
+
 func TestProtocolFramesBounded(t *testing.T) {
 	var x any
-	require.Error(t, readFrame(bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", maxFrame+2)), maxFrame+1), &x))
-	b, _ := json.Marshal(map[string]int{"a": 1})
+	require.Error(
+		t,
+		readFrame(
+			bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", maxFrame+2)), maxFrame+1),
+			&x,
+		),
+	)
+
+	b, marshalErr := json.Marshal(map[string]int{"a": 1})
+	require.NoError(t, marshalErr)
 	require.Error(t, readFrame(streamReader(bytes.NewReader(b)), &x))
 	require.NoError(t, readFrame(streamReader(bytes.NewReader(append(b, '\n'))), &x))
 }
@@ -119,67 +178,121 @@ func TestKnownRefusalCannotBecomeSourceOutage(t *testing.T) {
 		require.ErrorIs(t, v.stage(c), refusal)
 	}
 }
+
 func TestRunChildFailedPersistentRevokeStillRejectsFrozenNative(t *testing.T) {
 	v, c, key := signedFixture(t)
 	path := seed(t)
 	db, err := model.OpenSQLite(path)
 	require.NoError(t, err)
+
 	oldDB, oldLog := model.DB, model.LogDB
 	restore := model.ConfigureChannelAdmissionRuntime(model.ChannelExecutorIdentity{}, nil)
+
 	model.DB, model.LogDB = db, db
 	defer func() { restore(); model.DB, model.LogDB = oldDB, oldLog; p, _ := db.DB(); p.Close() }()
+
 	require.NoError(t, db.Create(&model.ChannelAdmissionExecutionProtocol{ID: 1, Version: 1}).Error)
-	require.NoError(t, db.Create(&model.ChannelAdmissionExecutionProtocol{ID: 2, Version: model.NativeExecutionProtocolVersion}).Error)
+	require.NoError(
+		t,
+		db.Create(
+			&model.ChannelAdmissionExecutionProtocol{
+				ID:      2,
+				Version: model.NativeExecutionProtocolVersion,
+			},
+		).Error,
+	)
+
 	in, parentWrite, err := os.Pipe()
 	require.NoError(t, err)
+
 	defer parentWrite.Close()
+
 	parentRead, out, err := os.Pipe()
 	require.NoError(t, err)
+
 	defer parentRead.Close()
 	defer out.Close()
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+
 	done := make(chan error, 1)
+
 	ready := make(chan error, 1)
 	go func() { done <- RunChild(ctx, v.hello, streamReader(in), in, out, v.boot, ready) }()
+
 	reader := streamReader(parentRead)
+
 	var reply Reply
 	require.NoError(t, readFrame(reader, &reply))
 	require.Equal(t, "fresh", reply.Kind)
-	require.NoError(t, writeFrame(parentWrite, sign(key, c)))
+
+	signed, signErr := sign(key, c)
+	require.NoError(t, signErr)
+	require.NoError(t, writeFrame(parentWrite, signed))
 	require.NoError(t, readFrame(reader, &reply))
 	require.Equal(t, "active", reply.Kind)
 	require.NoError(t, <-ready)
+
 	var channel model.Channel
 	require.NoError(t, db.First(&channel, 1).Error)
 	identity, err := model.ChannelIdentityOf(&channel)
 	require.NoError(t, err)
-	task, created, err := model.ReserveNativeTask(db, model.NativeTask{ID: "frozen-before-revoke", GroupID: "group", TokenID: 1, Model: "synthetic/native", Fingerprint: strings.Repeat("a", 64), OutputSchema: `{"type":"object"}`, ChannelID: identity.ChannelID, KeyFingerprint: identity.KeyDigest, AdmissionIdentityHash: identity.IdentityHash})
+	task, created, err := model.ReserveNativeTask(
+		db,
+		model.NativeTask{
+			ID:                    "frozen-before-revoke",
+			GroupID:               "group",
+			TokenID:               1,
+			Model:                 "synthetic/native",
+			Fingerprint:           strings.Repeat("a", 64),
+			OutputSchema:          `{"type":"object"}`,
+			ChannelID:             identity.ChannelID,
+			KeyFingerprint:        identity.KeyDigest,
+			AdmissionIdentityHash: identity.IdentityHash,
+		},
+	)
 	require.NoError(t, err)
 	require.True(t, created)
 	// Establish that the actual no-anchor frozen compatibility branch accepts
 	// a genuine zero-proof outage, without creating an execution anchor.
 	before, err := model.MigrationProbeRuntimeStore(db, db, nil)
 	require.NoError(t, err)
-	restoreOutage := model.ConfigureChannelAdmissionRuntime(before.Executor, func(context.Context) (model.VerifiedDeploymentProof, error) {
-		return model.VerifiedDeploymentProof{}, ErrUntrusted
-	})
+
+	restoreOutage := model.ConfigureChannelAdmissionRuntime(
+		before.Executor,
+		func(context.Context) (model.VerifiedDeploymentProof, error) {
+			return model.VerifiedDeploymentProof{}, ErrUntrusted
+		},
+	)
 	h, err := model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
+
 	restoreOutage()
 	require.NoError(t, err)
 	require.Nil(t, h)
-	require.NoError(t, db.Exec("CREATE TRIGGER refuse_proof_revoke BEFORE UPDATE OF revoked ON channel_admission_proofs BEGIN SELECT RAISE(ABORT, 'synthetic revoke failure'); END").Error)
+	require.NoError(
+		t,
+		db.Exec(
+			"CREATE TRIGGER refuse_proof_revoke BEFORE UPDATE OF revoked ON channel_admission_proofs BEGIN SELECT RAISE(ABORT, 'synthetic revoke failure'); END",
+		).Error,
+	)
+
 	c.Kind = "revoke"
-	require.NoError(t, writeFrame(parentWrite, sign(key, c)))
+	signed, signErr = sign(key, c)
+	require.NoError(t, signErr)
+	require.NoError(t, writeFrame(parentWrite, signed))
+
 	select {
 	case err = <-done:
 		require.Error(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("revoke did not return")
 	}
+
 	var stored model.ChannelAdmissionProof
 	require.NoError(t, db.First(&stored, "id=?", c.Proof.ProofID).Error)
 	require.False(t, stored.Revoked)
+
 	store, err := model.MigrationProbeRuntimeStore(db, db, nil)
 	require.NoError(t, err)
 	proof, err := store.LoadDeployment(t.Context())
@@ -188,6 +301,7 @@ func TestRunChildFailedPersistentRevokeStillRejectsFrozenNative(t *testing.T) {
 	h, err = model.BeginNativeTaskExecution(t.Context(), db, task, model.NativeExecutionPoll, "")
 	require.Error(t, err)
 	require.Nil(t, h)
+
 	var count int64
 	require.NoError(t, db.Model(&model.ChannelAdmissionTaskExecution{}).Count(&count).Error)
 	require.Zero(t, count)

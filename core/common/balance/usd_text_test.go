@@ -1,9 +1,10 @@
-package balance
+package balance_test
 
 import (
 	"math"
 	"testing"
 
+	balanceapi "github.com/labring/aiproxy/core/common/balance"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +21,7 @@ func TestMicrosText(t *testing.T) {
 		-120_000:      "-$0.12",
 		math.MinInt64: "-$9,223,372,036,854.775808",
 	} {
-		require.Equal(t, want, MicrosText(micros), micros)
+		require.Equal(t, want, balanceapi.MicrosText(micros), micros)
 	}
 }
 
@@ -39,17 +40,21 @@ func TestOwedText(t *testing.T) {
 		-1234.567:  "$1,234.57",
 		math.NaN(): "less than $0.01",
 	} {
-		require.Equal(t, want, OwedText(balance), balance)
+		require.Equal(t, want, balanceapi.OwedText(balance), balance)
 	}
 }
 
 func TestNegativeBalanceMessage(t *testing.T) {
-	require.Equal(t,
+	require.Equal(
+		t,
 		"Your balance is below zero (-$0.12). New requests are paused until your balance is back above zero; a top-up covers the amount owed first.",
-		NegativeBalanceMessage(-0.12))
-	sub := NegativeBalanceMessage(-0.0012)
-	require.Equal(t,
+		balanceapi.NegativeBalanceMessage(-0.12),
+	)
+	sub := balanceapi.NegativeBalanceMessage(-0.0012)
+	require.Equal(
+		t,
 		"Your balance is below zero (less than $0.01 owed). New requests are paused until your balance is back above zero; a top-up covers the amount owed first.",
-		sub)
+		sub,
+	)
 	require.NotContains(t, sub, "$0.00")
 }

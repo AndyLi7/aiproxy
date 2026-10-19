@@ -34,37 +34,66 @@ func TestImageTaskPrepaymentRefusalKeepsRequestIDRetryable(t *testing.T) {
 		{"model paused", http.StatusLocked, http.StatusServiceUnavailable, "model_unavailable", model.FailureStageRouting},
 	} {
 		t.Run(refusal.name, func(t *testing.T) {
-			testImageTaskPrepaymentRefusal(t, refusal.status, refusal.wantStatus, refusal.wantCode, refusal.wantStage)
+			testImageTaskPrepaymentRefusal(
+				t,
+				refusal.status,
+				refusal.wantStatus,
+				refusal.wantCode,
+				refusal.wantStage,
+			)
 		})
 	}
 }
 
-func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int, wantCode string, wantStage model.FailureStage) {
+func testImageTaskPrepaymentRefusal(
+	t *testing.T,
+	refusalStatus, wantStatus int,
+	wantCode string,
+	wantStage model.FailureStage,
+) {
+	t.Helper()
+
 	toppedUp := false
 	admits := []string{}
+
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var command balance.PrepaymentCommand
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&command))
+
 		if command.Action == "admit" {
 			admits = append(admits, command.BillingOperationID)
+
 			if !toppedUp {
 				w.WriteHeader(refusalStatus)
-				_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "message": "refused"})
+
+				if err := json.NewEncoder(w).
+					Encode(map[string]any{"code": 1, "message": "refused"}); err != nil {
+					panic(err)
+				} /* A broken test response must fail visibly. */
+
 				return
 			}
 		}
-		receipt := map[string]any{"id": command.BillingOperationID, "status": "pending", "prepaidMicros": 2000000}
+
+		receipt := map[string]any{
+			"id":            command.BillingOperationID,
+			"status":        "pending",
+			"prepaidMicros": 2000000,
+		}
 		if command.Action == "begin_attempt" {
 			receipt["claimed"] = true
 		}
+
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": receipt}))
 	}))
 	defer wallet.Close()
+
 	oldBalance := balance.Default
 	balance.Default = balance.NewExternalHTTP(wallet.URL, "local-only")
 	t.Cleanup(func() { balance.Default = oldBalance })
 
 	providerCalls := 0
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providerCalls++
 		_, _ = w.Write([]byte(`{"request_id":"upstream"}`))
@@ -73,13 +102,23 @@ func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int,
 
 	raw, err := os.ReadFile("../common/registryvalidation/testdata/provider.json")
 	require.NoError(t, err)
+
 	var contract map[string]any
 	require.NoError(t, json.Unmarshal(raw, &contract))
 	contract["execution"] = map[string]any{"mode": "async", "output": "image"}
 
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "retry.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(
+			&model.ImageTask{},
+			&model.AsyncUsageInfo{},
+			&model.Log{},
+			&model.RequestDetail{},
+		),
+	)
+
 	oldLogDB := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = oldLogDB })
@@ -88,12 +127,23 @@ func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int,
 		ID: 7, Type: model.ChannelTypeFal, Key: "secret", BaseURL: upstream.URL,
 		Models: []string{"image"}, ModelMapping: map[string]string{"image": "fal-ai/test"},
 		Configs: map[string]any{providerBindingsConfig: map[string]any{"image": map[string]any{
-			"provider": "small", "id": "small", "revision": "1",
+			"provider":     "small",
+			"id":           "small",
+			"revision":     "1",
 			"contractHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}}},
 	}
+
 	var quote map[string]any
-	require.NoError(t, json.Unmarshal([]byte(`{"version":1,"quoteVersion":"test-1","currency":"USD","prepaidMicros":2000000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":1000000,"prepaidMicros":2000000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`), &quote))
+	require.NoError(
+		t,
+		json.Unmarshal(
+			[]byte(
+				`{"version":1,"quoteVersion":"test-1","currency":"USD","prepaidMicros":2000000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":1000000,"prepaidMicros":2000000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`,
+			),
+			&quote,
+		),
+	)
 
 	submit := func() (*httptest.ResponseRecorder, *gin.Context) {
 		w := httptest.NewRecorder()
@@ -108,20 +158,33 @@ func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int,
 		c.Set(middleware.RequestModel, "image")
 		c.Set(middleware.RoutingModel, "image")
 		c.Set(middleware.RequestedModel, "image")
-		c.Set(middleware.ModelCaches, &model.ModelCaches{ChannelsByID: map[int]*model.Channel{7: ch}})
+		c.Set(
+			middleware.ModelCaches,
+			&model.ModelCaches{ChannelsByID: map[int]*model.Channel{7: ch}},
+		)
 		c.Set(middleware.ModelConfig, model.ModelConfig{
 			Price: model.Price{PerRequestPrice: 1},
 			Config: map[model.ModelConfigKey]any{
-				"x_token_platform_capability_contract": map[string]any{"entry_id": "image", "contract": contract},
-				"x_token_platform_pricing":             map[string]any{"currency": "USD", "pricing_version": "v1"},
-				model.ImagePrepaymentConfigKey:         quote,
+				"x_token_platform_capability_contract": map[string]any{
+					"entry_id": "image",
+					"contract": contract,
+				},
+				"x_token_platform_pricing": map[string]any{
+					"currency":        "USD",
+					"pricing_version": "v1",
+				},
+				model.ImagePrepaymentConfigKey: quote,
 			},
 		})
-		c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{Group: "g", CheckBalance: func(float64) bool {
-			t.Fatal("prepaid image tasks must not use the cached balance check")
-			return false
-		}})
+		c.Set(
+			middleware.GroupBalance,
+			&middleware.GroupBalanceConsumer{Group: "g", CheckBalance: func(float64) bool {
+				t.Fatal("prepaid image tasks must not use the cached balance check")
+				return false
+			}},
+		)
 		submitImageTask(c)
+
 		return w, c
 	}
 	count := func(table any) int64 {
@@ -137,6 +200,7 @@ func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int,
 	require.Zero(t, count(&model.ImageTask{}))
 	require.Zero(t, count(&model.AsyncUsageInfo{}))
 	require.Zero(t, count(&model.Log{}))
+
 	fields := middleware.OperationalFieldsFromContext(c)
 	require.Equal(t, wantStage, fields.FailureStage)
 	require.Equal(t, wantCode, fields.ErrorCode)
@@ -146,7 +210,12 @@ func testImageTaskPrepaymentRefusal(t *testing.T, refusalStatus, wantStatus int,
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 	require.Equal(t, 1, providerCalls)
 	require.Len(t, admits, 2)
-	require.NotEqual(t, admits[0], admits[1], "a refused admission must not be reused as a charge identity")
+	require.NotEqual(
+		t,
+		admits[0],
+		admits[1],
+		"a refused admission must not be reused as a charge identity",
+	)
 
 	// The accepted task is now idempotent: replaying it never resubmits or recharges.
 	w, _ = submit()
@@ -168,7 +237,13 @@ func TestImageTaskRetryOnAnotherKeyAfterTokenAuthRejection(t *testing.T) {
 	common.RedisEnabled = false
 	t.Cleanup(func() { common.RedisEnabled = oldRedis })
 
-	disabledKey := model.TokenCache{ID: 2, Key: "key-a-disabled", Name: "key-a", Group: "g", Status: model.TokenStatusDisabled}
+	disabledKey := model.TokenCache{
+		ID:     2,
+		Key:    "key-a-disabled",
+		Name:   "key-a",
+		Group:  "g",
+		Status: model.TokenStatusDisabled,
+	}
 	require.NoError(t, model.CacheSetToken(&disabledKey))
 	t.Cleanup(func() { require.NoError(t, model.CacheDeleteToken(disabledKey.Key)) })
 

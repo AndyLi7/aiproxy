@@ -31,16 +31,27 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	}
 	// Poll/archive and wallet sidecar are separate capabilities. A terminal
 	// refund uses only its winning transaction's private wallet handle.
-	pollCtx := actionguard.With(ctx, func(checkCtx context.Context) error { return model.ValidateClaimedImageTask(checkCtx, info, task) })
+	pollCtx := actionguard.With(
+		ctx,
+		func(checkCtx context.Context) error { return model.ValidateClaimedImageTask(checkCtx, info, task) },
+	)
 
 	if task.Status == "result_processing" {
-		if err := archiveClaimedImageTask(pollCtx, info, task, ownedimage.StoreWithMetadata); err != nil {
+		if err := archiveClaimedImageTask(
+			pollCtx,
+			info,
+			task,
+			ownedimage.StoreWithMetadata,
+		); err != nil {
 			handleImageArchiveFailure(ctx, info, task, err)
 			return
 		}
+
 		completeImageTaskUsage(ctx, info, task.Data)
+
 		return
 	}
+
 	if task.Status == "completed" {
 		if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs ||
 			(task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
@@ -54,10 +65,19 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	}
 
 	if task.Status == "failed" {
-		if err := model.SetClaimedImageTaskResult(ctx, info, task, "failed", task.Data, task.Error); err != nil {
+		if err := model.SetClaimedImageTaskResult(
+			ctx,
+			info,
+			task,
+			"failed",
+			task.Data,
+			task.Error,
+		); err != nil {
 			return
 		}
+
 		refundFailedImageTask(ctx, info, task)
+
 		return
 	}
 
@@ -71,6 +91,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		expireImageGeneration(ctx, info, task, cancelUpstream)
 		return
 	}
+
 	if err != nil {
 		retryImageUsageBefore(info, err, nextImageDeadlinePoll(task))
 		return
@@ -90,6 +111,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	if result.Status == "completed" && task.ArchiveRequired {
 		result.Status = "result_processing"
 	}
+
 	if err = model.SetClaimedImageTaskResult(
 		ctx, info, task,
 		result.Status,
@@ -110,28 +132,7 @@ func processOneImageUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 		return
 	}
 
-	switch saved.Status {
-	case "result_processing":
-		if err := archiveClaimedImageTask(pollCtx, info, saved, ownedimage.StoreWithMetadata); err != nil {
-			handleImageArchiveFailure(ctx, info, saved, err)
-			return
-		}
-		completeImageTaskUsage(ctx, info, saved.Data)
-	case "completed":
-		if len(saved.Data) == 0 || len(saved.Data) > model.ImageBillingMaxOutputs ||
-			(task.ExpectedImages > 0 && len(saved.Data) > task.ExpectedImages) {
-			_ = model.FailClaimedImageTaskUsage(ctx, info, saved, "unexpected stored image count")
-			return
-		}
-
-		completeImageTaskUsage(ctx, info, saved.Data)
-	case "failed":
-		// Only the fenced failure transaction's winner reaches this refund.
-		// Its later wallet actions are not an executor/use closure proof.
-		refundFailedImageTask(ctx, info, saved)
-	default:
-		touchAsyncUsagePollCursor(info)
-	}
+	finishPolledImageUsage(ctx, pollCtx, info, task, saved)
 }
 
 // imageCancel asks the provider once to stop an expired task. pollImageTask
@@ -188,6 +189,7 @@ func pollImageTask(
 	if err := actionguard.Check(pollCtx); err != nil {
 		return adaptor.ImageTaskResult{}, nil, err
 	}
+
 	result, err := adapter.PollImage(pollCtx, ch, info, task)
 
 	return result, cancelUpstream, err
@@ -231,16 +233,19 @@ func expireImageGeneration(
 
 	if task.PrepaymentQuoteJSON != "" {
 		refundCtx, cancel := context.WithTimeout(detached, imageTimeoutRefundTimeout)
+
 		failed, err := model.GetImageTask(task.ID, task.GroupID, task.TokenID)
 		if err == nil {
 			if granted := model.ImageTerminalWalletTask(info, failed); granted != nil {
 				_, err = imageprepayment.SyncOwned(refundCtx, granted)
 			}
 		}
+
 		cancel()
 
 		if err != nil {
-			entry.WithError(err).Warn("image task generation timed out; refund deferred to prepayment recovery")
+			entry.WithError(err).
+				Warn("image task generation timed out; refund deferred to prepayment recovery")
 		}
 	}
 
@@ -248,18 +253,25 @@ func expireImageGeneration(
 		entry.Warn("image task generation timed out; provider cancel unavailable")
 	} else {
 		cancelCtx, cancel := context.WithTimeout(detached, imageCancelTimeout)
-		cancelCtx = actionguard.With(cancelCtx, func(c context.Context) error { return model.ValidateImagePollTerminalCleanup(c, info) })
+		cancelCtx = actionguard.With(
+			cancelCtx,
+			func(c context.Context) error { return model.ValidateImagePollTerminalCleanup(c, info) },
+		)
+
 		var outcome string
+
 		err := actionguard.Check(cancelCtx)
 		if err == nil {
 			outcome, err = cancelUpstream(cancelCtx)
 		}
+
 		cancel()
 
 		if err != nil {
 			entry.WithError(err).Warn("image task generation timed out; provider cancel failed")
 		} else {
-			entry.WithField("cancel", outcome).Info("image task generation timed out; provider cancel sent")
+			entry.WithField("cancel", outcome).
+				Info("image task generation timed out; provider cancel sent")
 		}
 	}
 
@@ -278,17 +290,23 @@ func refundFailedImageTask(ctx context.Context, info *model.AsyncUsageInfo, task
 	if task.Status != "failed" || task.PrepaymentQuoteJSON == "" || task.BillingSettled {
 		return
 	}
+
 	if _, ok := balance.Default.(*balance.ExternalHTTP); !ok {
 		return
 	}
+
 	refundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imageTimeoutRefundTimeout)
+
 	granted := model.ImageTerminalWalletTask(info, task)
 	if granted == nil {
 		cancel()
 		return
 	}
+
 	_, err := imageprepayment.SyncOwned(refundCtx, granted)
+
 	cancel()
+
 	if err != nil {
 		log.WithField("task_id", task.ID).WithField("channel_id", info.ChannelID).WithError(err).
 			Warn("image task failed; refund deferred to prepayment recovery")
@@ -311,35 +329,52 @@ func expireUnconfirmedImageSubmissions(ctx context.Context, now time.Time) {
 	if ctx.Err() != nil {
 		return
 	}
+
 	if model.LogDB == nil || !model.LogDB.Migrator().HasTable(&model.ImageTask{}) {
 		return
 	}
+
 	tasks, err := model.UnconfirmedImageSubmissions(now, unconfirmedImageBatch)
 	if err != nil {
 		log.WithError(err).Warn("unconfirmed image submission scan unavailable")
 		return
 	}
+
 	for i := range tasks {
 		if ctx.Err() != nil {
 			return
 		}
+
 		task := &tasks[i]
+
 		expired, err := model.ExpireUnconfirmedImageSubmission(task.ID, now)
 		if err != nil {
-			log.WithField("task_id", task.ID).WithError(err).Warn("expire unconfirmed image submission")
+			log.WithField("task_id", task.ID).
+				WithError(err).
+				Warn("expire unconfirmed image submission")
 			continue
 		}
+
 		if !expired {
 			continue
 		}
+
 		entry := log.WithFields(log.Fields{
-			"lane": "image", "task_id": task.ID, "model": task.Model, "endpoint": task.UpstreamModel,
-			"previous_status": task.Status, "prepaid": task.PrepaymentQuoteJSON != "",
+			"lane":            "image",
+			"task_id":         task.ID,
+			"model":           task.Model,
+			"endpoint":        task.UpstreamModel,
+			"previous_status": task.Status,
+			"prepaid":         task.PrepaymentQuoteJSON != "",
 		})
-		entry.Warn("image task submission was not confirmed within the generation deadline; failed with generation_timeout")
+		entry.Warn(
+			"image task submission was not confirmed within the generation deadline; failed with generation_timeout",
+		)
+
 		if task.PrepaymentQuoteJSON == "" {
 			continue
 		}
+
 		if _, ok := balance.Default.(*balance.ExternalHTTP); !ok {
 			continue
 		}
@@ -376,6 +411,7 @@ func retryImageUsageBefore(info *model.AsyncUsageInfo, err error, latest time.Ti
 	if !latest.IsZero() && latest.Before(info.NextPollAt) {
 		info.NextPollAt = latest
 	}
+
 	if updateErr := model.RetryClaimedAsyncUsageInfo(info); updateErr != nil {
 		log.WithError(updateErr).Warn("persist image task retry")
 	}
@@ -391,9 +427,11 @@ func completeImageTaskUsage(
 		retryImageUsage(info, err)
 		return
 	}
+
 	if err := model.ValidateClaimedImageTask(ctx, info, task); err != nil {
 		return
 	}
+
 	if task.PrepaymentQuoteJSON != "" {
 		if !task.BillingSettled {
 			won, claimErr := model.ClaimImagePrepaymentFromPoll(ctx, info, task)
@@ -401,15 +439,18 @@ func completeImageTaskUsage(
 				retryImageUsage(info, claimErr)
 				return
 			}
+
 			if !won {
 				touchAsyncUsagePollCursor(info)
 				return
 			}
+
 			receipt, err := imageprepayment.SyncOwned(ctx, task)
 			if err != nil {
 				retryImageUsage(info, err)
 				return
 			}
+
 			if receipt.ChargedMicros == nil {
 				touchAsyncUsagePollCursor(info)
 				return
@@ -420,6 +461,7 @@ func completeImageTaskUsage(
 		if err := model.CompleteClaimedPrepaidImageUsage(ctx, info, task); err != nil {
 			retryImageUsage(info, err)
 		}
+
 		return
 	}
 
@@ -485,40 +527,77 @@ func completeImageTaskUsage(
 	completePolledAsyncUsage(ctx, info, usage, usageContext)
 }
 
-func archiveImageTask(ctx context.Context, task *model.ImageTask, store func(context.Context, string) (string, ownedimage.Metadata, error)) error {
-	return archiveImageTaskWithReceipts(ctx, task, store, model.SaveArchivedImage, model.CompleteImageArchive)
+func archiveImageTask(
+	ctx context.Context,
+	task *model.ImageTask,
+	store func(context.Context, string) (string, ownedimage.Metadata, error),
+) error {
+	return archiveImageTaskWithReceipts(
+		ctx,
+		task,
+		store,
+		model.SaveArchivedImage,
+		model.CompleteImageArchive,
+	)
 }
-func archiveClaimedImageTask(ctx context.Context, info *model.AsyncUsageInfo, task *model.ImageTask, store func(context.Context, string) (string, ownedimage.Metadata, error)) error {
-	ctx = actionguard.With(ctx, func(checkCtx context.Context) error { return model.ValidateClaimedImageTask(checkCtx, info, task) })
-	return archiveImageTaskWithReceipts(ctx, task, store,
+
+func archiveClaimedImageTask(
+	ctx context.Context,
+	info *model.AsyncUsageInfo,
+	task *model.ImageTask,
+	store func(context.Context, string) (string, ownedimage.Metadata, error),
+) error {
+	ctx = actionguard.With(
+		ctx,
+		func(checkCtx context.Context) error { return model.ValidateClaimedImageTask(checkCtx, info, task) },
+	)
+
+	return archiveImageTaskWithReceipts(
+		ctx,
+		task,
+		store,
 		func(task *model.ImageTask, index int, out model.ImageOutput) error {
 			return model.SaveClaimedArchivedImage(ctx, info, task, index, out)
 		},
-		func(task *model.ImageTask) error { return model.CompleteClaimedImageArchive(ctx, info, task) })
+		func(task *model.ImageTask) error { return model.CompleteClaimedImageArchive(ctx, info, task) },
+	)
 }
-func archiveImageTaskWithReceipts(ctx context.Context, task *model.ImageTask, store func(context.Context, string) (string, ownedimage.Metadata, error), save func(*model.ImageTask, int, model.ImageOutput) error, complete func(*model.ImageTask) error) error {
-	if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs || (task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
+
+func archiveImageTaskWithReceipts(
+	ctx context.Context,
+	task *model.ImageTask,
+	store func(context.Context, string) (string, ownedimage.Metadata, error),
+	save func(*model.ImageTask, int, model.ImageOutput) error,
+	complete func(*model.ImageTask) error,
+) error {
+	if len(task.Data) == 0 || len(task.Data) > model.ImageBillingMaxOutputs ||
+		(task.ExpectedImages > 0 && len(task.Data) > task.ExpectedImages) {
 		return errors.New("invalid archive output count")
 	}
 	// Bound work per poll. Each completed output is durable even when a later
 	// download/upload fails or the worker restarts.
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+
 	for _, out := range task.Data {
 		if !model.ValidAuxiliaryImages(out) {
 			return errors.New("invalid auxiliary image")
 		}
 	}
+
 	for i := range task.Data {
 		out := model.CloneImageOutputs(task.Data[i : i+1])[0]
+
 		archive := func(asset *model.ImageOutput, name string) error {
 			assetCtx := ownedimage.WithArchiveIdentity(ctx, task.ID, i)
 			if name != "" {
 				assetCtx = ownedimage.WithAuxiliaryName(assetCtx, name)
 			}
+
 			if err := actionguard.Check(assetCtx); err != nil {
 				return err
 			}
+
 			url, metadata, err := store(assetCtx, asset.URL)
 			if err != nil {
 				if errors.Is(err, ownedimage.ErrTooLarge) {
@@ -526,21 +605,25 @@ func archiveImageTaskWithReceipts(ctx context.Context, task *model.ImageTask, st
 				}
 				return errors.New("image result storage temporarily unavailable")
 			}
+
 			asset.URL, asset.Stored, asset.ContentType = url, true, metadata.ContentType
 			if metadata.Width > 0 && metadata.Height > 0 {
 				w, h := int64(metadata.Width), int64(metadata.Height)
 				asset.Width, asset.Height = &w, &h
 			}
+
 			return nil
 		}
 		if !out.Stored {
 			if err := archive(&out, ""); err != nil {
 				return err
 			}
+
 			if err := save(task, i, out); err != nil {
 				return err
 			}
 		}
+
 		for name, asset := range out.AuxiliaryImages {
 			if asset == nil || asset.Stored {
 				continue
@@ -551,23 +634,77 @@ func archiveImageTaskWithReceipts(ctx context.Context, task *model.ImageTask, st
 			if err := archive(out.AuxiliaryImages[name], name); err != nil {
 				return err
 			}
+
 			if err := save(task, i, out); err != nil {
 				return err
 			}
 		}
 	}
+
 	return complete(task)
 }
 
 // Permanent size failures must terminate; transport/storage outages remain retryable.
-func handleImageArchiveFailure(ctx context.Context, info *model.AsyncUsageInfo, task *model.ImageTask, archiveErr error) {
+func handleImageArchiveFailure(
+	ctx context.Context,
+	info *model.AsyncUsageInfo,
+	task *model.ImageTask,
+	archiveErr error,
+) {
 	if !errors.Is(archiveErr, ownedimage.ErrTooLarge) {
 		retryImageUsage(info, archiveErr)
 		return
 	}
-	if err := model.SetClaimedImageTaskResult(ctx, info, task, "failed", nil, &model.ImageTaskError{Code: "archive_size_exceeded", Message: "Image result exceeds delivery size limit"}); err != nil {
+
+	if err := model.SetClaimedImageTaskResult(
+		ctx,
+		info,
+		task,
+		"failed",
+		nil,
+		&model.ImageTaskError{
+			Code:    "archive_size_exceeded",
+			Message: "Image result exceeds delivery size limit",
+		},
+	); err != nil {
 		retryImageUsage(info, err)
 		return
 	}
+
 	log.WithField("task_id", task.ID).Warn("image delivery size limit exceeded")
+}
+
+func finishPolledImageUsage(
+	ctx, pollCtx context.Context,
+	info *model.AsyncUsageInfo,
+	task, saved *model.ImageTask,
+) {
+	switch saved.Status {
+	case "result_processing":
+		if err := archiveClaimedImageTask(
+			pollCtx,
+			info,
+			saved,
+			ownedimage.StoreWithMetadata,
+		); err != nil {
+			handleImageArchiveFailure(ctx, info, saved, err)
+			return
+		}
+
+		completeImageTaskUsage(ctx, info, saved.Data)
+	case "completed":
+		if len(saved.Data) == 0 || len(saved.Data) > model.ImageBillingMaxOutputs ||
+			(task.ExpectedImages > 0 && len(saved.Data) > task.ExpectedImages) {
+			_ = model.FailClaimedImageTaskUsage(ctx, info, saved, "unexpected stored image count")
+			return
+		}
+
+		completeImageTaskUsage(ctx, info, saved.Data)
+	case "failed":
+		// Only the fenced failure transaction's winner reaches this refund.
+		// Its later wallet actions are not an executor/use closure proof.
+		refundFailedImageTask(ctx, info, saved)
+	default:
+		touchAsyncUsagePollCursor(info)
+	}
 }

@@ -22,12 +22,15 @@ func (a *Attempt) Observe(f Failure) Failure {
 	if a == nil {
 		return f
 	}
+
 	if f.Acceptance != NotAccepted {
 		a.uncertain.Store(true)
 	}
+
 	if f.Acceptance == NotAccepted && a.calls.Load() > 1 && a.uncertain.Load() {
 		f.Acceptance = Unknown
 		f.Evidence = "prior_call_may_have_been_accepted"
 	}
+
 	return f
 }

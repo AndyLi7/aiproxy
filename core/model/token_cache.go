@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"errors"
+	// Only spreads cache expiry times; keys and security tokens are generated separately.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand/v2"
 	"slices"
 	"strings"

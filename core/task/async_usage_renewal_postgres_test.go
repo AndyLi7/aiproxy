@@ -1,32 +1,41 @@
+//nolint:testpackage // White-box coverage needs the package-private startAsyncUsageClaimRenewalAtInterval fixture or implementation.
 package task
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
-	"github.com/labring/aiproxy/core/model"
-	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"net/url"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/labring/aiproxy/core/model"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func renewalTaskPostgres(t *testing.T) *gorm.DB {
 	t.Helper()
+
 	dsn := os.Getenv("B2_G3_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("requires a disposable local PostgreSQL via B2_G3_TEST_POSTGRES_DSN")
 	}
+
 	u, err := url.Parse(dsn)
 	require.NoError(t, err)
 	require.Contains(t, []string{"127.0.0.1", "localhost", "::1"}, u.Hostname())
 	require.Equal(t, "/g3_queue_test", u.Path)
+
 	admin, err := model.OpenPostgreSQL(dsn)
 	require.NoError(t, err)
+
 	schema := fmt.Sprintf("renewal_stop_%d", time.Now().UnixNano())
 	require.NoError(t, admin.Exec("CREATE SCHEMA "+schema).Error)
+
 	query := u.Query()
 	query.Set("search_path", schema)
 	query.Set("application_name", schema)
@@ -43,6 +52,7 @@ func renewalTaskPostgres(t *testing.T) *gorm.DB {
 		require.NoError(t, pool.Close())
 	})
 	require.NoError(t, db.AutoMigrate(&model.AsyncUsageInfo{}))
+
 	return db
 }
 
@@ -53,37 +63,67 @@ func TestPostgresAsyncUsageRenewalStopJoinsSQLWait(t *testing.T) {
 			old := model.LogDB
 			model.LogDB = db
 			t.Cleanup(func() { model.LogDB = old })
-			info := &model.AsyncUsageInfo{Status: model.AsyncUsageStatusPending, ProcessingToken: "synthetic-token", NextPollAt: time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond)}
+
+			info := &model.AsyncUsageInfo{
+				Status:          model.AsyncUsageStatusPending,
+				ProcessingToken: "synthetic-token",
+				NextPollAt:      time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond),
+			}
 			require.NoError(t, db.Create(info).Error)
 			pool, err := db.DB()
 			require.NoError(t, err)
+
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
+
 			holder, err := pool.BeginTx(ctx, nil)
 			require.NoError(t, err)
-			defer holder.Rollback()
+
+			defer func() {
+				if err := holder.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+					t.Error(err)
+				}
+			}()
+
 			var id int
-			require.NoError(t, holder.QueryRowContext(ctx, "SELECT id FROM async_usage_infos WHERE id=$1 FOR UPDATE", info.ID).Scan(&id))
+			require.NoError(
+				t,
+				holder.QueryRowContext(ctx, "SELECT id FROM async_usage_infos WHERE id=$1 FOR UPDATE", info.ID).
+					Scan(&id),
+			)
+
 			parent, cancelParent := context.WithCancel(ctx)
 			defer cancelParent()
+
 			_, stop := startAsyncUsageClaimRenewalAtInterval(parent, info, time.Millisecond)
+
 			var app string
-			require.NoError(t, db.Raw("SELECT current_setting('application_name')").Scan(&app).Error)
+			require.NoError(
+				t,
+				db.Raw("SELECT current_setting('application_name')").Scan(&app).Error,
+			)
 			require.Eventually(t, func() bool {
 				var n int64
-				e := db.Raw("SELECT count(*) FROM pg_stat_activity WHERE application_name=? AND wait_event_type='Lock'", app).Scan(&n).Error
+
+				e := db.Raw("SELECT count(*) FROM pg_stat_activity WHERE application_name=? AND wait_event_type='Lock'", app).
+					Scan(&n).
+					Error
+
 				return e == nil && n > 0
 			}, time.Second, 5*time.Millisecond)
+
 			if mode == "parent-cancel" {
 				cancelParent()
 			}
+
 			var wg sync.WaitGroup
 			for range 4 {
-				wg.Add(1)
-				go func() { defer wg.Done(); stop() }()
+				wg.Go(func() { ; stop() })
 			}
+
 			joined := make(chan struct{})
 			go func() { wg.Wait(); close(joined) }()
+
 			select {
 			case <-joined:
 			case <-time.After(time.Second):
@@ -92,6 +132,7 @@ func TestPostgresAsyncUsageRenewalStopJoinsSQLWait(t *testing.T) {
 			// Holder still owns the row: stop did not merely wait for it to become free.
 			require.NoError(t, holder.Commit())
 			stop()
+
 			var row model.AsyncUsageInfo
 			require.NoError(t, db.First(&row, info.ID).Error)
 			require.True(t, row.NextPollAt.Equal(info.NextPollAt))

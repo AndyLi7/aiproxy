@@ -241,13 +241,21 @@ func TestResolvedBaseImageRegistryPreservesRequestedIdentity(t *testing.T) {
 				c.Set(PublicModel, parent)
 				c.Set(PublicCapabilityModel, capabilityID)
 				c.Set(ResolvedCapability, "text-to-image")
-				validationErr := validateImageRegistryRequest(c, mode.ImagesGenerations, requested, config)
+
+				validationErr := validateImageRegistryRequest(
+					c,
+					mode.ImagesGenerations,
+					requested,
+					config,
+				)
 				if requested == parent && refuseGroupIDs {
 					require.NotNil(t, validationErr)
 					require.Equal(t, http.StatusServiceUnavailable, validationErr.Status)
 					return
 				}
+
 				require.Nil(t, validationErr)
+
 				raw, err := common.GetRequestBodyReusable(c.Request)
 				require.NoError(t, err)
 
@@ -261,6 +269,7 @@ func TestResolvedBaseImageRegistryPreservesRequestedIdentity(t *testing.T) {
 
 func TestAsyncImageRegistryRejectsSyncEndpointBeforeSize(t *testing.T) {
 	const publicID = "alibaba/2.2-5b/text-to-image"
+
 	config := map[model.ModelConfigKey]any{
 		"public_capability_model": publicID,
 		"x_token_platform_capability_contract": map[string]any{
@@ -295,8 +304,14 @@ func TestAsyncImageRegistryRejectsSyncEndpointBeforeSize(t *testing.T) {
 			{"/v1/images/tasks", `{"model":"alibaba/2.2-5b/text-to-image","prompt":"lion","image_size":{"width":1536,"height":1024}}`, ""},
 		} {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			c.Request = httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				tc.path,
+				strings.NewReader(tc.body),
+			)
 			c.Request.Header.Set("Content-Type", "application/json")
+
 			err := validateImageRegistryRequest(c, requestMode, publicID, config)
 			if tc.wantCode != "" {
 				require.NotNil(t, err)
@@ -304,13 +319,25 @@ func TestAsyncImageRegistryRejectsSyncEndpointBeforeSize(t *testing.T) {
 				require.Equal(t, "endpoint", err.Param)
 				continue
 			}
+
 			require.Nil(t, err)
+
 			forwarded, readErr := common.GetRequestBodyReusable(c.Request)
 			require.NoError(t, readErr)
+
 			var values map[string]any
 			require.NoError(t, json.Unmarshal(forwarded, &values))
-			require.NotContains(t, values, "size", "normalized request must not retain the consumed alias")
-			require.Equal(t, map[string]any{"width": float64(1536), "height": float64(1024)}, values["image_size"])
+			require.NotContains(
+				t,
+				values,
+				"size",
+				"normalized request must not retain the consumed alias",
+			)
+			require.Equal(
+				t,
+				map[string]any{"width": float64(1536), "height": float64(1024)},
+				values["image_size"],
+			)
 		}
 	}
 }

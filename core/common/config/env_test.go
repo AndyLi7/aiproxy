@@ -37,7 +37,11 @@ func TestNativeRouteFollowsBindingEnvironment(t *testing.T) {
 	t.Cleanup(config.ReloadEnv) // runs after the environment is restored
 	t.Setenv("NATIVE_ROUTE_FOLLOWS_BINDING", "")
 	config.ReloadEnv()
-	require.True(t, config.NativeRouteFollowsBinding, "native routing follows the binding unless switched off")
+	require.True(
+		t,
+		config.NativeRouteFollowsBinding,
+		"native routing follows the binding unless switched off",
+	)
 
 	for _, off := range []string{"false", "0"} {
 		t.Setenv("NATIVE_ROUTE_FOLLOWS_BINDING", off)

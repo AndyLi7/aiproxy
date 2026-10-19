@@ -1,4 +1,3 @@
-//nolint:testpackage // The task view fragments are checked against their internal Go forms.
 package model
 
 import (
@@ -44,14 +43,30 @@ func taskViewFixture(now time.Time) []taskViewRow {
 		return l
 	}
 	own := func(l Log, status AsyncUsageStatus, op string, age time.Duration) Log {
-		l.Code, l.AsyncUsageStatus, l.BillingOperationID, l.RequestAt = 202, status, EmptyNullString(op), at(age)
+		l.Code, l.AsyncUsageStatus, l.BillingOperationID, l.RequestAt = 202, status, EmptyNullString(
+			op,
+		), at(
+			age,
+		)
+
 		return l
 	}
 	chat := func(id string, code int, stage FailureStage, age time.Duration) Log {
 		return Log{
-			RequestID: EmptyNullString(id), GroupID: taskViewGroup, TokenID: 7, TokenName: "prod", Model: "gpt-4o",
-			Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", Code: code, FailureStage: stage,
-			RequestAt: at(age),
+			RequestID: EmptyNullString(
+				id,
+			),
+			GroupID:   taskViewGroup,
+			TokenID:   7,
+			TokenName: "prod",
+			Model:     "gpt-4o",
+			Mode: int(
+				mode.ChatCompletions,
+			),
+			Endpoint:     "/v1/chat/completions",
+			Code:         code,
+			FailureStage: stage,
+			RequestAt:    at(age),
 		}
 	}
 
@@ -70,16 +85,46 @@ func taskViewFixture(now time.Time) []taskViewRow {
 
 	return []taskViewRow{
 		// One native task; rejected retries share its X-Request-Id.
-		{"a-rejected-429-before", rejected(a, 429, FailureStageRateLimit, "too_many_active_tasks", 60*time.Minute)},
+		{
+			"a-rejected-429-before",
+			rejected(a, 429, FailureStageRateLimit, "too_many_active_tasks", 60*time.Minute),
+		},
 		{"a-own", own(a, AsyncUsageStatusCompleted, "native:job-a1234", 59*time.Minute)},
-		{"a-rejected-429-replay", rejected(a, 429, FailureStageRateLimit, "rate_limit_exceeded", 58*time.Minute)},
-		{"a-conflict-409", rejected(a, 409, FailureStageValidation, errorCodeRequestIDConflict, 57*time.Minute)},
-		{"a-other-key-429", rejected(otherKey, 429, FailureStageRateLimit, "too_many_active_tasks", 57*time.Minute)},
-		{"a-poll-404", Log{
-			RequestID: "job-a1234", GroupID: taskViewGroup, TokenID: 7, Code: 404, FailureStage: FailureStageValidation,
-			ErrorCode: "task_not_found", Endpoint: "GET /v1/model-tasks/job-a1234", RequestAt: at(56 * time.Minute),
-		}},
-		{"k-other-group-429", rejected(otherGroup, 429, FailureStageRateLimit, "too_many_active_tasks", 55*time.Minute)},
+		{
+			"a-rejected-429-replay",
+			rejected(a, 429, FailureStageRateLimit, "rate_limit_exceeded", 58*time.Minute),
+		},
+		{
+			"a-conflict-409",
+			rejected(a, 409, FailureStageValidation, errorCodeRequestIDConflict, 57*time.Minute),
+		},
+		{
+			"a-other-key-429",
+			rejected(otherKey, 429, FailureStageRateLimit, "too_many_active_tasks", 57*time.Minute),
+		},
+		{
+			"a-poll-404",
+			Log{
+				RequestID:    "job-a1234",
+				GroupID:      taskViewGroup,
+				TokenID:      7,
+				Code:         404,
+				FailureStage: FailureStageValidation,
+				ErrorCode:    "task_not_found",
+				Endpoint:     "GET /v1/model-tasks/job-a1234",
+				RequestAt:    at(56 * time.Minute),
+			},
+		},
+		{
+			"k-other-group-429",
+			rejected(
+				otherGroup,
+				429,
+				FailureStageRateLimit,
+				"too_many_active_tasks",
+				55*time.Minute,
+			),
+		},
 		// Failed after the hold, then resent with the same ID and accepted.
 		{"b-failed-after-hold-503", failedAfterHold(b, "native:job-b5678", 50*time.Minute)},
 		{"b-own", own(b, AsyncUsageStatusCompleted, "native:job-b5678", 49*time.Minute)},
@@ -87,63 +132,166 @@ func taskViewFixture(now time.Time) []taskViewRow {
 		{"c-failed-first", failedAfterHold(c, "native:job-c9012", 45*time.Minute)},
 		{"c-failed-second", failedAfterHold(c, "native:job-c9012", 44*time.Minute)},
 		// A 1-7 character ID: the failed submit has a timestamp request ID.
-		{"d-failed-short-id", failedAfterHold(native("1760000000000001"), "native:abc", 40*time.Minute)},
-		{"d-own-processing", own(native("abc"), AsyncUsageStatusPending, "native:abc", 39*time.Minute)},
+		{
+			"d-failed-short-id",
+			failedAfterHold(native("1760000000000001"), "native:abc", 40*time.Minute),
+		},
+		{
+			"d-own-processing",
+			own(native("abc"), AsyncUsageStatusPending, "native:abc", 39*time.Minute),
+		},
 		// Image task: a gate refused a submit before the handler (the ID is
 		// kept), the handler refused another (image-trace ID), a poll failed.
-		{"e-image-gate-429-same-id", Log{
-			RequestID: "img-e1234", GroupID: taskViewGroup, TokenID: 7, Endpoint: imageSubmitEndpoint,
-			Code: 429, FailureStage: FailureStageRateLimit, ErrorCode: "rate_limited", RequestAt: at(36 * time.Minute),
-		}},
-		{"e-image-own", Log{
-			RequestID: "img-e1234", GroupID: taskViewGroup, TokenID: 7, Model: "vendor/img",
-			Mode: int(mode.ImagesGenerations), Endpoint: imageTaskRowEndpoint, Code: 202,
-			AsyncUsageStatus: AsyncUsageStatusCompleted, BillingOperationID: "image:img-e1234", RequestAt: at(35 * time.Minute),
-		}},
-		{"e-image-trace-429", Log{
-			RequestID: "image-trace-1760000000000002", GroupID: taskViewGroup, TokenID: 7, Endpoint: imageSubmitEndpoint,
-			Code: 429, FailureStage: FailureStageRateLimit, ErrorCode: "too_many_active_tasks", RequestAt: at(34 * time.Minute),
-		}},
-		{"e-image-poll-404", Log{
-			RequestID: "image-poll-1760000000000003", GroupID: taskViewGroup, TokenID: 7, Code: 404,
-			FailureStage: FailureStageRouting, ErrorCode: "task_not_found", Endpoint: "GET /v1/images/tasks/img-e1234",
-			RequestAt: at(33 * time.Minute),
-		}},
+		{
+			"e-image-gate-429-same-id",
+			Log{
+				RequestID:    "img-e1234",
+				GroupID:      taskViewGroup,
+				TokenID:      7,
+				Endpoint:     imageSubmitEndpoint,
+				Code:         429,
+				FailureStage: FailureStageRateLimit,
+				ErrorCode:    "rate_limited",
+				RequestAt:    at(36 * time.Minute),
+			},
+		},
+		{
+			"e-image-own",
+			Log{
+				RequestID:          "img-e1234",
+				GroupID:            taskViewGroup,
+				TokenID:            7,
+				Model:              "vendor/img",
+				Mode:               int(mode.ImagesGenerations),
+				Endpoint:           imageTaskRowEndpoint,
+				Code:               202,
+				AsyncUsageStatus:   AsyncUsageStatusCompleted,
+				BillingOperationID: "image:img-e1234",
+				RequestAt:          at(35 * time.Minute),
+			},
+		},
+		{
+			"e-image-trace-429",
+			Log{
+				RequestID:    "image-trace-1760000000000002",
+				GroupID:      taskViewGroup,
+				TokenID:      7,
+				Endpoint:     imageSubmitEndpoint,
+				Code:         429,
+				FailureStage: FailureStageRateLimit,
+				ErrorCode:    "too_many_active_tasks",
+				RequestAt:    at(34 * time.Minute),
+			},
+		},
+		{
+			"e-image-poll-404",
+			Log{
+				RequestID:    "image-poll-1760000000000003",
+				GroupID:      taskViewGroup,
+				TokenID:      7,
+				Code:         404,
+				FailureStage: FailureStageRouting,
+				ErrorCode:    "task_not_found",
+				Endpoint:     "GET /v1/images/tasks/img-e1234",
+				RequestAt:    at(33 * time.Minute),
+			},
+		},
 		// A poll for an ID that was never a task.
-		{"f-poll-unknown-404", Log{
-			RequestID: "poll-unknown-1", GroupID: taskViewGroup, TokenID: 7, Code: 404, FailureStage: FailureStageValidation,
-			ErrorCode: "task_not_found", Endpoint: "GET /v1/model-tasks/nope", RequestAt: at(30 * time.Minute),
-		}},
+		{
+			"f-poll-unknown-404",
+			Log{
+				RequestID:    "poll-unknown-1",
+				GroupID:      taskViewGroup,
+				TokenID:      7,
+				Code:         404,
+				FailureStage: FailureStageValidation,
+				ErrorCode:    "task_not_found",
+				Endpoint:     "GET /v1/model-tasks/nope",
+				RequestAt:    at(30 * time.Minute),
+			},
+		},
 		// Sync calls: one row each, also when they reuse an X-Request-Id.
 		{"g-chat-ok", chat("chat-1", 200, FailureStageNone, 29*time.Minute)},
 		{"g-chat-upstream-502", chat("chat-2", 502, FailureStageUpstream, 28*time.Minute)},
 		{"g-chat-rejected-402", chat("chat-3", 402, FailureStageBalance, 27*time.Minute)},
 		{"g-chat-dup-first", chat("dup-1", 200, FailureStageNone, 26*time.Minute)},
 		{"g-chat-dup-second", chat("dup-1", 200, FailureStageNone, 25*time.Minute)},
-		{"h-video-processing", Log{
-			RequestID: "video-1", GroupID: taskViewGroup, TokenID: 7, Model: "sora-2", Mode: int(mode.Videos),
-			Endpoint: "/v1/videos", Code: 200, AsyncUsageStatus: AsyncUsageStatusPending, RequestAt: at(24 * time.Minute),
-		}},
-		{"m-video-poll-502", Log{
-			RequestID: "video-poll-1", GroupID: taskViewGroup, TokenID: 7, Model: "sora-2", Mode: int(mode.VideosGet),
-			Endpoint: "/v1/videos/video_1", Code: 502, FailureStage: FailureStageUpstream, RequestAt: at(23 * time.Minute),
-		}},
+		{
+			"h-video-processing",
+			Log{
+				RequestID:        "video-1",
+				GroupID:          taskViewGroup,
+				TokenID:          7,
+				Model:            "sora-2",
+				Mode:             int(mode.Videos),
+				Endpoint:         "/v1/videos",
+				Code:             200,
+				AsyncUsageStatus: AsyncUsageStatusPending,
+				RequestAt:        at(24 * time.Minute),
+			},
+		},
+		{
+			"m-video-poll-502",
+			Log{
+				RequestID:    "video-poll-1",
+				GroupID:      taskViewGroup,
+				TokenID:      7,
+				Model:        "sora-2",
+				Mode:         int(mode.VideosGet),
+				Endpoint:     "/v1/videos/video_1",
+				Code:         502,
+				FailureStage: FailureStageUpstream,
+				RequestAt:    at(23 * time.Minute),
+			},
+		},
 		// Before key usage P2 a failure after the hold had no op: rejected.
-		{"i-pre-p2-failed-503", rejected(native("job-i3456"), 503, FailureStageRouting, "native_execution_unavailable", 22*time.Minute)},
+		{
+			"i-pre-p2-failed-503",
+			rejected(
+				native("job-i3456"),
+				503,
+				FailureStageRouting,
+				"native_execution_unavailable",
+				22*time.Minute,
+			),
+		},
 		{"i-pre-p2-own", own(native("job-i3456"), AsyncUsageStatusCompleted, "", 21*time.Minute)},
 		// Pending for more than a day.
-		{"n-own-stale", own(native("job-n7890"), AsyncUsageStatusPending, "native:job-n7890", 25*time.Hour)},
+		{
+			"n-own-stale",
+			own(native("job-n7890"), AsyncUsageStatusPending, "native:job-n7890", 25*time.Hour),
+		},
 		// The task exists, but no row carries its op (released hold, crash or
 		// retention): its rejected attempts never fold.
-		{"x-rejected-429-no-visible-task", rejected(native("job-x2468"), 429, FailureStageRateLimit, "too_many_active_tasks", 17*time.Minute)},
+		{
+			"x-rejected-429-no-visible-task",
+			rejected(
+				native("job-x2468"),
+				429,
+				FailureStageRateLimit,
+				"too_many_active_tasks",
+				17*time.Minute,
+			),
+		},
 		// Internal demos: admin only.
 		{"cust-admin-demo-chat", adminDemoChat},
-		{"j-trial", Log{
-			RequestID: "trial_j1234", GroupID: "internal", TokenID: 9, TokenName: "trial_ops",
-			RequestSource: RequestSourceAdminDemo, Model: "vendor/flux", Mode: int(mode.NativeTasks),
-			Endpoint: "POST /api/native-trials", Code: 202, AsyncUsageStatus: AsyncUsageStatusCompleted,
-			BillingOperationID: "native:trial_j1234", RequestAt: at(20 * time.Minute),
-		}},
+		{
+			"j-trial",
+			Log{
+				RequestID:          "trial_j1234",
+				GroupID:            "internal",
+				TokenID:            9,
+				TokenName:          "trial_ops",
+				RequestSource:      RequestSourceAdminDemo,
+				Model:              "vendor/flux",
+				Mode:               int(mode.NativeTasks),
+				Endpoint:           "POST /api/native-trials",
+				Code:               202,
+				AsyncUsageStatus:   AsyncUsageStatusCompleted,
+				BillingOperationID: "native:trial_j1234",
+				RequestAt:          at(20 * time.Minute),
+			},
+		},
 		{"j-internal-demo-chat", internalDemoChat},
 		{"j-unknown-key-401", Log{
 			RequestID: "unknown-key-1", Code: 401, FailureStage: FailureStageAuth,
@@ -159,15 +307,30 @@ var (
 		"h-video-processing", "i-pre-p2-own", "legacy-null-mode-endpoint", "n-own-stale",
 	}
 	wantCustomerNonTask = []string{
-		"a-conflict-409", "a-other-key-429", "a-poll-404", "a-rejected-429-before", "a-rejected-429-replay",
-		"b-failed-after-hold-503", "c-failed-second", "d-failed-short-id",
-		"e-image-gate-429-same-id", "e-image-poll-404", "e-image-trace-429",
-		"f-poll-unknown-404", "g-chat-rejected-402", "i-pre-p2-failed-503", "m-video-poll-502",
+		"a-conflict-409",
+		"a-other-key-429",
+		"a-poll-404",
+		"a-rejected-429-before",
+		"a-rejected-429-replay",
+		"b-failed-after-hold-503",
+		"c-failed-second",
+		"d-failed-short-id",
+		"e-image-gate-429-same-id",
+		"e-image-poll-404",
+		"e-image-trace-429",
+		"f-poll-unknown-404",
+		"g-chat-rejected-402",
+		"i-pre-p2-failed-503",
+		"m-video-poll-502",
 		"x-rejected-429-no-visible-task",
 	}
 	wantAdminOnlyTasks   = []string{"cust-admin-demo-chat", "j-internal-demo-chat", "j-trial"}
 	wantAdminOnlyNonTask = []string{"j-unknown-key-401", "k-other-group-429"}
-	wantSuperseded       = []string{"b-failed-after-hold-503", "c-failed-second", "d-failed-short-id"}
+	wantSuperseded       = []string{
+		"b-failed-after-hold-503",
+		"c-failed-second",
+		"d-failed-short-id",
+	}
 )
 
 func sortedConcat(lists ...[]string) []string {
@@ -231,6 +394,7 @@ func (s taskViewSeed) labelsOf(t *testing.T, logs []*Log) []string {
 	for _, entry := range logs {
 		label, ok := s.labels[entry.ID]
 		require.True(t, ok, "unexpected log %d", entry.ID)
+
 		out = append(out, label)
 	}
 
@@ -270,13 +434,33 @@ func withTaskViewDBs(t *testing.T, fn func(t *testing.T, db *gorm.DB)) {
 			}
 		})
 
-		require.NoError(t, db.AutoMigrate(&Log{}, &RequestDetail{}, &Summary{}, &GroupSummary{}, &NativeTask{}, &ImageTask{}))
+		require.NoError(
+			t,
+			db.AutoMigrate(
+				&Log{},
+				&RequestDetail{},
+				&Summary{},
+				&GroupSummary{},
+				&NativeTask{},
+				&ImageTask{},
+			),
+		)
 		fn(t, db)
 	})
 
 	t.Run("postgres", func(t *testing.T) {
 		withTestPostgresStoreDB(t, func() {
-			require.NoError(t, LogDB.AutoMigrate(&Log{}, &RequestDetail{}, &Summary{}, &GroupSummary{}, &NativeTask{}, &ImageTask{}))
+			require.NoError(
+				t,
+				LogDB.AutoMigrate(
+					&Log{},
+					&RequestDetail{},
+					&Summary{},
+					&GroupSummary{},
+					&NativeTask{},
+					&ImageTask{},
+				),
+			)
 			fn(t, LogDB)
 		})
 	})
@@ -287,6 +471,8 @@ func TestTaskViewKinds(t *testing.T) {
 }
 
 func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
 	now := time.Now()
 	seed := seedTaskViewRows(t, db, now)
 	start, end := now.Add(-48*time.Hour), now.Add(time.Hour)
@@ -294,21 +480,34 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 	// The hand-written expectation and the Go forms agree.
 	customerTask := func(l *Log) bool { return l.GroupID == taskViewGroup && l.isTaskViewTask(false, seed.all) }
 	customerNonTask := func(l *Log) bool {
-		return l.GroupID == taskViewGroup && l.RequestSource != RequestSourceAdminDemo && !l.isTaskViewTask(false, seed.all)
+		return l.GroupID == taskViewGroup && l.RequestSource != RequestSourceAdminDemo &&
+			!l.isTaskViewTask(false, seed.all)
 	}
 	adminTask := func(l *Log) bool { return l.isTaskViewTask(true, seed.all) }
 
 	require.Equal(t, wantCustomerTasks, seed.goLabels(customerTask))
 	require.Equal(t, wantCustomerNonTask, seed.goLabels(customerNonTask))
 	require.Equal(t, sortedConcat(wantCustomerTasks, wantAdminOnlyTasks), seed.goLabels(adminTask))
-	require.Equal(t, wantSuperseded, seed.goLabels(func(l *Log) bool { return l.supersededAmong(seed.all) }))
+	require.Equal(
+		t,
+		wantSuperseded,
+		seed.goLabels(func(l *Log) bool { return l.supersededAmong(seed.all) }),
+	)
 
 	groupLogs := func(kind GroupLogKind, status CallStatus, requestID string, page, perPage int) *GetGroupLogsResult {
 		t.Helper()
 
 		result, err := GetGroupLogs(context.Background(), GroupLogQuery{
-			Group: taskViewGroup, Windowed: true, Start: start, End: end, Kind: kind, Status: status,
-			RequestID: requestID, Page: page, PerPage: perPage, Now: now,
+			Group:     taskViewGroup,
+			Windowed:  true,
+			Start:     start,
+			End:       end,
+			Kind:      kind,
+			Status:    status,
+			RequestID: requestID,
+			Page:      page,
+			PerPage:   perPage,
+			Now:       now,
 		})
 		require.NoError(t, err)
 
@@ -333,19 +532,36 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 		}
 	}
 
-	require.Equal(t, sortedConcat(wantCustomerTasks, wantCustomerNonTask), seed.labelsOf(t, visible))
+	require.Equal(
+		t,
+		sortedConcat(wantCustomerTasks, wantCustomerNonTask),
+		seed.labelsOf(t, visible),
+	)
 
 	// One native task with rejected retries under the same X-Request-Id is
 	// one task row; its attempts and its failed poll are in non_task.
-	require.Equal(t, []string{"a-own"}, seed.labelsOf(t, groupLogs(GroupLogKindTasks, "", "job-a1234", 1, 100).Logs))
-	require.Equal(t,
-		[]string{"a-conflict-409", "a-other-key-429", "a-poll-404", "a-rejected-429-before", "a-rejected-429-replay"},
+	require.Equal(
+		t,
+		[]string{"a-own"},
+		seed.labelsOf(t, groupLogs(GroupLogKindTasks, "", "job-a1234", 1, 100).Logs),
+	)
+	require.Equal(
+		t,
+		[]string{
+			"a-conflict-409",
+			"a-other-key-429",
+			"a-poll-404",
+			"a-rejected-429-before",
+			"a-rejected-429-replay",
+		},
 		seed.labelsOf(t, groupLogs(GroupLogKindNonTask, "", "job-a1234", 1, 100).Logs),
 	)
 
 	// Status filters the task rows.
 	for _, status := range []CallStatus{CallStatusSucceeded, CallStatusFailed, CallStatusProcessing, CallStatusUnknown} {
-		want := seed.goLabels(func(l *Log) bool { return customerTask(l) && l.CallStatus(now) == status })
+		want := seed.goLabels(
+			func(l *Log) bool { return customerTask(l) && l.CallStatus(now) == status },
+		)
 		require.NotEmpty(t, want, status)
 
 		result := groupLogs(GroupLogKindTasks, status, "", 1, 100)
@@ -372,7 +588,12 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 		}
 
 		require.Len(t, paged, int(total), kind)
-		require.Equal(t, seed.labelsOf(t, groupLogs(kind, "", "", 1, 100).Logs), seed.labelsOf(t, paged), kind)
+		require.Equal(
+			t,
+			seed.labelsOf(t, groupLogs(kind, "", "", 1, 100).Logs),
+			seed.labelsOf(t, paged),
+			kind,
+		)
 	}
 
 	// Admin: every row, trials and demos among tasks, unidentified callers
@@ -382,13 +603,49 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 
 		filter := OperationalLogFilter{Kind: kind, Now: now}
 		if group == "" {
-			result, err := GetLogs(start, end, "", "", "", 0, filter, "", CodeTypeAll, 0, false, "", "", 1, 100)
+			result, err := GetLogs(
+				start,
+				end,
+				"",
+				"",
+				"",
+				0,
+				filter,
+				"",
+				CodeTypeAll,
+				0,
+				false,
+				"",
+				"",
+				1,
+				100,
+			)
 			require.NoError(t, err)
 
 			return result
 		}
 
-		result, err := SearchLogs("", "", "", group, 0, "", "", start, end, 0, filter, "", CodeTypeAll, 0, false, "", "", 1, 100)
+		result, err := SearchLogs(
+			"",
+			"",
+			"",
+			group,
+			0,
+			"",
+			"",
+			start,
+			end,
+			0,
+			filter,
+			"",
+			CodeTypeAll,
+			0,
+			false,
+			"",
+			"",
+			1,
+			100,
+		)
 		require.NoError(t, err)
 
 		return result
@@ -404,10 +661,19 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 	result = adminLogs(AdminLogKindNonTask, "")
 	require.Equal(t, wantAdminNonTask, seed.labelsOf(t, result.Logs))
 	require.EqualValues(t, len(wantAdminNonTask), result.Total)
-	require.Len(t, seed.all, len(wantAdminTasks)+len(wantAdminNonTask), "admin tasks and non_task cover every row")
+	require.Len(
+		t,
+		seed.all,
+		len(wantAdminTasks)+len(wantAdminNonTask),
+		"admin tasks and non_task cover every row",
+	)
 
 	result = adminLogs(AdminLogKindTasks, taskViewGroup)
-	require.Equal(t, sortedConcat(wantCustomerTasks, []string{"cust-admin-demo-chat"}), seed.labelsOf(t, result.Logs))
+	require.Equal(
+		t,
+		sortedConcat(wantCustomerTasks, []string{"cust-admin-demo-chat"}),
+		seed.labelsOf(t, result.Logs),
+	)
 
 	result = adminLogs(AdminLogKindNonTask, taskViewGroup)
 	require.Equal(t, wantCustomerNonTask, seed.labelsOf(t, result.Logs))
@@ -423,12 +689,30 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 	)
 
 	// unit=tasks: superseded rows drop out of the counts; nothing else moves.
-	requests, err := GetGroupCallTotals(context.Background(), taskViewGroup, start, end, now, CallUnitRequests)
+	requests, err := GetGroupCallTotals(
+		context.Background(),
+		taskViewGroup,
+		start,
+		end,
+		now,
+		CallUnitRequests,
+	)
 	require.NoError(t, err)
-	tasksTotals, err := GetGroupCallTotals(context.Background(), taskViewGroup, start, end, now, CallUnitTasks)
+	tasksTotals, err := GetGroupCallTotals(
+		context.Background(),
+		taskViewGroup,
+		start,
+		end,
+		now,
+		CallUnitTasks,
+	)
 	require.NoError(t, err)
 
-	require.Equal(t, requests.Totals.Requests-int64(len(wantSuperseded)), tasksTotals.Totals.Requests)
+	require.Equal(
+		t,
+		requests.Totals.Requests-int64(len(wantSuperseded)),
+		tasksTotals.Totals.Requests,
+	)
 	require.Equal(t, requests.Totals.Failed-int64(len(wantSuperseded)), tasksTotals.Totals.Failed)
 	require.Equal(t, requests.Totals.Succeeded, tasksTotals.Totals.Succeeded)
 	require.Equal(t, requests.Totals.Rejected, tasksTotals.Totals.Rejected)
@@ -440,9 +724,25 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 	require.EqualValues(t, tasks.Total, unrejected)
 
 	// Counts per key: the failed-then-resent submit of key 11 is one task.
-	byRequest, err := GetGroupKeyCallStats(context.Background(), taskViewGroup, []int{11, 7}, start, end, now, CallUnitRequests)
+	byRequest, err := GetGroupKeyCallStats(
+		context.Background(),
+		taskViewGroup,
+		[]int{11, 7},
+		start,
+		end,
+		now,
+		CallUnitRequests,
+	)
 	require.NoError(t, err)
-	byTask, err := GetGroupKeyCallStats(context.Background(), taskViewGroup, []int{11, 7}, start, end, now, CallUnitTasks)
+	byTask, err := GetGroupKeyCallStats(
+		context.Background(),
+		taskViewGroup,
+		[]int{11, 7},
+		start,
+		end,
+		now,
+		CallUnitTasks,
+	)
 	require.NoError(t, err)
 
 	require.EqualValues(t, 2, byRequest[0].Requests)
@@ -452,7 +752,12 @@ func assertTaskViewKinds(t *testing.T, db *gorm.DB) {
 	require.EqualValues(t, 0, byTask[0].Failed)
 	require.EqualValues(t, 1, byTask[0].Succeeded)
 	require.Equal(t, byRequest[0].LastRequestAt, byTask[0].LastRequestAt, "last used stays per row")
-	require.Equal(t, byRequest[1].Requests-2, byTask[1].Requests, "key 7 loses c-failed-second and d-failed-short-id")
+	require.Equal(
+		t,
+		byRequest[1].Requests-2,
+		byTask[1].Requests,
+		"key 7 loses c-failed-second and d-failed-short-id",
+	)
 	require.Equal(t, byRequest[1].Rejected, byTask[1].Rejected)
 }
 
@@ -463,8 +768,10 @@ func TestTaskViewSQLMatchesGo(t *testing.T) {
 }
 
 func assertTaskViewSQLMatchesGo(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
 	now := time.Now()
-	rows := []Log{}
+	rows := make([]Log, 0, 3840)
 
 	for _, group := range []string{"g", "h"} {
 		for _, endpoint := range []EmptyNullString{nativeSubmitEndpoint, imageSubmitEndpoint, imageTaskRowEndpoint, "", "GET /v1/model-tasks/x"} {
@@ -475,10 +782,19 @@ func assertTaskViewSQLMatchesGo(t *testing.T, db *gorm.DB) {
 							for _, source := range []string{RequestSourceAPI, RequestSourceAdminDemo} {
 								for _, tokenID := range []int{0, 7} {
 									rows = append(rows, Log{
-										GroupID: group, TokenID: tokenID, Code: code, AsyncUsageStatus: async,
-										FailureStage: stage, Mode: int(mode.NativeTasks), Endpoint: endpoint,
-										RequestSource: source, BillingOperationID: op,
-										RequestAt: now.Add(-time.Hour), CreatedAt: now.Add(-time.Hour),
+										GroupID:            group,
+										TokenID:            tokenID,
+										Code:               code,
+										AsyncUsageStatus:   async,
+										FailureStage:       stage,
+										Mode:               int(mode.NativeTasks),
+										Endpoint:           endpoint,
+										RequestSource:      source,
+										BillingOperationID: op,
+										RequestAt: now.Add(
+											-time.Hour,
+										),
+										CreatedAt: now.Add(-time.Hour),
 									})
 								}
 							}
@@ -495,10 +811,19 @@ func assertTaskViewSQLMatchesGo(t *testing.T, db *gorm.DB) {
 	// group: the hold needs one.
 	for _, column := range []string{"endpoint", "async_usage_status", "billing_operation_id", "request_source", "mode", "token_id", "group_id"} {
 		values := map[string]any{
-			"group_id": "g", "token_id": 7, "code": 503, "async_usage_status": 0,
-			"mode": int(mode.NativeTasks), "endpoint": nativeSubmitEndpoint, "request_source": RequestSourceAPI,
-			"failure_stage": string(FailureStageRouting), "billing_operation_id": "native:o1",
-			"request_at": now, "created_at": now,
+			"group_id":           "g",
+			"token_id":           7,
+			"code":               503,
+			"async_usage_status": 0,
+			"mode": int(
+				mode.NativeTasks,
+			),
+			"endpoint":             nativeSubmitEndpoint,
+			"request_source":       RequestSourceAPI,
+			"failure_stage":        string(FailureStageRouting),
+			"billing_operation_id": "native:o1",
+			"request_at":           now,
+			"created_at":           now,
 		}
 		if column == "group_id" {
 			values["billing_operation_id"] = "native:null-group"
@@ -513,7 +838,7 @@ func assertTaskViewSQLMatchesGo(t *testing.T, db *gorm.DB) {
 	supersededSQL, supersededArgs := supersededExpr()
 	nonTaskSQL, nonTaskArgs := taskViewNonTaskExpr(false, now)
 
-	args := []any{}
+	args := make([]any, 0, len(customerArgs)+len(adminArgs)+len(supersededArgs)+len(nonTaskArgs))
 	args = append(args, customerArgs...)
 	args = append(args, adminArgs...)
 	args = append(args, supersededArgs...)
@@ -571,8 +896,14 @@ func assertTaskViewSQLMatchesGo(t *testing.T, db *gorm.DB) {
 		taskSQL, taskArgs := taskViewTaskExpr(admin, now)
 
 		var inTask, notTask int64
-		require.NoError(t, db.Model(&Log{}).Where("("+taskSQL+")", taskArgs...).Count(&inTask).Error)
-		require.NoError(t, db.Model(&Log{}).Where("NOT ("+taskSQL+")", taskArgs...).Count(&notTask).Error)
+		require.NoError(
+			t,
+			db.Model(&Log{}).Where("("+taskSQL+")", taskArgs...).Count(&inTask).Error,
+		)
+		require.NoError(
+			t,
+			db.Model(&Log{}).Where("NOT ("+taskSQL+")", taskArgs...).Count(&notTask).Error,
+		)
 		require.EqualValues(t, len(stored), inTask+notTask, "admin=%v", admin)
 	}
 }
@@ -586,12 +917,15 @@ func (l *Log) foldableAmong(lane taskLane, tasks []taskRef, peers []*Log) bool {
 	}
 
 	if string(l.Endpoint) != endpoint || l.AsyncUsageStatus != AsyncUsageStatusNone ||
-		l.CallStatus(time.Now()) != CallStatusRejected || l.ErrorCode == errorCodeRequestIDConflict {
+		l.CallStatus(
+			time.Now(),
+		) != CallStatusRejected || l.ErrorCode == errorCodeRequestIDConflict {
 		return false
 	}
 
 	for _, task := range tasks {
-		if task.ID != string(l.RequestID) || task.GroupID != l.GroupID || task.TokenID != l.TokenID {
+		if task.ID != string(l.RequestID) || task.GroupID != l.GroupID ||
+			task.TokenID != l.TokenID {
 			continue
 		}
 
@@ -628,16 +962,24 @@ func seedTaskTables(t *testing.T, db *gorm.DB) ([]taskRef, []taskRef) {
 	}
 	for _, ref := range natives {
 		require.NoError(t, db.Create(&NativeTask{
-			ID: ref.ID, GroupID: ref.GroupID, TokenID: ref.TokenID, BillingOperationID: ref.BillingOperationID,
-			Model: "vendor/flux", Status: "completed",
+			ID:                 ref.ID,
+			GroupID:            ref.GroupID,
+			TokenID:            ref.TokenID,
+			BillingOperationID: ref.BillingOperationID,
+			Model:              "vendor/flux",
+			Status:             "completed",
 		}).Error, ref.ID)
 	}
 
 	images := []taskRef{{"img-e1234", taskViewGroup, 7, "image:img-e1234"}}
 	for _, ref := range images {
 		require.NoError(t, db.Create(&ImageTask{
-			ID: ref.ID, GroupID: ref.GroupID, TokenID: ref.TokenID, BillingOperationID: ref.BillingOperationID,
-			Model: "vendor/img", Status: "succeeded",
+			ID:                 ref.ID,
+			GroupID:            ref.GroupID,
+			TokenID:            ref.TokenID,
+			BillingOperationID: ref.BillingOperationID,
+			Model:              "vendor/img",
+			Status:             "succeeded",
 		}).Error, ref.ID)
 	}
 
@@ -649,6 +991,8 @@ func TestTaskRequests(t *testing.T) {
 }
 
 func assertTaskRequests(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
 	now := time.Now()
 	seed := seedTaskViewRows(t, db, now)
 	natives, images := seedTaskTables(t, db)
@@ -674,12 +1018,21 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 
 	foldSQL, foldArgs := foldableExpr(taskLaneNative, now)
 	require.NoError(t, db.Model(&Log{}).Where(foldSQL, foldArgs...).Find(&folded).Error)
-	require.Equal(t, []string{"a-rejected-429-before", "a-rejected-429-replay"}, seed.labelsOf(t, folded))
+	require.Equal(
+		t,
+		[]string{"a-rejected-429-before", "a-rejected-429-replay"},
+		seed.labelsOf(t, folded),
+	)
 
 	related := func(label string) *TaskRequests {
 		t.Helper()
 
-		result, err := GetTaskRequests(context.Background(), seed.rows[label].GroupID, seed.rows[label].ID, now)
+		result, err := GetTaskRequests(
+			context.Background(),
+			seed.rows[label].GroupID,
+			seed.rows[label].ID,
+			now,
+		)
 		require.NoError(t, err, label)
 		require.Equal(t, seed.rows[label].ID, result.Task.ID)
 
@@ -693,7 +1046,7 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 	}
 
 	attemptsOf := func(result *TaskRequests) []attempt {
-		out := []attempt{}
+		out := make([]attempt, 0, len(result.Attempts))
 		for _, entry := range result.Attempts {
 			out = append(out, attempt{seed.labels[entry.Log.ID], entry.Relation, entry.Hint})
 		}
@@ -711,10 +1064,22 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 	}, attemptsOf(result))
 
 	// The submit that failed after the hold, found by op.
-	require.Equal(t, []attempt{{"b-failed-after-hold-503", TaskRequestFailedSubmit, ""}}, attemptsOf(related("b-own")))
-	require.Equal(t, []attempt{{"c-failed-second", TaskRequestFailedSubmit, ""}}, attemptsOf(related("c-failed-first")))
+	require.Equal(
+		t,
+		[]attempt{{"b-failed-after-hold-503", TaskRequestFailedSubmit, ""}},
+		attemptsOf(related("b-own")),
+	)
+	require.Equal(
+		t,
+		[]attempt{{"c-failed-second", TaskRequestFailedSubmit, ""}},
+		attemptsOf(related("c-failed-first")),
+	)
 	// A 1-7 character ID: the failed submit's request ID is a timestamp.
-	require.Equal(t, []attempt{{"d-failed-short-id", TaskRequestFailedSubmit, ""}}, attemptsOf(related("d-own-processing")))
+	require.Equal(
+		t,
+		[]attempt{{"d-failed-short-id", TaskRequestFailedSubmit, ""}},
+		attemptsOf(related("d-own-processing")),
+	)
 	// Image: a gate rejection that kept the ID folds; image-trace rows never.
 	require.Equal(t,
 		[]attempt{{"e-image-gate-429-same-id", TaskRequestRejected, TaskRequestHintBeforeSubmit}},
@@ -724,7 +1089,12 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 	require.Empty(t, related("j-trial").Attempts)
 
 	for _, label := range []string{"g-chat-ok", "a-rejected-429-before", "b-failed-after-hold-503", "h-video-processing", "a-poll-404"} {
-		_, err := GetTaskRequests(context.Background(), seed.rows[label].GroupID, seed.rows[label].ID, now)
+		_, err := GetTaskRequests(
+			context.Background(),
+			seed.rows[label].GroupID,
+			seed.rows[label].ID,
+			now,
+		)
 		require.ErrorIs(t, err, ErrNotTaskRow, label)
 	}
 
@@ -749,8 +1119,14 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.CreateInBatches(&manyRows, 100).Error)
 
 	manyTasks, err := GetGroupLogs(context.Background(), GroupLogQuery{
-		Group: "many", Windowed: true, Start: now.Add(-3 * time.Hour), End: now, Kind: GroupLogKindTasks,
-		Page: 1, PerPage: 100, Now: now,
+		Group:    "many",
+		Windowed: true,
+		Start:    now.Add(-3 * time.Hour),
+		End:      now,
+		Kind:     GroupLogKindTasks,
+		Page:     1,
+		PerPage:  100,
+		Now:      now,
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, manyTasks.Total)
@@ -758,8 +1134,14 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 	require.Equal(t, manyRows[0].ID, manyTasks.Logs[0].ID)
 
 	manyNonTask, err := GetGroupLogs(context.Background(), GroupLogQuery{
-		Group: "many", Windowed: true, Start: now.Add(-3 * time.Hour), End: now, Kind: GroupLogKindNonTask,
-		Page: 1, PerPage: 10, Now: now,
+		Group:    "many",
+		Windowed: true,
+		Start:    now.Add(-3 * time.Hour),
+		End:      now,
+		Kind:     GroupLogKindNonTask,
+		Page:     1,
+		PerPage:  10,
+		Now:      now,
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, many-1, manyNonTask.Total)
@@ -775,9 +1157,18 @@ func assertTaskRequests(t *testing.T, db *gorm.DB) {
 	for index := range taskRequestsLimit + 5 {
 		requestAt := now.Add(-time.Hour + time.Duration(index)*time.Second)
 		rejectedRows = append(rejectedRows, Log{
-			RequestID: "job-a1234", GroupID: taskViewGroup, TokenID: 7, Mode: int(mode.NativeTasks),
-			Endpoint: nativeSubmitEndpoint, Code: 429, FailureStage: FailureStageRateLimit,
-			ErrorCode: "rate_limit_exceeded" + strconv.Itoa(index%2), RequestAt: requestAt, CreatedAt: requestAt,
+			RequestID:    "job-a1234",
+			GroupID:      taskViewGroup,
+			TokenID:      7,
+			Mode:         int(mode.NativeTasks),
+			Endpoint:     nativeSubmitEndpoint,
+			Code:         429,
+			FailureStage: FailureStageRateLimit,
+			ErrorCode: "rate_limit_exceeded" + strconv.Itoa(
+				index%2,
+			),
+			RequestAt: requestAt,
+			CreatedAt: requestAt,
 		})
 	}
 
@@ -831,6 +1222,7 @@ func TestTaskViewStorageReady(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
 		withTestPostgresStoreDB(t, func() {
 			ctx := context.Background()
+
 			require.NoError(t, LogDB.AutoMigrate(&Log{}))
 
 			// Postgres gets the usage attribution indexes only from the

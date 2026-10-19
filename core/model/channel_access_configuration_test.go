@@ -1,23 +1,36 @@
+//nolint:testpackage // White-box regression exercises private model or runtime invariants.
 package model
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestAccessConfigurationIdempotentCreationAndEmptyRouting(t *testing.T) {
 	db, _ := routingFixture(t, true)
 	require.NoError(t, db.AutoMigrate(&ChannelAccessConfiguration{}))
+
 	makeChannel := func() *Channel {
-		return &Channel{Name: strings.Repeat("测", 64), Type: ChannelTypeOpenAI, Key: "synthetic-access-key", BaseURL: "https://example.invalid", Status: ChannelStatusEnabled, Models: []string{}, ModelMapping: map[string]string{}, Sets: []string{"default"}}
+		return &Channel{
+			Name:         strings.Repeat("测", 64),
+			Type:         ChannelTypeOpenAI,
+			Key:          "synthetic-access-key",
+			BaseURL:      "https://example.invalid",
+			Status:       ChannelStatusEnabled,
+			Models:       []string{},
+			ModelMapping: map[string]string{},
+			Sets:         []string{"default"},
+		}
 	}
 	receipt, e := EnsureAccessConfiguration(context.Background(), "access-1", makeChannel())
 	require.NoError(t, e)
 	replay, e := EnsureAccessConfiguration(context.Background(), "access-1", makeChannel())
 	require.NoError(t, e)
 	require.Equal(t, receipt, replay)
+
 	var n int64
 	require.NoError(t, db.Model(&ChannelAccessConfiguration{}).Count(&n).Error)
 	require.EqualValues(t, 1, n)
@@ -28,6 +41,7 @@ func TestAccessConfigurationIdempotentCreationAndEmptyRouting(t *testing.T) {
 	q.Routing.ModelMapping = map[string]string{"route-test": "upstream"}
 	added := PatchChannelRouting(context.Background(), receipt.Identity.ChannelID, q)
 	require.Equal(t, "ready", added.State)
+
 	replay, e = EnsureAccessConfiguration(context.Background(), "access-1", makeChannel())
 	require.NoError(t, e)
 	require.Equal(t, receipt, replay)
@@ -38,24 +52,40 @@ func TestAccessConfigurationIdempotentCreationAndEmptyRouting(t *testing.T) {
 	restored := PatchChannelRouting(context.Background(), receipt.Identity.ChannelID, undo)
 	require.Equal(t, "ready", restored.State)
 	require.Empty(t, restored.Snapshot.Routing.Models)
+
 	bad := makeChannel()
 	bad.Key = "different-synthetic-key"
 	_, e = EnsureAccessConfiguration(context.Background(), "access-1", bad)
 	require.Error(t, e)
-	require.NoError(t, db.Model(&Channel{}).Where("id=?", receipt.Identity.ChannelID).UpdateColumn("status", ChannelStatusDisabled).Error)
+	require.NoError(
+		t,
+		db.Model(&Channel{}).
+			Where("id=?", receipt.Identity.ChannelID).
+			UpdateColumn("status", ChannelStatusDisabled).
+			Error,
+	)
+
 	_, e = EnsureAccessConfiguration(context.Background(), "access-1", makeChannel())
 	require.NoError(t, e)
+
 	var stopped Channel
 	require.NoError(t, db.First(&stopped, receipt.Identity.ChannelID).Error)
 	require.Equal(t, ChannelStatusDisabled, stopped.Status)
 	require.NoError(t, db.Delete(&stopped).Error)
+
 	_, e = EnsureAccessConfiguration(context.Background(), "access-1", makeChannel())
 	require.Error(t, e) // never resurrect deleted IDs
 }
+
 func TestAccessConfigurationFailsClosedWithoutStorageAndRejectsLegacyClear(t *testing.T) {
 	db, ch := routingFixture(t, true)
-	_, e := EnsureAccessConfiguration(context.Background(), "new-access", &Channel{Name: "test", Type: ChannelTypeOpenAI, Key: "synthetic-key", Status: 1})
+	_, e := EnsureAccessConfiguration(
+		context.Background(),
+		"new-access",
+		&Channel{Name: "test", Type: ChannelTypeOpenAI, Key: "synthetic-key", Status: 1},
+	)
 	require.Error(t, e)
+
 	var n int64
 	require.NoError(t, db.Model(&Channel{}).Count(&n).Error)
 	require.EqualValues(t, 1, n)

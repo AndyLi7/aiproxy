@@ -1,4 +1,4 @@
-package imageprepayment
+package imageprepayment_test
 
 import (
 	"encoding/json"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/failover"
+	"github.com/labring/aiproxy/core/common/imageprepayment"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
 )
@@ -22,19 +23,28 @@ type fakeWallet struct {
 }
 
 func (w *fakeWallet) serve(t *testing.T) *httptest.Server {
+	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		var c balance.PrepaymentCommand
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			t.Errorf("decode wallet command: %v", err)
 		}
+
 		action := c.Action
 		if c.Outcome != nil {
 			action += ":" + c.Outcome.Kind + "/" + c.Outcome.Reason
 		}
+
 		w.mu.Lock()
 		w.actions = append(w.actions, action)
 		w.mu.Unlock()
-		_, _ = rw.Write([]byte(`{"code":0,"data":{"id":"op","status":"refunded","prepaidMicros":600000,"chargedMicros":0,"refundMicros":600000}}`))
+
+		_, _ = rw.Write(
+			[]byte(
+				`{"code":0,"data":{"id":"op","status":"refunded","prepaidMicros":600000,"chargedMicros":0,"refundMicros":600000}}`,
+			),
+		)
 	}))
 }
 
@@ -45,6 +55,7 @@ func TestSyncRefundsGenerationTimeoutInOneCall(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+
 	oldDB, oldBalance := model.LogDB, balance.Default
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB, balance.Default = oldDB, oldBalance })
@@ -57,22 +68,37 @@ func TestSyncRefundsGenerationTimeoutInOneCall(t *testing.T) {
 	} {
 		t.Run(code, func(t *testing.T) {
 			wallet := &fakeWallet{}
+
 			server := wallet.serve(t)
 			defer server.Close()
+
 			balance.Default = balance.NewExternalHTTP(server.URL, "test")
 			task := &model.ImageTask{
-				ID: "task-" + code, GroupID: "g", TokenID: 1, Status: "failed", UpstreamID: "upstream",
-				BillingOperationID: "op", PrepaymentQuoteJSON: `{"version":1}`,
-				Attempts: []model.ImageTaskAttempt{{Failure: failover.Failure{Acceptance: failover.Accepted}}},
-				Error:    &model.ImageTaskError{Code: code},
+				ID:                  "task-" + code,
+				GroupID:             "g",
+				TokenID:             1,
+				Status:              "failed",
+				UpstreamID:          "upstream",
+				BillingOperationID:  "op",
+				PrepaymentQuoteJSON: `{"version":1}`,
+				Attempts: []model.ImageTaskAttempt{
+					{Failure: failover.Failure{Acceptance: failover.Accepted}},
+				},
+				Error: &model.ImageTaskError{Code: code},
 			}
 			require.NoError(t, db.Create(task).Error)
-			receipt, err := Sync(t.Context(), task)
+			receipt, err := imageprepayment.Sync(t.Context(), task)
 			require.NoError(t, err)
 			require.Equal(t, "refunded", receipt.Status)
 			require.Equal(t, want, wallet.actions)
+
 			for _, action := range wallet.actions {
-				require.NotContains(t, action, model.AsyncGenerationTimeoutCode, "the wallet reason stays platform_failure")
+				require.NotContains(
+					t,
+					action,
+					model.AsyncGenerationTimeoutCode,
+					"the wallet reason stays platform_failure",
+				)
 			}
 		})
 	}
@@ -85,21 +111,31 @@ func TestSyncRefundsUnconfirmedGenerationTimeoutInOneCall(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+
 	oldDB, oldBalance := model.LogDB, balance.Default
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB, balance.Default = oldDB, oldBalance })
+
 	wallet := &fakeWallet{}
+
 	server := wallet.serve(t)
 	defer server.Close()
+
 	balance.Default = balance.NewExternalHTTP(server.URL, "test")
 	task := &model.ImageTask{
-		ID: "unconfirmed", GroupID: "g", TokenID: 1, Status: "failed",
-		BillingOperationID: "op", PrepaymentQuoteJSON: `{"version":1}`,
-		Attempts: []model.ImageTaskAttempt{{Failure: failover.Failure{Acceptance: failover.Unknown}}},
-		Error:    &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode},
+		ID:                  "unconfirmed",
+		GroupID:             "g",
+		TokenID:             1,
+		Status:              "failed",
+		BillingOperationID:  "op",
+		PrepaymentQuoteJSON: `{"version":1}`,
+		Attempts: []model.ImageTaskAttempt{
+			{Failure: failover.Failure{Acceptance: failover.Unknown}},
+		},
+		Error: &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode},
 	}
 	require.NoError(t, db.Create(task).Error)
-	receipt, err := Sync(t.Context(), task)
+	receipt, err := imageprepayment.Sync(t.Context(), task)
 	require.NoError(t, err)
 	require.Equal(t, "refunded", receipt.Status)
 	require.Equal(t, []string{"settle:failed/platform_failure", "get"}, wallet.actions)
@@ -114,9 +150,11 @@ func TestSyncClosesBillingOnlyWhenTheWalletConfirmsNoHold(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+
 	oldDB, oldBalance := model.LogDB, balance.Default
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB, balance.Default = oldDB, oldBalance })
+
 	const appNotFound = `{"code":-1,"message":"Prepayment not found"}`
 	for _, tc := range []struct {
 		name, body string
@@ -130,31 +168,47 @@ func TestSyncClosesBillingOnlyWhenTheWalletConfirmsNoHold(t *testing.T) {
 		{"an attempt was claimed", appNotFound, 2 * time.Hour, []model.ImageTaskAttempt{{Failure: failover.Failure{Acceptance: failover.Unknown}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var mu sync.Mutex
-			var actions []string
-			server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-				var c balance.PrepaymentCommand
-				if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-					t.Errorf("decode wallet command: %v", err)
-				}
-				mu.Lock()
-				actions = append(actions, c.Action)
-				mu.Unlock()
-				rw.WriteHeader(http.StatusNotFound)
-				_, _ = rw.Write([]byte(tc.body))
-			}))
+			var (
+				mu      sync.Mutex
+				actions []string
+			)
+
+			server := httptest.NewServer(
+				http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					var c balance.PrepaymentCommand
+					if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+						t.Errorf("decode wallet command: %v", err)
+					}
+
+					mu.Lock()
+
+					actions = append(actions, c.Action)
+					mu.Unlock()
+					rw.WriteHeader(http.StatusNotFound)
+					_, _ = rw.Write([]byte(tc.body))
+				}),
+			)
 			defer server.Close()
+
 			balance.Default = balance.NewExternalHTTP(server.URL, "test")
 			failedAt := time.Now().Add(-tc.failedAgo)
 			task := &model.ImageTask{
-				ID: "never-held-" + tc.name, GroupID: "g", TokenID: 1, Status: "failed", CompletedAt: &failedAt,
-				BillingOperationID: "op", PrepaymentQuoteJSON: `{"version":1}`, Attempts: tc.attempts,
-				Error: &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode},
+				ID:                  "never-held-" + tc.name,
+				GroupID:             "g",
+				TokenID:             1,
+				Status:              "failed",
+				CompletedAt:         &failedAt,
+				BillingOperationID:  "op",
+				PrepaymentQuoteJSON: `{"version":1}`,
+				Attempts:            tc.attempts,
+				Error:               &model.ImageTaskError{Code: model.AsyncGenerationTimeoutCode},
 			}
 			require.NoError(t, db.Create(task).Error)
-			_, err := Sync(t.Context(), task)
+			_, err := imageprepayment.Sync(t.Context(), task)
+
 			var saved model.ImageTask
 			require.NoError(t, db.First(&saved, "id = ?", task.ID).Error)
+
 			if tc.closed {
 				require.NoError(t, err)
 				require.Equal(t, []string{"settle"}, actions)

@@ -39,10 +39,10 @@ type AsyncUsageInfo struct {
 	// Server-owned admission snapshot; never accepted from public JSON requests.
 	InternalImageTask bool   `json:"-"`
 	MeasuredImage     bool   `json:"measured_image,omitempty"`
-	ID                int    `json:"id"                                       gorm:"primaryKey"`
-	RequestID         string `json:"request_id"                               gorm:"type:varchar(128);index"`
+	ID                int    `json:"id"                       gorm:"primaryKey"`
+	RequestID         string `json:"request_id"               gorm:"type:varchar(128);index"`
 	// Persist before settlement; empty on pre-upgrade rows to preserve prior debit keys.
-	BillingOperationID          string           `json:"-" gorm:"type:varchar(128)"`
+	BillingOperationID          string           `json:"-"                                        gorm:"type:varchar(128)"`
 	RequestAt                   time.Time        `json:"request_at"`
 	Mode                        int              `json:"mode"                                     gorm:"index"`
 	Model                       string           `json:"model"                                    gorm:"size:128"`
@@ -146,7 +146,11 @@ func GetPendingAsyncUsagesDue(
 	return GetPendingAsyncUsagesDueContext(context.Background(), limit, now)
 }
 
-func GetPendingAsyncUsagesDueContext(ctx context.Context, limit int, now time.Time) ([]*AsyncUsageInfo, error) {
+func GetPendingAsyncUsagesDueContext(
+	ctx context.Context,
+	limit int,
+	now time.Time,
+) ([]*AsyncUsageInfo, error) {
 	var infos []*AsyncUsageInfo
 
 	err := LogDB.WithContext(ctx).
@@ -172,10 +176,16 @@ func TryClaimAsyncUsageInfo(
 	return TryClaimAsyncUsageInfoContext(context.Background(), info, token, leaseUntil, now)
 }
 
-func TryClaimAsyncUsageInfoContext(ctx context.Context, info *AsyncUsageInfo, token string, leaseUntil, now time.Time) (bool, error) {
+func TryClaimAsyncUsageInfoContext(
+	ctx context.Context,
+	info *AsyncUsageInfo,
+	token string,
+	leaseUntil, now time.Time,
+) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+
 	if info == nil || info.ID == 0 || token == "" {
 		return false, nil
 	}
@@ -183,6 +193,7 @@ func TryClaimAsyncUsageInfoContext(ctx context.Context, info *AsyncUsageInfo, to
 	if handled, won, err := tryClaimMeasured(ctx, info, token, leaseUntil, now); handled {
 		return won, err
 	}
+
 	if handled, won, err := tryClaimImagePoll(ctx, info, token, leaseUntil, now); handled {
 		return won, err
 	}
@@ -225,79 +236,113 @@ var errAsyncUsageRenewalExpired = errors.New("async usage renewal expired")
 // deadline remains the authorization boundary through the final write check;
 // the proposed new deadline cannot revive an expired owner. Each successful
 // same-token renewal becomes the next renewal's original deadline.
-func RenewAsyncUsageClaimContext(ctx context.Context, id int, token string, leaseUntil time.Time) (bool, error) {
+func RenewAsyncUsageClaimContext(
+	ctx context.Context,
+	id int,
+	token string,
+	leaseUntil time.Time,
+) (bool, error) {
 	if id == 0 || token == "" || leaseUntil.IsZero() {
 		return false, nil
 	}
+
 	if LogDB == nil {
 		return false, errors.New("async usage database unavailable")
 	}
+
 	renewed := false
+
 	err := LogDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var e error
+
 		renewed, e = renewAsyncUsageClaimTx(tx, id, token, leaseUntil)
 		return e
 	}, claimTxOptions(LogDB)...)
 	if errors.Is(err, errAsyncUsageRenewalExpired) {
 		return false, nil
 	}
+
 	return renewed && err == nil, err
 }
+
 func renewAsyncUsageClaimTx(tx *gorm.DB, id int, token string, leaseUntil time.Time) (bool, error) {
 	clock, err := asyncUsageLeaseClockSQL(tx)
 	if err != nil {
 		return false, err
 	}
+
 	precision := time.Microsecond
 	// Existing MySQL DATETIME(3) must receive exactly representable values.
-	if tx.Dialector.Name() == "mysql" {
+	if tx.Name() == "mysql" {
 		precision = time.Millisecond
 	}
+
 	leaseUntil = leaseUntil.UTC().Truncate(precision)
+
 	var current AsyncUsageInfo
-	e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND status=? AND processing_token=?", id, AsyncUsageStatusPending, token).First(&current).Error
+
+	e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id=? AND status=? AND processing_token=?", id, AsyncUsageStatusPending, token).
+		First(&current).
+		Error
 	if errors.Is(e, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
+
 	if e != nil {
 		return false, e
 	}
+
 	var now int64
 	if e = tx.Raw("SELECT " + clock).Scan(&now).Error; e != nil {
 		return false, e
 	}
+
 	if now <= 0 {
 		return false, errors.New("async usage database clock unavailable")
 	}
 	// Reject equal/shorter proposals too: renewal must not shorten a valid lease.
-	if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now || !leaseUntil.After(current.NextPollAt) {
+	if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now ||
+		!leaseUntil.After(current.NextPollAt) {
 		return false, nil
 	}
+
 	priorDeadline := current.NextPollAt.UnixMilli()
-	result := tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", id, AsyncUsageStatusPending, token, current.NextPollAt).Updates(map[string]any{"next_poll_at": leaseUntil, "updated_at": time.UnixMilli(now).UTC()})
+
+	result := tx.Model(&AsyncUsageInfo{}).
+		Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", id, AsyncUsageStatusPending, token, current.NextPollAt).
+		Updates(map[string]any{"next_poll_at": leaseUntil, "updated_at": time.UnixMilli(now).UTC()})
 	if result.Error != nil {
 		return false, result.Error
 	}
+
 	if result.RowsAffected != 1 {
 		return false, errAsyncUsageRenewalExpired
 	}
 	// Final DB-time predicate is after every write/callback/lock wait. A failure
 	// rolls back the proposed extension, even if it is far in the future.
 	var count int64
-	e = tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", id, AsyncUsageStatusPending, token, leaseUntil).Where("? > "+clock, priorDeadline).Count(&count).Error
+
+	e = tx.Model(&AsyncUsageInfo{}).
+		Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", id, AsyncUsageStatusPending, token, leaseUntil).
+		Where("? > "+clock, priorDeadline).
+		Count(&count).
+		Error
 	if e != nil {
 		return false, e
 	}
+
 	if count != 1 {
 		return false, errAsyncUsageRenewalExpired
 	}
+
 	return true, nil
 }
 
 // This primitive also serves existing MySQL async workers; it does not depend
 // on installing the optional SQLite/PostgreSQL admission extension.
 func asyncUsageLeaseClockSQL(db *gorm.DB) (string, error) {
-	switch db.Dialector.Name() {
+	switch db.Name() {
 	case "sqlite":
 		return "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)", nil
 	case "postgres":
@@ -373,6 +418,7 @@ func RetryClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {
 	if info == nil {
 		return NotFoundError("async usage claim")
 	}
+
 	return updateClaimedAsyncUsageInfo(info, map[string]any{
 		"retry_count":      info.RetryCount,
 		"error":            info.Error,
@@ -385,6 +431,7 @@ func TouchClaimedAsyncUsageInfo(info *AsyncUsageInfo) error {
 	if info == nil {
 		return NotFoundError("async usage claim")
 	}
+
 	return updateClaimedAsyncUsageInfo(info, map[string]any{
 		"error":            "",
 		"next_poll_at":     info.NextPollAt,
@@ -396,15 +443,38 @@ func FailClaimedAsyncUsageInfo(info *AsyncUsageInfo) (bool, error) {
 	if info == nil {
 		return false, nil
 	}
+
 	if UsesImageAccountingClaim(info) {
-		err := withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
-			if err := writeImageAccountingUsage(tx, current, map[string]any{"status": AsyncUsageStatusFailed, "error": info.Error, "processing_token": ""}); err != nil {
-				return err
-			}
-			return writeImageAccountingLog(tx, entry, map[string]any{"async_usage_status": AsyncUsageStatusFailed, "content": info.Error})
-		})
+		err := withImageAccountingClaim(
+			imagePollParentContext(info),
+			info,
+			func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+				if err := writeImageAccountingUsage(
+					tx,
+					current,
+					map[string]any{
+						"status":           AsyncUsageStatusFailed,
+						"error":            info.Error,
+						"processing_token": "",
+					},
+				); err != nil {
+					return err
+				}
+
+				return writeImageAccountingLog(
+					tx,
+					entry,
+					map[string]any{
+						"async_usage_status": AsyncUsageStatusFailed,
+						"content":            info.Error,
+					},
+				)
+			},
+		)
+
 		return err == nil, err
 	}
+
 	return writeClaimedAsyncUsageInfo(info, map[string]any{
 		"status": int(AsyncUsageStatusFailed), "error": info.Error, "processing_token": "",
 	})
@@ -419,6 +489,7 @@ func CompleteClaimedAsyncUsageInfo(
 	if info == nil {
 		return false, nil
 	}
+
 	updatesModel := &AsyncUsageInfo{
 		Status:          AsyncUsageStatusCompleted,
 		Usage:           usage,
@@ -444,19 +515,31 @@ func CompleteClaimedAsyncUsageInfo(
 	}
 
 	if UsesImageAccountingClaim(info) {
-		err := withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
-			// A memory-only consumed flag cannot turn an unknown debit into confirmation.
-			// Prepaid image tasks retain their separately owned billing receipt boundary.
-			if info.BalanceConsumed && !current.BalanceConsumed {
-				return ErrImagePollClaimLost
-			}
-			if err := writeImageAccountingUsage(tx, current, updates); err != nil {
-				return err
-			}
-			return writeImageAccountingLog(tx, entry, map[string]any{"async_usage_status": AsyncUsageStatusCompleted})
-		})
+		err := withImageAccountingClaim(
+			imagePollParentContext(info),
+			info,
+			func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+				// A memory-only consumed flag cannot turn an unknown debit into confirmation.
+				// Prepaid image tasks retain their separately owned billing receipt boundary.
+				if info.BalanceConsumed && !current.BalanceConsumed {
+					return ErrImagePollClaimLost
+				}
+
+				if err := writeImageAccountingUsage(tx, current, updates); err != nil {
+					return err
+				}
+
+				return writeImageAccountingLog(
+					tx,
+					entry,
+					map[string]any{"async_usage_status": AsyncUsageStatusCompleted},
+				)
+			},
+		)
+
 		return err == nil, err
 	}
+
 	return writeClaimedAsyncUsageInfo(info, updates)
 }
 
@@ -519,73 +602,102 @@ func writeClaimedAsyncUsageInfo(info *AsyncUsageInfo, updates map[string]any) (b
 	if info == nil || info.ID == 0 || info.ProcessingToken == "" {
 		return false, nil
 	}
+
 	if LogDB == nil {
 		return false, errors.New("async usage database unavailable")
 	}
+
 	clock, err := asyncUsageLeaseClockSQL(LogDB)
 	if err != nil {
 		return false, err
 	}
+
 	written := false
 	ctx := imagePollParentContext(info)
+
 	err = imagePollTransaction(ctx, info, func(tx *gorm.DB, _ *imageWalletClaimContext) error {
 		var current AsyncUsageInfo
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND status=? AND processing_token=?", info.ID, AsyncUsageStatusPending, info.ProcessingToken).First(&current).Error
+
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id=? AND status=? AND processing_token=?", info.ID, AsyncUsageStatusPending, info.ProcessingToken).
+			First(&current).
+			Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
+
 		if err != nil {
 			return err
 		}
+
 		var now int64
 		if err = tx.Raw("SELECT " + clock).Scan(&now).Error; err != nil {
 			return err
 		}
+
 		if now <= 0 {
 			return errors.New("async usage database clock unavailable")
 		}
+
 		if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= now {
 			return nil
 		}
+
 		deadline := current.NextPollAt.UnixMilli()
 		updates["updated_at"] = time.UnixMilli(now).UTC()
+
 		result := tx.Model(&AsyncUsageInfo{}).
 			Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", info.ID, AsyncUsageStatusPending, info.ProcessingToken, current.NextPollAt).
 			Where("? > "+clock, deadline).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
+
 		if result.RowsAffected != 1 {
 			return errAsyncUsageClaimExpired
 		}
 		// A terminal/retry update can clear the token or replace the deadline with
 		// its next schedule. Check the expected new identity but the OLD deadline.
-		var status any = AsyncUsageStatusPending
-		var token any = info.ProcessingToken
+		var (
+			status any = AsyncUsageStatusPending
+			token  any = info.ProcessingToken
+		)
+
 		if value, ok := updates["status"]; ok {
 			status = value
 		}
+
 		if value, ok := updates["processing_token"]; ok {
 			token = value
 		}
+
 		var count int64
-		err = tx.Model(&AsyncUsageInfo{}).Where("id=? AND status=? AND processing_token=?", info.ID, status, token).
-			Where("? > "+clock, deadline).Count(&count).Error
+
+		err = tx.Model(&AsyncUsageInfo{}).
+			Where("id=? AND status=? AND processing_token=?", info.ID, status, token).
+			Where("? > "+clock, deadline).
+			Count(&count).
+			Error
 		if err != nil {
 			return err
 		}
+
 		if count != 1 {
 			return errAsyncUsageClaimExpired
 		}
+
 		written = true
+
 		return nil
 	})
 	if errors.Is(err, errAsyncUsageClaimExpired) {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, err
 	}
+
 	return written, nil
 }
 
@@ -595,13 +707,16 @@ func updateClaimedAsyncUsageInfo(info *AsyncUsageInfo, updates map[string]any) e
 	if info != nil && UsesImageAccountingClaim(info) {
 		return updateImageAccountingUsage(info, updates)
 	}
+
 	written, err := writeClaimedAsyncUsageInfo(info, updates)
 	if err != nil {
 		return err
 	}
+
 	if !written {
 		return NotFoundError("async usage claim")
 	}
+
 	return nil
 }
 
@@ -700,7 +815,11 @@ func resolveAsyncUsageLog(info *AsyncUsageInfo) (int, error) {
 		return 0, NotFoundError("log")
 	}
 
-	if err := query.Where("billing_operation_id IS NULL").Order("id").Limit(1).Pluck("id", &ids).Error; err != nil {
+	if err := query.Where("billing_operation_id IS NULL").
+		Order("id").
+		Limit(1).
+		Pluck("id", &ids).
+		Error; err != nil {
 		return 0, err
 	}
 
@@ -723,17 +842,37 @@ func UpdateAsyncUsageLogUsage(
 	if info != nil && requiresAsyncUsageLogID(info) && info.LogID <= 0 {
 		return NotFoundError("log")
 	}
+
 	if info != nil && UsesImageAccountingClaim(info) {
-		return withImageAccountingClaim(imagePollParentContext(info), info, func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
-			update := &AsyncUsageInfo{Usage: usage, UsageContext: usageContext, Price: price, Amount: amount}
-			values, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Price", "Amount")
-			if err != nil {
-				return err
-			}
-			values["currency"], values["pricing_version"], values["async_usage_status"] = currency, pricingVersion, AsyncUsageStatusCompleted
-			return writeImageAccountingLog(tx, entry, values)
-		})
+		return withImageAccountingClaim(
+			imagePollParentContext(info),
+			info,
+			func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+				update := &AsyncUsageInfo{
+					Usage:        usage,
+					UsageContext: usageContext,
+					Price:        price,
+					Amount:       amount,
+				}
+
+				values, err := asyncUsageUpdateValues(
+					update,
+					"Usage",
+					"UsageContext",
+					"Price",
+					"Amount",
+				)
+				if err != nil {
+					return err
+				}
+
+				values["currency"], values["pricing_version"], values["async_usage_status"] = currency, pricingVersion, AsyncUsageStatusCompleted
+
+				return writeImageAccountingLog(tx, entry, values)
+			},
+		)
 	}
+
 	logID, err := resolveAsyncUsageLog(info)
 	if err != nil {
 		return err

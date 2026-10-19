@@ -21,9 +21,20 @@ func imageTaskErrorMessage(code string) string {
 		return "This API key cannot use the requested image operation. Use a key with access to this endpoint."
 	case "unsupported_image_execution":
 		return "This model does not support asynchronous image tasks. Check its published endpoint in the model catalog."
-	case "unsupported_image_adapter", "adapter_unavailable", "provider_contract_mismatch", "provider_binding_required", "provider_mapping_unavailable", "invalid_contract", "invalid_provider_binding", "reserved_contract_unavailable":
+	case "unsupported_image_adapter",
+		"adapter_unavailable",
+		"provider_contract_mismatch",
+		"provider_binding_required",
+		"provider_mapping_unavailable",
+		"invalid_contract",
+		"invalid_provider_binding",
+		"reserved_contract_unavailable":
 		return "This model's image route is currently unavailable. Contact support with the request ID or select another model."
-	case "invalid_image_price", "measured_image_billing_not_supported_by_queue_adapter", "pricing_metadata_unavailable", "invalid_image_usage", "invalid_image_metering":
+	case "invalid_image_price",
+		"measured_image_billing_not_supported_by_queue_adapter",
+		"pricing_metadata_unavailable",
+		"invalid_image_usage",
+		"invalid_image_metering":
 		return "Billing configuration for this image model is unavailable. Contact support with the request ID before retrying."
 	case "balance_unavailable":
 		return "Your account balance could not be checked. Please retry later."

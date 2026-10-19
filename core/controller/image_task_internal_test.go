@@ -357,12 +357,22 @@ func TestSyncDispatchPersistsOrQuarantinesWithoutResubmission(t *testing.T) {
 			}
 			saved, created, err := model.ReserveImageTask(
 				original,
-				&model.AsyncUsageInfo{RequestID: original.ID, GroupID: original.GroupID, TokenID: original.TokenID},
+				&model.AsyncUsageInfo{
+					RequestID: original.ID,
+					GroupID:   original.GroupID,
+					TokenID:   original.TokenID,
+				},
 			)
 			require.NoError(t, err)
 			require.True(t, created)
-			attempt, err := model.PrepareImageTaskAttempt(t.Context(), saved, model.ChannelIdentity{}, 0)
+			attempt, err := model.PrepareImageTaskAttempt(
+				t.Context(),
+				saved,
+				model.ChannelIdentity{},
+				0,
+			)
 			require.NoError(t, err)
+
 			saved.AdmissionAttempt = attempt
 			saved.Attempts = []model.ImageTaskAttempt{{Decision: "in_flight"}}
 			require.NoError(t, model.SaveImageTaskAttempt(saved, 0, 0, ""))
@@ -426,14 +436,25 @@ func TestAdminImageTaskRequiresInternalOwnedToken(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/tasks", strings.NewReader(`{"model":"private","prompt":"hi","n":1}`))
+			c.Request = httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"/v1/images/tasks",
+				strings.NewReader(`{"model":"private","prompt":"hi","n":1}`),
+			)
 			c.Request.Header.Set("X-Request-ID", "admin-auth")
-			c.Request.Header.Set(middleware.OperationalLogSourceHeader, model.RequestSourceAdminDemo)
+			c.Request.Header.Set(
+				middleware.OperationalLogSourceHeader,
+				model.RequestSourceAdminDemo,
+			)
 			c.Set(middleware.Group, tc.group)
 			c.Set(middleware.Token, model.TokenCache{ID: tc.token})
 			c.Set(middleware.ModelConfig, model.ModelConfig{Config: map[model.ModelConfigKey]any{
 				"x_token_platform_capability_contract": map[string]any{
-					"entry_id": "original", "contract": map[string]any{"execution": map[string]any{"mode": "async", "output": "image"}},
+					"entry_id": "original",
+					"contract": map[string]any{
+						"execution": map[string]any{"mode": "async", "output": "image"},
+					},
 				},
 			}})
 			submitImageTask(c)

@@ -38,6 +38,7 @@ func TestRelayConsumeCarriesUsageIdentity(t *testing.T) {
 			_, _ = w.Write([]byte(`{"code":0,"data":{"balance":100}}`))
 		case "/api/internal/wallet/consume":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&consumed))
+
 			_, _ = w.Write([]byte(`{"code":0,"data":{"charged":0.002}}`))
 		default:
 			http.NotFound(w, r)
@@ -50,7 +51,7 @@ func TestRelayConsumeCarriesUsageIdentity(t *testing.T) {
 	_, consumer, err := external.GetGroupRemainBalance(context.Background(), group)
 	require.NoError(t, err)
 
-	requestAt := time.Date(2026, 10, 12, 1, 2, 3, 456_789_000, time.UTC)
+	requestAt := time.Date(2026, time.October, 12, 1, 2, 3, 456_789_000, time.UTC)
 	requestMeta := &meta.Meta{
 		RequestID:          "relay-identity",
 		BillingOperationID: "op-relay",

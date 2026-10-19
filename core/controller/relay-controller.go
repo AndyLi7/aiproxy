@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	// Only adds bounded retry delay jitter; no secrets or tokens.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand/v2"
 	"net/http"
 	"strconv"
@@ -249,39 +251,72 @@ func RelayHelper(
 
 	startedAt := time.Now()
 	result = handel(c, meta)
+
 	failure := evidence.Observe(failover.FromError(result.Error))
 	if result.Error == nil || result.UpstreamID != "" {
 		failure.Acceptance = failover.Accepted
 	}
+
 	if result.Error != nil && !monitorplugin.ShouldRetry(result.Error) {
 		failure.Class = failover.InvalidRequest
 	}
+
 	p := failover.Policy{MaxRetries: -1}
 	if value, ok := c.Get("failover_policy"); ok {
-		p = value.(failover.Policy)
+		if policy, valid := value.(failover.Policy); valid {
+			p = policy
+		}
 	}
+
 	retries := c.GetInt("failover_attempt_count")
 	c.Set("failover_attempt_count", retries+1)
-	decision := failover.Decide(failure, p, failover.State{Retries: retries, Pinned: c.GetBool("failover_pinned"), Written: c.Writer.Written(), Cancelled: c.Request.Context().Err() != nil}, time.Now())
+
+	decision := failover.Decide(
+		failure,
+		p,
+		failover.State{
+			Retries:   retries,
+			Pinned:    c.GetBool("failover_pinned"),
+			Written:   c.Writer.Written(),
+			Cancelled: c.Request.Context().Err() != nil,
+		},
+		time.Now(),
+	)
 	if result.Error == nil {
 		decision = failover.Decision{Reason: "success"}
 	}
-	fields := log.Fields{"channel_id": meta.Channel.ID, "acceptance": failure.Acceptance, "failure_class": failure.Class, "evidence": failure.Evidence, "duration_ms": time.Since(startedAt).Milliseconds(), "decision": decision.Reason, "retry": decision.Retry}
+
+	fields := log.Fields{
+		"channel_id":    meta.Channel.ID,
+		"acceptance":    failure.Acceptance,
+		"failure_class": failure.Class,
+		"evidence":      failure.Evidence,
+		"duration_ms":   time.Since(startedAt).Milliseconds(),
+		"decision":      decision.Reason,
+		"retry":         decision.Retry,
+	}
 	common.GetLogger(c).WithFields(fields).Info("channel_failover_decision")
 	// Only server-created attempts are appended; client metadata cannot forge them.
 	attempts, _ := c.Get("failover_attempts")
 	records, _ := attempts.([]log.Fields)
 	records = append(records, fields)
 	c.Set("failover_attempts", records)
-	encoded, _ := json.Marshal(records)
+
+	encoded, encodeErr := json.Marshal(records)
+	if encodeErr != nil {
+		common.GetLogger(c).WithError(encodeErr).Warn("encode failover attempts")
+		return result, decision.Retry
+	}
+
 	metadata := middleware.GetRequestMetadata(c)
 	if metadata == nil {
 		metadata = make(map[string]string)
 	}
+
 	metadata["channel_failover_attempts"] = string(encoded)
 	c.Set(middleware.RequestMetadata, metadata)
-	return result, decision.Retry
 
+	return result, decision.Retry
 }
 
 func NewRelay(mode mode.Mode) func(c *gin.Context) {
@@ -452,7 +487,12 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	)
 	c.Set("failover_policy", failover.Policy{MaxRetries: retryTimes, Deadline: retryDeadline})
 	c.Set("failover_pinned", initialChannel.designatedChannel)
-	meta.MeasuredRelay = model.NewMeasuredRelayIntent(price, meta.RequestAt, meta.ModelConfig.DisableResolutionFuzzyMatch)
+
+	meta.MeasuredRelay = model.NewMeasuredRelayIntent(
+		price,
+		meta.RequestAt,
+		meta.ModelConfig.DisableResolutionFuzzyMatch,
+	)
 	result, retry := RelayHelper(c, meta, relayController.Handler)
 	upstreamOutcome := "success"
 	upstreamStatus := http.StatusOK
@@ -485,6 +525,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 	if initialChannel.designatedChannel {
 		retry = false
 	}
+
 	if handleRelayResult(c, result.Error, retry, retryTimes, retryDeadline) {
 		recordResult(
 			c,
@@ -716,6 +757,7 @@ func saveAsyncUsageInfo(
 	}
 	// The outbox's attribution equals the submit row the same request wrote.
 	info.SetUsageIdentity(consume.RelayUsageIdentity(meta))
+
 	if err := model.CreateAsyncUsageInfo(info); err != nil {
 		log.Errorf("failed to save async usage info: %v", err)
 		return
@@ -848,6 +890,7 @@ func handleRelayResult(
 	if c.Writer.Written() {
 		return true
 	}
+
 	if !retry ||
 		retryTimes == 0 ||
 		(!retryDeadline.IsZero() && !time.Now().Before(retryDeadline)) ||
@@ -960,6 +1003,7 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 	if state.ignoreChannelIDs == nil {
 		state.ignoreChannelIDs = make(map[int64]struct{})
 	}
+
 	state.ignoreChannelIDs[int64(state.meta.Channel.ID)] = struct{}{}
 
 	log := common.GetLogger(c)
@@ -989,6 +1033,7 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 			if errors.Is(err, ErrChannelsExhausted) {
 				finishFailoverDecision(c, "no_candidates")
 			}
+
 			if !errors.Is(err, ErrChannelsExhausted) && ctx.Err() == nil {
 				log.Errorf("prepare retry failed: %+v", err)
 			}
@@ -1035,8 +1080,13 @@ func retryLoop(c *gin.Context, mode mode.Mode, state *retryState, relayControlle
 		if state.ignoreChannelIDs == nil {
 			state.ignoreChannelIDs = make(map[int64]struct{})
 		}
+
 		state.ignoreChannelIDs[int64(newChannel.ID)] = struct{}{}
-		state.meta.MeasuredRelay = model.NewMeasuredRelayIntent(state.price, state.meta.RequestAt, state.meta.ModelConfig.DisableResolutionFuzzyMatch)
+		state.meta.MeasuredRelay = model.NewMeasuredRelayIntent(
+			state.price,
+			state.meta.RequestAt,
+			state.meta.ModelConfig.DisableResolutionFuzzyMatch,
+		)
 		state.result, retry = RelayHelper(c, state.meta, relayController)
 		i++
 
@@ -1099,7 +1149,8 @@ func handleRetryResult(
 	newChannel *model.Channel,
 	state *retryState,
 ) (done bool) {
-	if ctx.Writer.Written() || ctx.Request.Context().Err() != nil || state.designatedChannel != nil {
+	if ctx.Writer.Written() || ctx.Request.Context().Err() != nil ||
+		state.designatedChannel != nil {
 		return true
 	}
 
@@ -1166,7 +1217,10 @@ func publicUpstreamError(upstreamStatus int) (int, string, string) {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return upstreamStatus, "invalid_request",
 			"The request could not be processed. Please check the input parameters."
-	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound:
+	case http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusNotFound:
 		return http.StatusBadGateway, "upstream_unavailable",
 			"The upstream provider could not process this request. Retry later or contact support with the request ID."
 	default:
@@ -1186,6 +1240,7 @@ func writePublicUpstreamError(c *gin.Context, original adaptor.Error) {
 		c.JSON(status, safe)
 		return
 	}
+
 	ErrorWithRequestID(c, safe)
 }
 
@@ -1366,7 +1421,17 @@ func recordMeasuredImageResult(
 	if !downstreamResult {
 		// A non-final attempt writes no request-log row: one HTTP request is one
 		// call row, written by the final attempt.
-		if err := recordMeasuredImageAttemptOwned(c.Request.Context(), result.MeasuredProducer, price, meta, info, code, retryTimes, firstByteAt, detail); err != nil {
+		if err := recordMeasuredImageAttemptOwned(
+			c.Request.Context(),
+			result.MeasuredProducer,
+			price,
+			meta,
+			info,
+			code,
+			retryTimes,
+			firstByteAt,
+			detail,
+		); err != nil {
 			log.Errorf(
 				"persist measured image attempt failed, request_id=%s: %v",
 				meta.RequestID,
@@ -1403,25 +1468,33 @@ func recordMeasuredImageResult(
 		downstreamResult,
 	)
 	middleware.SaveRequestTraceTask(c, info.ID, info.GroupID)
-	if err := model.RecordMeasuredProducerReturn(c.Request.Context(), result.MeasuredProducer); err != nil {
+
+	if err := model.RecordMeasuredProducerReturn(
+		c.Request.Context(),
+		result.MeasuredProducer,
+	); err != nil {
 		log.Errorf("measured producer return: %v", err)
 	}
 }
 
 // recordMeasuredImageAttempt stores a non-final attempt's evidence in the
 // outbox only (never chargeable) and, like relay retries, in retry_logs.
-func recordMeasuredImageAttempt(
+func recordMeasuredImageAttemptOwned(
+	ctx context.Context,
+	producer *model.MeasuredRelayIntent,
+	price model.Price,
 	meta *meta.Meta,
 	info *model.AsyncUsageInfo,
-	code int,
-	retryTimes int,
+	code, retryTimes int,
 	firstByteAt time.Time,
 	detail *model.RequestDetail,
 ) error {
-	return recordMeasuredImageAttemptOwned(context.Background(), nil, model.Price{}, meta, info, code, retryTimes, firstByteAt, detail)
-}
-func recordMeasuredImageAttemptOwned(ctx context.Context, producer *model.MeasuredRelayIntent, price model.Price, meta *meta.Meta, info *model.AsyncUsageInfo, code, retryTimes int, firstByteAt time.Time, detail *model.RequestDetail) error {
-	if err := model.CreateMeasuredImageAttemptEvidenceOwned(ctx, producer, price, info); err != nil {
+	if err := model.CreateMeasuredImageAttemptEvidenceOwned(
+		ctx,
+		producer,
+		price,
+		info,
+	); err != nil {
 		return err
 	}
 
@@ -1456,17 +1529,26 @@ func recordMeasuredImageAttemptOwned(ctx context.Context, producer *model.Measur
 // Final scheduling failures update the last attempt before its terminal log is saved.
 func finishFailoverDecision(c *gin.Context, reason string) {
 	value, _ := c.Get("failover_attempts")
+
 	records, _ := value.([]log.Fields)
 	if len(records) == 0 || records[len(records)-1]["retry"] != true {
 		return
 	}
+
 	records[len(records)-1]["decision"] = reason
 	records[len(records)-1]["retry"] = false
-	encoded, _ := json.Marshal(records)
+
+	encoded, encodeErr := json.Marshal(records)
+	if encodeErr != nil {
+		common.GetLogger(c).WithError(encodeErr).Warn("encode final failover decision")
+		return
+	}
+
 	metadata := middleware.GetRequestMetadata(c)
 	if metadata == nil {
 		metadata = make(map[string]string)
 	}
+
 	metadata["channel_failover_attempts"] = string(encoded)
 	c.Set(middleware.RequestMetadata, metadata)
 }

@@ -76,7 +76,11 @@ func parseOperationalLogFilter(c *gin.Context) (model.OperationalLogFilter, erro
 	}
 
 	if !filter.Kind.AllowsStatus(filter.Status) {
-		return model.OperationalLogFilter{}, fmt.Errorf("status %q is not valid with kind %q", filter.Status, filter.Kind)
+		return model.OperationalLogFilter{}, fmt.Errorf(
+			"status %q is not valid with kind %q",
+			filter.Status,
+			filter.Kind,
+		)
 	}
 
 	rawChannels := strings.TrimSpace(c.Query("channels"))
@@ -592,6 +596,7 @@ func GetLogDetail(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusNotFound, "record not found")
 		return
 	}
+
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, "unable to read log detail")
 		return
@@ -629,6 +634,7 @@ func GetGroupLogDetail(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusNotFound, "record not found")
 		return
 	}
+
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, "unable to read log detail")
 		return

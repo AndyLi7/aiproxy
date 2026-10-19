@@ -45,7 +45,20 @@ func TestImageOutputDimensionsSurviveJSON(t *testing.T) {
 }
 
 func TestQueuePixelBudgetRequiresAuditedBound(t *testing.T) {
-	p := Price{OutputPrice: 0.003, OutputPriceUnit: 1, ImageBilling: &ImageBillingPolicy{Version: 2, Scenario: "generation", OutputPixels: &ImagePixelQuantity{PixelsPerUnit: 1048576, Rounding: "ceil", Scope: "per_image", MinimumUnits: 1}}}
+	p := Price{
+		OutputPrice:     0.003,
+		OutputPriceUnit: 1,
+		ImageBilling: &ImageBillingPolicy{
+			Version:  2,
+			Scenario: "generation",
+			OutputPixels: &ImagePixelQuantity{
+				PixelsPerUnit: 1048576,
+				Rounding:      "ceil",
+				Scope:         "per_image",
+				MinimumUnits:  1,
+			},
+		},
+	}
 	_, err := QueueImageMaximumAmount(p, 2, 0)
 	require.Error(t, err)
 	_, err = QueueImageMaximumAmount(p, 2, 0, 0)

@@ -13,19 +13,24 @@ func imageTaskLogRequestSummary(body []byte) string {
 	if json.Unmarshal(body, &input) != nil {
 		return ""
 	}
+
 	summary := make(map[string]string)
 	if input.Prompt != "" && len(input.Prompt) <= 8192 {
 		summary["prompt"] = input.Prompt
 	}
+
 	if input.NegativePrompt != "" && len(input.NegativePrompt) <= 8192 {
 		summary["negative_prompt"] = input.NegativePrompt
 	}
+
 	if len(summary) == 0 {
 		return ""
 	}
+
 	encoded, err := json.Marshal(summary)
 	if err != nil {
 		return ""
 	}
+
 	return string(encoded)
 }

@@ -30,22 +30,33 @@ const (
 // 404 NOT_FOUND; those are outcomes, and only transport errors and other
 // statuses are errors. It is best effort: a running request may still finish
 // and be billed, and callers never retry it.
-func (c *Client) Cancel(ctx context.Context, modelName, id string, frozenContracts ...[]byte) (string, error) {
+func (c *Client) Cancel(
+	ctx context.Context,
+	modelName, id string,
+	frozenContracts ...[]byte,
+) (string, error) {
 	root, err := endpoint(modelName)
 	if err != nil {
 		return "", err
 	}
+
 	if !segment.MatchString(id) {
 		return "", errors.New("invalid fal request id")
 	}
+
 	if len(frozenContracts) > 1 {
 		return "", errors.New("multiple task contracts")
 	}
 
 	legacy := root + "/requests/" + id
+
 	path := legacy
 	if len(frozenContracts) == 1 && registryvalidation.HasProviderContracts(frozenContracts[0]) {
-		if _, path, err = registryvalidation.FrozenFalQueuePaths(frozenContracts[0], modelName, id); err != nil {
+		if _, path, err = registryvalidation.FrozenFalQueuePaths(
+			frozenContracts[0],
+			modelName,
+			id,
+		); err != nil {
 			return "", err
 		}
 	}
@@ -53,13 +64,16 @@ func (c *Client) Cancel(ctx context.Context, modelName, id string, frozenContrac
 	if err := actionguard.Check(ctx); err != nil {
 		return "", err
 	}
+
 	_, code, err := c.nativeRequest(ctx, http.MethodPut, path+"/cancel", nil)
 	if code == http.StatusMethodNotAllowed && path != legacy {
 		if err := actionguard.Check(ctx); err != nil {
 			return "", err
 		}
+
 		_, code, err = c.nativeRequest(ctx, http.MethodPut, legacy+"/cancel", nil)
 	}
+
 	switch {
 	case err == nil:
 		return NativeCancelRequested, nil
@@ -68,6 +82,7 @@ func (c *Client) Cancel(ctx context.Context, modelName, id string, frozenContrac
 	case code == http.StatusNotFound:
 		return NativeCancelNotFound, nil
 	}
+
 	return "", err
 }
 

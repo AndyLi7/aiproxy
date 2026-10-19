@@ -80,9 +80,19 @@ func InitModelConfigAndChannelCache() error {
 	// Channel models are filtered against the configs read above, not against
 	// a fresh query per channel: one rebuild sees one set of model configs.
 	configured := configuredModels(snapshot.modelConfigs)
-	enabledChannels := prepareCachedChannels(snapshot.enabledChannels, ChannelStatusEnabled, configured)
-	disabledChannels := prepareCachedChannels(snapshot.disabledChannels, ChannelStatusDisabled, configured)
-	if source := snapshot.migrationSource; source != nil && (len(enabledChannels) != len(snapshot.enabledChannels) || len(disabledChannels) != len(snapshot.disabledChannels)) {
+	enabledChannels := prepareCachedChannels(
+		snapshot.enabledChannels,
+		ChannelStatusEnabled,
+		configured,
+	)
+
+	disabledChannels := prepareCachedChannels(
+		snapshot.disabledChannels,
+		ChannelStatusDisabled,
+		configured,
+	)
+	if source := snapshot.migrationSource; source != nil &&
+		(len(enabledChannels) != len(snapshot.enabledChannels) || len(disabledChannels) != len(snapshot.disabledChannels)) {
 		source.reason = "effective_cache_projection_unsupported"
 	}
 
@@ -158,26 +168,34 @@ func readCacheSnapshot() (cacheSnapshot, error) {
 
 	read := func(tx *gorm.DB) error {
 		var err error
+
 		snapshot.migrationSource, err = readMigrationCacheSource(tx)
 		if err != nil {
 			return err
 		}
-		if err := tx.Model(&ModelConfig{}).Order("created_at desc").Find(&snapshot.modelConfigs).Error; err != nil {
+
+		if err := tx.Model(&ModelConfig{}).
+			Order("created_at desc").
+			Find(&snapshot.modelConfigs).
+			Error; err != nil {
 			return err
 		}
 
-		if err := tx.Where("status = ?", ChannelStatusEnabled).Find(&snapshot.enabledChannels).Error; err != nil {
+		if err := tx.Where("status = ?", ChannelStatusEnabled).
+			Find(&snapshot.enabledChannels).
+			Error; err != nil {
 			return err
 		}
 
 		return tx.Where("status = ?", ChannelStatusDisabled).Find(&snapshot.disabledChannels).Error
 	}
 
-	if DB.Dialector.Name() == "sqlite" {
+	if DB.Name() == "sqlite" {
 		err := DB.Transaction(read, &sql.TxOptions{ReadOnly: true})
 		return snapshot, err
 	}
-	if DB.Dialector.Name() != "postgres" {
+
+	if DB.Name() != "postgres" {
 		return snapshot, read(DB)
 	}
 
@@ -204,7 +222,11 @@ func configuredModels(configs []ModelConfig) map[string]struct{} {
 // prepareCachedChannels is LoadEnabledChannels/LoadDisabledChannels for
 // channels already read: YAML channels of that status are added, and every
 // channel's models and mapping are initialized against configured.
-func prepareCachedChannels(channels []*Channel, status int, configured map[string]struct{}) []*Channel {
+func prepareCachedChannels(
+	channels []*Channel,
+	status int,
+	configured map[string]struct{},
+) []*Channel {
 	configChannels := NewConfigChannels(LoadYAMLConfig(), status)
 	if len(configChannels) != 0 {
 		log.Infof("added %d channels from config", len(configChannels))

@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box regression exercises private model or runtime invariants.
 package model
 
 import (

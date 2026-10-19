@@ -2,12 +2,12 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
@@ -45,6 +45,7 @@ func publicModelIndexForToken(
 		if !mc.CreatedAt.IsZero() {
 			created = int(mc.CreatedAt.Unix())
 		}
+
 		models[key] = &OpenAIModels{
 			ID:         id,
 			Object:     "model",
@@ -54,7 +55,12 @@ func publicModelIndexForToken(
 			Permission: permission,
 			Parent:     nil,
 		}
-		encoded, _ := json.Marshal(mc.Config["x_token_platform_capability_contract"])
+
+		encoded, encodeErr := json.Marshal(mc.Config["x_token_platform_capability_contract"])
+		if encodeErr != nil {
+			return
+		}
+
 		var wrapper struct {
 			Contract json.RawMessage `json:"contract"`
 		}
@@ -174,11 +180,25 @@ func RetrieveModel(c *gin.Context) {
 
 	if c.GetBool("model_schema_request") {
 		if found.InputSchema == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "schema_not_found", "type": "not_found_error", "message": "No public input schema is available for this model.", "param": "model"}})
+			c.JSON(
+				http.StatusNotFound,
+				gin.H{
+					"error": gin.H{
+						"code":    "schema_not_found",
+						"type":    "not_found_error",
+						"message": "No public input schema is available for this model.",
+						"param":   "model",
+					},
+				},
+			)
+
 			return
 		}
+
 		c.JSON(http.StatusOK, found.InputSchema)
+
 		return
 	}
+
 	c.JSON(http.StatusOK, found)
 }

@@ -562,10 +562,12 @@ func TestRequestTraceRejectsClientOwnershipAndLeaksNoSensitiveTraceData(t *testi
 
 		response := httptest.NewRecorder()
 		fixture.engine.ServeHTTP(response, request)
+
 		expected := http.StatusOK
 		if index == 0 {
 			expected = http.StatusInternalServerError
 		}
+
 		require.Equal(t, expected, response.Code, response.Body.String())
 	}
 

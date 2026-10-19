@@ -545,83 +545,13 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		return
 	}
 
-	var err error
-
 	channelHeader := c.Request.Header.Get("Aiproxy-Channel")
 	adminChannelBypass := config.EnableAdminBypassChannelModelCheck &&
 		group.Status == model.GroupStatusInternal && channelHeader != ""
-	publicModel := requestModel
-	routingModel := resolveImageCapability(c, mode, requestModel)
 
-	native, proceed := resolveNativeCapability(c, mode, token, routingModel)
+	publicModel, routingModel, proceed := resolveDistributionModels(c, mode, requestModel, token)
 	if !proceed {
 		return
-	}
-
-	if native != nil {
-		routingModel = native.route
-		// The route-key check and the log row name the config's public model,
-		// whichever accepted ID the request used.
-		if native.publicModel != "" {
-			publicModel = native.publicModel
-		}
-	}
-
-	resolvedLocal := false
-	if isCapabilityCreateMode(mode) {
-		// A model group ID (a model ID without its capability) selects a
-		// capability by the request parameters, except on the image endpoints
-		// once DISABLE_IMAGE_GROUP_IDS is set (owner decision D3).
-		resolution, resolveErr := resolveCapabilityRequest(
-			c,
-			token,
-			GetModelCaches(c).EnabledModelConfigsMap,
-			requestModel,
-			acceptsCapabilityGroupID(mode),
-		)
-		if resolveErr == nil {
-			publicModel, routingModel = resolution.PublicModel, resolution.InternalModel
-			c.Set(RequestedModel, resolution.RequestedModel)
-			c.Set(PublicModel, resolution.PublicModel)
-			c.Set(PublicCapabilityModel, resolution.PublicCapabilityModel)
-			c.Set(ResolvedCapability, resolution.Capability)
-
-			if isVideosCreateMode(mode) {
-				setVideoCapabilityContext(
-					c,
-					publicModel,
-					routingModel,
-					model.ModelCapability(resolution.Capability),
-				)
-			}
-
-			resolvedLocal = true
-		}
-	}
-
-	if !resolvedLocal && IsPublicVideoRequest(c.Request.URL.Path, mode) {
-		publicModel, routingModel, err = resolveVideoCapability(c, mode, requestModel)
-		if err != nil {
-			if validationErr, ok := errors.AsType[*publicVideoRequestValidationError](err); ok {
-				AbortPublicVideoRequestError(
-					c,
-					model.FailureStageValidation,
-					http.StatusBadRequest,
-					validationErr.code,
-					validationErr.message,
-					validationErr.param,
-					validationErr.value,
-					validationErr.allowedValues,
-					validationErr.expected,
-				)
-
-				return
-			}
-
-			AbortLogWithMessage(c, http.StatusInternalServerError, err.Error())
-
-			return
-		}
 	}
 
 	SetLogModelFields(log.Data, publicModel)
@@ -716,12 +646,22 @@ func distribute(c *gin.Context, mode mode.Mode) {
 			if code == "" {
 				code = "invalid_parameter"
 			}
+
 			SetOperationalFailure(c, model.FailureStageValidation, code, validationErr.Error())
 			saveCustomerValidationDetail(c, validationErr)
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": validationErr.PublicError()})
+			c.AbortWithStatusJSON(
+				http.StatusBadRequest,
+				gin.H{"error": validationErr.PublicError()},
+			)
 		} else {
-			AbortOperationally(c, model.FailureStageModel, validationErr.Status, validationErr.Error())
+			AbortOperationally(
+				c,
+				model.FailureStageModel,
+				validationErr.Status,
+				validationErr.Error(),
+			)
 		}
+
 		return
 	}
 
@@ -1260,6 +1200,7 @@ func getMetadataFromNode(node *ast.Node) (map[string]string, error) {
 
 	// Reserved server-generated audit data must never originate from the caller.
 	delete(metadata, "channel_failover_attempts")
+
 	return metadata, nil
 }
 
@@ -1945,14 +1886,17 @@ func resolveRequestModel(
 	}
 
 	if requestModel == "" {
-		if requestMode == mode.ImagesGenerations && (c.Request.URL.Path == "/v1/images/tasks" || c.Request.URL.Path == "/v1/images/generations") {
+		if requestMode == mode.ImagesGenerations &&
+			(c.Request.URL.Path == "/v1/images/tasks" || c.Request.URL.Path == "/v1/images/generations") {
 			AbortPublicVideoRequestError(
 				c, model.FailureStageValidation, http.StatusBadRequest,
 				"missing_parameter", "model is required and must be a non-empty string",
 				"model", nil, nil, "non-empty string",
 			)
+
 			return "", false
 		}
+
 		if IsPublicVideoRequest(c.Request.URL.Path, requestMode) {
 			AbortPublicVideoRequestError(
 				c,
@@ -2092,4 +2036,92 @@ func validateEffectiveRelayModel(
 	}
 
 	return true
+}
+
+// resolveDistributionModels chooses the public/transport identities before
+// entitlement, configuration and wallet checks. It retains validation errors at
+// the same boundary as the original distributor.
+func resolveDistributionModels(
+	c *gin.Context,
+	mode mode.Mode,
+	requestModel string,
+	token model.TokenCache,
+) (string, string, bool) {
+	var err error
+
+	publicModel := requestModel
+	routingModel := resolveImageCapability(c, mode, requestModel)
+
+	native, proceed := resolveNativeCapability(c, mode, token, routingModel)
+	if !proceed {
+		return "", "", false
+	}
+
+	if native != nil {
+		routingModel = native.route
+		// The route-key check and the log row name the config's public model,
+		// whichever accepted ID the request used.
+		if native.publicModel != "" {
+			publicModel = native.publicModel
+		}
+	}
+
+	resolvedLocal := false
+	if isCapabilityCreateMode(mode) {
+		// A model group ID (a model ID without its capability) selects a
+		// capability by the request parameters, except on the image endpoints
+		// once DISABLE_IMAGE_GROUP_IDS is set (owner decision D3).
+		resolution, resolveErr := resolveCapabilityRequest(
+			c,
+			token,
+			GetModelCaches(c).EnabledModelConfigsMap,
+			requestModel,
+			acceptsCapabilityGroupID(mode),
+		)
+		if resolveErr == nil {
+			publicModel, routingModel = resolution.PublicModel, resolution.InternalModel
+			c.Set(RequestedModel, resolution.RequestedModel)
+			c.Set(PublicModel, resolution.PublicModel)
+			c.Set(PublicCapabilityModel, resolution.PublicCapabilityModel)
+			c.Set(ResolvedCapability, resolution.Capability)
+
+			if isVideosCreateMode(mode) {
+				setVideoCapabilityContext(
+					c,
+					publicModel,
+					routingModel,
+					model.ModelCapability(resolution.Capability),
+				)
+			}
+
+			resolvedLocal = true
+		}
+	}
+
+	if !resolvedLocal && IsPublicVideoRequest(c.Request.URL.Path, mode) {
+		publicModel, routingModel, err = resolveVideoCapability(c, mode, requestModel)
+		if err != nil {
+			if validationErr, ok := errors.AsType[*publicVideoRequestValidationError](err); ok {
+				AbortPublicVideoRequestError(
+					c,
+					model.FailureStageValidation,
+					http.StatusBadRequest,
+					validationErr.code,
+					validationErr.message,
+					validationErr.param,
+					validationErr.value,
+					validationErr.allowedValues,
+					validationErr.expected,
+				)
+
+				return "", "", false
+			}
+
+			AbortLogWithMessage(c, http.StatusInternalServerError, err.Error())
+
+			return "", "", false
+		}
+	}
+
+	return publicModel, routingModel, true
 }

@@ -57,32 +57,17 @@ func validateImageRegistryRequest(
 		bindingID = GetPublicCapabilityModel(c)
 	}
 
-	if wrapper.ID != bindingID {
-		// Private demo projections bind a transport ID to the original registry
-		// contract. Only server-owned configuration may establish this binding.
-		parent, _ := config["public_model"].(string)
-
-		capability, _ := config["capability"].(string)
-		if parent == "" || (len(capability) > 80 || !imageCapabilitySlug.MatchString(capability)) ||
-			config["public_capability_model"] != parent+"/"+capability ||
-			(bindingID != parent+"::"+capability && bindingID != parent+"/"+capability) {
-			return unavailable
-		}
+	if wrapper.ID != bindingID && !isPrivateImageRegistryBinding(config, bindingID) {
+		return unavailable
 	}
 
-	if c.Request.URL.Path == "/v1/images/generations" {
-		var execution struct {
-			Execution struct {
-				Mode string `json:"mode"`
-			} `json:"execution"`
-		}
-		if json.Unmarshal(wrapper.Contract, &execution) != nil {
-			return unavailable
-		}
-		if execution.Execution.Mode == "async" {
-			return &registryvalidation.ValidationError{Status: 400, Param: "endpoint", Code: "unsupported_endpoint", Message: "This model uses asynchronous image generation. Submit to /v1/images/tasks and poll /v1/images/tasks/{id}.", Expected: map[string]any{"endpoint": "/v1/images/tasks", "status_endpoint": "/v1/images/tasks/{id}"}}
-		}
+	if endpointErr := validateImageRegistryEndpoint(
+		c.Request.URL.Path,
+		wrapper.Contract,
+	); endpointErr != nil {
+		return endpointErr
 	}
+
 	if !common.IsJSONContentType(c.Request.Header.Get("Content-Type")) {
 		return &registryvalidation.ValidationError{Status: 400}
 	}
@@ -131,4 +116,46 @@ func validateImageRegistryRequest(
 	clearRequestBodyNode(c)
 
 	return nil
+}
+
+func validateImageRegistryEndpoint(
+	path string,
+	contract json.RawMessage,
+) *registryvalidation.ValidationError {
+	if path == "/v1/images/generations" {
+		var execution struct {
+			Execution struct {
+				Mode string `json:"mode"`
+			} `json:"execution"`
+		}
+		if json.Unmarshal(contract, &execution) != nil {
+			return &registryvalidation.ValidationError{Status: 503}
+		}
+
+		if execution.Execution.Mode == "async" {
+			return &registryvalidation.ValidationError{
+				Status:  400,
+				Param:   "endpoint",
+				Code:    "unsupported_endpoint",
+				Message: "This model uses asynchronous image generation. Submit to /v1/images/tasks and poll /v1/images/tasks/{id}.",
+				Expected: map[string]any{
+					"endpoint":        "/v1/images/tasks",
+					"status_endpoint": "/v1/images/tasks/{id}",
+				},
+			}
+		}
+	}
+
+	return nil
+}
+
+// Private demo projections bind a transport ID to the original registry
+// contract. Only server-owned configuration may establish this binding.
+func isPrivateImageRegistryBinding(config map[model.ModelConfigKey]any, bindingID string) bool {
+	parent, _ := config["public_model"].(string)
+	capability, _ := config["capability"].(string)
+
+	return parent != "" && len(capability) <= 80 && imageCapabilitySlug.MatchString(capability) &&
+		config["public_capability_model"] == parent+"/"+capability &&
+		(bindingID == parent+"::"+capability || bindingID == parent+"/"+capability)
 }

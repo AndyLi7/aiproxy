@@ -15,8 +15,22 @@ func TestGetAndValidateTokenReturnsRejectedKeyForAttribution(t *testing.T) {
 	common.RedisEnabled = false
 	t.Cleanup(func() { common.RedisEnabled = oldRedis })
 
-	disabled := &model.TokenCache{ID: 51, Key: "attribution-disabled", Name: "off", Group: "g", Status: model.TokenStatusDisabled}
-	exhausted := &model.TokenCache{ID: 52, Key: "attribution-exhausted", Name: "spent", Group: "g", Status: model.TokenStatusEnabled, Quota: 1, UsedAmount: 2}
+	disabled := &model.TokenCache{
+		ID:     51,
+		Key:    "attribution-disabled",
+		Name:   "off",
+		Group:  "g",
+		Status: model.TokenStatusDisabled,
+	}
+	exhausted := &model.TokenCache{
+		ID:         52,
+		Key:        "attribution-exhausted",
+		Name:       "spent",
+		Group:      "g",
+		Status:     model.TokenStatusEnabled,
+		Quota:      1,
+		UsedAmount: 2,
+	}
 
 	for _, token := range []*model.TokenCache{disabled, exhausted} {
 		require.NoError(t, model.CacheSetToken(token))

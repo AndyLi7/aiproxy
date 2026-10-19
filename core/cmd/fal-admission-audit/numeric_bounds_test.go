@@ -11,10 +11,12 @@ func TestOfficialBriaNumericAliasBoundsSurviveGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var original sample
 	if err = json.Unmarshal(raw, &original); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, tc := range []struct {
 		value any
 		pass  bool
@@ -23,13 +25,16 @@ func TestOfficialBriaNumericAliasBoundsSurviveGateway(t *testing.T) {
 		if err = json.Unmarshal(original.Request, &request); err != nil {
 			t.Fatal(err)
 		}
+
 		request["guidance_scale"] = tc.value
 		changed := original
-		changed.Request, _ = json.Marshal(request)
+		changed.Request = marshalFixture(t, request)
+
 		result := run(changed)
 		if result.Passed != tc.pass {
 			t.Fatalf("value=%v pass=%v result=%+v", tc.value, tc.pass, result)
 		}
+
 		if !tc.pass && result.Stage != "public_validation" {
 			t.Fatalf("invalid value reached provider: %+v", result)
 		}

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	// Only spreads balance-cache expiry; never generates a signing key or token.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand/v2"
 	"net/http"
 	"time"
@@ -272,6 +274,7 @@ func (s *Sealos) GetGroupRemainBalance(
 		if err := actionguard.Check(ctx); err != nil {
 			return 0, nil, err
 		}
+
 		balance, userUID, err := s.getGroupRemainBalance(ctx, group.ID)
 		if err == nil {
 			if sealosCheckRealNameEnable &&
@@ -375,6 +378,7 @@ func (s *Sealos) fetchRealNameFromAPI(ctx context.Context, userUID string) (bool
 	if err := actionguard.Check(ctx); err != nil {
 		return false, err
 	}
+
 	resp, err := actionguard.DoHTTP(sealosHTTPClient, req)
 	if err != nil {
 		return false, err
@@ -450,6 +454,7 @@ func (s *Sealos) fetchBalanceFromAPI(
 	if err := actionguard.Check(ctx); err != nil {
 		return nil, err
 	}
+
 	resp, err := actionguard.DoHTTP(sealosHTTPClient, req)
 	if err != nil {
 		return nil, err
@@ -523,6 +528,7 @@ func (s *SealosPostGroupConsumer) PostGroupConsume(
 	if err := actionguard.Check(ctx); err != nil {
 		return 0, err
 	}
+
 	amount := s.calculateAmount(usage)
 
 	if err := cacheDecreaseGroupBalance(ctx, s.group, amount.IntPart()); err != nil {
@@ -574,6 +580,7 @@ func (s *SealosPostGroupConsumer) postConsume(
 	if err := actionguard.Check(ctx); err != nil {
 		return err
 	}
+
 	resp, err := actionguard.DoHTTP(sealosHTTPClient, req)
 	if err != nil {
 		return err

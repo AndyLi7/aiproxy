@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	// Only samples weighted eligible channels after authorization; no secrets or tokens.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -473,27 +475,20 @@ func getInitialChannel(c *gin.Context, modelName string, m mode.Mode) (*initialC
 	var prepaid *model.ImagePrepaymentQuote
 	if m == mode.ImagesGenerations || m == mode.ImagesEdits {
 		var quoteErr error
+
 		mc := middleware.GetModelConfig(c)
+
 		prepaid, _, quoteErr = mc.ImagePrepaymentQuote()
 		if quoteErr != nil {
 			return nil, quoteErr
 		}
+
 		if prepaid != nil {
 			if c.Request.URL.Path != "/v1/images/tasks" || c.Request.Method != http.MethodPost {
 				return nil, ErrChannelsNotFound
 			}
-			compatible := eligible
-			eligible = func(ch *model.Channel) bool {
-				if ch == nil || (compatible != nil && !compatible(ch)) {
-					return false
-				}
-				for _, quoted := range prepaid.Routes {
-					if quoted.ChannelID == ch.ID {
-						return true
-					}
-				}
-				return false
-			}
+
+			eligible = quotedChannelFilter(prepaid, eligible)
 		}
 	}
 
@@ -860,4 +855,23 @@ func isChannelSelectable(
 	}
 
 	return true
+}
+
+func quotedChannelFilter(
+	prepaid *model.ImagePrepaymentQuote,
+	compatible func(*model.Channel) bool,
+) func(*model.Channel) bool {
+	return func(ch *model.Channel) bool {
+		if ch == nil || (compatible != nil && !compatible(ch)) {
+			return false
+		}
+
+		for _, quoted := range prepaid.Routes {
+			if quoted.ChannelID == ch.ID {
+				return true
+			}
+		}
+
+		return false
+	}
 }

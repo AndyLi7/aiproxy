@@ -84,16 +84,31 @@ func TestAdminLogsKindSeparatesCallsFromReads(t *testing.T) {
 		query   url.Values
 		want    []string
 	}{
-		{"list without kind keeps every row", GetLogs, "/api/logs/", url.Values{},
-			[]string{"chat-ok", "failed-poll", "trial_abc", "unknown-key"}},
-		{"list calls keeps trials", GetLogs, "/api/logs/", url.Values{"kind": {"calls"}},
-			[]string{"chat-ok", "trial_abc"}},
-		{"list reads holds polls and unknown keys", GetLogs, "/api/logs/", url.Values{"kind": {"reads"}},
-			[]string{"failed-poll", "unknown-key"}},
-		{"search reads of one group", SearchLogs, "/api/logs/search", url.Values{"kind": {"reads"}, "group": {"g"}},
-			[]string{"failed-poll"}},
-		{"search calls", SearchLogs, "/api/logs/search", url.Values{"kind": {"calls"}},
-			[]string{"chat-ok", "trial_abc"}},
+		{
+			"list without kind keeps every row", GetLogs, "/api/logs/",
+			url.Values{},
+			[]string{"chat-ok", "failed-poll", "trial_abc", "unknown-key"},
+		},
+		{
+			"list calls keeps trials", GetLogs, "/api/logs/",
+			url.Values{"kind": {"calls"}},
+			[]string{"chat-ok", "trial_abc"},
+		},
+		{
+			"list reads holds polls and unknown keys", GetLogs, "/api/logs/",
+			url.Values{"kind": {"reads"}},
+			[]string{"failed-poll", "unknown-key"},
+		},
+		{
+			"search reads of one group", SearchLogs, "/api/logs/search",
+			url.Values{"kind": {"reads"}, "group": {"g"}},
+			[]string{"failed-poll"},
+		},
+		{
+			"search calls", SearchLogs, "/api/logs/search",
+			url.Values{"kind": {"calls"}},
+			[]string{"chat-ok", "trial_abc"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.query.Set("per_page", "100")

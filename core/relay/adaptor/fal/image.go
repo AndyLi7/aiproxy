@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/labring/aiproxy/core/common/actionguard"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/common/failover"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
@@ -35,8 +36,11 @@ func (*Adaptor) DefaultBaseURL() string { return "https://queue.fal.run" }
 func (*Adaptor) SupportMode(m *meta.Meta) bool {
 	return m.Mode == mode.ImagesGenerations || m.Mode == mode.NativeTasks
 }
+
 func (*Adaptor) Metadata() adaptor.Metadata {
-	return adaptor.Metadata{KeyHelp: "fal API key; used by durable image tasks and native model tasks"}
+	return adaptor.Metadata{
+		KeyHelp: "fal API key; used by durable image tasks and native model tasks",
+	}
 }
 
 func (a *Adaptor) SubmitImage(ctx context.Context, m *meta.Meta, body []byte) (string, error) {
@@ -61,9 +65,9 @@ func (a *Adaptor) PollImage(
 	)
 }
 
-// queueResultFailure identifies a structured runner failure, not a transient
+// queueResultError identifies a structured runner failure, not a transient
 // HTTP gateway failure. Never include upstream response text in public errors.
-type queueResultFailure struct {
+type queueResultError struct {
 	status   int
 	terminal bool
 	issues   []model.ImageParameterIssue
@@ -71,7 +75,7 @@ type queueResultFailure struct {
 	reason string
 }
 
-func (e *queueResultFailure) Error() string { return fmt.Sprintf("fal returned HTTP %d", e.status) }
+func (e *queueResultError) Error() string { return fmt.Sprintf("fal returned HTTP %d", e.status) }
 
 // errorBodyLimit bounds how much of a fal error response is read.
 const errorBodyLimit = 64 << 10
@@ -80,8 +84,12 @@ const errorBodyLimit = 64 << 10
 // log-only reason, at most 8 public parameter issues from detail[].type/loc
 // and whether fal reports its downstream service as unavailable. The body
 // itself is never kept.
-func providerFailure(status int, raw []byte, key string) *queueResultFailure {
-	failure := &queueResultFailure{status: status, reason: adaptor.ProviderErrorReason(status, raw, key)}
+func providerFailure(status int, raw []byte, key string) *queueResultError {
+	failure := &queueResultError{
+		status: status,
+		reason: adaptor.ProviderErrorReason(status, raw, key),
+	}
+
 	var envelope struct {
 		Detail []struct {
 			Type string `json:"type"`
@@ -93,11 +101,13 @@ func providerFailure(status int, raw []byte, key string) *queueResultFailure {
 			if issue, ok := parameterIssue(detail.Type, detail.Loc); ok && len(failure.issues) < 8 {
 				failure.issues = append(failure.issues, issue)
 			}
+
 			if detail.Type == "downstream_service_unavailable" {
 				failure.terminal = true
 			}
 		}
 	}
+
 	return failure
 }
 
@@ -140,6 +150,7 @@ func (c *Client) request(
 	}
 
 	ctx, classifyTransport := failover.TraceTransport(ctx)
+
 	req, err := http.NewRequestWithContext(
 		ctx,
 		method,
@@ -170,11 +181,16 @@ func (c *Client) request(
 	if err := actionguard.Check(ctx); err != nil {
 		return 0, err
 	}
+
 	resp, err := copyClient.Do(req)
 	if err != nil {
-		return 0, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err), ProviderReason: transportReason(err)}
+		return 0, &adaptor.ImageSubmissionFailure{
+			Failure:        classifyTransport(err),
+			ProviderReason: transportReason(err),
+		}
 	}
 	defer resp.Body.Close()
+
 	if len(captureHeaders) == 1 && captureHeaders[0] != nil {
 		*captureHeaders[0] = resp.Header.Clone()
 	}
@@ -201,7 +217,9 @@ func (c *Client) Submit(ctx context.Context, modelName string, body []byte) (str
 	}
 
 	code, err := c.request(ctx, http.MethodPost, modelName, body, &result)
-	var failure *queueResultFailure
+
+	var failure *queueResultError
+
 	reason := ""
 	if errors.As(err, &failure) {
 		reason = failure.reason
@@ -213,19 +231,25 @@ func (c *Client) Submit(ctx context.Context, modelName string, body []byte) (str
 	case adaptor.InputRejectionStatus(code):
 		var public *model.ImageTaskError
 		if code == 422 && failure != nil && len(failure.issues) > 0 {
-			public = &model.ImageTaskError{Code: "invalid_parameters", Message: "Request parameters are invalid; check the listed fields", Issues: failure.issues}
+			public = &model.ImageTaskError{
+				Code:    "invalid_parameters",
+				Message: "Request parameters are invalid; check the listed fields",
+				Issues:  failure.issues,
+			}
 		}
+
 		return "", adaptor.NewSubmissionRejected(code, reason, public)
 	case adaptor.ProviderUnavailableStatus(code):
 		return "", adaptor.NewProviderUnavailable(code, reason)
 	case err != nil:
-		var transport *adaptor.ImageSubmissionFailure
-		if errors.As(err, &transport) {
+		if transport, ok := errors.AsType[*adaptor.ImageSubmissionFailure](err); ok {
 			return "", transport
 		}
+
 		if reason == "" {
 			reason = "unreadable response body"
 		}
+
 		return "", adaptor.NewSubmissionUnknown(code, reason)
 	}
 
@@ -246,6 +270,7 @@ func transportReason(err error) string {
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
 		return "request timed out"
 	}
+
 	return "transport error"
 }
 
@@ -304,6 +329,7 @@ func (c *Client) Poll(
 		statusPath = path + "/status"
 		_, err = c.request(ctx, http.MethodGet, statusPath, nil, &status)
 	}
+
 	if err != nil {
 		return adaptor.ImageTaskResult{}, err
 	}
@@ -324,47 +350,56 @@ func (c *Client) Poll(
 		return failed("upstream_failed"), nil
 	}
 
-	var result struct {
-		NumImages     *int64              `json:"num_images"`
-		Seeds         []json.Number       `json:"seeds"`
-		ActualPrompt  string              `json:"actual_prompt"`
-		RevisedPrompt *string             `json:"revised_prompt"`
-		Description   string              `json:"description"`
-		Seed          *json.Number        `json:"seed"`
-		UsedSeed      *json.Number        `json:"used_seed"`
-		Prompt        string              `json:"prompt"`
-		Images        []model.ImageOutput `json:"images"`
-		Image         *model.ImageOutput  `json:"image"`
-	}
-
 	var rawResult json.RawMessage
 
 	var resultHeaders http.Header
+
 	code, err := c.request(ctx, http.MethodGet, path, nil, &rawResult, &resultHeaders)
 	if err != nil {
-		var runnerFailure *queueResultFailure
+		var runnerFailure *queueResultError
 		errors.As(err, &runnerFailure)
+
 		if code == 400 || code == 422 ||
 			(errors.As(err, &runnerFailure) && runnerFailure.terminal) {
 			if runnerFailure != nil && code == 422 && len(runnerFailure.issues) > 0 {
-				return adaptor.ImageTaskResult{Status: "failed", Error: &model.ImageTaskError{Code: "invalid_parameters", Message: "Request parameters are invalid; check the listed fields", Issues: runnerFailure.issues}}, nil
+				return adaptor.ImageTaskResult{
+					Status: "failed",
+					Error: &model.ImageTaskError{
+						Code:    "invalid_parameters",
+						Message: "Request parameters are invalid; check the listed fields",
+						Issues:  runnerFailure.issues,
+					},
+				}, nil
 			}
+
 			return failed("upstream_failed"), nil
 		}
+
 		return adaptor.ImageTaskResult{}, err
 	}
 
+	return parseImageResult(rawResult, resultHeaders, frozenContracts)
+}
+
+func parseImageResult(
+	rawResult json.RawMessage,
+	resultHeaders http.Header,
+	frozenContracts [][]byte,
+) (adaptor.ImageTaskResult, error) {
+	var result falImageResult
+
 	mapTypeEnabled := false
+
 	providerMetadata := map[string]json.RawMessage{}
 	for _, frozen := range frozenContracts {
 		mapTypeEnabled = mapTypeEnabled || registryvalidation.FrozenImageMapTypeEnabled(frozen)
+
 		projected, err := registryvalidation.ExtractFrozenProviderMetadata(frozen, rawResult)
 		if err != nil {
 			return failed("invalid_result"), nil
 		}
-		for name, value := range projected {
-			providerMetadata[name] = value
-		}
+
+		maps.Copy(providerMetadata, projected)
 	}
 
 	if json.Unmarshal(rawResult, &result) != nil {
@@ -375,129 +410,231 @@ func (c *Client) Poll(
 	if json.Unmarshal(rawResult, &fields) != nil {
 		return failed("invalid_result"), nil
 	}
-	namedFields := []string(nil)
-	for _, frozen := range frozenContracts {
-		names, err := registryvalidation.FrozenNamedImageOutputs(frozen)
-		if err != nil {
-			return failed("invalid_result"), nil
-		}
-		if len(names) > 0 {
-			if namedFields != nil && !reflect.DeepEqual(namedFields, names) {
-				return failed("invalid_result"), nil
-			}
-			namedFields = names
-		}
-	}
-	if len(namedFields) > 0 {
-		result.Images = nil
-		result.Image = nil
-		for _, name := range namedFields {
-			var image model.ImageOutput
-			if len(fields[name]) == 0 || json.Unmarshal(fields[name], &image) != nil || image.URL == "" {
-				return failed("invalid_result"), nil
-			}
-			image.SourceField = name
-			result.Images = append(result.Images, image)
-		}
-	}
-	_, hasImages := fields["images"]
-	_, hasImage := fields["image"]
-	if len(namedFields) == 0 && hasImages && hasImage {
-		allowed := false
-		for _, frozen := range frozenContracts {
-			ok, err := registryvalidation.FrozenCombinedImageOutputs(frozen)
-			if err != nil {
-				return failed("invalid_result"), nil
-			}
-			allowed = allowed || ok
-		}
-		if !allowed || result.Image == nil {
-			return failed("invalid_result"), nil
-		}
-		combined := []model.ImageOutput{*result.Image}
-		for _, candidate := range result.Images {
-			duplicate := false
-			for _, existing := range combined {
-				if candidate.URL == existing.URL {
-					if !reflect.DeepEqual(candidate, existing) {
-						return failed("invalid_result"), nil
-					}
-					duplicate = true
-					break
-				}
-			}
-			if !duplicate {
-				combined = append(combined, candidate)
-			}
-		}
-		result.Images = combined
-	}
-	if len(namedFields) == 0 && !hasImages && result.Image != nil {
-		result.Images = []model.ImageOutput{*result.Image}
-	}
-	if len(result.Images) == 0 {
+
+	namedFields, ok := selectImageOutputs(&result, fields, frozenContracts)
+	if !ok {
 		return failed("invalid_result"), nil
 	}
 
 	for _, frozen := range frozenContracts {
-		if err := registryvalidation.CheckFrozenOutputControls(frozen, rawResult, len(result.Images)); err != nil {
+		if err := registryvalidation.CheckFrozenOutputControls(
+			frozen,
+			rawResult,
+			len(result.Images),
+		); err != nil {
 			if errors.Is(err, registryvalidation.ErrUnsafeImageResult) {
 				return failed("content_filtered"), nil
 			}
 			return failed("invalid_result"), nil
 		}
 	}
-	for _, img := range result.Images {
-		u, e := url.Parse(img.URL)
-		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
-			u.Fragment != "" ||
-			(img.ContentType != "" && !strings.HasPrefix(img.ContentType, "image/")) {
-			return failed("invalid_result"), nil
+
+	if !normalizeImageMetadata(&result, fields, namedFields, mapTypeEnabled) {
+		return failed("invalid_result"), nil
+	}
+
+	if !applyImageLayers(&result, rawResult, frozenContracts) {
+		return failed("invalid_result"), nil
+	}
+
+	legacySeed, seedExact, ok := imageResultSeed(&result)
+	if !ok {
+		return failed("invalid_result"), nil
+	}
+
+	if !applyAuxiliaryImages(&result, rawResult, frozenContracts) {
+		return failed("invalid_result"), nil
+	}
+
+	return adaptor.ImageTaskResult{
+		Status: "completed",
+		Data:   result.Images,
+		Metadata: model.ImageResultMetadata{
+			ProviderMetadata: providerMetadata,
+			NumImages:        result.NumImages,
+			Description:      result.Description,
+			Seed:             legacySeed,
+			SeedExact:        seedExact,
+			Prompt:           result.Prompt,
+			BillableUnits:    resultHeaders.Get("X-Fal-Billable-Units"),
+		},
+	}, nil
+}
+
+// Synchronous/demo relay must never accidentally send a paid queue request.
+func (*Adaptor) GetRequestURL(*meta.Meta, adaptor.Store, *gin.Context) (adaptor.RequestURL, error) {
+	return adaptor.RequestURL{}, errors.New("fal requires /v1/images/tasks")
+}
+func (*Adaptor) ImageAdapterName() string { return "fal-image" }
+
+type falImageResult struct {
+	NumImages     *int64              `json:"num_images"`
+	Seeds         []json.Number       `json:"seeds"`
+	ActualPrompt  string              `json:"actual_prompt"`
+	RevisedPrompt *string             `json:"revised_prompt"`
+	Description   string              `json:"description"`
+	Seed          *json.Number        `json:"seed"`
+	UsedSeed      *json.Number        `json:"used_seed"`
+	Prompt        string              `json:"prompt"`
+	Images        []model.ImageOutput `json:"images"`
+	Image         *model.ImageOutput  `json:"image"`
+}
+
+func selectImageOutputs(
+	result *falImageResult,
+	fields map[string]json.RawMessage,
+	frozenContracts [][]byte,
+) ([]string, bool) {
+	namedFields := []string(nil)
+	for _, frozen := range frozenContracts {
+		names, err := registryvalidation.FrozenNamedImageOutputs(frozen)
+		if err != nil {
+			return nil, false
+		}
+
+		if len(names) > 0 {
+			if namedFields != nil && !reflect.DeepEqual(namedFields, names) {
+				return nil, false
+			}
+
+			namedFields = names
 		}
 	}
 
-	if _, present := fields["seeds"]; present && len(result.Seeds) != len(result.Images) {
-		return failed("invalid_result"), nil
-	}
-	if result.RevisedPrompt != nil {
-		if raw, present := fields["actual_prompt"]; present && string(raw) != "null" && result.ActualPrompt != *result.RevisedPrompt {
-			return failed("invalid_result"), nil
+	if len(namedFields) > 0 {
+		result.Images = nil
+
+		result.Image = nil
+		for _, name := range namedFields {
+			var image model.ImageOutput
+			if len(fields[name]) == 0 || json.Unmarshal(fields[name], &image) != nil ||
+				image.URL == "" {
+				return nil, false
+			}
+
+			image.SourceField = name
+			result.Images = append(result.Images, image)
 		}
-		for _, img := range result.Images {
-			if img.RevisedPrompt != "" && img.RevisedPrompt != *result.RevisedPrompt {
-				return failed("invalid_result"), nil
+	}
+
+	_, hasImages := fields["images"]
+
+	_, hasImage := fields["image"]
+	if len(namedFields) == 0 && hasImages && hasImage {
+		allowed := false
+		for _, frozen := range frozenContracts {
+			ok, err := registryvalidation.FrozenCombinedImageOutputs(frozen)
+			if err != nil {
+				return nil, false
+			}
+
+			allowed = allowed || ok
+		}
+
+		if !allowed || result.Image == nil {
+			return nil, false
+		}
+
+		combined := []model.ImageOutput{*result.Image}
+		for _, candidate := range result.Images {
+			duplicate := false
+			for _, existing := range combined {
+				if candidate.URL == existing.URL {
+					if !reflect.DeepEqual(candidate, existing) {
+						return nil, false
+					}
+
+					duplicate = true
+
+					break
+				}
+			}
+
+			if !duplicate {
+				combined = append(combined, candidate)
 			}
 		}
+
+		result.Images = combined
+	}
+
+	if len(namedFields) == 0 && !hasImages && result.Image != nil {
+		result.Images = []model.ImageOutput{*result.Image}
+	}
+
+	if len(result.Images) == 0 {
+		return nil, false
+	}
+
+	return namedFields, true
+}
+
+func normalizeImageMetadata(
+	result *falImageResult,
+	fields map[string]json.RawMessage,
+	namedFields []string,
+	mapTypeEnabled bool,
+) bool {
+	if !validImageLocations(result.Images) {
+		return false
+	}
+
+	if _, present := fields["seeds"]; present && len(result.Seeds) != len(result.Images) {
+		return false
+	}
+
+	if result.RevisedPrompt != nil {
+		if raw, present := fields["actual_prompt"]; present && string(raw) != "null" &&
+			result.ActualPrompt != *result.RevisedPrompt {
+			return false
+		}
+
+		for _, img := range result.Images {
+			if img.RevisedPrompt != "" && img.RevisedPrompt != *result.RevisedPrompt {
+				return false
+			}
+		}
+
 		result.ActualPrompt = *result.RevisedPrompt
 	}
+
 	if result.Prompt == "" {
 		result.Prompt = result.ActualPrompt
 	}
+
 	for i := range result.Images {
 		// Delivery state is platform-owned, never accepted from provider JSON.
 		if len(namedFields) == 0 {
 			result.Images[i].SourceField = ""
 		}
+
 		if !mapTypeEnabled {
 			result.Images[i].MapType = ""
 		}
+
 		result.Images[i].Layer = nil
 		result.Images[i].Stored = false
 		result.Images[i].URLExpiresAt = nil
+
 		result.Images[i].AuxiliaryImages = nil
 		if result.Images[i].Seed != nil && !validSeed.MatchString(result.Images[i].Seed.String()) {
-			return failed("invalid_result"), nil
+			return false
 		}
-		if result.ActualPrompt != "" && result.Images[i].RevisedPrompt != "" && result.Images[i].RevisedPrompt != result.ActualPrompt {
-			return failed("invalid_result"), nil
+
+		if result.ActualPrompt != "" && result.Images[i].RevisedPrompt != "" &&
+			result.Images[i].RevisedPrompt != result.ActualPrompt {
+			return false
 		}
+
 		if len(result.Seeds) > 0 {
 			if !validSeed.MatchString(result.Seeds[i].String()) {
-				return failed("invalid_result"), nil
+				return false
 			}
+
 			if result.Images[i].Seed != nil && *result.Images[i].Seed != result.Seeds[i] {
-				return failed("invalid_result"), nil
+				return false
 			}
+
 			result.Images[i].Seed = &result.Seeds[i]
 		}
 
@@ -508,79 +645,132 @@ func (c *Client) Poll(
 			}
 		}
 	}
+
+	return true
+}
+
+func applyImageLayers(
+	result *falImageResult,
+	rawResult json.RawMessage,
+	frozenContracts [][]byte,
+) bool {
 	var layerMetadata []json.RawMessage
 	for _, frozen := range frozenContracts {
 		layers, err := registryvalidation.ExtractFrozenLayerMetadata(frozen, rawResult)
 		if err != nil {
-			return failed("invalid_result"), nil
+			return false
 		}
+
 		if len(layers) == 0 {
 			continue
 		}
-		if len(layers) != len(result.Images) || (layerMetadata != nil && !reflect.DeepEqual(layerMetadata, layers)) {
-			return failed("invalid_result"), nil
+
+		if len(layers) != len(result.Images) ||
+			(layerMetadata != nil && !reflect.DeepEqual(layerMetadata, layers)) {
+			return false
 		}
+
 		layerMetadata = layers
 	}
+
 	for i, layer := range layerMetadata {
 		result.Images[i].Layer = append([]byte(nil), layer...)
 	}
+
+	return true
+}
+
+func imageResultSeed(result *falImageResult) (*int64, string, bool) {
 	if result.UsedSeed != nil {
 		if result.Seed != nil && result.Seed.String() != result.UsedSeed.String() {
-			return failed("invalid_result"), nil
+			return nil, "", false
 		}
+
 		result.Seed = result.UsedSeed
 	}
+
 	var legacySeed *int64
+
 	seedExact := ""
 	if result.Seed != nil {
 		if !validSeed.MatchString(result.Seed.String()) {
-			return failed("invalid_result"), nil
+			return nil, "", false
 		}
+
 		if value, e := result.Seed.Int64(); e == nil {
 			legacySeed = &value
 		} else {
 			seedExact = result.Seed.String()
 		}
 	}
+
+	return legacySeed, seedExact, true
+}
+
+func applyAuxiliaryImages(
+	result *falImageResult,
+	rawResult json.RawMessage,
+	frozenContracts [][]byte,
+) bool {
 	for _, frozen := range frozenContracts {
 		assets, err := registryvalidation.ExtractFrozenAuxiliaryImages(frozen, rawResult)
 		if err != nil {
-			return failed("invalid_result"), nil
+			return false
 		}
+
 		if len(assets) == 0 {
 			continue
 		}
+
 		if len(result.Images) != 1 {
-			return failed("invalid_result"), nil
+			return false
 		}
+
 		if result.Images[0].AuxiliaryImages == nil {
 			result.Images[0].AuxiliaryImages = map[string]*model.ImageOutput{}
 		}
+
 		for name, rawAsset := range assets {
 			if string(bytes.TrimSpace(rawAsset)) == "null" {
 				result.Images[0].AuxiliaryImages[name] = nil
 				continue
 			}
+
 			var asset model.ImageOutput
 			if json.Unmarshal(rawAsset, &asset) != nil {
-				return failed("invalid_result"), nil
+				return false
 			}
+
 			u, err := url.Parse(asset.URL)
-			if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (asset.ContentType != "" && !strings.HasPrefix(asset.ContentType, "image/")) {
-				return failed("invalid_result"), nil
+			if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
+				u.Fragment != "" ||
+				(asset.ContentType != "" && !strings.HasPrefix(asset.ContentType, "image/")) {
+				return false
 			}
 			// Project only the source-declared image asset fields. New primary-image
 			// metadata must never leak into auxiliary assets by default.
-			asset = model.ImageOutput{URL: asset.URL, ContentType: asset.ContentType, Width: asset.Width, Height: asset.Height}
+			asset = model.ImageOutput{
+				URL:         asset.URL,
+				ContentType: asset.ContentType,
+				Width:       asset.Width,
+				Height:      asset.Height,
+			}
 			result.Images[0].AuxiliaryImages[name] = &asset
 		}
 	}
-	return adaptor.ImageTaskResult{Status: "completed", Data: result.Images, Metadata: model.ImageResultMetadata{ProviderMetadata: providerMetadata, NumImages: result.NumImages, Description: result.Description, Seed: legacySeed, SeedExact: seedExact, Prompt: result.Prompt, BillableUnits: resultHeaders.Get("x-fal-billable-units")}}, nil
+
+	return true
 }
 
-// Synchronous/demo relay must never accidentally send a paid queue request.
-func (*Adaptor) GetRequestURL(*meta.Meta, adaptor.Store, *gin.Context) (adaptor.RequestURL, error) {
-	return adaptor.RequestURL{}, errors.New("fal requires /v1/images/tasks")
+func validImageLocations(images []model.ImageOutput) bool {
+	for _, img := range images {
+		u, e := url.Parse(img.URL)
+		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
+			u.Fragment != "" ||
+			(img.ContentType != "" && !strings.HasPrefix(img.ContentType, "image/")) {
+			return false
+		}
+	}
+
+	return true
 }
-func (*Adaptor) ImageAdapterName() string { return "fal-image" }

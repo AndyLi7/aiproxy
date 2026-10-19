@@ -77,7 +77,12 @@ const (
 
 func (k AdminLogKind) Valid() bool {
 	switch k {
-	case "", AdminLogKindAll, AdminLogKindCalls, AdminLogKindReads, AdminLogKindTasks, AdminLogKindNonTask:
+	case "",
+		AdminLogKindAll,
+		AdminLogKindCalls,
+		AdminLogKindReads,
+		AdminLogKindTasks,
+		AdminLogKindNonTask:
 		return true
 	default:
 		return false

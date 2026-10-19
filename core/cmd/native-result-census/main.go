@@ -4,8 +4,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/labring/aiproxy/core/common/nativeresult"
 	"os"
+
+	"github.com/labring/aiproxy/core/common/nativeresult"
 )
 
 type row struct {
@@ -21,19 +22,29 @@ func main() {
 	if len(os.Args) != 3 {
 		panic("usage: native-result-census input.json output.json")
 	}
+
+	// #nosec G703 -- Offline CLI operator explicitly chooses the input file.
 	raw, err := os.ReadFile(os.Args[1])
 	if err != nil {
 		panic(err)
 	}
+
 	var rows []row
 	if err = json.Unmarshal(raw, &rows); err != nil {
 		panic(err)
 	}
-	results := []map[string]any{}
+
+	results := make([]map[string]any, 0, len(rows))
 	passed := 0
+
 	sourceErrors := 0
 	for _, r := range rows {
-		entry := map[string]any{"endpoint": r.Endpoint, "sourceSha256": r.SourceSHA256, "schemaCompiled": false, "publicReady": false}
+		entry := map[string]any{
+			"endpoint":       r.Endpoint,
+			"sourceSha256":   r.SourceSHA256,
+			"schemaCompiled": false,
+			"publicReady":    false,
+		}
 		if r.Error != "" {
 			entry["error"] = r.Error
 			sourceErrors++
@@ -53,16 +64,35 @@ func main() {
 			entry["schemaCompiled"] = true
 			passed++
 		}
+
 		results = append(results, entry)
 	}
-	report := map[string]any{"summary": map[string]any{"total": len(rows), "schemaCompiled": passed, "sourceFailures": sourceErrors, "schemaFailures": len(rows) - passed - sourceErrors, "publicReady": 0}, "results": results}
+
+	report := map[string]any{
+		"summary": map[string]any{
+			"total":          len(rows),
+			"schemaCompiled": passed,
+			"sourceFailures": sourceErrors,
+			"schemaFailures": len(rows) - passed - sourceErrors,
+			"publicReady":    0,
+		},
+		"results": results,
+	}
+
 	output, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		panic(err)
 	}
-	if err = os.WriteFile(os.Args[2], output, 0600); err != nil {
+
+	// #nosec G703 -- Offline CLI operator explicitly chooses the output report path.
+	if err = os.WriteFile(os.Args[2], output, 0o600); err != nil {
 		panic(err)
 	}
-	summary, _ := json.Marshal(report["summary"])
+
+	summary, err := json.Marshal(report["summary"])
+	if err != nil {
+		panic(err)
+	}
+
 	fmt.Println(string(summary))
 }

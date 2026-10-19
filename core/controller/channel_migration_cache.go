@@ -10,10 +10,15 @@ func GetMigrationCacheObservation(c *gin.Context) {
 	if !migrationReadNoBody(c) {
 		return
 	}
+
 	id := c.Param("id")
 	if !model.ValidMigrationReadOperationID(id) {
 		migrationReadReject(c)
 		return
 	}
-	middleware.SuccessResponse(c, migrationReadStore().ReadMigrationCacheObservation(c.Request.Context(), id))
+
+	middleware.SuccessResponse(
+		c,
+		migrationReadStore().ReadMigrationCacheObservation(c.Request.Context(), id),
+	)
 }

@@ -73,7 +73,8 @@ func HasProviderContracts(raw []byte) bool {
 
 // ValidProviderBindingIdentity checks the existing provider contract identity format.
 func ValidProviderBindingIdentity(b ProviderBinding) bool {
-	return b.Provider != "" && b.ID != "" && b.Revision != "" && providerHash.MatchString(b.ContractHash)
+	return b.Provider != "" && b.ID != "" && b.Revision != "" &&
+		providerHash.MatchString(b.ContractHash)
 }
 
 func bound(raw []byte, b ProviderBinding) (*boundProvider, error) {
@@ -94,12 +95,15 @@ func bound(raw []byte, b ProviderBinding) (*boundProvider, error) {
 		s.Endpoint == "" {
 		return nil, ErrProviderContract
 	}
+
 	if err := validateOutputArtifactProjection(s); err != nil {
 		return nil, err
 	}
+
 	if err := validateOutputImageProjection(s); err != nil {
 		return nil, err
 	}
+
 	if err := validateOutputMetadataProjection(s); err != nil {
 		return nil, err
 	}
@@ -189,21 +193,31 @@ func MapBoundProviderInput(
 	if schemaAccepts(s.Accepted, input) != nil {
 		return nil, ErrProviderContract
 	}
+
 	if p.InputProjection != "" {
 		if p.InputProjection != "seedream45_ark_single_v1" || adapter != "volcengine-ark-image" ||
-			len(p.Mapping) != 2 || p.Mapping["prompt"] != "prompt" || p.Mapping["image_size"] != "size" ||
-			len(p.Fixed) != 2 || p.Fixed["stream"] != false || p.Fixed["response_format"] != "url" ||
-			len(p.Passthrough) != 0 || len(input) != 4 || input["n"] != float64(1) || input["max_images"] != float64(1) {
+			len(
+				p.Mapping,
+			) != 2 || p.Mapping["prompt"] != "prompt" || p.Mapping["image_size"] != "size" ||
+			len(
+				p.Fixed,
+			) != 2 || p.Fixed["stream"] != false || p.Fixed["response_format"] != "url" ||
+			len(
+				p.Passthrough,
+			) != 0 || len(input) != 4 || input["n"] != float64(1) || input["max_images"] != float64(1) {
 			return nil, ErrProviderContract
 		}
+
 		size, ok := input["image_size"].(string)
 		if !ok || (size != "auto_2K" && size != "auto_4K") {
 			return nil, ErrProviderContract
 		}
+
 		prompt, ok := input["prompt"].(string)
 		if !ok || prompt == "" {
 			return nil, ErrProviderContract
 		}
+
 		mapped := map[string]any{
 			"prompt": prompt, "size": strings.TrimPrefix(size, "auto_"),
 			"stream": false, "response_format": "url",
@@ -211,6 +225,7 @@ func MapBoundProviderInput(
 		if schemaAccepts(s.Input, mapped) != nil {
 			return nil, ErrProviderContract
 		}
+
 		return json.Marshal(mapped)
 	}
 
@@ -228,6 +243,7 @@ func MapBoundProviderInput(
 				}
 				continue
 			}
+
 			if !slices.Contains(p.Passthrough, key) {
 				return nil, ErrProviderContract
 			}
@@ -316,14 +332,17 @@ func ValidateFrozenProviderOutput(raw, output []byte) error {
 	if json.Unmarshal(output, &value) != nil {
 		return ErrProviderContract
 	}
+
 	var metering ImageMetering
 	if len(p.Upstream.Metering) != 0 && json.Unmarshal(p.Upstream.Metering, &metering) != nil {
 		return ErrProviderContract
 	}
+
 	if metering.Version == 4 || (metering.Version == 5 && metering.MaxOutputPixels != nil) {
 		if metering.MaxOutputPixels == nil || *metering.MaxOutputPixels < 1 {
 			return ErrProviderContract
 		}
+
 		var images struct {
 			Images []struct {
 				Width  int64 `json:"width"`
@@ -333,8 +352,10 @@ func ValidateFrozenProviderOutput(raw, output []byte) error {
 		if json.Unmarshal(output, &images) != nil || len(images.Images) == 0 {
 			return ErrProviderContract
 		}
+
 		for _, image := range images.Images {
-			if image.Width < 1 || image.Height < 1 || image.Width > *metering.MaxOutputPixels/image.Height {
+			if image.Width < 1 || image.Height < 1 ||
+				image.Width > *metering.MaxOutputPixels/image.Height {
 				return ErrProviderContract
 			}
 		}
@@ -348,29 +369,36 @@ func FrozenImagePixelLimit(raw []byte) (int64, error) {
 	if !HasProviderContracts(raw) {
 		return 0, nil
 	}
+
 	var frozen struct {
 		Binding ProviderBinding `json:"selected_provider_binding"`
 	}
 	if json.Unmarshal(raw, &frozen) != nil {
 		return 0, ErrProviderContract
 	}
+
 	p, err := bound(raw, frozen.Binding)
 	if err != nil {
 		return 0, err
 	}
+
 	var m ImageMetering
+
 	if len(p.Upstream.Metering) == 0 {
 		return 0, nil
 	}
+
 	if json.Unmarshal(p.Upstream.Metering, &m) != nil {
 		return 0, ErrProviderContract
 	}
+
 	if m.Version == 4 || (m.Version == 5 && m.MaxOutputPixels != nil) {
 		if m.MaxOutputPixels == nil || *m.MaxOutputPixels < 1 || *m.MaxOutputPixels > 100000000 {
 			return 0, ErrProviderContract
 		}
 		return *m.MaxOutputPixels, nil
 	}
+
 	return 0, nil
 }
 

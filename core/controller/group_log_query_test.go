@@ -52,8 +52,11 @@ func newLogTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func serveGroupLogs(t *testing.T, group string, query url.Values) (int, groupLogPage, string) {
+func serveGroupLogs(t *testing.T, query url.Values) (int, groupLogPage, string) {
 	t.Helper()
+
+	const group = "g"
+
 	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
@@ -102,41 +105,102 @@ func seedGroupLogs(t *testing.T, db *gorm.DB, now time.Time) map[string]*model.L
 	at := func(age time.Duration) time.Time { return now.Add(-age) }
 	rows := map[string]*model.Log{
 		"chat-ok": {
-			GroupID: "g", TokenID: 3, TokenName: "prod", Code: 200, Model: "gpt-4o",
-			Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: at(time.Hour),
+			GroupID:   "g",
+			TokenID:   3,
+			TokenName: "prod",
+			Code:      200,
+			Model:     "gpt-4o",
+			Mode: int(
+				mode.ChatCompletions,
+			),
+			Endpoint:  "/v1/chat/completions",
+			RequestAt: at(time.Hour),
 		},
 		"chat-upstream-failed": {
-			GroupID: "g", TokenID: 3, TokenName: "prod", Code: 502, FailureStage: model.FailureStageUpstream,
-			Model: "gpt-4o", Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: at(2 * time.Hour),
+			GroupID:      "g",
+			TokenID:      3,
+			TokenName:    "prod",
+			Code:         502,
+			FailureStage: model.FailureStageUpstream,
+			Model:        "gpt-4o",
+			Mode:         int(mode.ChatCompletions),
+			Endpoint:     "/v1/chat/completions",
+			RequestAt:    at(2 * time.Hour),
 		},
 		"balance-rejected": {
-			GroupID: "g", TokenID: 4, TokenName: "ci", Code: 402, FailureStage: model.FailureStageBalance,
-			Model: "gpt-4o", Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: at(3 * time.Hour),
+			GroupID:      "g",
+			TokenID:      4,
+			TokenName:    "ci",
+			Code:         402,
+			FailureStage: model.FailureStageBalance,
+			Model:        "gpt-4o",
+			Mode:         int(mode.ChatCompletions),
+			Endpoint:     "/v1/chat/completions",
+			RequestAt:    at(3 * time.Hour),
 		},
 		"failed-poll": {
-			GroupID: "g", TokenID: 3, TokenName: "prod", Code: 404, FailureStage: model.FailureStageNone,
-			Endpoint: "GET /v1/model-tasks/missing", RequestAt: at(4 * time.Hour),
+			GroupID:      "g",
+			TokenID:      3,
+			TokenName:    "prod",
+			Code:         404,
+			FailureStage: model.FailureStageNone,
+			Endpoint:     "GET /v1/model-tasks/missing",
+			RequestAt:    at(4 * time.Hour),
 		},
 		"native-processing": {
-			GroupID: "g", TokenID: 3, TokenName: "prod", Code: 202, AsyncUsageStatus: model.AsyncUsageStatusPending,
-			Model: "vendor/flux", Capability: "text-to-image", Mode: int(mode.NativeTasks),
-			Endpoint: "POST /v1/model-tasks", RequestAt: at(30 * time.Minute),
+			GroupID:          "g",
+			TokenID:          3,
+			TokenName:        "prod",
+			Code:             202,
+			AsyncUsageStatus: model.AsyncUsageStatusPending,
+			Model:            "vendor/flux",
+			Capability:       "text-to-image",
+			Mode:             int(mode.NativeTasks),
+			Endpoint:         "POST /v1/model-tasks",
+			RequestAt:        at(30 * time.Minute),
 		},
 		"measured-image-billing-pending": {
-			GroupID: "g", TokenID: 3, TokenName: "prod", Code: 200, AsyncUsageStatus: model.AsyncUsageStatusPending,
-			Model: "vendor/flux", Mode: int(mode.ImagesGenerations), Endpoint: "/v1/images/generations", RequestAt: at(5 * time.Hour),
+			GroupID:          "g",
+			TokenID:          3,
+			TokenName:        "prod",
+			Code:             200,
+			AsyncUsageStatus: model.AsyncUsageStatusPending,
+			Model:            "vendor/flux",
+			Mode:             int(mode.ImagesGenerations),
+			Endpoint:         "/v1/images/generations",
+			RequestAt:        at(5 * time.Hour),
 		},
 		"admin-demo": {
-			GroupID: "g", TokenID: 3, Code: 200, RequestSource: model.RequestSourceAdminDemo,
-			Model: "gpt-4o", Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: at(6 * time.Hour),
+			GroupID:       "g",
+			TokenID:       3,
+			Code:          200,
+			RequestSource: model.RequestSourceAdminDemo,
+			Model:         "gpt-4o",
+			Mode:          int(mode.ChatCompletions),
+			Endpoint:      "/v1/chat/completions",
+			RequestAt:     at(6 * time.Hour),
 		},
 		"twenty-days-old": {
-			GroupID: "g", TokenID: 3, TokenName: "prod", Code: 200, Model: "gpt-4o",
-			Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: at(20 * 24 * time.Hour),
+			GroupID:   "g",
+			TokenID:   3,
+			TokenName: "prod",
+			Code:      200,
+			Model:     "gpt-4o",
+			Mode: int(
+				mode.ChatCompletions,
+			),
+			Endpoint:  "/v1/chat/completions",
+			RequestAt: at(20 * 24 * time.Hour),
 		},
 		"other-tenant": {
-			GroupID: "other", TokenID: 9, Code: 502, FailureStage: model.FailureStageUpstream,
-			Model: "gpt-4o", Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: at(time.Hour),
+			GroupID:      "other",
+			TokenID:      9,
+			Code:         502,
+			FailureStage: model.FailureStageUpstream,
+			Model:        "gpt-4o",
+			Mode:         int(mode.ChatCompletions),
+			Endpoint:     "/v1/chat/completions",
+			RequestAt:    at(time.Hour),
 		},
 	}
 
@@ -153,7 +217,7 @@ func TestGroupLogsCarryCallStatus(t *testing.T) {
 	db := newLogTestDB(t)
 	seedGroupLogs(t, db, time.Now())
 
-	code, page, body := serveGroupLogs(t, "g", url.Values{"per_page": {"100"}})
+	code, page, body := serveGroupLogs(t, url.Values{"per_page": {"100"}})
 	require.Equal(t, http.StatusOK, code, body)
 
 	statuses := map[string]string{}
@@ -183,7 +247,10 @@ func TestGroupLogsStatusFilterApplies(t *testing.T) {
 		// The pre-P1 alias still filters.
 		"success": {"admin-demo", "chat-ok", "measured-image-billing-pending"},
 	} {
-		code, page, body := serveGroupLogs(t, "g", url.Values{"status": {status}, "per_page": {"100"}})
+		code, page, body := serveGroupLogs(
+			t,
+			url.Values{"status": {status}, "per_page": {"100"}},
+		)
 		require.Equal(t, http.StatusOK, code, body)
 		require.Equal(t, want, requestIDs(page), status)
 		require.EqualValues(t, len(want), page.Total, status)
@@ -194,7 +261,7 @@ func TestGroupLogsKindSeparatesCallsFromReads(t *testing.T) {
 	db := newLogTestDB(t)
 	seedGroupLogs(t, db, time.Now())
 
-	code, page, body := serveGroupLogs(t, "g", url.Values{"kind": {"calls"}, "per_page": {"100"}})
+	code, page, body := serveGroupLogs(t, url.Values{"kind": {"calls"}, "per_page": {"100"}})
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, []string{
 		"balance-rejected",
@@ -204,11 +271,11 @@ func TestGroupLogsKindSeparatesCallsFromReads(t *testing.T) {
 		"native-processing",
 	}, requestIDs(page))
 
-	code, page, body = serveGroupLogs(t, "g", url.Values{"kind": {"reads"}, "per_page": {"100"}})
+	code, page, body = serveGroupLogs(t, url.Values{"kind": {"reads"}, "per_page": {"100"}})
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, []string{"admin-demo", "failed-poll"}, requestIDs(page))
 
-	code, page, body = serveGroupLogs(t, "g", url.Values{
+	code, page, body = serveGroupLogs(t, url.Values{
 		"kind": {"calls"}, "status": {"failed"}, "per_page": {"100"},
 	})
 	require.Equal(t, http.StatusOK, code, body)
@@ -220,7 +287,7 @@ func TestGroupLogsWindowReachesBeyondSevenDays(t *testing.T) {
 	now := time.Now()
 	seedGroupLogs(t, db, now)
 
-	code, page, body := serveGroupLogs(t, "g", url.Values{
+	code, page, body := serveGroupLogs(t, url.Values{
 		"start": {ms(now.Add(-30 * 24 * time.Hour))}, "kind": {"calls"}, "per_page": {"100"},
 	})
 	require.Equal(t, http.StatusOK, code, body)
@@ -228,7 +295,7 @@ func TestGroupLogsWindowReachesBeyondSevenDays(t *testing.T) {
 	require.EqualValues(t, 6, page.Total)
 
 	// Without start the legacy 7-day created_at window is unchanged.
-	code, page, body = serveGroupLogs(t, "g", url.Values{"kind": {"calls"}, "per_page": {"100"}})
+	code, page, body = serveGroupLogs(t, url.Values{"kind": {"calls"}, "per_page": {"100"}})
 	require.Equal(t, http.StatusOK, code, body)
 	require.NotContains(t, requestIDs(page), "twenty-days-old")
 }
@@ -249,7 +316,7 @@ func TestGroupLogsWindowUsesRequestTime(t *testing.T) {
 		}).Error)
 	}
 
-	code, page, body := serveGroupLogs(t, "g", url.Values{
+	code, page, body := serveGroupLogs(t, url.Values{
 		"start": {ms(now.Add(-5 * 24 * time.Hour))},
 		"end":   {ms(now.Add(-24 * time.Hour))},
 	})
@@ -267,7 +334,7 @@ func TestGroupLogsModelIDMatchesCapabilityAndPlainModels(t *testing.T) {
 		"gpt-4o":                     {"balance-rejected", "chat-ok", "chat-upstream-failed"},
 		"vendor/flux/image-to-image": {},
 	} {
-		code, page, body := serveGroupLogs(t, "g", url.Values{
+		code, page, body := serveGroupLogs(t, url.Values{
 			"model_id": {modelID}, "kind": {"calls"}, "per_page": {"100"},
 		})
 		require.Equal(t, http.StatusOK, code, body)
@@ -279,7 +346,7 @@ func TestGroupLogsTokenIDFilters(t *testing.T) {
 	db := newLogTestDB(t)
 	seedGroupLogs(t, db, time.Now())
 
-	code, page, body := serveGroupLogs(t, "g", url.Values{"token_id": {"4"}, "per_page": {"100"}})
+	code, page, body := serveGroupLogs(t, url.Values{"token_id": {"4"}, "per_page": {"100"}})
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, []string{"balance-rejected"}, requestIDs(page))
 }
@@ -288,7 +355,7 @@ func TestGroupLogsLogIDFindsOldRowsWithinTheGroup(t *testing.T) {
 	db := newLogTestDB(t)
 	rows := seedGroupLogs(t, db, time.Now())
 
-	code, page, body := serveGroupLogs(t, "g", url.Values{
+	code, page, body := serveGroupLogs(t, url.Values{
 		"log_id": {strconv.Itoa(rows["twenty-days-old"].ID)},
 	})
 	require.Equal(t, http.StatusOK, code, body)
@@ -296,7 +363,7 @@ func TestGroupLogsLogIDFindsOldRowsWithinTheGroup(t *testing.T) {
 	require.EqualValues(t, 1, page.Total)
 
 	// Another group's row id is not visible through this group.
-	code, page, body = serveGroupLogs(t, "g", url.Values{
+	code, page, body = serveGroupLogs(t, url.Values{
 		"log_id": {strconv.Itoa(rows["other-tenant"].ID)},
 	})
 	require.Equal(t, http.StatusOK, code, body)
@@ -336,7 +403,7 @@ func TestGroupLogsWindowPagesAreStable(t *testing.T) {
 	var ordered []string
 
 	for pageNumber := 1; pageNumber <= 3; pageNumber++ {
-		code, page, body := serveGroupLogs(t, "g", url.Values{
+		code, page, body := serveGroupLogs(t, url.Values{
 			"start":    {ms(now.Add(-24 * time.Hour))},
 			"page":     {strconv.Itoa(pageNumber)},
 			"per_page": {"2"},
@@ -349,6 +416,10 @@ func TestGroupLogsWindowPagesAreStable(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, []string{"newest-request", "tie-c", "tie-b", "tie-a", "oldest-request"}, ordered)
+	require.Equal(
+		t,
+		[]string{"newest-request", "tie-c", "tie-b", "tie-a", "oldest-request"},
+		ordered,
+	)
 	require.Greater(t, ids["tie-c"], ids["tie-b"])
 }

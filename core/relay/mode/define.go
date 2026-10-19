@@ -108,7 +108,7 @@ const (
 // All returns every relay mode in id order.
 func All() []Mode {
 	modes := make([]Mode, 0, int(modeEnd))
-	for m := Unknown; m < modeEnd; m++ {
+	for m := range modeEnd {
 		modes = append(modes, m)
 	}
 

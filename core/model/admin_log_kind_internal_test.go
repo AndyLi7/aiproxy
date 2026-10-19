@@ -1,4 +1,3 @@
-//nolint:testpackage // The admin log kind is checked against its internal Go form.
 package model
 
 import (
@@ -15,7 +14,12 @@ import (
 // The admin request log keeps trial and admin demo rows among calls, unlike
 // the customer list (TestIsCall).
 func TestIsAdminLogCall(t *testing.T) {
-	call := Log{GroupID: "g", TokenID: 7, Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions"}
+	call := Log{
+		GroupID:  "g",
+		TokenID:  7,
+		Mode:     int(mode.ChatCompletions),
+		Endpoint: "/v1/chat/completions",
+	}
 	require.True(t, call.isAdminLogCall())
 
 	for _, tc := range []struct {
@@ -74,20 +78,39 @@ func adminLogKindRows(now time.Time) []adminLogKindRow {
 			Endpoint: "POST /v1/model-tasks", RequestAt: at(9 * time.Minute),
 		}},
 		{label: "native-submit", log: Log{
-			RequestID: "job-7f3a91", GroupID: "cust", TokenID: 7, TokenName: "prod", Code: 202,
-			AsyncUsageStatus: AsyncUsageStatusCompleted, Model: "vendor/flux", Mode: int(mode.NativeTasks),
-			Endpoint: "POST /v1/model-tasks", BillingOperationID: "native:job-7f3a91", RequestAt: at(8 * time.Minute),
+			RequestID:          "job-7f3a91",
+			GroupID:            "cust",
+			TokenID:            7,
+			TokenName:          "prod",
+			Code:               202,
+			AsyncUsageStatus:   AsyncUsageStatusCompleted,
+			Model:              "vendor/flux",
+			Mode:               int(mode.NativeTasks),
+			Endpoint:           "POST /v1/model-tasks",
+			BillingOperationID: "native:job-7f3a91",
+			RequestAt:          at(8 * time.Minute),
 		}},
 		{label: "native-artifact-download-502", read: true, log: Log{
-			RequestID: "artifact-req-1", GroupID: "cust", TokenID: 7, TokenName: "prod", Code: 502,
-			FailureStage: FailureStageUpstream, Endpoint: "GET /v1/model-tasks/job-7f3a91/artifacts/0",
-			RequestAt: at(7 * time.Minute),
+			RequestID:    "artifact-req-1",
+			GroupID:      "cust",
+			TokenID:      7,
+			TokenName:    "prod",
+			Code:         502,
+			FailureStage: FailureStageUpstream,
+			Endpoint:     "GET /v1/model-tasks/job-7f3a91/artifacts/0",
+			RequestAt:    at(7 * time.Minute),
 		}},
 		// An image task poll replaces its request ID (controller/image_task.go).
 		{label: "image-poll-404", read: true, log: Log{
-			RequestID: "image-poll-1760400000000", GroupID: "cust", TokenID: 7, TokenName: "prod", Code: 404,
-			FailureStage: FailureStageRouting, ErrorCode: "task_not_found",
-			Endpoint: "GET /v1/images/tasks/img-1", RequestAt: at(6 * time.Minute),
+			RequestID:    "image-poll-1760400000000",
+			GroupID:      "cust",
+			TokenID:      7,
+			TokenName:    "prod",
+			Code:         404,
+			FailureStage: FailureStageRouting,
+			ErrorCode:    "task_not_found",
+			Endpoint:     "GET /v1/images/tasks/img-1",
+			RequestAt:    at(6 * time.Minute),
 		}},
 		{label: "video-poll-relay-502", read: true, log: Log{
 			RequestID: "video-poll-1", GroupID: "cust", TokenID: 7, TokenName: "prod", Code: 502,
@@ -101,15 +124,29 @@ func adminLogKindRows(now time.Time) []adminLogKindRow {
 		}},
 		// TokenAuth identified the key and refused it: the key's own call.
 		{label: "disabled-key-403", log: Log{
-			RequestID: "disabled-key-1", GroupID: "cust", TokenID: 8, TokenName: "old", Code: 403,
-			FailureStage: FailureStageAuth, Endpoint: "POST /v1/chat/completions", RequestAt: at(3 * time.Minute),
+			RequestID:    "disabled-key-1",
+			GroupID:      "cust",
+			TokenID:      8,
+			TokenName:    "old",
+			Code:         403,
+			FailureStage: FailureStageAuth,
+			Endpoint:     "POST /v1/chat/completions",
+			RequestAt:    at(3 * time.Minute),
 		}},
 		// Trials and admin demos are calls in the admin log.
 		{label: "native-trial", log: Log{
-			RequestID: "trial_abc", GroupID: "internal", TokenID: 9, TokenName: "trial_ops", Code: 202,
-			AsyncUsageStatus: AsyncUsageStatusCompleted, RequestSource: RequestSourceAdminDemo,
-			Model: "vendor/flux", Mode: int(mode.NativeTasks), Endpoint: "POST /api/native-trials",
-			BillingOperationID: "native:trial_abc", RequestAt: at(2 * time.Minute),
+			RequestID:          "trial_abc",
+			GroupID:            "internal",
+			TokenID:            9,
+			TokenName:          "trial_ops",
+			Code:               202,
+			AsyncUsageStatus:   AsyncUsageStatusCompleted,
+			RequestSource:      RequestSourceAdminDemo,
+			Model:              "vendor/flux",
+			Mode:               int(mode.NativeTasks),
+			Endpoint:           "POST /api/native-trials",
+			BillingOperationID: "native:trial_abc",
+			RequestAt:          at(2 * time.Minute),
 		}},
 		{label: "admin-demo-image-task", log: Log{
 			RequestID: "demo-img-1", GroupID: "internal", TokenID: 9, TokenName: "demo", Code: 202,
@@ -118,9 +155,15 @@ func adminLogKindRows(now time.Time) []adminLogKindRow {
 			RequestAt: at(2 * time.Minute),
 		}},
 		{label: "admin-demo-image-poll-404", read: true, log: Log{
-			RequestID: "image-poll-1760400000001", GroupID: "internal", TokenID: 9, TokenName: "demo", Code: 404,
-			FailureStage: FailureStageRouting, RequestSource: RequestSourceAdminDemo,
-			Endpoint: "GET /v1/images/tasks/demo-img-1", RequestAt: at(time.Minute),
+			RequestID:     "image-poll-1760400000001",
+			GroupID:       "internal",
+			TokenID:       9,
+			TokenName:     "demo",
+			Code:          404,
+			FailureStage:  FailureStageRouting,
+			RequestSource: RequestSourceAdminDemo,
+			Endpoint:      "GET /v1/images/tasks/demo-img-1",
+			RequestAt:     at(time.Minute),
 		}},
 		// No key was recognised, so no customer owns these rows.
 		{label: "unknown-key-401", read: true, log: Log{
@@ -140,7 +183,11 @@ func adminLogKindRows(now time.Time) []adminLogKindRow {
 }
 
 // seedAdminLogKindRows writes the rows and returns the label of every log ID.
-func seedAdminLogKindRows(t *testing.T, db *gorm.DB, now time.Time) (map[int]string, []adminLogKindRow) {
+func seedAdminLogKindRows(
+	t *testing.T,
+	db *gorm.DB,
+	now time.Time,
+) (map[int]string, []adminLogKindRow) {
 	t.Helper()
 
 	rows := adminLogKindRows(now)
@@ -184,6 +231,7 @@ func labelsOf(t *testing.T, labels map[int]string, logs []*Log) []string {
 	for _, entry := range logs {
 		label, ok := labels[entry.ID]
 		require.True(t, ok, "unexpected log %d", entry.ID)
+
 		got = append(got, label)
 	}
 
@@ -244,11 +292,29 @@ func assertAdminLogKindSplit(t *testing.T, db *gorm.DB) {
 	isRead := func(row adminLogKindRow) bool { return row.read }
 	all := func(adminLogKindRow) bool { return true }
 
-	getLogs := func(filter OperationalLogFilter, requestID string, page, perPage int) *GetLogsResult {
+	getLogs := func(filter OperationalLogFilter, requestID string, perPage int) *GetLogsResult {
+		page := 1
+
 		t.Helper()
 
 		filter.Now = now
-		result, err := GetLogs(start, end, "", requestID, "", 0, filter, "", CodeTypeAll, 0, false, "", "", page, perPage)
+		result, err := GetLogs(
+			start,
+			end,
+			"",
+			requestID,
+			"",
+			0,
+			filter,
+			"",
+			CodeTypeAll,
+			0,
+			false,
+			"",
+			"",
+			page,
+			perPage,
+		)
 		require.NoError(t, err)
 
 		return result
@@ -258,7 +324,27 @@ func assertAdminLogKindSplit(t *testing.T, db *gorm.DB) {
 		t.Helper()
 
 		filter.Now = now
-		result, err := SearchLogs("", requestID, "", group, 0, "", "", start, end, 0, filter, "", CodeTypeAll, 0, false, "", "", 1, 100)
+		result, err := SearchLogs(
+			"",
+			requestID,
+			"",
+			group,
+			0,
+			"",
+			"",
+			start,
+			end,
+			0,
+			filter,
+			"",
+			CodeTypeAll,
+			0,
+			false,
+			"",
+			"",
+			1,
+			100,
+		)
 		require.NoError(t, err)
 
 		return result
@@ -272,7 +358,7 @@ func assertAdminLogKindSplit(t *testing.T, db *gorm.DB) {
 	} {
 		want := expectedAdminLogLabels(rows, keep)
 
-		result := getLogs(OperationalLogFilter{Kind: kind}, "", 1, 100)
+		result := getLogs(OperationalLogFilter{Kind: kind}, "", 100)
 		require.Equal(t, want, labelsOf(t, labels, result.Logs), "GetLogs kind=%q", kind)
 		require.EqualValues(t, len(want), result.Total, "GetLogs kind=%q", kind)
 
@@ -282,37 +368,62 @@ func assertAdminLogKindSplit(t *testing.T, db *gorm.DB) {
 	}
 
 	// The total counts the filtered rows, not the page.
-	page := getLogs(OperationalLogFilter{Kind: AdminLogKindCalls}, "", 1, 2)
+	page := getLogs(OperationalLogFilter{Kind: AdminLogKindCalls}, "", 2)
 	require.Len(t, page.Logs, 2)
 	require.EqualValues(t, len(expectedAdminLogLabels(rows, isCall)), page.Total)
 
 	// One task ID: the calls tab holds the attempt and the task row, the
 	// reads tab the poll sent before the submit.
-	require.Equal(t,
+	require.Equal(
+		t,
 		[]string{"native-submit", "native-submit-rejected-429"},
-		labelsOf(t, labels, getLogs(OperationalLogFilter{Kind: AdminLogKindCalls}, "job-7f3a91", 1, 100).Logs),
+		labelsOf(
+			t,
+			labels,
+			getLogs(OperationalLogFilter{Kind: AdminLogKindCalls}, "job-7f3a91", 100).Logs,
+		),
 	)
-	require.Equal(t,
+	require.Equal(
+		t,
 		[]string{"native-poll-404-before-submit"},
-		labelsOf(t, labels, searchLogs(OperationalLogFilter{Kind: AdminLogKindReads}, "", "job-7f3a91").Logs),
+		labelsOf(
+			t,
+			labels,
+			searchLogs(OperationalLogFilter{Kind: AdminLogKindReads}, "", "job-7f3a91").Logs,
+		),
 	)
 
 	// With a group, the rows without one (401) drop out of reads.
-	require.Equal(t,
+	require.Equal(
+		t,
 		[]string{
 			"image-poll-404",
 			"native-artifact-download-502",
 			"native-poll-404-before-submit",
 			"video-poll-relay-502",
 		},
-		labelsOf(t, labels, searchLogs(OperationalLogFilter{Kind: AdminLogKindReads}, "cust", "").Logs),
+		labelsOf(
+			t,
+			labels,
+			searchLogs(OperationalLogFilter{Kind: AdminLogKindReads}, "cust", "").Logs,
+		),
 	)
 
 	// Kind and status combine: rejected calls are the refused attempts, not
 	// the failed polls, which are rejected reads.
-	require.Equal(t,
+	require.Equal(
+		t,
 		[]string{"disabled-key-403", "native-submit-rejected-429"},
-		labelsOf(t, labels, getLogs(OperationalLogFilter{Kind: AdminLogKindCalls, Status: CallStatusRejected}, "", 1, 100).Logs),
+		labelsOf(
+			t,
+			labels,
+			getLogs(
+				OperationalLogFilter{Kind: AdminLogKindCalls, Status: CallStatusRejected},
+				"",
+
+				100,
+			).Logs,
+		),
 	)
 
 	for _, kind := range []AdminLogKind{AdminLogKindCalls, AdminLogKindReads} {
@@ -321,8 +432,15 @@ func assertAdminLogKindSplit(t *testing.T, db *gorm.DB) {
 				return row.read == (kind == AdminLogKindReads) && row.log.CallStatus(now) == status
 			})
 
-			result := getLogs(OperationalLogFilter{Kind: kind, Status: status}, "", 1, 100)
-			require.Equal(t, want, labelsOf(t, labels, result.Logs), "kind=%s status=%s", kind, status)
+			result := getLogs(OperationalLogFilter{Kind: kind, Status: status}, "", 100)
+			require.Equal(
+				t,
+				want,
+				labelsOf(t, labels, result.Logs),
+				"kind=%s status=%s",
+				kind,
+				status,
+			)
 			require.EqualValues(t, len(want), result.Total, "kind=%s status=%s", kind, status)
 		}
 	}

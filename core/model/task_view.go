@@ -217,7 +217,11 @@ func (l *Log) taskLaneOf() (taskLane, string) {
 
 	switch {
 	case l.Mode == int(mode.NativeTasks) || endpoint == nativeSubmitEndpoint:
-		if id, ok := strings.CutPrefix(string(l.BillingOperationID), nativeBillingOperationPrefix); ok && id != "" {
+		if id, ok := strings.CutPrefix(
+			string(l.BillingOperationID),
+			nativeBillingOperationPrefix,
+		); ok &&
+			id != "" {
 			return taskLaneNative, id
 		}
 
@@ -307,7 +311,12 @@ const (
 // Each lookup is ordered by request_at, id, reads at most 100 rows and stops
 // after 2 s; either limit sets Truncated. gorm.ErrRecordNotFound: no such row
 // in the group; ErrNotTaskRow: the row is not a native or image task row.
-func GetTaskRequests(ctx context.Context, group string, logID int, now time.Time) (*TaskRequests, error) {
+func GetTaskRequests(
+	ctx context.Context,
+	group string,
+	logID int,
+	now time.Time,
+) (*TaskRequests, error) {
 	if group == "" {
 		return nil, errors.New("group is required")
 	}
@@ -368,7 +377,12 @@ func GetTaskRequests(ctx context.Context, group string, logID int, now time.Time
 
 	if op := string(task.BillingOperationID); op != "" {
 		failed, truncated, err := readTaskRequests(ctx, func(tx *gorm.DB) *gorm.DB {
-			return tx.Where("group_id = ? AND billing_operation_id = ? AND id <> ?", group, op, task.ID)
+			return tx.Where(
+				"group_id = ? AND billing_operation_id = ? AND id <> ?",
+				group,
+				op,
+				task.ID,
+			)
 		})
 		if err != nil {
 			return nil, err
@@ -377,7 +391,10 @@ func GetTaskRequests(ctx context.Context, group string, logID int, now time.Time
 		result.Truncated = result.Truncated || truncated
 
 		for _, entry := range failed {
-			result.Attempts = append(result.Attempts, TaskRequest{Log: entry, Relation: TaskRequestFailedSubmit})
+			result.Attempts = append(
+				result.Attempts,
+				TaskRequest{Log: entry, Relation: TaskRequestFailedSubmit},
+			)
 		}
 	}
 
@@ -427,7 +444,12 @@ func readTaskRequests(ctx context.Context, scope func(*gorm.DB) *gorm.DB) ([]*Lo
 
 // The columns the task view reads, and the task tables GetTaskRequests probes.
 var (
-	taskViewLogColumns  = []string{"billing_operation_id", "async_usage_status", "endpoint", "error_code"}
+	taskViewLogColumns = []string{
+		"billing_operation_id",
+		"async_usage_status",
+		"endpoint",
+		"error_code",
+	}
 	taskTableColumns    = []string{"id", "group_id", "token_id", "billing_operation_id"}
 	taskViewReadyTables = []any{&NativeTask{}, &ImageTask{}}
 )
@@ -441,6 +463,7 @@ func columnsSelectable(ctx context.Context, db *gorm.DB, table any, columns []st
 	}
 
 	err = rows.Err()
+	//nolint:sqlclosecheck // The LIMIT 0 schema probe must close before the next query on this transaction.
 	_ = rows.Close()
 
 	return err
@@ -460,7 +483,7 @@ func TaskViewStorageReady(ctx context.Context, db *gorm.DB) (bool, error) {
 		return false, err
 	}
 
-	if db.Dialector.Name() != "postgres" {
+	if db.Name() != "postgres" {
 		return true, nil
 	}
 

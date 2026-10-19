@@ -12,15 +12,18 @@ func NativeTaskStorageReady(db *gorm.DB) bool {
 	if db == nil {
 		return false
 	}
+
 	statement := &gorm.Statement{DB: db}
 	if err := statement.Parse(&NativeTask{}); err != nil {
 		return false
 	}
+
 	rows, err := db.Session(&gorm.Session{Logger: logger.Discard}).Model(&NativeTask{}).
 		Select(statement.Schema.DBNames).Limit(0).Rows()
 	if err != nil {
 		return false
 	}
 	defer rows.Close()
+
 	return rows.Err() == nil
 }

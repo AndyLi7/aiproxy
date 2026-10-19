@@ -20,11 +20,21 @@ func TestNativeTaskAdmissionSelectsFalChannels(t *testing.T) {
 		},
 	}
 
-	channels, err := getAvailableChannels(mc, []string{"default"}, "vendor/native-model", mode.NativeTasks)
+	channels, err := getAvailableChannels(
+		mc,
+		[]string{"default"},
+		"vendor/native-model",
+		mode.NativeTasks,
+	)
 	require.NoError(t, err)
 	require.Len(t, channels, 1)
 	require.Equal(t, 7, channels[0].ID)
 
-	_, err = getAvailableChannels(mc, []string{"default"}, "vendor/native-model", mode.ChatCompletions)
+	_, err = getAvailableChannels(
+		mc,
+		[]string{"default"},
+		"vendor/native-model",
+		mode.ChatCompletions,
+	)
 	require.ErrorIs(t, err, ErrChannelsNotFound)
 }

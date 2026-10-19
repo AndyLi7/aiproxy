@@ -42,7 +42,12 @@ func AllowCustomerRead(group string, token int) bool {
 }
 
 func newReadLimiter(now func() time.Time) *readLimiter {
-	return &readLimiter{now: now, buckets: map[string]*readBucket{}, active: map[string]int{}, groups: map[string]int{}}
+	return &readLimiter{
+		now:     now,
+		buckets: map[string]*readBucket{},
+		active:  map[string]int{},
+		groups:  map[string]int{},
+	}
 }
 
 func readKey(group string, token int) string { return group + "/" + strconv.Itoa(token) }
@@ -51,25 +56,32 @@ func readKey(group string, token int) string { return group + "/" + strconv.Itoa
 func (l *readLimiter) allowStatus(group string, token int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	now := l.now()
 	key := readKey(group, token)
+
 	bucket := l.buckets[key]
 	if bucket == nil {
 		if len(l.buckets) >= 10000 {
 			l.evictIdle(now)
 		}
+
 		bucket = &readBucket{tokens: statusReadBurst, last: now}
 		l.buckets[key] = bucket
 	}
+
 	bucket.tokens += now.Sub(bucket.last).Seconds() * statusReadsPerSecond
 	if bucket.tokens > statusReadBurst {
 		bucket.tokens = statusReadBurst
 	}
+
 	bucket.last = now
 	if bucket.tokens < 1 {
 		return false
 	}
+
 	bucket.tokens--
+
 	return true
 }
 
@@ -87,22 +99,29 @@ func (l *readLimiter) evictIdle(now time.Time) {
 func (l *readLimiter) acquireDownload(group string, token int) (func(), bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	key := readKey(group, token)
-	if l.total >= artifactDownloadsGlobal || l.active[key] >= artifactDownloadsPerKey || l.groups[group] >= artifactDownloadsPerGroup {
+	if l.total >= artifactDownloadsGlobal || l.active[key] >= artifactDownloadsPerKey ||
+		l.groups[group] >= artifactDownloadsPerGroup {
 		return nil, false
 	}
+
 	l.total++
 	l.active[key]++
 	l.groups[group]++
+
 	var once sync.Once
+
 	return func() {
 		once.Do(func() {
 			l.mu.Lock()
 			defer l.mu.Unlock()
+
 			l.total--
 			if l.active[key]--; l.active[key] <= 0 {
 				delete(l.active, key)
 			}
+
 			if l.groups[group]--; l.groups[group] <= 0 {
 				delete(l.groups, group)
 			}

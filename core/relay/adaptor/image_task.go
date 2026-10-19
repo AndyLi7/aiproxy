@@ -57,7 +57,13 @@ type ImageTaskCanceller interface {
 	) (string, error)
 }
 
-var ErrImageSubmissionRejected = &ImageSubmissionFailure{Failure: failover.Failure{Acceptance: failover.NotAccepted, Class: failover.InvalidRequest, Evidence: "invalid_submission"}}
+var ErrImageSubmissionRejected = &ImageSubmissionFailure{
+	Failure: failover.Failure{
+		Acceptance: failover.NotAccepted,
+		Class:      failover.InvalidRequest,
+		Evidence:   "invalid_submission",
+	},
+}
 
 // MapImageProviderInput executes the server-owned contract, independent of model names.
 func MapImageProviderInput(

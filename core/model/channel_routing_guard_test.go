@@ -48,7 +48,13 @@ func TestSameIdentityConfigs(t *testing.T) {
 
 	empty := ChannelConfigs{"outbound_policy": "public_only"}
 	require.True(t, sameIdentityConfigs(empty, nil))
-	require.True(t, sameIdentityConfigs(nil, ChannelConfigs{"x_token_platform_provider_bindings": map[string]any{}}))
+	require.True(
+		t,
+		sameIdentityConfigs(
+			nil,
+			ChannelConfigs{"x_token_platform_provider_bindings": map[string]any{}},
+		),
+	)
 }
 
 func useSnapshotTestDB(t *testing.T) *gorm.DB {
@@ -62,6 +68,7 @@ func useSnapshotTestDB(t *testing.T) *gorm.DB {
 	DB = db
 	t.Cleanup(func() {
 		DB = previousDB
+
 		modelCaches.Store(previousCaches)
 		config.SetDefaultChannelModels(previousDefaults)
 		require.NoError(t, sqlDB.Close())
@@ -78,24 +85,40 @@ func useSnapshotTestDB(t *testing.T) *gorm.DB {
 // and kept once.
 func TestCacheRebuildFiltersChannelModelsFromItsOwnRead(t *testing.T) {
 	db := useSnapshotTestDB(t)
+
 	config.SetDefaultChannelModels(map[int][]string{int(ChannelTypeOpenAI): {"vendor/default"}})
 
 	for _, model := range []string{"vendor/a", "vendor/b"} {
 		require.NoError(t, db.Create(&ModelConfig{Model: model, Type: mode.ChatCompletions}).Error)
 	}
 
-	mixed := &Channel{Name: "mixed", Type: ChannelTypeOpenAI, Key: "k",
-		Models: []string{"vendor/b", "vendor/missing", "vendor/a", "vendor/a"}}
+	mixed := &Channel{
+		Name: "mixed", Type: ChannelTypeOpenAI, Key: "k",
+		Models: []string{"vendor/b", "vendor/missing", "vendor/a", "vendor/a"},
+	}
 	fallback := &Channel{Name: "fallback", Type: ChannelTypeOpenAI, Key: "k"}
-	orphan := &Channel{Name: "orphan", Type: ChannelTypeOpenAI, Key: "k", Models: []string{"vendor/missing"}}
-	retired := &Channel{Name: "retired", Type: ChannelTypeOpenAI, Key: "k", Status: ChannelStatusDisabled,
-		Models: []string{"vendor/b", "vendor/missing"}}
+	orphan := &Channel{
+		Name:   "orphan",
+		Type:   ChannelTypeOpenAI,
+		Key:    "k",
+		Models: []string{"vendor/missing"},
+	}
+	retired := &Channel{
+		Name: "retired", Type: ChannelTypeOpenAI, Key: "k", Status: ChannelStatusDisabled,
+		Models: []string{"vendor/b", "vendor/missing"},
+	}
 	require.NoError(t, db.Create([]*Channel{mixed, fallback, orphan, retired}).Error)
 
 	var queries atomic.Int64
-	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:count_rebuild_queries", func(*gorm.DB) {
-		queries.Add(1)
-	}))
+	require.NoError(
+		t,
+		db.Callback().
+			Query().
+			After("gorm:query").
+			Register("test:count_rebuild_queries", func(*gorm.DB) {
+				queries.Add(1)
+			}),
+	)
 
 	rebuild := func() int64 {
 		t.Helper()
@@ -111,12 +134,19 @@ func TestCacheRebuildFiltersChannelModelsFromItsOwnRead(t *testing.T) {
 	require.Equal(t, []string{"vendor/default"}, caches.ChannelsByID[fallback.ID].Models)
 	require.Empty(t, caches.ChannelsByID[orphan.ID].Models)
 	require.Equal(t, []string{"vendor/b"}, caches.ChannelsByID[retired.ID].Models)
-	require.Len(t, caches.EnabledModel2ChannelsBySet[ChannelDefaultSet]["vendor/a"], 1, "a duplicate model routes once")
+	require.Len(
+		t,
+		caches.EnabledModel2ChannelsBySet[ChannelDefaultSet]["vendor/a"],
+		1,
+		"a duplicate model routes once",
+	)
 	require.Contains(t, caches.DisabledModel2ChannelsBySet[ChannelDefaultSet], "vendor/b")
 
 	for i := range 5 {
-		require.NoError(t, db.Create(&Channel{Name: "more", Type: ChannelTypeOpenAI, Key: "k",
-			Models: []string{"vendor/a", "vendor/missing"}, Priority: int32(i)}).Error)
+		require.NoError(t, db.Create(&Channel{
+			Name: "more", Type: ChannelTypeOpenAI, Key: "k",
+			Models: []string{"vendor/a", "vendor/missing"}, Priority: int32(i),
+		}).Error)
 	}
 
 	require.Equal(t, first, rebuild(), "a rebuild must not query per channel")
@@ -144,29 +174,66 @@ func TestCacheRebuildPostgresReadsOneSnapshot(t *testing.T) {
 		t.Cleanup(func() { modelCaches.Store(previousCaches) })
 		require.NoError(t, DB.AutoMigrate(&Channel{}, &ModelConfig{}))
 
-		require.NoError(t, DB.Create(&ModelConfig{Model: "vendor/old", Type: mode.ChatCompletions}).Error)
-		old := &Channel{Name: "old", Type: ChannelTypeOpenAI, Key: "k", Models: []string{"vendor/old"}}
+		require.NoError(
+			t,
+			DB.Create(&ModelConfig{Model: "vendor/old", Type: mode.ChatCompletions}).Error,
+		)
+		old := &Channel{
+			Name:   "old",
+			Type:   ChannelTypeOpenAI,
+			Key:    "k",
+			Models: []string{"vendor/old"},
+		}
 		require.NoError(t, DB.Create(old).Error)
 
 		var (
 			armed   atomic.Bool
 			written atomic.Bool
-			late    = &Channel{Name: "late", Type: ChannelTypeOpenAI, Key: "k", Models: []string{"vendor/late"}}
+			late    = &Channel{
+				Name:   "late",
+				Type:   ChannelTypeOpenAI,
+				Key:    "k",
+				Models: []string{"vendor/late"},
+			}
 		)
 
-		require.NoError(t, DB.Callback().Query().After("gorm:query").Register("test:write_between_rebuild_reads", func(tx *gorm.DB) {
-			if tx.Statement.Table != "model_configs" || !armed.CompareAndSwap(true, false) {
-				return
-			}
+		require.NoError(
+			t,
+			DB.Callback().
+				Query().
+				After("gorm:query").
+				Register("test:write_between_rebuild_reads", func(tx *gorm.DB) {
+					if tx.Statement.Table != "model_configs" || !armed.CompareAndSwap(true, false) {
+						return
+					}
 
-			// Another connection commits while the rebuild is between reads.
-			writer := DB.Session(&gorm.Session{NewDB: true})
-			require.NoError(t, writer.Exec("UPDATE channels SET status = ? WHERE id = ?", ChannelStatusDisabled, old.ID).Error)
-			require.NoError(t, writer.Exec("DELETE FROM model_configs WHERE model = ?", "vendor/old").Error)
-			require.NoError(t, writer.Create(&ModelConfig{Model: "vendor/late", Type: mode.ChatCompletions}).Error)
-			require.NoError(t, writer.Create(late).Error)
-			written.Store(true)
-		}))
+					// Another connection commits while the rebuild is between reads.
+					writer := DB.Session(&gorm.Session{NewDB: true})
+					require.NoError(
+						t,
+						writer.Exec(
+							"UPDATE channels SET status = ? WHERE id = ?",
+							ChannelStatusDisabled,
+							old.ID,
+						).Error,
+					)
+					require.NoError(
+						t,
+						writer.Exec(
+							"DELETE FROM model_configs WHERE model = ?",
+							"vendor/old",
+						).Error,
+					)
+					require.NoError(
+						t,
+						writer.Create(
+							&ModelConfig{Model: "vendor/late", Type: mode.ChatCompletions},
+						).Error,
+					)
+					require.NoError(t, writer.Create(late).Error)
+					written.Store(true)
+				}),
+		)
 		t.Cleanup(func() { _ = DB.Callback().Query().Remove("test:write_between_rebuild_reads") })
 
 		armed.Store(true)

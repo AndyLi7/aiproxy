@@ -61,5 +61,6 @@ func PublicTaskErrorMessage(code string) string {
 	case UpstreamUnavailableCode:
 		return UpstreamUnavailableMessage
 	}
+
 	return ""
 }

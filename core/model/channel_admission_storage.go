@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -90,20 +91,30 @@ func ChannelAdmissionStorageReady(db *gorm.DB) bool {
 	if db == nil {
 		return false
 	}
+
 	for _, table := range []any{&ChannelAdmissionControl{}, &ChannelAdmissionProof{}, &ChannelAdmissionFamily{}, &ChannelAdmissionBarrier{}, &ChannelAdmissionUse{}} {
 		statement := &gorm.Statement{DB: db}
 		if statement.Parse(table) != nil {
 			return false
 		}
-		rows, err := db.Session(&gorm.Session{Logger: logger.Discard}).Model(table).Select(statement.Schema.DBNames).Limit(0).Rows()
+
+		rows, err := db.Session(&gorm.Session{Logger: logger.Discard}).
+			Model(table).
+			Select(statement.Schema.DBNames).
+			Limit(0).
+			Rows()
 		if err != nil {
 			return false
 		}
+
 		rowErr := rows.Err()
+
+		//nolint:sqlclosecheck // The LIMIT 0 schema probe must close before the next query on this transaction.
 		closeErr := rows.Close()
 		if rowErr != nil || closeErr != nil {
 			return false
 		}
 	}
+
 	return true
 }

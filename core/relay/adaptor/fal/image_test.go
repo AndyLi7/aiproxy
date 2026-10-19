@@ -42,7 +42,8 @@ func TestQueueLifecycle(t *testing.T) {
 				t.Errorf("write mock response: %v", writeErr)
 			}
 		case "/fal-ai/minimax/requests/abc":
-			w.Header().Set("x-fal-billable-units", "1.5")
+			w.Header().Set("X-Fal-Billable-Units", "1.5")
+
 			if _, writeErr := w.Write(
 				[]byte(
 					`{"num_images":1,"description":"generated caption","seed":42,"prompt":"revised description","images":[{"url":"https://cdn.example/image.png","content_type":"image/png"}]}`,
@@ -150,6 +151,7 @@ func TestWanFullQueuePathFallsBackAfterMethodRejection(t *testing.T) {
 		"../../../common/registryvalidation/testdata/seedream-4.5-v2-text-to-image.json",
 	)
 	require.NoError(t, err)
+
 	raw = []byte(strings.ReplaceAll(
 		string(raw),
 		"fal-ai/bytedance/seedream/v4.5/text-to-image",
@@ -172,6 +174,7 @@ func TestWanFullQueuePathFallsBackAfterMethodRejection(t *testing.T) {
 	require.NoError(t, err)
 
 	var calls []string
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch r.URL.Path {
@@ -180,7 +183,11 @@ func TestWanFullQueuePathFallsBackAfterMethodRejection(t *testing.T) {
 		case "/wan/v2.6/requests/abc/status":
 			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
 		case "/wan/v2.6/requests/abc":
-			_, _ = w.Write([]byte(`{"images":[{"url":"https://fal.media/out.png","width":null,"height":null}],"seed":42}`))
+			_, _ = w.Write(
+				[]byte(
+					`{"images":[{"url":"https://fal.media/out.png","width":null,"height":null}],"seed":42}`,
+				),
+			)
 		default:
 			t.Errorf("unexpected queue path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -296,11 +303,16 @@ func TestSubmissionRejectionIsDistinctFromUnknownAcceptance(t *testing.T) {
 			// timeouts and redirects do not establish whether it accepted work.
 			rejected := code == 400 || code == 413 || code == 422 || code == 451
 			unavailable := code == 401 || code == 402 || code == 403 || code == 404 || code == 429
-			require.Equal(t, rejected || unavailable, errors.Is(err, adaptor.ErrImageSubmissionRejected))
+			require.Equal(
+				t,
+				rejected || unavailable,
+				errors.Is(err, adaptor.ErrImageSubmissionRejected),
+			)
 			require.Equal(t, unavailable, adaptor.ProviderUnavailable(err))
 			failure := failover.FromError(err)
 			status, _ := adaptor.SubmissionEvidence(err)
 			require.Equal(t, code, status)
+
 			switch {
 			case rejected:
 				require.Equal(t, failover.NotAccepted, failure.Acceptance)
@@ -335,12 +347,18 @@ func TestSubmitCarriesSanitizedProviderEvidence(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer s.Close()
+
 			c := fal.Client{HTTP: s.Client(), BaseURL: s.URL, Key: "fal-key-0123456789"}
-			_, err := c.SubmitNative(t.Context(), "fal-ai/qwen-image", []byte(`{"prompt":"secret customer prompt"}`))
+			_, err := c.SubmitNative(
+				t.Context(),
+				"fal-ai/qwen-image",
+				[]byte(`{"prompt":"secret customer prompt"}`),
+			)
 			status, reason := adaptor.SubmissionEvidence(err)
 			require.Equal(t, tc.code, status)
 			require.Contains(t, reason, tc.want)
 			require.NotContains(t, reason, "secret customer prompt")
+
 			if tc.absent != "" {
 				require.NotContains(t, reason, tc.absent)
 			}
@@ -519,10 +537,12 @@ func TestFalNormalizesSingleImageWithoutWeakeningValidation(t *testing.T) {
 				}
 			}))
 			defer s.Close()
+
 			c := fal.Client{HTTP: s.Client(), BaseURL: s.URL}
 			result, err := c.Poll(t.Context(), "fal-ai/test", "abc")
 			require.NoError(t, err)
 			require.Equal(t, tc.status, result.Status)
+
 			if tc.status == "completed" {
 				require.Len(t, result.Data, 1)
 				require.Equal(t, "https://cdn.example/a.png", result.Data[0].URL)
@@ -544,14 +564,20 @@ func TestSingleImageHonorsFrozenNativeOutput(t *testing.T) {
 					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
 					return
 				}
+
 				_, _ = w.Write([]byte(`{"image":{"url":"https://cdn.example/a.png"}}`))
 			}))
 			defer s.Close()
-			contract := []byte(`{"provider_contract_version":1,"selected_provider_binding":{"provider":"p","id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"providers":{"p":{"adapter":"fal-image","upstream":{"id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","endpoint":"fal-ai/test","execution":{"mode":"async","statusEndpoint":"fal-ai/test/requests/{request_id}/status","resultEndpoint":"fal-ai/test/requests/{request_id}","supportsCancellation":false},"outputJsonSchema":{"type":"object","required":["` + required + `"],"properties":{"image":{"type":"object","required":["url"],"properties":{"url":{"type":"string"}}}}}}}}}`)
+
+			contract := []byte(
+				`{"provider_contract_version":1,"selected_provider_binding":{"provider":"p","id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"providers":{"p":{"adapter":"fal-image","upstream":{"id":"p","revision":"1","contractHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","endpoint":"fal-ai/test","execution":{"mode":"async","statusEndpoint":"fal-ai/test/requests/{request_id}/status","resultEndpoint":"fal-ai/test/requests/{request_id}","supportsCancellation":false},"outputJsonSchema":{"type":"object","required":["` + required + `"],"properties":{"image":{"type":"object","required":["url"],"properties":{"url":{"type":"string"}}}}}}}}}`,
+			)
 			require.True(t, json.Valid(contract), string(contract))
+
 			c := fal.Client{HTTP: s.Client(), BaseURL: s.URL}
 			result, err := c.Poll(t.Context(), "fal-ai/test", "abc", contract)
 			require.NoError(t, err)
+
 			if required == "image" {
 				require.Equal(t, "completed", result.Status)
 				require.Len(t, result.Data, 1)
@@ -574,18 +600,26 @@ func TestCompletedQueueDistinguishesRunnerFailureFromGatewayTimeout(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				require.Equal(t, http.MethodGet, r.Method)
-				if strings.HasSuffix(r.URL.Path, "/status") {
-					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
-					return
-				}
-				w.WriteHeader(http.StatusGatewayTimeout)
-				_, _ = w.Write([]byte(tc.body))
-			}))
+
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+
+					require.Equal(t, http.MethodGet, r.Method)
+
+					if strings.HasSuffix(r.URL.Path, "/status") {
+						_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+						return
+					}
+
+					w.WriteHeader(http.StatusGatewayTimeout)
+					_, _ = w.Write([]byte(tc.body))
+				}),
+			)
 			defer server.Close()
+
 			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
+
 			result, err := client.Poll(t.Context(), "wan/v2.6/text-to-image", "test-id")
 			if tc.terminal {
 				require.NoError(t, err)
@@ -595,6 +629,7 @@ func TestCompletedQueueDistinguishesRunnerFailureFromGatewayTimeout(t *testing.T
 				require.Error(t, err)
 				require.Empty(t, result.Status)
 			}
+
 			require.Equal(t, 2, calls)
 		})
 	}
@@ -616,13 +651,16 @@ func TestNativeOutputSeedsAndActualPrompt(t *testing.T) {
 				_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
 				return
 			}
+
 			_, _ = w.Write([]byte(tc.body))
 		}))
 		client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
 		result, err := client.Poll(t.Context(), "fal-ai/wan-25-preview/text-to-image", "abc")
+
 		server.Close()
 		require.NoError(t, err)
 		require.Equal(t, tc.status, result.Status)
+
 		if tc.status == "completed" {
 			require.Equal(t, json.Number("0"), *result.Data[0].Seed)
 			require.Equal(t, json.Number("42"), *result.Data[1].Seed)
@@ -640,14 +678,22 @@ func TestOptionalOutputImageCount(t *testing.T) {
 		{name: "absent"}, {name: "null", field: `"num_images":null,`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/status") {
-					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
-					return
-				}
-				_, _ = w.Write([]byte(`{` + tc.field + `"images":[{"url":"https://cdn.example/image.png"}]}`))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasSuffix(r.URL.Path, "/status") {
+						_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+						return
+					}
+
+					_, _ = w.Write(
+						[]byte(
+							`{` + tc.field + `"images":[{"url":"https://cdn.example/image.png"}]}`,
+						),
+					)
+				}),
+			)
 			defer server.Close()
+
 			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
 			result, err := client.Poll(t.Context(), "fal-ai/test/image", "abc")
 			require.NoError(t, err)
@@ -665,14 +711,20 @@ func TestNullableActualPromptProjection(t *testing.T) {
 		{"text", `,"actual_prompt":"expanded prompt"`, "expanded prompt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/status") {
-					_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
-					return
-				}
-				_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"}]` + tc.field + `}`))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasSuffix(r.URL.Path, "/status") {
+						_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+						return
+					}
+
+					_, _ = w.Write(
+						[]byte(`{"images":[{"url":"https://cdn.example/a.png"}]` + tc.field + `}`),
+					)
+				}),
+			)
 			defer server.Close()
+
 			client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
 			result, err := client.Poll(t.Context(), "fal-ai/test", "test-id")
 			require.NoError(t, err)
@@ -698,15 +750,23 @@ func TestRootRevisedPromptProjection(t *testing.T) {
 				_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"},{"url":"https://cdn.example/b.png"}]` + tc.field + `}`))
+
+			_, _ = w.Write(
+				[]byte(
+					`{"images":[{"url":"https://cdn.example/a.png"},{"url":"https://cdn.example/b.png"}]` + tc.field + `}`,
+				),
+			)
 		}))
 		client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
 		result, err := client.Poll(t.Context(), "xai/grok-imagine-image", "id")
+
 		server.Close()
 		require.NoError(t, err)
 		require.Equal(t, tc.status, result.Status)
+
 		if result.Status == "completed" {
 			require.Len(t, result.Data, 2)
+
 			for _, img := range result.Data {
 				require.Equal(t, tc.want, img.RevisedPrompt)
 			}
@@ -728,16 +788,22 @@ func TestUsedSeedAliasPreservesExactNumbers(t *testing.T) {
 				_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"images":[{"url":"https://cdn.example/a.png"}]` + tc.fields + `}`))
+
+			_, _ = w.Write(
+				[]byte(`{"images":[{"url":"https://cdn.example/a.png"}]` + tc.fields + `}`),
+			)
 		}))
 		client := fal.Client{HTTP: server.Client(), BaseURL: server.URL, Key: "test"}
 		result, err := client.Poll(t.Context(), "fal-ai/finegrain-eraser", "id")
+
 		server.Close()
 		require.NoError(t, err)
 		require.Equal(t, tc.status, result.Status)
+
 		if result.Status == "completed" {
 			if result.Metadata.Seed != nil {
-				value, _ := json.Marshal(*result.Metadata.Seed)
+				value, err := json.Marshal(*result.Metadata.Seed)
+				require.NoError(t, err)
 				require.Equal(t, tc.want, string(value))
 			} else {
 				require.Equal(t, tc.want, result.Metadata.SeedExact)

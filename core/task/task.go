@@ -294,28 +294,46 @@ var (
 func AsyncUsagePollTask(ctx context.Context) {
 	ticker := time.NewTicker(asyncUsagePollInterval)
 	defer ticker.Stop()
-	runAsyncUsagePollTask(ctx, ticker.C, processAsyncUsages, ImagePrepaymentRecoveryTask, UpstreamBillingRecoveryTask)
+
+	runAsyncUsagePollTask(
+		ctx,
+		ticker.C,
+		processAsyncUsages,
+		ImagePrepaymentRecoveryTask,
+		UpstreamBillingRecoveryTask,
+	)
 }
 
 // Child loops own synchronous work and bounded cleanup. Cancellation requests
 // their exit; only their actual return completes this local join.
-func runAsyncUsagePollTask(ctx context.Context, ticks <-chan time.Time, poll func(context.Context) bool, children ...func(context.Context)) {
+func runAsyncUsagePollTask(
+	ctx context.Context,
+	ticks <-chan time.Time,
+	poll func(context.Context) bool,
+	children ...func(context.Context),
+) {
 	var childrenWG sync.WaitGroup
 	for _, child := range children {
 		if ctx.Err() != nil {
 			break
 		}
+
 		childrenWG.Add(1)
 		go func(run func(context.Context)) {
 			defer childrenWG.Done()
+
 			if ctx.Err() == nil {
 				run(ctx)
 			}
 		}(child)
 	}
+
 	runRecoveryTicks(ctx, ticks, func(ctx context.Context) {
 		for ctx.Err() == nil && poll(ctx) {
-			log.Debugf("async usage poll: batch full, continue immediately batch_size=%d", asyncUsageBatchSize)
+			log.Debugf(
+				"async usage poll: batch full, continue immediately batch_size=%d",
+				asyncUsageBatchSize,
+			)
 		}
 	})
 	childrenWG.Wait()
@@ -332,6 +350,7 @@ func runRecoveryTicks(ctx context.Context, ticks <-chan time.Time, work func(con
 			if !ok || ctx.Err() != nil {
 				return
 			}
+
 			work(ctx)
 		}
 	}
@@ -367,6 +386,7 @@ func processAsyncUsages(ctx context.Context) bool {
 		if ctx.Err() != nil {
 			return false
 		}
+
 		claimed, err := claimAsyncUsageContext(ctx, info)
 		if err != nil {
 			notify.ErrorThrottle(
@@ -405,6 +425,7 @@ func processAsyncUsages(ctx context.Context) bool {
 			wg.Wait()
 			return false
 		}
+
 		select {
 		case <-ctx.Done():
 			wg.Wait()
@@ -417,6 +438,7 @@ func processAsyncUsages(ctx context.Context) bool {
 			wg.Wait()
 			return false
 		}
+
 		wg.Add(1)
 
 		go func(info *model.AsyncUsageInfo) {
@@ -442,6 +464,7 @@ func claimAsyncUsageContext(ctx context.Context, info *model.AsyncUsageInfo) (bo
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+
 	now := time.Now()
 	token := common.ShortUUID()
 	leaseUntil := now.Add(asyncUsageProcessingLease)
@@ -467,20 +490,24 @@ func processOneAsyncUsage(ctx context.Context, info *model.AsyncUsageInfo) {
 	if err != nil || !accepted {
 		return
 	}
+
 	workCtx, stopRenew := startAsyncUsageClaimRenewal(ctx, info)
 	defer stopRenew() // panic and Goexit join locally, but never record returned.
+
 	processOneAsyncUsageBody(workCtx, info)
 	stopRenew()
+
 	if err := model.RecordImagePollReturn(ctx, info); err != nil {
 		log.Errorf("record image poll return: %v", err)
 	}
 }
-func processOneAsyncUsageBody(ctx context.Context, info *model.AsyncUsageInfo) {
 
+func processOneAsyncUsageBody(ctx context.Context, info *model.AsyncUsageInfo) {
 	if info.MeasuredImage {
 		if err := model.ValidateImageAccountingClaim(ctx, info); err != nil {
 			return
 		}
+
 		result := info.Amount.ImageBillingResult
 		if info.Status != model.AsyncUsageStatusPending {
 			return
@@ -734,6 +761,7 @@ func startAsyncUsageClaimRenewalAtInterval(
 
 	go func() {
 		defer close(exited)
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -755,6 +783,7 @@ func startAsyncUsageClaimRenewalAtInterval(
 					if workCtx.Err() != nil {
 						return
 					}
+
 					notify.ErrorThrottle(
 						"asyncUsageRenewClaim",
 						time.Minute*5,
@@ -779,7 +808,6 @@ func startAsyncUsageClaimRenewalAtInterval(
 
 					return
 				}
-
 			}
 		}
 	}()
@@ -805,6 +833,7 @@ func completeAsyncUsage(
 
 	if model.UsesImageAccountingClaim(info) {
 		originalToken := info.ProcessingToken
+
 		ctx = actionguard.With(ctx, func(checkCtx context.Context) error {
 			snapshot := *info
 			snapshot.ProcessingToken = originalToken
@@ -814,6 +843,7 @@ func completeAsyncUsage(
 			return err
 		}
 	}
+
 	usageContext = usageContext.WithFallback(info.UsageContext)
 
 	price := info.Price
@@ -855,7 +885,6 @@ func completeAsyncUsage(
 	}
 
 	selectedPrice.ConditionalPrices = nil
-	nonReplaySafeDebitAttempted := false
 
 	if amount.UsedAmount > 0 && !settlementPrepared {
 		if err := model.PrepareClaimedAsyncUsageSettlement(
@@ -910,90 +939,15 @@ func completeAsyncUsage(
 		}
 	}
 
-	if amount.UsedAmount > 0 && !info.BalanceConsumed {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		charged, replaySafe, err := consumeAsyncUsageGroupBalance(ctx, info, amount.UsedAmount)
-
-		nonReplaySafeDebitAttempted = charged && !replaySafe
-		if model.UsesImageAccountingClaim(info) {
-			if guardErr := actionguard.Check(ctx); guardErr != nil {
-				return guardErr
-			}
-			if err != nil && charged && !replaySafe {
-				return fmt.Errorf("%w: non-replay-safe debit outcome unknown: %s", errAsyncUsageManualSettlement, err)
-			}
-		}
-		if err != nil {
-			if errors.Is(err, errAsyncUsageManualSettlement) {
-				return err
-			}
-
-			if !charged {
-				return fmt.Errorf(
-					"%w: consume async usage balance before charge: %s",
-					errAsyncUsageSettlementPending,
-					err.Error(),
-				)
-			}
-
-			if replaySafe {
-				return fmt.Errorf(
-					"%w: confirm idempotent async usage debit: %s",
-					errAsyncUsageSettlementPending,
-					err.Error(),
-				)
-			}
-
-			notify.ErrorThrottle(
-				"asyncUsageConsumeBalance",
-				time.Minute*5,
-				"consume async usage balance failed",
-				err.Error(),
-			)
-			recordAsyncUsageConsumeError(info, amount.UsedAmount, err)
-			log.Errorf(
-				"consume async usage balance failed, complete without retry to avoid duplicate charge: id=%d request_id=%s upstream_id=%s amount=%f err=%v",
-				info.ID,
-				info.RequestID,
-				info.UpstreamID,
-				amount.UsedAmount,
-				err,
-			)
-		} else if charged {
-			info.BalanceConsumed = true
-			if err := markAsyncUsageBalanceConsumed(info); err != nil {
-				if replaySafe || requiresAccountingLog(info) {
-					return fmt.Errorf(
-						"%w: persist consumed balance: %s",
-						errAsyncUsageSettlementPending,
-						err.Error(),
-					)
-				}
-
-				notify.ErrorThrottle(
-					"asyncUsageMarkBalanceConsumed",
-					time.Minute*5,
-					"persist non-replay-safe async usage debit marker",
-					err.Error(),
-				)
-				log.Errorf(
-					"persist non-replay-safe async usage debit marker failed; completing with in-memory consumed marker to avoid duplicate charge: id=%d request_id=%s upstream_id=%s amount=%f err=%v",
-					info.ID,
-					info.RequestID,
-					info.UpstreamID,
-					amount.UsedAmount,
-					err,
-				)
-			}
-		}
+	nonReplaySafeDebitAttempted, err := debitAsyncUsage(ctx, info, amount)
+	if err != nil {
+		return err
 	}
 
 	if err := actionguard.Check(ctx); err != nil {
 		return err
 	}
+
 	info.Status = model.AsyncUsageStatusCompleted
 	info.Usage = usage
 	info.UsageContext = usageContext
@@ -1069,7 +1023,12 @@ func waitForAsyncUsageLog(info *model.AsyncUsageInfo) error {
 		info.BillingOperationID,
 	)
 	log.Error(message)
-	notify.ErrorThrottle("asyncUsageLogMissing", time.Minute*5, "async usage call log missing", message)
+	notify.ErrorThrottle(
+		"asyncUsageLogMissing",
+		time.Minute*5,
+		"async usage call log missing",
+		message,
+	)
 
 	return nil
 }
@@ -1104,6 +1063,7 @@ func reportMeasuredZero(ctx context.Context, info *model.AsyncUsageInfo) error {
 	if err := actionguard.Check(ctx); err != nil {
 		return err
 	}
+
 	_, err := reporter.MeasuredZero(ctx, balance.MeasuredZeroRequest{
 		Group:              info.GroupID,
 		RequestID:          info.RequestID,
@@ -1121,7 +1081,11 @@ func reportMeasuredZero(ctx context.Context, info *model.AsyncUsageInfo) error {
 	}
 
 	if info.RequestAt.IsZero() || time.Since(info.RequestAt) < measuredZeroReceiptWindow {
-		return fmt.Errorf("%w: measured-zero receipt: %s", errAsyncUsageSettlementPending, err.Error())
+		return fmt.Errorf(
+			"%w: measured-zero receipt: %s",
+			errAsyncUsageSettlementPending,
+			err.Error(),
+		)
 	}
 
 	message := fmt.Sprintf(
@@ -1134,7 +1098,12 @@ func reportMeasuredZero(ctx context.Context, info *model.AsyncUsageInfo) error {
 		err,
 	)
 	log.Error(message)
-	notify.ErrorThrottle("asyncUsageMeasuredZero", time.Minute*5, "measured-zero receipt unavailable", message)
+	notify.ErrorThrottle(
+		"asyncUsageMeasuredZero",
+		time.Minute*5,
+		"measured-zero receipt unavailable",
+		message,
+	)
 
 	return nil
 }
@@ -1273,6 +1242,7 @@ func consumeAsyncUsageGroupBalance(
 	if err := actionguard.Check(ctx); err != nil {
 		return false, false, err
 	}
+
 	_, consumer, err := balance.Default.GetGroupRemainBalance(ctx, *group)
 	if err != nil {
 		return false, false, fmt.Errorf("get group balance: %w", err)
@@ -1308,6 +1278,7 @@ func consumeAsyncUsageGroupBalance(
 	if err := actionguard.Check(ctx); err != nil {
 		return false, replaySafe, err
 	}
+
 	_, err = consumer.PostGroupConsume(ctx, info.TokenName, amount)
 
 	return true, replaySafe, err
@@ -1363,6 +1334,7 @@ func markAsyncUsageFailed(info *model.AsyncUsageInfo, errMsg string) {
 	if model.UsesImageAccountingClaim(info) {
 		return
 	} // the paired receipt committed with the terminal claim
+
 	if err := model.IgnoreNotFound(
 		model.UpdateAsyncUsageLogFailed(info, errMsg),
 	); err != nil {
@@ -1430,4 +1402,100 @@ func measuredImageSettlementReady(info *model.AsyncUsageInfo) bool {
 
 func requiresAccountingLog(info *model.AsyncUsageInfo) bool {
 	return info.ImageTaskID != "" || info.MeasuredImage
+}
+
+func debitAsyncUsage(
+	ctx context.Context,
+	info *model.AsyncUsageInfo,
+	amount model.Amount,
+) (bool, error) {
+	nonReplaySafeDebitAttempted := false
+	if amount.UsedAmount > 0 && !info.BalanceConsumed {
+		if err := ctx.Err(); err != nil {
+			return nonReplaySafeDebitAttempted, err
+		}
+
+		charged, replaySafe, err := consumeAsyncUsageGroupBalance(ctx, info, amount.UsedAmount)
+
+		nonReplaySafeDebitAttempted = charged && !replaySafe
+		if model.UsesImageAccountingClaim(info) {
+			if guardErr := actionguard.Check(ctx); guardErr != nil {
+				return nonReplaySafeDebitAttempted, guardErr
+			}
+
+			if err != nil && charged && !replaySafe {
+				return nonReplaySafeDebitAttempted, fmt.Errorf(
+					"%w: non-replay-safe debit outcome unknown: %s",
+					errAsyncUsageManualSettlement,
+					err.Error(),
+				)
+			}
+		}
+
+		if err != nil {
+			if errors.Is(err, errAsyncUsageManualSettlement) {
+				return nonReplaySafeDebitAttempted, err
+			}
+
+			if !charged {
+				return nonReplaySafeDebitAttempted, fmt.Errorf(
+					"%w: consume async usage balance before charge: %s",
+					errAsyncUsageSettlementPending,
+					err.Error(),
+				)
+			}
+
+			if replaySafe {
+				return nonReplaySafeDebitAttempted, fmt.Errorf(
+					"%w: confirm idempotent async usage debit: %s",
+					errAsyncUsageSettlementPending,
+					err.Error(),
+				)
+			}
+
+			notify.ErrorThrottle(
+				"asyncUsageConsumeBalance",
+				time.Minute*5,
+				"consume async usage balance failed",
+				err.Error(),
+			)
+			recordAsyncUsageConsumeError(info, amount.UsedAmount, err)
+			log.Errorf(
+				"consume async usage balance failed, complete without retry to avoid duplicate charge: id=%d request_id=%s upstream_id=%s amount=%f err=%v",
+				info.ID,
+				info.RequestID,
+				info.UpstreamID,
+				amount.UsedAmount,
+				err,
+			)
+		} else if charged {
+			info.BalanceConsumed = true
+			if err := markAsyncUsageBalanceConsumed(info); err != nil {
+				if replaySafe || requiresAccountingLog(info) {
+					return nonReplaySafeDebitAttempted, fmt.Errorf(
+						"%w: persist consumed balance: %s",
+						errAsyncUsageSettlementPending,
+						err.Error(),
+					)
+				}
+
+				notify.ErrorThrottle(
+					"asyncUsageMarkBalanceConsumed",
+					time.Minute*5,
+					"persist non-replay-safe async usage debit marker",
+					err.Error(),
+				)
+				log.Errorf(
+					"persist non-replay-safe async usage debit marker failed; completing with in-memory consumed marker to avoid duplicate charge: id=%d request_id=%s upstream_id=%s amount=%f err=%v",
+					info.ID,
+					info.RequestID,
+					info.UpstreamID,
+					amount.UsedAmount,
+					err,
+				)
+			}
+		}
+	}
+
+	return nonReplaySafeDebitAttempted, nil
 }

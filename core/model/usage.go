@@ -962,6 +962,7 @@ func (c UsageContext) priceConditionMatches(
 	if len(condition.Style) > 0 && !slices.Contains(condition.Style, c.Style) {
 		return false
 	}
+
 	if !qualityConditionValueMatches(condition.Quality, c.Quality) {
 		return false
 	}
@@ -1007,6 +1008,7 @@ func (c UsageContext) WithFallback(fallback UsageContext) UsageContext {
 	if c.Style == "" {
 		c.Style = fallback.Style
 	}
+
 	if c.Quality == "" {
 		c.Quality = fallback.Quality
 	}
@@ -1163,10 +1165,12 @@ func styleConditionsOverlap(a, b []string) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return true
 	}
+
 	for _, value := range a {
 		if slices.Contains(b, value) {
 			return true
 		}
 	}
+
 	return false
 }

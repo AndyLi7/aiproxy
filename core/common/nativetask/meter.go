@@ -22,27 +22,38 @@ var (
 	errMeterInput         = errors.New("upstream input is not a JSON object")
 	errMeterFieldMissing  = errors.New("metered field is missing")
 	errMeterFieldNotText  = errors.New("metered field is not a top-level string")
-	errMeterUndeclaredKey = errors.New("upstream input has a key the frozen schema does not declare")
-	errMeterOtherText     = errors.New("upstream input has other long text")
+	errMeterUndeclaredKey = errors.New(
+		"upstream input has a key the frozen schema does not declare",
+	)
+	errMeterOtherText = errors.New("upstream input has other long text")
 )
 
 // sizeQuoteToInput applies the model's input meter: each metered route holds
 // the price of this request's metered text instead of the longest text the
 // model accepts. It never fails a request. On any problem it returns the
 // published quote byte for byte, with the reason for the operator log.
-func sizeQuoteToInput(encoded string, quote *model.ImagePrepaymentQuote, rawMeter json.RawMessage, frozen nativeresult.TaskContract, input json.RawMessage) (string, *model.ImagePrepaymentQuote, error) {
+func sizeQuoteToInput(
+	encoded string,
+	quote *model.ImagePrepaymentQuote,
+	rawMeter json.RawMessage,
+	frozen nativeresult.TaskContract,
+	input json.RawMessage,
+) (string, *model.ImagePrepaymentQuote, error) {
 	meter, err := model.ParseInputMeter(rawMeter, quote)
 	if err != nil {
 		return encoded, quote, err
 	}
+
 	quantity, err := meteredCharacters(frozen, input, meter.Path[0])
 	if err != nil {
 		return encoded, quote, err
 	}
+
 	sized, sizedJSON, err := meter.Apply(encoded, quote, quantity)
 	if err != nil {
 		return encoded, quote, err
 	}
+
 	return sizedJSON, sized, nil
 }
 
@@ -53,7 +64,11 @@ func sizeQuoteToInput(encoded string, quote *model.ImagePrepaymentQuote, rawMete
 // another top-level string longer than otherTextLimit whose schema is not an
 // enum or const, or another top-level array or object whose strings together
 // are longer than otherTextLimit.
-func meteredCharacters(frozen nativeresult.TaskContract, input json.RawMessage, field string) (int64, error) {
+func meteredCharacters(
+	frozen nativeresult.TaskContract,
+	input json.RawMessage,
+	field string,
+) (int64, error) {
 	// The upstream schema validates the body sent upstream, platform controls
 	// included; without platform controls it is the public input schema.
 	schema := frozen.UpstreamInputSchema
@@ -63,36 +78,48 @@ func meteredCharacters(frozen nativeresult.TaskContract, input json.RawMessage, 
 	// Imported contracts keep the request schema as a local reference into
 	// their own components; follow it as the schema validator does.
 	root := resolveSchema(schema, schema, 0)
+
 	var properties map[string]json.RawMessage
 	if root == nil || json.Unmarshal(root["properties"], &properties) != nil || properties == nil {
 		return 0, errMeterSchema
 	}
+
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(input, &fields) != nil || fields == nil {
 		return 0, errMeterInput
 	}
+
 	raw, present := fields[field]
 	if !present {
 		return 0, errMeterFieldMissing
 	}
+
 	text, isText := jsonString(raw)
 	if !isText {
 		return 0, errMeterFieldNotText
 	}
+
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
+
 	for _, key := range keys {
 		declared, ok := properties[key]
 		if !ok {
 			return 0, errMeterUndeclaredKey
 		}
+
 		if key == field {
 			continue
 		}
-		if other, isText := jsonString(fields[key]); isText && utf8.RuneCountInString(other) > otherTextLimit && !enumerated(resolveSchema(declared, schema, 0)) {
+
+		if other, isText := jsonString(
+			fields[key],
+		); isText && utf8.RuneCountInString(other) > otherTextLimit &&
+			!enumerated(resolveSchema(declared, schema, 0)) {
 			return 0, errMeterOtherText
 		}
 		// Text inside a list or object (a dialogue turn, a context block) may
@@ -102,6 +129,7 @@ func meteredCharacters(frozen nativeresult.TaskContract, input json.RawMessage, 
 			return 0, errMeterOtherText
 		}
 	}
+
 	return int64(utf8.RuneCountInString(text)), nil
 }
 
@@ -112,16 +140,22 @@ func nestedTextLength(raw json.RawMessage, limit int) int {
 	if len(trimmed) == 0 || (trimmed[0] != '[' && trimmed[0] != '{') {
 		return 0
 	}
+
 	var value any
+
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.UseNumber()
+
 	if decoder.Decode(&value) != nil {
 		// The body already passed schema validation; an undecodable value is
 		// treated as possible text so the request holds the maximum.
 		return limit + 1
 	}
+
 	total := 0
+
 	var walk func(any) bool
+
 	walk = func(node any) bool {
 		switch typed := node.(type) {
 		case string:
@@ -139,9 +173,11 @@ func nestedTextLength(raw json.RawMessage, limit int) int {
 				}
 			}
 		}
+
 		return total <= limit
 	}
 	walk(value)
+
 	return total
 }
 
@@ -152,10 +188,12 @@ func jsonString(raw json.RawMessage) (string, bool) {
 	if len(trimmed) == 0 || trimmed[0] != '"' {
 		return "", false
 	}
+
 	var text string
 	if json.Unmarshal(trimmed, &text) != nil {
 		return "", false
 	}
+
 	return text, true
 }
 
@@ -171,8 +209,18 @@ func enumerated(keywords map[string]json.RawMessage) bool {
 // changing what the schema accepts. Same set as the application's
 // native-usage-estimate resolveSchema, which picks the metered field.
 var schemaAnnotations = map[string]bool{
-	"title": true, "description": true, "examples": true, "default": true, "deprecated": true, "readOnly": true,
-	"writeOnly": true, "components": true, "$defs": true, "definitions": true, "$schema": true, "nullable": true,
+	"title":       true,
+	"description": true,
+	"examples":    true,
+	"default":     true,
+	"deprecated":  true,
+	"readOnly":    true,
+	"writeOnly":   true,
+	"components":  true,
+	"$defs":       true,
+	"definitions": true,
+	"$schema":     true,
+	"nullable":    true,
 }
 
 const maxSchemaDepth = 32
@@ -185,6 +233,7 @@ func onlyAnnotations(node map[string]json.RawMessage, keep string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -197,31 +246,40 @@ func resolveSchema(node, document json.RawMessage, depth int) map[string]json.Ra
 	if depth > maxSchemaDepth || json.Unmarshal(node, &keywords) != nil || keywords == nil {
 		return nil
 	}
+
 	if rawRef, isRef := keywords["$ref"]; isRef {
 		var ref string
-		if json.Unmarshal(rawRef, &ref) != nil || !strings.HasPrefix(ref, "#/") || !onlyAnnotations(keywords, "$ref") {
+		if json.Unmarshal(rawRef, &ref) != nil || !strings.HasPrefix(ref, "#/") ||
+			!onlyAnnotations(keywords, "$ref") {
 			return nil
 		}
+
 		target := document
-		for _, part := range strings.Split(ref[2:], "/") {
+		for part := range strings.SplitSeq(ref[2:], "/") {
 			part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
+
 			var object map[string]json.RawMessage
 			if json.Unmarshal(target, &object) != nil || object == nil {
 				return nil
 			}
+
 			next, exists := object[part]
 			if !exists {
 				return nil
 			}
+
 			target = next
 		}
+
 		return resolveSchema(target, document, depth+1)
 	}
+
 	if rawAll, isAll := keywords["allOf"]; isAll && onlyAnnotations(keywords, "allOf") {
 		var branches []json.RawMessage
 		if json.Unmarshal(rawAll, &branches) == nil && len(branches) == 1 {
 			return resolveSchema(branches[0], document, depth+1)
 		}
 	}
+
 	return keywords
 }

@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"math/big"
 	"slices"
+
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
 )
 
 const (
@@ -158,22 +159,26 @@ func (p *ImageBillingPolicy) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(obj["version"], &version); err != nil {
 		return err
 	}
+
 	if version == 2 {
 		if _, ok := obj["input"]; ok {
 			return errors.New("pixel billing cannot include input billing")
 		}
+
 		if _, ok := obj["outputPixelTiers"]; ok {
 			return errors.New("pixel billing cannot include tiers")
 		}
 	} else if _, ok := obj["outputPixels"]; ok {
 		return errors.New("pixel quantity requires v2")
 	}
+
 	if v, ok := obj["outputPixels"]; ok {
 		keys := []string{"pixelsPerUnit", "rounding", "scope", "minimumUnits"}
 		if _, err := strictImageObject(v, keys, keys); err != nil {
 			return err
 		}
 	}
+
 	if v, ok := obj["input"]; ok {
 		var inputFields map[string]json.RawMessage
 		if json.Unmarshal(v, &inputFields) != nil {
@@ -244,11 +249,14 @@ func (p *ImageBillingPolicy) UnmarshalJSON(data []byte) error {
 
 func (p *ImageBillingPolicy) Validate() error {
 	if p != nil && p.Version == 2 {
-		if p.Scenario != "generation" || p.Input != nil || p.OutputPixelTiers != nil || p.OutputPixels == nil {
+		if p.Scenario != "generation" || p.Input != nil || p.OutputPixelTiers != nil ||
+			p.OutputPixels == nil {
 			return errors.New("invalid pixel billing policy")
 		}
+
 		return p.OutputPixels.Validate()
 	}
+
 	if p == nil || p.Version != 1 || p.OutputPixels != nil || !imageScenario(p.Scenario) {
 		return errors.New("invalid image billing policy")
 	}

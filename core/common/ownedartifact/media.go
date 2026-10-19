@@ -33,6 +33,7 @@ var mediaTypes = map[string]string{
 // provider's declared type or file name. An unrecognised file is "".
 func DetectType(head []byte) string {
 	starts := func(prefix string) bool { return bytes.HasPrefix(head, []byte(prefix)) }
+
 	at := func(offset int, value string) bool {
 		return len(head) >= offset+len(value) && string(head[offset:offset+len(value)]) == value
 	}
@@ -58,6 +59,7 @@ func DetectType(head []byte) string {
 		case "qt  ":
 			return "video/quicktime"
 		}
+
 		return "video/mp4"
 	case starts("\x1a\x45\xdf\xa3"):
 		if bytes.Contains(head[:min(len(head), 64)], []byte("webm")) {
@@ -76,6 +78,7 @@ func DetectType(head []byte) string {
 	case len(head) >= 2 && head[0] == 0xff && head[1]&0xe0 == 0xe0 && head[1]&0x06 != 0:
 		return "audio/mpeg"
 	}
+
 	return ""
 }
 
@@ -94,9 +97,11 @@ func FileName(task string, index int, mediaType string) string {
 	if !ok {
 		extension = "bin"
 	}
+
 	if index > 0 {
 		return task + "-" + strconv.Itoa(index) + "." + extension
 	}
+
 	return task + "." + extension
 }
 

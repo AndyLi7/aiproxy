@@ -47,6 +47,7 @@ func (*Adaptor) GenerateImage(
 	}
 
 	ctx, classifyTransport := failover.TraceTransport(ctx)
+
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -81,7 +82,10 @@ func (*Adaptor) GenerateImage(
 
 	response, err := once.Do(req)
 	if err != nil {
-		return adaptor.ImageTaskResult{}, &adaptor.ImageSubmissionFailure{Failure: classifyTransport(err), ProviderReason: "transport error"}
+		return adaptor.ImageTaskResult{}, &adaptor.ImageSubmissionFailure{
+			Failure:        classifyTransport(err),
+			ProviderReason: "transport error",
+		}
 	}
 	defer response.Body.Close()
 
@@ -89,6 +93,7 @@ func (*Adaptor) GenerateImage(
 	// prove nothing was generated; any other non-2xx answer is uncertain.
 	if status := response.StatusCode; status < 200 || status >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+
 		reason := adaptor.ProviderErrorReason(status, raw, m.Channel.Key)
 		switch {
 		case adaptor.InputRejectionStatus(status):
@@ -96,6 +101,7 @@ func (*Adaptor) GenerateImage(
 		case adaptor.ProviderUnavailableStatus(status):
 			return adaptor.ImageTaskResult{}, adaptor.NewProviderUnavailable(status, reason)
 		}
+
 		return adaptor.ImageTaskResult{}, adaptor.NewSubmissionUnknown(status, reason)
 	}
 
@@ -104,6 +110,10 @@ func (*Adaptor) GenerateImage(
 		return adaptor.ImageTaskResult{}, errors.New("synchronous image response incomplete")
 	}
 
+	return parseGeneratedImage(raw, frozen)
+}
+
+func parseGeneratedImage(raw, frozen []byte) (adaptor.ImageTaskResult, error) {
 	failed := adaptor.ImageTaskResult{
 		Status: "failed",
 		Error:  &model.ImageTaskError{Code: "invalid_result", Message: "Image generation failed"},

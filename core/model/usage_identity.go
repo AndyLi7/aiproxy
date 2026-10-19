@@ -17,6 +17,8 @@ import (
 // with it was made by the website. The application pins the same literal
 // (src/modules/gateway/key-name.ts PLAYGROUND_CREDENTIAL_NAME); a test in each
 // repository keeps the two equal.
+//
+//nolint:gosec // Symbolic credential name or synthetic test identifier, not a secret.
 const PlaygroundCredentialName = "__website_playground__"
 
 // MaxUsageModelIDLength bounds a usage model id (the canonical capability key),
@@ -181,7 +183,13 @@ func NativeUsageIdentity(task *NativeTask, info NativeTaskLog) UsageIdentity {
 
 	logModel, capability := nativeLogIdentity(task.Model)
 
-	return NewUsageIdentity(task.TokenID, logModel, capability, nativeLogSource(info.RequestSource), info.RequestAt)
+	return NewUsageIdentity(
+		task.TokenID,
+		logModel,
+		capability,
+		nativeLogSource(info.RequestSource),
+		info.RequestAt,
+	)
 }
 
 // usageAttributionColumns are the LogDB columns the reviewed SQL
@@ -213,7 +221,7 @@ var ErrUsageAttributionSQLMissing = errors.New(
 // keeps serving. A fresh database (no table to lock) and a development SQLite
 // LogDB migrate as before.
 func checkUsageAttributionMigration(db *gorm.DB) error {
-	if db == nil || db.Dialector.Name() == "sqlite" {
+	if db == nil || db.Name() == "sqlite" {
 		return nil
 	}
 
@@ -243,6 +251,7 @@ func UsageAttributionStorageReady(db *gorm.DB) bool {
 		}
 
 		err = rows.Err()
+		//nolint:sqlclosecheck // The LIMIT 0 schema probe must close before the next query on this transaction.
 		_ = rows.Close()
 
 		if err != nil {

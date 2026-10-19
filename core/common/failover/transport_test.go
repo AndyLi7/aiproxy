@@ -1,4 +1,4 @@
-package failover
+package failover_test
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"net/http/httptrace"
 	"testing"
 	"time"
+
+	"github.com/labring/aiproxy/core/common/failover"
 )
 
 func TestTransportEvidence(t *testing.T) {
@@ -15,23 +17,26 @@ func TestTransportEvidence(t *testing.T) {
 		name               string
 		started, connected bool
 		err                error
-		want               Acceptance
+		want               failover.Acceptance
 	}{
-		{"unobserved dial", false, false, &net.OpError{Op: "dial", Err: errors.New("refused")}, Unknown},
-		{"observed dial", true, false, &net.OpError{Op: "dial", Err: errors.New("refused")}, NotAccepted},
-		{"observed DNS", true, false, &net.DNSError{Err: "not found"}, NotAccepted},
-		{"redirect dial", true, true, &net.OpError{Op: "dial", Err: errors.New("refused")}, Unknown},
-		{"response timeout", true, true, context.DeadlineExceeded, Unknown},
+		{"unobserved dial", false, false, &net.OpError{Op: "dial", Err: errors.New("refused")}, failover.Unknown},
+		{"observed dial", true, false, &net.OpError{Op: "dial", Err: errors.New("refused")}, failover.NotAccepted},
+		{"observed DNS", true, false, &net.DNSError{Err: "not found"}, failover.NotAccepted},
+		{"redirect dial", true, true, &net.OpError{Op: "dial", Err: errors.New("refused")}, failover.Unknown},
+		{"response timeout", true, true, context.DeadlineExceeded, failover.Unknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, classify := TraceTransport(context.Background())
+			ctx, classify := failover.TraceTransport(context.Background())
+
 			tr := httptrace.ContextClientTrace(ctx)
 			if tc.started {
 				tr.ConnectStart("tcp", "test")
 			}
+
 			if tc.connected {
 				tr.GotConn(httptrace.GotConnInfo{})
 			}
+
 			if f := classify(tc.err); f.Acceptance != tc.want {
 				t.Fatalf("%+v", f)
 			}
@@ -40,20 +45,28 @@ func TestTransportEvidence(t *testing.T) {
 }
 
 func TestTransportLocalConnectionRefused(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	address := listener.Addr().String()
 	listener.Close()
-	ctx, classify := TraceTransport(context.Background())
+
+	ctx, classify := failover.TraceTransport(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address, nil)
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: time.Second}
-	_, err = client.Do(req)
+
+	response, err := client.Do(req)
+	if response != nil {
+		response.Body.Close()
+	}
+
 	if err == nil {
 		t.Fatal("expected refused connection")
 	}
-	if f := classify(err); f.Acceptance != NotAccepted {
+
+	if f := classify(err); f.Acceptance != failover.NotAccepted {
 		t.Fatalf("%+v: %v", f, err)
 	}
 }
@@ -71,10 +84,11 @@ func TestTransportDiagnosticsDoNotAuthorizeRetryOrExposeRawError(t *testing.T) {
 		}, "transport_error_after_request_write_attempt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, classify := TraceTransport(context.Background())
+			ctx, classify := failover.TraceTransport(context.Background())
 			tc.observe(httptrace.ContextClientTrace(ctx))
+
 			f := classify(errors.New("https://user:secret@example.com failed"))
-			if f.Acceptance != Unknown || f.Evidence != tc.want {
+			if f.Acceptance != failover.Unknown || f.Evidence != tc.want {
 				t.Fatalf("unexpected diagnostic: %+v", f)
 			}
 		})

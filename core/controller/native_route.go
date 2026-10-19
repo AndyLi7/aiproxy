@@ -41,12 +41,12 @@ func nativeRouteFeatures(engineConfigured bool) []string {
 	return []string{NativeRouteFollowsBindingFeature}
 }
 
-// nativeRouteRejection is a ResolvePlan failure with its reason. It unwraps
+// nativeRouteError is a ResolvePlan failure with its reason. It unwraps
 // to nativetask.ErrUnavailable, so the public answer is unchanged.
-type nativeRouteRejection struct{ reason string }
+type nativeRouteError struct{ reason string }
 
-func (r *nativeRouteRejection) Error() string { return "native route rejected: " + r.reason }
-func (r *nativeRouteRejection) Unwrap() error { return nativetask.ErrUnavailable }
+func (r *nativeRouteError) Error() string { return "native route rejected: " + r.reason }
+func (r *nativeRouteError) Unwrap() error { return nativetask.ErrUnavailable }
 
 // parseNativeRouteBinding reads the model config's native binding. It is
 // invalid when missing, unparsable, of another version, or naming no channel
@@ -56,14 +56,17 @@ func parseNativeRouteBinding(mc model.ModelConfig) (nativeRouteBinding, bool) {
 	if raw == nil {
 		return nativeRouteBinding{}, false
 	}
+
 	encoded, err := json.Marshal(raw)
 	if err != nil {
 		return nativeRouteBinding{}, false
 	}
+
 	var binding nativeRouteBinding
 	if json.Unmarshal(encoded, &binding) != nil || binding.Version != 1 || binding.ChannelID <= 0 {
 		return nativeRouteBinding{}, false
 	}
+
 	return binding, true
 }
 
@@ -81,12 +84,15 @@ func nativeBindingFilter(c *gin.Context, m mode.Mode) func(*model.Channel) bool 
 	if m != mode.NativeTasks || !config.NativeRouteFollowsBinding {
 		return nil
 	}
+
 	value, _ := c.Get(middleware.ModelConfig)
 	mc, _ := value.(model.ModelConfig)
+
 	binding, ok := parseNativeRouteBinding(mc)
 	if !ok {
 		return func(*model.Channel) bool { return false }
 	}
+
 	return func(ch *model.Channel) bool {
 		return ch != nil && ch.ID == binding.ChannelID && ch.Status == model.ChannelStatusEnabled
 	}
@@ -94,33 +100,58 @@ func nativeBindingFilter(c *gin.Context, m mode.Mode) func(*model.Channel) bool 
 
 // rejectNativeRoute logs why a native submission has no route and returns the
 // rejection. Never logs a key; fingerprints are cut to 8 characters.
-func rejectNativeRoute(c *gin.Context, reason string, binding nativeRouteBinding, channel *model.Channel, cause error) (nativetask.Plan, nativetask.Provider, error) {
+func rejectNativeRoute(
+	c *gin.Context,
+	reason string,
+	binding nativeRouteBinding,
+	channel *model.Channel,
+	cause error,
+) (nativetask.Plan, nativetask.Provider, error) {
 	selected := 0
 	if channel != nil {
 		selected = channel.ID
 	}
-	line := fmt.Sprintf("native route rejected: reason=%s request_id=%s route=%s binding_channel=%d selected_channel=%d cache_version=%d follows_binding=%t",
-		reason, middleware.GetRequestID(c), middleware.GetRoutingModel(c), binding.ChannelID, selected, middleware.ModelCacheVersion(c), config.NativeRouteFollowsBinding)
+
+	line := fmt.Sprintf(
+		"native route rejected: reason=%s request_id=%s route=%s binding_channel=%d selected_channel=%d cache_version=%d follows_binding=%t",
+		reason,
+		middleware.GetRequestID(c),
+		middleware.GetRoutingModel(c),
+		binding.ChannelID,
+		selected,
+		middleware.ModelCacheVersion(c),
+		config.NativeRouteFollowsBinding,
+	)
 	if reason == nativeRouteKeyFingerprintMismatch && channel != nil {
 		channelFingerprint := ""
 		if channel.Key != "" {
 			channelFingerprint = model.ImageChannelKeyFingerprint(channel.Key)
 		}
-		line += fmt.Sprintf(" binding_fingerprint=%s channel_fingerprint=%s", fingerprintPrefix(binding.KeyFingerprint), fingerprintPrefix(channelFingerprint))
+
+		line += fmt.Sprintf(
+			" binding_fingerprint=%s channel_fingerprint=%s",
+			fingerprintPrefix(binding.KeyFingerprint),
+			fingerprintPrefix(channelFingerprint),
+		)
 	}
+
 	if cause != nil {
 		line += fmt.Sprintf(" cause=%q", cause.Error())
 	}
+
 	common.GetLogger(c).Warn(line)
-	return nativetask.Plan{}, nil, &nativeRouteRejection{reason: reason}
+
+	return nativetask.Plan{}, nil, &nativeRouteError{reason: reason}
 }
 
 func fingerprintPrefix(fingerprint string) string {
 	if fingerprint == "" {
 		return "none"
 	}
+
 	if len(fingerprint) > 8 {
 		return fingerprint[:8]
 	}
+
 	return fingerprint
 }

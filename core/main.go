@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -30,8 +32,18 @@ var (
 )
 
 func init() {
-	flag.IntVar(&controlledReadFD, "controlled-runtime-read-fd", 0, "private supervisor pipe; local controlled mode only")
-	flag.IntVar(&controlledWriteFD, "controlled-runtime-write-fd", 0, "private supervisor pipe; local controlled mode only")
+	flag.IntVar(
+		&controlledReadFD,
+		"controlled-runtime-read-fd",
+		0,
+		"private supervisor pipe; local controlled mode only",
+	)
+	flag.IntVar(
+		&controlledWriteFD,
+		"controlled-runtime-write-fd",
+		0,
+		"private supervisor pipe; local controlled mode only",
+	)
 	flag.StringVar(&listen, "listen", "0.0.0.0:3000", "http server listen")
 	flag.IntVar(&pprofPort, "pprof-port", 15000, "pport http server port")
 }
@@ -51,6 +63,13 @@ func startRequestTraceRuntime(
 //	@in							header
 //	@name						Authorization
 func main() {
+	if err := runMain(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// runMain owns cleanup; process exit occurs only after its deferred cleanup ran.
+func runMain() (runErr error) {
 	flag.Parse()
 
 	loadEnv()
@@ -67,42 +86,57 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
 	var initErr error
 	if controlledReadFD != 0 || controlledWriteFD != 0 {
 		if controlledReadFD < 3 || controlledWriteFD < 3 || controlledReadFD == controlledWriteFD {
-			log.Fatal("controlled runtime private session required")
+			return errors.New("controlled runtime private session required")
 		}
-		in, out := os.NewFile(uintptr(controlledReadFD), "controlled-in"), os.NewFile(uintptr(controlledWriteFD), "controlled-out")
+
+		in, out := os.NewFile(
+			uintptr(controlledReadFD),
+			"controlled-in",
+		), os.NewFile(
+			uintptr(controlledWriteFD),
+			"controlled-out",
+		)
 		defer in.Close()
 		defer out.Close()
+
 		h, r, boot, e := runtimeguard.ChildHandshake(in, out)
 		if e != nil {
-			log.Fatal("controlled runtime handshake failed")
+			return errors.New("controlled runtime handshake failed")
 		}
+
 		var controlledDB *gorm.DB
+
 		controlledDB, initErr = runtimeguard.OpenControlledStorage(h)
 		if initErr == nil {
 			model.DB = controlledDB
 			model.LogDB = controlledDB
 		}
+
 		if initErr == nil {
 			ready := make(chan error, 1)
 			go func() { _ = runtimeguard.RunChild(ctx, h, r, in, out, boot, ready); stop() }()
+
 			initErr = <-ready
 		}
+
 		if initErr == nil {
 			initErr = initializeOptionAndCaches()
 		}
 	} else {
 		initErr = initializeServices(pprofPort)
 	}
+
 	if initErr != nil {
-		log.Fatal("failed to initialize services: " + initErr.Error())
+		return fmt.Errorf("failed to initialize services: %w", initErr)
 	}
 
 	defer func() {
 		if err := model.CloseDB(); err != nil {
-			log.Fatal("failed to close database: " + err.Error())
+			runErr = errors.Join(runErr, fmt.Errorf("failed to close database: %w", err))
 		}
 	}()
 
@@ -147,6 +181,7 @@ func main() {
 	startJoinedRecoveryTasks(ctx, &wg, task.AsyncUsagePollTask, task.NativeTaskRecoveryTask)
 
 	log.Info("image result cleanup task started")
+
 	go task.ImageResultCleanupTask(ctx)
 
 	if common.RedisEnabled {
@@ -208,4 +243,6 @@ func main() {
 	}
 
 	log.Info("server exiting")
+
+	return nil
 }

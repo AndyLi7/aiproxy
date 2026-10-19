@@ -217,12 +217,19 @@ func p2VideoInfo(op string) *model.AsyncUsageInfo {
 		TokenID:            1,
 		Mode:               int(mode.VideoGenerationsJobs),
 	}
-	info.SetUsageIdentity(model.NewUsageIdentity(1, "veo", "text-to-video", model.RequestSourceAPI, time.Now()))
+	info.SetUsageIdentity(
+		model.NewUsageIdentity(1, "veo", "text-to-video", model.RequestSourceAPI, time.Now()),
+	)
 
 	return info
 }
 
-func createOperationLog(t *testing.T, db *gorm.DB, op string, status model.AsyncUsageStatus) model.Log {
+func createOperationLog(
+	t *testing.T,
+	db *gorm.DB,
+	op string,
+	status model.AsyncUsageStatus,
+) model.Log {
 	t.Helper()
 
 	row := model.Log{

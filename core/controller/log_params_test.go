@@ -56,7 +56,7 @@ func TestGroupLogsRejectInvalidParameters(t *testing.T) {
 				t.Fatalf("parse query: %v", err)
 			}
 
-			code, _, body := serveGroupLogs(t, "g", query)
+			code, _, body := serveGroupLogs(t, query)
 			if code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body = %s", code, body)
 			}
@@ -81,7 +81,7 @@ func TestGroupLogsRejectInvalidParameters(t *testing.T) {
 				t.Fatalf("parse query: %v", err)
 			}
 
-			code, _, body := serveGroupLogs(t, "g", query)
+			code, _, body := serveGroupLogs(t, query)
 			if code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body = %s", code, body)
 			}
@@ -101,7 +101,7 @@ func TestGroupLogsHideDatabaseErrors(t *testing.T) {
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
 
-	code, _, body := serveGroupLogs(t, "g", url.Values{"kind": {"calls"}})
+	code, _, body := serveGroupLogs(t, url.Values{"kind": {"calls"}})
 	if code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500; body = %s", code, body)
 	}

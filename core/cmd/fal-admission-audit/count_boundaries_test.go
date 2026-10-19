@@ -2,17 +2,20 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSourceMaximumImageCountsReachDelivery(t *testing.T) {
 	raw, err := os.ReadFile("../../common/registryvalidation/testdata/count-boundaries.json")
 	require.NoError(t, err)
+
 	var cases []sample
 	require.NoError(t, json.Unmarshal(raw, &cases))
 	require.Len(t, cases, 5)
+
 	for _, c := range cases {
 		t.Run(c.Endpoint+"/"+c.Scenario, func(t *testing.T) {
 			r := run(c)

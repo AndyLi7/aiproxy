@@ -24,9 +24,9 @@ const (
 )
 
 type Failure struct {
-	Acceptance Acceptance
-	Class      Class
-	Evidence   string
+	Acceptance Acceptance `json:"Acceptance"`
+	Class      Class      `json:"Class"`
+	Evidence   string     `json:"Evidence"`
 }
 type Policy struct {
 	MaxRetries int
@@ -42,7 +42,7 @@ type Decision struct {
 }
 
 func Decide(f Failure, p Policy, s State, now time.Time) Decision {
-	reason := ""
+	var reason string
 	switch {
 	case s.Cancelled:
 		reason = "cancelled"
@@ -63,12 +63,15 @@ func Decide(f Failure, p Policy, s State, now time.Time) Decision {
 	default:
 		return Decision{Retry: true, Reason: "confirmed_not_accepted"}
 	}
+
 	return Decision{Reason: reason}
 }
+
 func FromError(err error) Failure {
 	var provider interface{ FailoverFailure() Failure }
 	if errors.As(err, &provider) {
 		return provider.FailoverFailure()
 	}
+
 	return Failure{Acceptance: Unknown, Class: UnknownFailure}
 }

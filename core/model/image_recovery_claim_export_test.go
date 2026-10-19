@@ -1,8 +1,9 @@
 package model
 
 import (
-	"gorm.io/gorm"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ShortenImageRecoveryDeadlineForTest shortens only an isolated test fixture's
@@ -13,16 +14,26 @@ func ShortenImageRecoveryDeadlineForTest(task *ImageTask, deadline time.Time) er
 	if h == nil || deadline.UnixMicro() >= h.row.UntilMicros {
 		return ErrChannelAdmissionConflict
 	}
+
 	deadline = deadline.UTC().Truncate(time.Microsecond)
+
 	err := h.store.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&ChannelAdmissionImageRecoveryClaim{}).Where("id = ? AND owner = ?", h.row.ID, h.row.Owner).Update("until_micros", deadline.UnixMicro()).Error; err != nil {
+		if err := tx.Model(&ChannelAdmissionImageRecoveryClaim{}).
+			Where("id = ? AND owner = ?", h.row.ID, h.row.Owner).
+			Update("until_micros", deadline.UnixMicro()).
+			Error; err != nil {
 			return err
 		}
-		return tx.Model(&ImageTask{}).Where("id = ?", task.ID).Update("billing_next_check_at", deadline).Error
+
+		return tx.Model(&ImageTask{}).
+			Where("id = ?", task.ID).
+			Update("billing_next_check_at", deadline).
+			Error
 	})
 	if err == nil {
 		h.row.UntilMicros = deadline.UnixMicro()
 	}
+
 	return err
 }
 

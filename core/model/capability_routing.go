@@ -378,7 +378,11 @@ func ResolveCapabilityModel(
 	requested = strings.TrimSpace(requested)
 
 	candidates := capabilityCandidates(configs)
-	if resolution, matched, err := resolveExactCapabilityModel(requested, fields, candidates); matched {
+	if resolution, matched, err := resolveExactCapabilityModel(
+		requested,
+		fields,
+		candidates,
+	); matched {
 		return resolution, err
 	}
 

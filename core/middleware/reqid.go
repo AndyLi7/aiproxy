@@ -52,7 +52,9 @@ func GetBillingOperationID(c *gin.Context) string {
 	if id := c.GetString(key); id != "" {
 		return id
 	}
+
 	id := uuid.NewString()
 	c.Set(key, id)
+
 	return id
 }

@@ -14,10 +14,13 @@ func TestAsyncGenerationRuleIsFifteenMinutes(t *testing.T) {
 	if model.AsyncGenerationDeadline != 15*time.Minute {
 		t.Fatalf("deadline = %s", model.AsyncGenerationDeadline)
 	}
+
 	if model.AsyncGenerationTimeoutCode != "generation_timeout" {
 		t.Fatalf("code = %q", model.AsyncGenerationTimeoutCode)
 	}
+
 	for _, want := range []string{"15 minutes", "not charged", "new X-Request-Id"} {
+		//nolint:gocritic // The public timeout message must contain each expected phrase in the table.
 		if !strings.Contains(model.AsyncGenerationTimeoutMessage, want) {
 			t.Fatalf("message %q lacks %q", model.AsyncGenerationTimeoutMessage, want)
 		}

@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private setFastExternalRetries fixture or implementation.
 package balance
 
 import (
@@ -53,6 +54,7 @@ func TestExternalConsumeCarriesUsageIdentity(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodies = append(bodies, decodeBody(t, r))
+
 		writeExternalCharged(w, 0.5)
 	}))
 	defer srv.Close()
@@ -67,12 +69,20 @@ func TestExternalConsumeCarriesUsageIdentity(t *testing.T) {
 	partial := testUsage
 	partial.APIKeyID = 0
 	_, err = consumer.PostGroupConsume(
-		ContextWithUsageIdentity(ContextWithBillingOperationID(context.Background(), "op-2"), partial),
-		"prod", 0.5,
+		ContextWithUsageIdentity(
+			ContextWithBillingOperationID(context.Background(), "op-2"),
+			partial,
+		),
+		"prod",
+		0.5,
 	)
 	require.NoError(t, err)
 
-	_, err = consumer.PostGroupConsume(ContextWithBillingOperationID(context.Background(), "op-3"), "prod", 0.5)
+	_, err = consumer.PostGroupConsume(
+		ContextWithBillingOperationID(context.Background(), "op-3"),
+		"prod",
+		0.5,
+	)
 	require.NoError(t, err)
 
 	require.Len(t, bodies, 3)
@@ -88,6 +98,7 @@ func TestPrepaymentReceiptUsageFields(t *testing.T) {
 	var commands []map[string]any
 
 	reply := `{"code":0,"data":{"id":"op-1","status":"pending","prepaidMicros":200,"usageAtMs":1791000000123,"usageSource":"playground"}}`
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		commands = append(commands, decodeBody(t, r))
 		_, _ = w.Write([]byte(reply))
@@ -96,7 +107,13 @@ func TestPrepaymentReceiptUsageFields(t *testing.T) {
 
 	client := NewExternalHTTP(srv.URL, "k")
 	prepaid := int64(200)
-	admit := PrepaymentCommand{Action: "admit", Group: "u_1", BillingOperationID: "op-1", ModelID: "entry", PrepaidMicros: &prepaid}
+	admit := PrepaymentCommand{
+		Action:             "admit",
+		Group:              "u_1",
+		BillingOperationID: "op-1",
+		ModelID:            "entry",
+		PrepaidMicros:      &prepaid,
+	}
 
 	receipt, err := client.Prepayment(context.Background(), admit.WithUsage(testUsage))
 	require.NoError(t, err)
@@ -107,7 +124,10 @@ func TestPrepaymentReceiptUsageFields(t *testing.T) {
 	require.Equal(t, "entry", commands[0]["modelId"], "modelId keeps its meaning")
 
 	// An incomplete identity sends nothing.
-	_, err = client.Prepayment(context.Background(), admit.WithUsage(model.UsageIdentity{ModelID: "m"}))
+	_, err = client.Prepayment(
+		context.Background(),
+		admit.WithUsage(model.UsageIdentity{ModelID: "m"}),
+	)
 	require.NoError(t, err)
 	requireNoUsageFields(t, commands[1])
 
@@ -120,7 +140,10 @@ func TestPrepaymentReceiptUsageFields(t *testing.T) {
 		"time only":      `{"code":0,"data":{"id":"op-1","status":"pending","prepaidMicros":200,"usageAtMs":1791000000123}}`,
 	} {
 		reply = body
-		receipt, err := client.Prepayment(context.Background(), PrepaymentCommand{Action: "get", Group: "u_1", BillingOperationID: "op-1"})
+		receipt, err := client.Prepayment(
+			context.Background(),
+			PrepaymentCommand{Action: "get", Group: "u_1", BillingOperationID: "op-1"},
+		)
 		require.NoError(t, err, name)
 		require.Nil(t, receipt.UsageAtMs, name)
 		require.Empty(t, receipt.UsageSource, name)
@@ -139,12 +162,14 @@ func TestMeasuredZeroClient(t *testing.T) {
 		require.Equal(t, "/api/internal/wallet/measured-zero", r.URL.Path)
 		require.Equal(t, "Bearer wallet-key", r.Header.Get("Authorization"))
 		bodies = append(bodies, decodeBody(t, r))
+
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(reply))
 	}))
 	defer srv.Close()
 
 	client := NewExternalHTTP(srv.URL, "wallet-key")
+
 	var _ MeasuredZeroReporter = client
 
 	request := MeasuredZeroRequest{

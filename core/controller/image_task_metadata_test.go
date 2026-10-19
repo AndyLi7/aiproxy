@@ -1,12 +1,14 @@
+//nolint:testpackage // White-box coverage needs the package-private fillImageMetadata fixture or implementation.
 package controller
 
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/labring/aiproxy/core/common/ownedimage"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestTaskMetadataFillsMissingDimensionsWithoutChangingURL(t *testing.T) {
@@ -24,11 +26,19 @@ func TestTaskMetadataFillsMissingDimensionsWithoutChangingURL(t *testing.T) {
 	require.False(t, fillImageMetadata(context.Background(), out, read))
 	require.Equal(t, 1, calls)
 }
+
 func TestTaskMetadataFailureKeepsCompletedImage(t *testing.T) {
 	out := []model.ImageOutput{{URL: "https://result.example/image"}}
-	require.False(t, fillImageMetadata(context.Background(), out, func(context.Context, string) (ownedimage.Metadata, error) {
-		return ownedimage.Metadata{}, errors.New("unavailable")
-	}))
+	require.False(
+		t,
+		fillImageMetadata(
+			context.Background(),
+			out,
+			func(context.Context, string) (ownedimage.Metadata, error) {
+				return ownedimage.Metadata{}, errors.New("unavailable")
+			},
+		),
+	)
 	require.Nil(t, out[0].Width)
 	require.NotEmpty(t, out[0].URL)
 }

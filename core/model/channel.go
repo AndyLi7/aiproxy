@@ -420,13 +420,16 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 		if _, e := channelRoutingStorageReady(tx); e != nil {
 			return e
 		}
+
 		if e := tx.Create(&channels).Error; e != nil {
 			return e
 		}
+
 		ids := make([]int, 0, len(channels))
 		for _, ch := range channels {
 			ids = append(ids, ch.ID)
 		}
+
 		return initializeChannelRoutingState(tx, ids)
 	})
 }
@@ -461,6 +464,7 @@ func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
 	defer func() {
 		if err == nil {
 			rebuildModelCachesAfterWrite()
+
 			_ = monitor.ClearChannelAllModelErrors(context.Background(), channel.ID)
 		}
 	}()
@@ -478,12 +482,14 @@ func persistChannelPatch(db *gorm.DB, channel *Channel, update *ChannelPatch) er
 	if e := bumpChannelRoutingRevision(db, channel.ID); e != nil {
 		return e
 	}
+
 	result := db.Model(channel).
 		Clauses(clause.Returning{}).
 		Where("id = ?", channel.ID).
 		Updates(update)
 	if result.Error == nil && result.RowsAffected == 0 {
 		current := &Channel{}
+
 		err := db.First(current, "id = ?", channel.ID).Error
 		if err != nil {
 			return err
@@ -575,6 +581,7 @@ func DeleteChannelByID(id int) (err error) {
 	defer func() {
 		if err == nil {
 			rebuildModelCachesAfterWrite()
+
 			_ = monitor.ClearChannelAllModelErrors(context.Background(), id)
 		}
 	}()
@@ -614,6 +621,7 @@ func UpdateChannelStatusByIDContext(ctx context.Context, id, status int) (err er
 			rebuildModelCachesAfterWrite()
 		}
 	}()
+
 	return withMigrationChannelStatus(ctx, id, status)
 }
 

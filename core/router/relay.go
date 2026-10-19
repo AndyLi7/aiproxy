@@ -1,15 +1,20 @@
 package router
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/controller"
 	"github.com/labring/aiproxy/core/middleware"
-	"strings"
 )
 
 func SetRelayRouter(router *gin.Engine) {
 	// Signed, read-only result URLs permit browser image loading without exposing upstream hosts.
-	router.GET("/v1/images/tasks/:id/content/:index", middleware.IPBlock, controller.GetImageTaskContent)
+	router.GET(
+		"/v1/images/tasks/:id/content/:index",
+		middleware.IPBlock,
+		controller.GetImageTaskContent,
+	)
 	// https://platform.openai.com/docs/api-reference/introduction
 	v1Router := router.Group("/v1")
 	v1Router.Use(
@@ -274,15 +279,22 @@ func modelDetailOrOperation() []gin.HandlerFunc {
 	return append([]gin.HandlerFunc{func(c *gin.Context) {
 		path := c.Param("path")
 		if strings.HasPrefix(path, "/operations/") {
-			c.Params = append(c.Params, gin.Param{Key: "operation_id", Value: strings.TrimPrefix(path, "/operations")})
+			c.Params = append(
+				c.Params,
+				gin.Param{Key: "operation_id", Value: strings.TrimPrefix(path, "/operations")},
+			)
 			c.Next()
+
 			return
 		}
+
 		id := c.Param("model") + path
-		if strings.HasSuffix(id, "/schema") {
-			id = strings.TrimSuffix(id, "/schema")
+		if before, ok := strings.CutSuffix(id, "/schema"); ok {
+			id = before
+
 			c.Set("model_schema_request", true)
 		}
+
 		c.Params = gin.Params{{Key: "model", Value: id}}
 		controller.RetrieveModel(c)
 		c.Abort()

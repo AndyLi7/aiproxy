@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private imageTaskHTTPError fixture or implementation.
 package controller
 
 import (
@@ -22,9 +23,15 @@ func TestImageTaskErrorsUsePublicErrorEnvelope(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest(http.MethodGet, "/v1/images/tasks/example", nil)
+		c.Request = httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			"/v1/images/tasks/example",
+			nil,
+		)
 		imageTaskHTTPError(c, tc.status, tc.code)
 		require.Equal(t, tc.status, w.Code)
+
 		var response struct {
 			Error map[string]any `json:"error"`
 		}

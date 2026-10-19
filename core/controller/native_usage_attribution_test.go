@@ -47,12 +47,19 @@ type nativeAttributionWallet struct {
 	onBegin   func()
 }
 
-func (w *nativeAttributionWallet) Prepayment(_ context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (w *nativeAttributionWallet) Prepayment(
+	_ context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	w.commands = append(w.commands, c)
-	receipt := balance.PrepaymentReceipt{ID: c.BillingOperationID, Status: "pending", PrepaidMicros: 200}
+	receipt := balance.PrepaymentReceipt{
+		ID:            c.BillingOperationID,
+		Status:        "pending",
+		PrepaidMicros: 200,
+	}
 
 	switch c.Action {
 	case "admit":
@@ -144,23 +151,37 @@ func (h *nativeAttributionHarness) submit(t *testing.T, id string) *httptest.Res
 	router.Use(middleware.OperationalLogMiddleware())
 	router.POST("/v1/model-tasks", func(c *gin.Context) {
 		c.Set(middleware.Group, model.GroupCache{ID: "u_1", Status: model.GroupStatusEnabled})
-		c.Set(middleware.Token, model.TokenCache{ID: 1, Name: model.PlaygroundCredentialName, Group: "u_1"})
+		c.Set(
+			middleware.Token,
+			model.TokenCache{ID: 1, Name: model.PlaygroundCredentialName, Group: "u_1"},
+		)
 
 		handler, ok := nativeHTTP(c)
 		require.True(t, ok)
 
 		handler.ResolvePlan = func(*http.Request, []byte) (nativetask.Plan, nativetask.Provider, error) {
 			return nativetask.Plan{
-				Contract: json.RawMessage(attributionNativeContract), ChannelID: 1, Endpoint: "fal-ai/vector/model",
-				CredentialScope: "scope", KeyFingerprint: model.ImageChannelKeyFingerprint("test-native-key"),
-				QuoteJSON: attributionNativeQuote, Log: nativeTaskLogInfo(c),
+				Contract: json.RawMessage(
+					attributionNativeContract,
+				),
+				ChannelID:       1,
+				Endpoint:        "fal-ai/vector/model",
+				CredentialScope: "scope",
+				KeyFingerprint:  model.ImageChannelKeyFingerprint("test-native-key"),
+				QuoteJSON:       attributionNativeQuote,
+				Log:             nativeTaskLogInfo(c),
 			}, h.provider, nil
 		}
 		handler.Create(c.Writer, c.Request)
 	})
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/model-tasks", strings.NewReader(attributionNativeBody))
-	request.Header.Set("X-Request-Id", id)
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/model-tasks",
+		strings.NewReader(attributionNativeBody),
+	)
+	request.Header.Set("X-Request-ID", id)
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -212,6 +233,7 @@ func (h *nativeAttributionHarness) overHTTP(t *testing.T, edge map[string]int) *
 
 		front.mu.Lock()
 		front.bodies = append(front.bodies, string(raw))
+
 		edgeAnswer := front.edge[command.Action] > 0
 		if edgeAnswer {
 			front.edge[command.Action]--
@@ -227,11 +249,18 @@ func (h *nativeAttributionHarness) overHTTP(t *testing.T, edge map[string]int) *
 
 		receipt, err := h.wallet.Prepayment(r.Context(), command)
 		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": -1, "message": err.Error()})
+			if err := json.NewEncoder(w).
+				Encode(map[string]any{"code": -1, "message": err.Error()}); err != nil {
+				panic(err)
+			} /* A broken test response must fail visibly. */
+
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": receipt})
+		if err := json.NewEncoder(w).
+			Encode(map[string]any{"code": 0, "data": receipt}); err != nil {
+			panic(err)
+		} /* A broken test response must fail visibly. */
 	}))
 	t.Cleanup(server.Close)
 
@@ -262,7 +291,7 @@ func (h *nativeAttributionHarness) setTask(t *testing.T, id string, changes map[
 // conflict answered 409 with a second row. A request that loses the
 // transition itself answers the stored state too (stop-loss S3, 2026-10-13).
 func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
-	start := time.Date(2026, 10, 12, 1, 2, 3, 456_789_000, time.UTC)
+	start := time.Date(2026, time.October, 12, 1, 2, 3, 456_789_000, time.UTC)
 
 	requireOneFailedRowWithOp := func(t *testing.T, h *nativeAttributionHarness, id string, status int, code string) {
 		t.Helper()
@@ -288,7 +317,13 @@ func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
 
 			response := h.submit(t, "case")
 			require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-			requireOneFailedRowWithOp(t, h, "case", http.StatusServiceUnavailable, "native_execution_unavailable")
+			requireOneFailedRowWithOp(
+				t,
+				h,
+				"case",
+				http.StatusServiceUnavailable,
+				"native_execution_unavailable",
+			)
 		})
 	}
 
@@ -325,7 +360,12 @@ func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
 		rows := h.rows(t, "ok")
 		require.Len(t, rows, 1)
 		require.Equal(t, 202, rows[0].Code)
-		require.Equal(t, model.UsageTime(start), rows[0].RequestAt.UTC(), "request_at = the receipt's usageAtMs")
+		require.Equal(
+			t,
+			model.UsageTime(start),
+			rows[0].RequestAt.UTC(),
+			"request_at = the receipt's usageAtMs",
+		)
 		require.Equal(t, model.EmptyNullString("native:ok"), rows[0].BillingOperationID)
 
 		admit := h.wallet.commands[0]
@@ -359,7 +399,12 @@ func TestNativeRowsAfterReserveCarryOperation(t *testing.T) {
 		require.Len(t, rows, 2)
 		require.Equal(t, http.StatusServiceUnavailable, rows[0].Code)
 		require.Equal(t, 202, rows[1].Code)
-		require.Equal(t, model.UsageTime(start), rows[1].RequestAt.UTC(), "the first admission's time, not the retry's")
+		require.Equal(
+			t,
+			model.UsageTime(start),
+			rows[1].RequestAt.UTC(),
+			"the first admission's time, not the retry's",
+		)
 		require.Equal(t, rows[0].BillingOperationID, rows[1].BillingOperationID)
 	})
 
@@ -427,7 +472,7 @@ func TestNativeSubmissionResendsAfterAnEdge502(t *testing.T) {
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			h := newNativeAttributionHarness(t)
-			h.start = time.Date(2026, 10, 13, 11, 21, 0, 0, time.UTC)
+			h.start = time.Date(2026, time.October, 13, 11, 21, 0, 0, time.UTC)
 			calls := 0
 			h.provider.submit = func() (string, error) {
 				calls++
@@ -442,7 +487,12 @@ func TestNativeSubmissionResendsAfterAnEdge502(t *testing.T) {
 			require.Equal(t, tc.sent, front.actions(t))
 
 			index := slices.Index(tc.sent, tc.action)
-			require.Equal(t, front.bodies[index], front.bodies[index+1], "the resend repeats the same body")
+			require.Equal(
+				t,
+				front.bodies[index],
+				front.bodies[index+1],
+				"the resend repeats the same body",
+			)
 
 			rows := h.rows(t, "edge")
 			require.Len(t, rows, 1)
@@ -462,11 +512,22 @@ func TestNativeTrialUsesRequestStart(t *testing.T) {
 
 	wallet := &nativeAttributionWallet{holdAt: map[string]int64{}, holdFrom: map[string]string{}}
 	engine := &nativetask.Engine{DB: database, Wallet: wallet}
-	channel := &model.Channel{ID: 9, Type: model.ChannelTypeFal, Status: model.ChannelStatusDisabled, Key: "trial-secret", BaseURL: "https://queue.fal.run"}
+	channel := &model.Channel{
+		ID:      9,
+		Type:    model.ChannelTypeFal,
+		Status:  model.ChannelStatusDisabled,
+		Key:     "trial-secret",
+		BaseURL: "https://queue.fal.run",
+	}
 	deps := nativeTrialDependencies{
 		engine: func() (*nativetask.Engine, bool) { return engine, true },
 		token: func(id int) (*model.Token, error) {
-			return &model.Token{ID: id, Name: "trial-key", GroupID: "internal", Status: model.TokenStatusEnabled}, nil
+			return &model.Token{
+				ID:      id,
+				Name:    "trial-key",
+				GroupID: "internal",
+				Status:  model.TokenStatusEnabled,
+			}, nil
 		},
 		group: func(string, bool) (*model.Group, error) {
 			return &model.Group{ID: "internal", Status: model.GroupStatusInternal}, nil
@@ -488,17 +549,34 @@ func TestNativeTrialUsesRequestStart(t *testing.T) {
 	router.POST("/api/native-trials/:group/:token", middleware.AdminAuth, deps.create)
 
 	input := nativeTrialRequest{
-		Contract: json.RawMessage(`{"version":1,"model":"test/model/native","input_schema":{"type":"object","required":["seed"],"properties":{"seed":{"type":"integer"}},"additionalProperties":false},"output_schema":{"type":"null"}}`),
-		Input:    json.RawMessage(`{"seed":1}`), ChannelID: 9, Endpoint: "fal-ai/native/variant", CredentialScope: "scope",
-		KeyFingerprint: model.ImageChannelKeyFingerprint(channel.Key), DeliveryBase: "https://gateway.example",
-		Quote: json.RawMessage(`{"version":1,"currency":"USD","quoteVersion":"private-fixture","prepaidMicros":200,"routes":[{"routeId":"private","channelId":9,"provider":"fal","endpoint":"fal-ai/native/variant","credentialScope":"scope","quantityMetric":"request","estimatedMicros":100,"prepaidMicros":200,"rule":{"mode":"cost_markup","ratio":"1"}}]}`),
+		Contract: json.RawMessage(
+			`{"version":1,"model":"test/model/native","input_schema":{"type":"object","required":["seed"],"properties":{"seed":{"type":"integer"}},"additionalProperties":false},"output_schema":{"type":"null"}}`,
+		),
+		Input: json.RawMessage(
+			`{"seed":1}`,
+		),
+		ChannelID:       9,
+		Endpoint:        "fal-ai/native/variant",
+		CredentialScope: "scope",
+		KeyFingerprint: model.ImageChannelKeyFingerprint(
+			channel.Key,
+		),
+		DeliveryBase: "https://gateway.example",
+		Quote: json.RawMessage(
+			`{"version":1,"currency":"USD","quoteVersion":"private-fixture","prepaidMicros":200,"routes":[{"routeId":"private","channelId":9,"provider":"fal","endpoint":"fal-ai/native/variant","credentialScope":"scope","quantityMetric":"request","estimatedMicros":100,"prepaidMicros":200,"rule":{"mode":"cost_markup","ratio":"1"}}]}`,
+		),
 	}
 	encoded, err := json.Marshal(input)
 	require.NoError(t, err)
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/native-trials/internal/7", strings.NewReader(string(encoded)))
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/api/native-trials/internal/7",
+		strings.NewReader(string(encoded)),
+	)
 	request.Header.Set("Authorization", "Bearer "+config.AdminKey)
-	request.Header.Set("X-Request-Id", "trial_start")
+	request.Header.Set("X-Request-ID", "trial_start")
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)

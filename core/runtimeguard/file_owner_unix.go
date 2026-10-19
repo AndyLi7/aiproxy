@@ -11,5 +11,5 @@ import (
 // writable by its group or other users. Preserve the Unix bootstrap boundary.
 func trustedFileOwner(st os.FileInfo) bool {
 	sys, ok := st.Sys().(*syscall.Stat_t)
-	return ok && int(sys.Uid) == os.Geteuid() && st.Mode().Perm()&0022 == 0
+	return ok && int(sys.Uid) == os.Geteuid() && st.Mode().Perm()&0o022 == 0
 }

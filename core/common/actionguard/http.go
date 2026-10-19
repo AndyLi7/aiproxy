@@ -13,8 +13,10 @@ import (
 func DoHTTP(client *http.Client, req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	if _, scoped := ctx.Value(key{}).(func(context.Context) error); !scoped {
+		// #nosec G704 -- This transport wrapper preserves the caller request and enforces its invocation guard; destination validation belongs to the calling adapter.
 		return client.Do(req)
 	}
+
 	guarded := *client
 	guarded.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if client.CheckRedirect != nil {
@@ -24,7 +26,10 @@ func DoHTTP(client *http.Client, req *http.Request) (*http.Response, error) {
 		} else if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
+
 		return Check(ctx)
 	}
+
+	// #nosec G704 -- This transport wrapper preserves the caller request and enforces its invocation guard; destination validation belongs to the calling adapter.
 	return guarded.Do(req)
 }

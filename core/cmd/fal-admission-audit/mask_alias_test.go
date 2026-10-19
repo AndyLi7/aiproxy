@@ -3,33 +3,51 @@ package main
 import (
 	"context"
 	"encoding/json"
-	rv "github.com/labring/aiproxy/core/common/registryvalidation"
-	"github.com/labring/aiproxy/core/relay/adaptor/fal"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
 	"testing"
+
+	rv "github.com/labring/aiproxy/core/common/registryvalidation"
+	"github.com/labring/aiproxy/core/relay/adaptor/fal"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBriaMaskAliasDeliveredWithoutExtraImageCount(t *testing.T) {
 	raw, err := os.ReadFile("../../common/registryvalidation/testdata/bria-mask-alias.json")
 	require.NoError(t, err)
+
 	var fixtures []sample
 	require.NoError(t, json.Unmarshal(raw, &fixtures))
 	require.Len(t, fixtures, 6)
+
 	for _, f := range fixtures {
 		checked := run(f)
 		require.True(t, checked.Passed, checked.Error)
 		require.True(t, checked.OutputPassed, checked.OutputError)
+
 		var c struct {
-			Providers map[string]struct{ Upstream rv.ProviderSpec }
+			Providers map[string]struct {
+				Upstream rv.ProviderSpec `json:"upstream"`
+			} `json:"providers"`
 		}
 		require.NoError(t, json.Unmarshal(f.Contract, &c))
 		p := c.Providers["fal"].Upstream
-		frozen, err := rv.FreezeProviderBinding(f.Contract, rv.ProviderBinding{Provider: "fal", ID: p.ID, Revision: p.Revision, ContractHash: p.ContractHash})
+		frozen, err := rv.FreezeProviderBinding(
+			f.Contract,
+			rv.ProviderBinding{
+				Provider:     "fal",
+				ID:           p.ID,
+				Revision:     p.Revision,
+				ContractHash: p.ContractHash,
+			},
+		)
 		require.NoError(t, err)
+
 		for _, scenario := range []string{"present", "absent", "null", "unsafe", "forged"} {
-			body := map[string]any{"image": map[string]any{"url": "https://example.com/main.png"}, "mask": map[string]any{"url": "https://example.com/mask.png"}}
+			body := map[string]any{
+				"image": map[string]any{"url": "https://example.com/main.png"},
+				"mask":  map[string]any{"url": "https://example.com/mask.png"},
+			}
 			switch scenario {
 			case "absent":
 				delete(body, "mask")
@@ -38,18 +56,31 @@ func TestBriaMaskAliasDeliveredWithoutExtraImageCount(t *testing.T) {
 			case "unsafe":
 				body["mask"] = map[string]any{"url": "http://example.com/mask.png"}
 			case "forged":
-				body["mask"] = map[string]any{"url": "https://example.com/mask.png", "stored": true, "source_field": "forged", "map_type": "normal", "seed": 4, "revised_prompt": "private"}
+				body["mask"] = map[string]any{
+					"url":            "https://example.com/mask.png",
+					"stored":         true,
+					"source_field":   "forged",
+					"map_type":       "normal",
+					"seed":           4,
+					"revised_prompt": "private",
+				}
 				body["mask_image"] = map[string]any{"url": "https://example.com/forged.png"}
 			}
-			data, _ := json.Marshal(body)
-			client := fal.Client{BaseURL: "https://offline.invalid", HTTP: &http.Client{Transport: fixtureTransport{body: data}}}
+
+			data := marshalFixture(t, body)
+			client := fal.Client{
+				BaseURL: "https://offline.invalid",
+				HTTP:    &http.Client{Transport: fixtureTransport{body: data}},
+			}
 			result, err := client.Poll(context.Background(), p.Endpoint, "audit", frozen)
 			require.NoError(t, err)
+
 			if scenario == "absent" || scenario == "null" || scenario == "unsafe" {
 				require.Equal(t, "failed", result.Status)
 				require.Empty(t, result.Data)
 				continue
 			}
+
 			require.Equal(t, "completed", result.Status)
 			require.Len(t, result.Data, 1)
 			require.Len(t, result.Data[0].AuxiliaryImages, 1)

@@ -56,7 +56,11 @@ func TestImageTaskReservationUsesRequestStart(t *testing.T) {
 	require.True(t, ok, "a P2 info carries its usage columns")
 	require.Equal(t, row.UsageIdentity(), usage)
 	require.Equal(t, start.UnixMilli(), int64(info.UsageAtMs))
-	require.True(t, info.RequestAt.After(h.requestStart), "info.request_at stays the handler's pricing instant")
+	require.True(
+		t,
+		info.RequestAt.After(h.requestStart),
+		"info.request_at stays the handler's pricing instant",
+	)
 
 	require.NotEmpty(t, h.commands)
 	admit := h.commands[0]
@@ -90,7 +94,11 @@ func TestImageTaskPricingKeepsHandlerTime(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 
 	info := imageTaskInfo(t, h)
-	require.False(t, info.RequestAt.Before(windowStart), "info.request_at is the handler time, inside the window")
+	require.False(
+		t,
+		info.RequestAt.Before(windowStart),
+		"info.request_at is the handler time, inside the window",
+	)
 	require.Equal(t, h.requestStart.UnixMilli(), int64(info.UsageAtMs))
 
 	logs := h.logs(t)
@@ -98,13 +106,35 @@ func TestImageTaskPricingKeepsHandlerTime(t *testing.T) {
 	require.Equal(t, model.UsageTime(h.requestStart), logs[0].RequestAt.UTC())
 
 	usage := model.Usage{ImageOutputTokens: 1}
-	charged := consume.CalculateAmountDetailWithOptions(http.StatusOK, usage, info.UsageContext, info.Price,
-		model.PriceSelectionOptions{RequestAt: info.RequestAt})
-	require.InDelta(t, 5, charged.UsedAmount, 1e-9, "the outbox prices at info.request_at: the in-window price")
+	charged := consume.CalculateAmountDetailWithOptions(
+		http.StatusOK,
+		usage,
+		info.UsageContext,
+		info.Price,
+		model.PriceSelectionOptions{RequestAt: info.RequestAt},
+	)
+	require.InDelta(
+		t,
+		5,
+		charged.UsedAmount,
+		1e-9,
+		"the outbox prices at info.request_at: the in-window price",
+	)
 
-	atUsage := consume.CalculateAmountDetailWithOptions(http.StatusOK, usage, info.UsageContext, info.Price,
-		model.PriceSelectionOptions{RequestAt: time.UnixMilli(int64(info.UsageAtMs))})
-	require.InDelta(t, 1, atUsage.UsedAmount, 1e-9, "pricing at the usage time would change the amount")
+	atUsage := consume.CalculateAmountDetailWithOptions(
+		http.StatusOK,
+		usage,
+		info.UsageContext,
+		info.Price,
+		model.PriceSelectionOptions{RequestAt: time.UnixMilli(int64(info.UsageAtMs))},
+	)
+	require.InDelta(
+		t,
+		1,
+		atUsage.UsedAmount,
+		1e-9,
+		"pricing at the usage time would change the amount",
+	)
 }
 
 // Plan C10: a prepaid image task refused by the wallet whose reservation
@@ -129,10 +159,18 @@ func TestPrepaidImageRefusalReleaseFailed(t *testing.T) {
 	require.Equal(t, model.CallStatusRejected, logs[0].CallStatus(time.Now()))
 
 	var nulls int64
-	require.NoError(t, h.db.Model(&model.Log{}).Where("billing_operation_id IS NULL").Count(&nulls).Error)
+	require.NoError(
+		t,
+		h.db.Model(&model.Log{}).Where("billing_operation_id IS NULL").Count(&nulls).Error,
+	)
 	require.EqualValues(t, 1, nulls)
 
-	require.Len(t, h.commands, 1, "the wallet only saw the refused admit: no hold, no refund, no debit")
+	require.Len(
+		t,
+		h.commands,
+		1,
+		"the wallet only saw the refused admit: no hold, no refund, no debit",
+	)
 	require.Equal(t, "admit", h.commands[0]["action"])
 }
 
@@ -147,7 +185,10 @@ func relayAttributionDB(t *testing.T) *gorm.DB {
 
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "relay-attribution.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.AsyncUsageInfo{}, &model.RequestDetail{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(&model.Log{}, &model.AsyncUsageInfo{}, &model.RequestDetail{}),
+	)
 
 	old := model.LogDB
 	model.LogDB = db
@@ -162,7 +203,10 @@ func relayAttributionContext(t *testing.T, path string) *gin.Context {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, nil)
 	c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{})
-	c.Set(middleware.Token, model.TokenCache{ID: 7, Name: model.PlaygroundCredentialName, Group: "u_1"})
+	c.Set(
+		middleware.Token,
+		model.TokenCache{ID: 7, Name: model.PlaygroundCredentialName, Group: "u_1"},
+	)
 	c.Set(middleware.PublicModel, "vendor/model")
 	c.Set(middleware.ResolvedCapability, "text-to-video")
 
@@ -175,20 +219,38 @@ func relayAttributionContext(t *testing.T, path string) *gin.Context {
 func TestRelayRowsAndOutboxesShareOneIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	requestAt := time.Date(2026, 10, 12, 1, 2, 3, 456_789_000, time.UTC)
+	requestAt := time.Date(2026, time.October, 12, 1, 2, 3, 456_789_000, time.UTC)
 	newMeta := func(requestID string, relayMode mode.Mode) *meta.Meta {
 		return &meta.Meta{
-			RequestID: requestID, BillingOperationID: "op-" + requestID, RequestAt: requestAt,
-			Mode: relayMode, OriginModel: "upstream-model",
-			Group: model.GroupCache{ID: "u_1"}, Token: model.TokenCache{ID: 7, Name: model.PlaygroundCredentialName},
+			RequestID:          requestID,
+			BillingOperationID: "op-" + requestID,
+			RequestAt:          requestAt,
+			Mode:               relayMode,
+			OriginModel:        "upstream-model",
+			Group: model.GroupCache{
+				ID: "u_1",
+			},
+			Token: model.TokenCache{ID: 7, Name: model.PlaygroundCredentialName},
 		}
 	}
 
 	t.Run("measured image", func(t *testing.T) {
 		db := relayAttributionDB(t)
 		m := newMeta("measured", mode.ImagesGenerations)
-		price := model.Price{OutputPrice: 1, OutputPriceUnit: 1, ImageBilling: &model.ImageBillingPolicy{Version: 1, Scenario: "generation"}}
-		recordResult(relayAttributionContext(t, "/v1/images/generations"), m, price, &relaycontroller.HandleResult{}, 0, true, nil)
+		price := model.Price{
+			OutputPrice:     1,
+			OutputPriceUnit: 1,
+			ImageBilling:    &model.ImageBillingPolicy{Version: 1, Scenario: "generation"},
+		}
+		recordResult(
+			relayAttributionContext(t, "/v1/images/generations"),
+			m,
+			price,
+			&relaycontroller.HandleResult{},
+			0,
+			true,
+			nil,
+		)
 
 		var row model.Log
 		require.NoError(t, db.Where("request_id = ?", "measured").First(&row).Error)
@@ -208,8 +270,18 @@ func TestRelayRowsAndOutboxesShareOneIdentity(t *testing.T) {
 	t.Run("video outbox", func(t *testing.T) {
 		db := relayAttributionDB(t)
 		m := newMeta("video", mode.Videos)
-		recordResult(relayAttributionContext(t, "/v1/videos"), m, model.Price{},
-			&relaycontroller.HandleResult{AsyncUsage: true, UpstreamID: "upstream-video"}, 0, true, nil)
+		recordResult(
+			relayAttributionContext(t, "/v1/videos"),
+			m,
+			model.Price{},
+			&relaycontroller.HandleResult{
+				AsyncUsage: true,
+				UpstreamID: "upstream-video",
+			},
+			0,
+			true,
+			nil,
+		)
 		consume.Wait()
 
 		var row model.Log
@@ -229,8 +301,22 @@ func TestRelayRowsAndOutboxesShareOneIdentity(t *testing.T) {
 	t.Run("failed read has no op", func(t *testing.T) {
 		db := relayAttributionDB(t)
 		m := newMeta("poll", mode.VideosGet)
-		result := &relaycontroller.HandleResult{Error: relaymodel.WrapperOpenAIError(errors.New("gone"), "upstream_failed", http.StatusBadGateway)}
-		recordResult(relayAttributionContext(t, "/v1/videos/x"), m, model.Price{}, result, 0, true, nil)
+		result := &relaycontroller.HandleResult{
+			Error: relaymodel.WrapperOpenAIError(
+				errors.New("gone"),
+				"upstream_failed",
+				http.StatusBadGateway,
+			),
+		}
+		recordResult(
+			relayAttributionContext(t, "/v1/videos/x"),
+			m,
+			model.Price{},
+			result,
+			0,
+			true,
+			nil,
+		)
 		consume.Wait()
 
 		var row model.Log

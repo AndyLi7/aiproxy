@@ -61,18 +61,39 @@ func TestImageReservationReplayAndOwnership(t *testing.T) {
 func TestImageReservationPersistsTextOnlyLogSummary(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "image-summary.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(
+			&model.ImageTask{},
+			&model.AsyncUsageInfo{},
+			&model.Log{},
+			&model.RequestDetail{},
+		),
+	)
+
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
+
 	_, created, err := model.ReserveImageTask(
-		&model.ImageTask{ID: "summary", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "hash", RequestSummary: `{"prompt":"A quiet harbor"}`},
+		&model.ImageTask{
+			ID:             "summary",
+			GroupID:        "g",
+			TokenID:        1,
+			Model:          "image",
+			Fingerprint:    "hash",
+			RequestSummary: `{"prompt":"A quiet harbor"}`,
+		},
 		&model.AsyncUsageInfo{RequestID: "summary"},
 	)
 	require.NoError(t, err)
 	require.True(t, created)
+
 	var entry model.Log
-	require.NoError(t, db.Preload("RequestDetail").Where("request_id = ?", "summary").First(&entry).Error)
+	require.NoError(
+		t,
+		db.Preload("RequestDetail").Where("request_id = ?", "summary").First(&entry).Error,
+	)
 	require.NotNil(t, entry.RequestDetail)
 	require.JSONEq(t, `{"prompt":"A quiet harbor"}`, entry.RequestDetail.RequestBody)
 }
@@ -142,7 +163,12 @@ func TestImageReservationRejectsPreexistingOperationalRequestID(t *testing.T) {
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
 	// A request ID already logged for another API key is never adopted.
-	require.NoError(t, db.Create(&model.Log{RequestID: "collision", GroupID: "other-group", TokenID: 9, Code: 404}).Error)
+	require.NoError(
+		t,
+		db.Create(
+			&model.Log{RequestID: "collision", GroupID: "other-group", TokenID: 9, Code: 404},
+		).Error,
+	)
 	_, _, err = model.ReserveImageTask(
 		&model.ImageTask{ID: "collision", GroupID: "g", TokenID: 1},
 		&model.AsyncUsageInfo{RequestID: "collision"},
@@ -291,44 +317,86 @@ func TestImageReservationAfterEndpointRejection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "fallback.db"))
 			require.NoError(t, err)
-			require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+			require.NoError(
+				t,
+				db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}),
+			)
+
 			old := model.LogDB
 			model.LogDB = db
 			t.Cleanup(func() { model.LogDB = old })
-			prior := &model.Log{RequestID: "fallback", GroupID: "g", TokenID: 1, Model: "wan", Capability: "text-to-image", Code: 400, ErrorCode: "unsupported_endpoint", FailureStage: model.FailureStageValidation, Endpoint: "POST /v1/images/generations"}
+
+			prior := &model.Log{
+				RequestID:    "fallback",
+				GroupID:      "g",
+				TokenID:      1,
+				Model:        "wan",
+				Capability:   "text-to-image",
+				Code:         400,
+				ErrorCode:    "unsupported_endpoint",
+				FailureStage: model.FailureStageValidation,
+				Endpoint:     "POST /v1/images/generations",
+			}
 			tc.mutate(prior)
 			require.NoError(t, db.Create(prior).Error)
-			task := &model.ImageTask{ID: "fallback", GroupID: "g", TokenID: 1, Model: "wan/text-to-image", Fingerprint: "same"}
-			_, created, err := model.ReserveImageTask(task, &model.AsyncUsageInfo{RequestID: task.ID})
+
+			task := &model.ImageTask{
+				ID:          "fallback",
+				GroupID:     "g",
+				TokenID:     1,
+				Model:       "wan/text-to-image",
+				Fingerprint: "same",
+			}
+
+			_, created, err := model.ReserveImageTask(
+				task,
+				&model.AsyncUsageInfo{RequestID: task.ID},
+			)
 			if !tc.allowed {
 				require.ErrorIs(t, err, model.ErrImageTaskConflict)
+
 				var n int64
 				require.NoError(t, db.Model(&model.ImageTask{}).Count(&n).Error)
 				require.Zero(t, n)
+
 				return
 			}
+
 			require.NoError(t, err)
 			require.True(t, created)
-			_, created, err = model.ReserveImageTask(task, &model.AsyncUsageInfo{RequestID: task.ID})
+			_, created, err = model.ReserveImageTask(
+				task,
+				&model.AsyncUsageInfo{RequestID: task.ID},
+			)
 			require.NoError(t, err)
 			require.False(t, created)
+
 			changed := *task
 			changed.Fingerprint = "changed"
 			_, _, err = model.ReserveImageTask(&changed, &model.AsyncUsageInfo{})
 			require.ErrorIs(t, err, model.ErrImageTaskConflict)
+
 			var n int64
 			require.NoError(t, db.Model(&model.AsyncUsageInfo{}).Count(&n).Error)
 			require.EqualValues(t, 1, n)
 			require.NoError(t, db.Model(&model.Log{}).Count(&n).Error)
 			require.EqualValues(t, 2, n)
 			require.NoError(t, model.AcceptImageTask(task.ID, "upstream"))
-			require.NoError(t, model.SetImageTaskResult(task.ID, "failed", nil, &model.ImageTaskError{Code: "test", Message: "test"}))
+			require.NoError(
+				t,
+				model.SetImageTaskResult(
+					task.ID,
+					"failed",
+					nil,
+					&model.ImageTaskError{Code: "test", Message: "test"},
+				),
+			)
+
 			var preserved model.Log
 			require.NoError(t, db.First(&preserved, prior.ID).Error)
 			require.Equal(t, prior.Code, preserved.Code)
 			require.Empty(t, preserved.UpstreamID)
 			require.Zero(t, preserved.Amount.UsedAmount)
-
 		})
 	}
 }
@@ -337,31 +405,44 @@ func TestImagePhaseTimesDoNotRegressOrInventHistory(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "phases.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
+
 	task := &model.ImageTask{ID: "phases", GroupID: "g", TokenID: 1, ArchiveRequired: true}
 	_, _, err = model.ReserveImageTask(task, &model.AsyncUsageInfo{RequestID: task.ID})
 	require.NoError(t, err)
 	require.NoError(t, model.AcceptImageTask(task.ID, "provider"))
 	require.NoError(t, model.SetImageTaskResult(task.ID, "in_progress", nil, nil))
+
 	var first model.ImageTask
 	require.NoError(t, db.First(&first, "id = ?", task.ID).Error)
 	require.NotNil(t, first.QueuedAt)
 	require.NotNil(t, first.RunningAt)
 	require.NoError(t, model.SetImageTaskResult(task.ID, "queued", nil, nil))
 	require.NoError(t, model.SetImageTaskResult(task.ID, "in_progress", nil, nil))
+
 	var next model.ImageTask
 	require.NoError(t, db.First(&next, "id = ?", task.ID).Error)
 	require.Equal(t, "in_progress", next.Status)
 	require.True(t, first.RunningAt.Equal(*next.RunningAt))
-	require.NoError(t, model.SetImageTaskResult(task.ID, "result_processing", []model.ImageOutput{{URL: "https://source/image"}}, nil))
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			task.ID,
+			"result_processing",
+			[]model.ImageOutput{{URL: "https://source/image"}},
+			nil,
+		),
+	)
 	require.NoError(t, model.SetImageTaskResult(task.ID, "in_progress", nil, nil))
 	require.NoError(t, db.First(&next, "id = ?", task.ID).Error)
 	require.Equal(t, "result_processing", next.Status)
 	require.Len(t, next.Data, 1)
 	require.NotNil(t, next.ResultReceivedAt)
 	require.Nil(t, next.CompletedAt)
+
 	legacy := &model.ImageTask{ID: "legacy", Status: "completed"}
 	require.NoError(t, db.Create(legacy).Error)
 	require.Nil(t, legacy.RunningAt)
@@ -372,13 +453,44 @@ func TestResultBillingMetadataPersistsAndTerminalReplayCannotReplaceIt(t *testin
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "result-metadata.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
-	require.NoError(t, db.Create(&model.ImageTask{ID: "metadata", GroupID: "g", TokenID: 1, Status: "queued"}).Error)
+	require.NoError(
+		t,
+		db.Create(
+			&model.ImageTask{ID: "metadata", GroupID: "g", TokenID: 1, Status: "queued"},
+		).Error,
+	)
+
 	seed := int64(42)
-	require.NoError(t, model.SetImageTaskResult("metadata", "completed", []model.ImageOutput{{URL: "https://example.com/image.png", RevisedPrompt: "revised"}}, nil, model.ImageResultMetadata{NumImages: &seed, Description: "generated explanation", Seed: &seed, BillableUnits: "1.5"}))
-	require.NoError(t, model.SetImageTaskResult("metadata", "completed", []model.ImageOutput{{URL: "https://example.com/other.png"}}, nil, model.ImageResultMetadata{BillableUnits: "999"}))
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"metadata",
+			"completed",
+			[]model.ImageOutput{{URL: "https://example.com/image.png", RevisedPrompt: "revised"}},
+			nil,
+			model.ImageResultMetadata{
+				NumImages:     &seed,
+				Description:   "generated explanation",
+				Seed:          &seed,
+				BillableUnits: "1.5",
+			},
+		),
+	)
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"metadata",
+			"completed",
+			[]model.ImageOutput{{URL: "https://example.com/other.png"}},
+			nil,
+			model.ImageResultMetadata{BillableUnits: "999"},
+		),
+	)
+
 	saved, err := model.GetImageTask("metadata", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, int64(42), *saved.Seed)
@@ -395,13 +507,28 @@ func TestLargeSeedSurvivesPersistenceAndPublicJSONExactly(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "large-seed.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
-	require.NoError(t, db.Create(&model.ImageTask{ID: "large", GroupID: "g", TokenID: 1, Status: "queued"}).Error)
+	require.NoError(
+		t,
+		db.Create(&model.ImageTask{ID: "large", GroupID: "g", TokenID: 1, Status: "queued"}).Error,
+	)
+
 	exact := "18446744073709551615"
 	seed := json.Number(exact)
-	require.NoError(t, model.SetImageTaskResult("large", "completed", []model.ImageOutput{{URL: "https://example.com/a.png", Seed: &seed}}, nil, model.ImageResultMetadata{SeedExact: exact}))
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"large",
+			"completed",
+			[]model.ImageOutput{{URL: "https://example.com/a.png", Seed: &seed}},
+			nil,
+			model.ImageResultMetadata{SeedExact: exact},
+		),
+	)
+
 	saved, err := model.GetImageTask("large", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, exact, saved.SeedExact)
@@ -415,17 +542,35 @@ func TestLargeSeedSurvivesPersistenceAndPublicJSONExactly(t *testing.T) {
 func TestReleasedImageReservationCanBeReservedAgain(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "release.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(
+			&model.ImageTask{},
+			&model.AsyncUsageInfo{},
+			&model.Log{},
+			&model.RequestDetail{},
+		),
+	)
+
 	old := model.LogDB
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = old })
 
 	reserve := func(operation string) (*model.ImageTask, bool) {
 		task, created, err := model.ReserveImageTask(
-			&model.ImageTask{ID: "topup", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "same", BillingOperationID: operation, RequestSummary: `{"prompt":"p"}`},
+			&model.ImageTask{
+				ID:                 "topup",
+				GroupID:            "g",
+				TokenID:            1,
+				Model:              "image",
+				Fingerprint:        "same",
+				BillingOperationID: operation,
+				RequestSummary:     `{"prompt":"p"}`,
+			},
 			&model.AsyncUsageInfo{RequestID: "topup", ChannelID: 7, BillingOperationID: operation},
 		)
 		require.NoError(t, err)
+
 		return task, created
 	}
 
@@ -438,6 +583,7 @@ func TestReleasedImageReservationCanBeReservedAgain(t *testing.T) {
 		require.NoError(t, db.Model(table).Count(&n).Error)
 		require.Zero(t, n, "%T", table)
 	}
+
 	_, err = model.GetImageTask("topup", "g", 1)
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
@@ -452,24 +598,42 @@ func TestImageReservationIsNotReleasedOnceItMayHaveReachedAProvider(t *testing.T
 		name   string
 		mutate func(*testing.T, *gorm.DB)
 	}{
-		{"accepted", func(t *testing.T, _ *gorm.DB) { require.NoError(t, model.AcceptImageTask("kept", "provider-id")) }},
+		{"accepted", func(t *testing.T, _ *gorm.DB) {
+			t.Helper()
+
+			require.NoError(t, model.AcceptImageTask("kept", "provider-id"))
+		}},
 		{"submission unknown", func(t *testing.T, db *gorm.DB) {
+			t.Helper()
+
 			require.NoError(t, db.Model(&model.ImageTask{}).Where("id = ?", "kept").Update("status", "submission_unknown").Error)
 		}},
 		{"attempt started", func(t *testing.T, db *gorm.DB) {
+			t.Helper()
+
 			require.NoError(t, db.Model(&model.ImageTask{}).Where("id = ?", "kept").Update("attempts", `[{"channel_id":7}]`).Error)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "kept.db"))
 			require.NoError(t, err)
-			require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+			require.NoError(
+				t,
+				db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}),
+			)
+
 			old := model.LogDB
 			model.LogDB = db
 			t.Cleanup(func() { model.LogDB = old })
 
 			_, created, err := model.ReserveImageTask(
-				&model.ImageTask{ID: "kept", GroupID: "g", TokenID: 1, Model: "image", Fingerprint: "same"},
+				&model.ImageTask{
+					ID:          "kept",
+					GroupID:     "g",
+					TokenID:     1,
+					Model:       "image",
+					Fingerprint: "same",
+				},
 				&model.AsyncUsageInfo{RequestID: "kept", ChannelID: 7},
 			)
 			require.NoError(t, err)
@@ -477,6 +641,7 @@ func TestImageReservationIsNotReleasedOnceItMayHaveReachedAProvider(t *testing.T
 			tc.mutate(t, db)
 
 			require.Error(t, model.ReleaseImageTaskReservation("kept"))
+
 			for _, table := range []any{&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}} {
 				var n int64
 				require.NoError(t, db.Model(table).Count(&n).Error)
@@ -521,12 +686,25 @@ func TestUpdateImageTaskCallLogClearsOperationOnGateRejection(t *testing.T) {
 	require.Equal(t, model.CallStatusRejected, got.CallStatus(time.Now()))
 
 	var nulls int64
-	require.NoError(t, db.Model(&model.Log{}).Where("id = ? AND billing_operation_id IS NULL", refused.ID).Count(&nulls).Error)
+	require.NoError(
+		t,
+		db.Model(&model.Log{}).
+			Where("id = ? AND billing_operation_id IS NULL", refused.ID).
+			Count(&nulls).
+			Error,
+	)
 	require.EqualValues(t, 1, nulls)
 
 	ours := reserve("ours")
-	require.NoError(t, model.UpdateImageTaskCallLog(ours.ID, "ours", "g", 503,
-		model.FailureStageNone, "task_store_unavailable", "Task storage is temporarily unavailable."))
+	require.NoError(t, model.UpdateImageTaskCallLog(
+		ours.ID,
+		"ours",
+		"g",
+		503,
+		model.FailureStageNone,
+		"task_store_unavailable",
+		"Task storage is temporarily unavailable.",
+	))
 
 	got = model.Log{}
 	require.NoError(t, db.First(&got, ours.ID).Error)

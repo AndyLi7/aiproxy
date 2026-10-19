@@ -19,8 +19,10 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-const MigrationInventoryMaxRows = 4096
-const MigrationInventoryMaxBytes = 16 << 20
+const (
+	MigrationInventoryMaxRows  = 4096
+	MigrationInventoryMaxBytes = 16 << 20
+)
 
 type MigrationInventory struct {
 	Version            int                         `json:"version"`
@@ -71,103 +73,153 @@ type MigrationInventoryRouting struct {
 }
 
 func inventoryState(state, reason string) MigrationInventory {
-	return MigrationInventory{Version: 1, Source: "gateway-persistent-inventory-v1", State: state, ReasonCode: reason}
+	return MigrationInventory{
+		Version:    1,
+		Source:     "gateway-persistent-inventory-v1",
+		State:      state,
+		ReasonCode: reason,
+	}
 }
 
 // ReadMigrationInventory performs only SELECTs. PostgreSQL uses a repeatable
 // snapshot plus the shared control lock (not the command transaction's UPDATE).
 // SQLite's read transaction supplies the corresponding consistent snapshot.
 // Features describe this binary, not an all-replica deployment attestation.
-func (s *ChannelAdmissionStore) ReadMigrationInventory(ctx context.Context, features []string) MigrationInventory {
+func (s *ChannelAdmissionStore) ReadMigrationInventory(
+	ctx context.Context,
+	features []string,
+) MigrationInventory {
 	unsupported := inventoryState("unsupported", "inventory_unavailable")
 	if s == nil || s.DB == nil || s.LogDB != s.DB {
 		return unsupported
 	}
-	dialect := s.DB.Dialector.Name()
+
+	dialect := s.DB.Name()
 	if dialect != "sqlite" && dialect != "postgres" {
 		return unsupported
 	}
+
 	options := &sql.TxOptions{}
 	if dialect == "postgres" {
 		options.Isolation = sql.LevelRepeatableRead
 	}
+
 	result := unsupported
-	err := s.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Transaction(func(tx *gorm.DB) error {
-		exists, err := channelAdmissionTablesExist(tx)
-		if err != nil {
+
+	err := s.DB.WithContext(ctx).
+		Session(&gorm.Session{Logger: logger.Discard}).
+		Transaction(func(tx *gorm.DB) error {
+			exists, err := channelAdmissionTablesExist(tx)
+			if err != nil {
+				return err
+			}
+
+			if !exists {
+				result = inventoryState("legacy", "admission_storage_absent")
+				return nil
+			}
+
+			if !ChannelAdmissionStorageReady(tx) {
+				return ErrChannelAdmissionUnavailable
+			}
+
+			var control ChannelAdmissionControl
+
+			q := tx
+			if dialect == "postgres" {
+				q = q.Clauses(clause.Locking{Strength: "SHARE"})
+			}
+
+			if err = q.First(&control, 1).Error; err != nil {
+				return err
+			}
+
+			result, err = migrationInventoryTx(tx, &control, features)
+
 			return err
-		}
-		if !exists {
-			result = inventoryState("legacy", "admission_storage_absent")
-			return nil
-		}
-		if !ChannelAdmissionStorageReady(tx) {
-			return ErrChannelAdmissionUnavailable
-		}
-		var control ChannelAdmissionControl
-		q := tx
-		if dialect == "postgres" {
-			q = q.Clauses(clause.Locking{Strength: "SHARE"})
-		}
-		if err = q.First(&control, 1).Error; err != nil {
-			return err
-		}
-		result, err = migrationInventoryTx(tx, &control, features)
-		return err
-	}, options)
+		}, options)
 	if err != nil {
 		return unsupported
 	}
+
 	return result
 }
 
 // migrationInventoryTx keeps the original complete inventory producer inside the
 // caller's transaction. It performs no writes and never obtains a second snapshot.
-func migrationInventoryTx(tx *gorm.DB, c *ChannelAdmissionControl, features []string) (result MigrationInventory, err error) {
+//
+//nolint:gocyclo // One bounded snapshot validates raw JSON before decoding, builds channel/config projections, and checks aggregate redaction limits.
+func migrationInventoryTx(
+	tx *gorm.DB,
+	c *ChannelAdmissionControl,
+	features []string,
+) (result MigrationInventory, err error) {
 	result = inventoryState("unsupported", "inventory_unavailable")
 	control := *c
 	err = func() error {
 		if control.Version != ChannelAdmissionProtocolVersion || control.Revision < 0 {
 			return ErrChannelAdmissionUnavailable
 		}
+
 		if control.Epoch == "" {
 			never, e := channelAdmissionNeverActivated(tx, &control)
 			if e != nil || !never {
 				return ErrChannelAdmissionUnavailable
 			}
+
 			result = inventoryState("legacy", "admission_never_activated")
+
 			return nil
 		}
-		if control.StorageGeneration == "" || control.EpochSequence <= 0 || control.ActiveProofID == "" {
+
+		if control.StorageGeneration ==
+			"" ||
+			control.
+				EpochSequence <= 0 ||
+			control.
+				ActiveProofID == "" {
 			return ErrChannelAdmissionUnavailable
 		}
+
 		if err = migrationStorageReady(tx); err != nil {
 			return err
 		}
 		// Inspect raw JSON before GORM's serializer can recursively decode it.
-		rawChannels, err := migrationRawRows(tx.Table("channels").Select("id, configs, models, model_mapping, sets").Order("id").Limit(MigrationInventoryMaxRows + 1))
+		rawChannels, err := migrationRawRows(
+			tx.Table("channels").
+				Select("id, configs, models, model_mapping, sets").
+				Order("id").
+				Limit(MigrationInventoryMaxRows + 1),
+		)
 		if err != nil {
 			return err
 		}
-		rows, err := migrationRawRows(tx.Table("model_configs").Order("model").Limit(MigrationInventoryMaxRows + 1))
+
+		rows, err := migrationRawRows(
+			tx.Table("model_configs").Order("model").Limit(MigrationInventoryMaxRows + 1),
+		)
 		if err != nil {
 			return err
 		}
+
 		if len(rawChannels) > MigrationInventoryMaxRows || len(rows) > MigrationInventoryMaxRows {
 			result = inventoryState("unsupported", "inventory_limit_exceeded")
 			return nil
 		}
+
 		for _, row := range rawChannels {
 			if !inventoryReviewText(row["configs"], "channel") {
 				result = inventoryState("unsupported", "inventory_unreviewed_config")
 				return nil
 			}
+
 			for _, column := range []string{"models", "model_mapping", "sets"} {
 				if raw := row[column]; raw != nil && raw != "" {
 					text, ok := raw.(string)
 					if !ok {
 						return ErrChannelAdmissionConflict
 					}
+
 					if _, ok = inventoryDecode([]byte(text)); !ok {
 						result = inventoryState("unsupported", "inventory_unreviewed_config")
 						return nil
@@ -175,44 +227,71 @@ func migrationInventoryTx(tx *gorm.DB, c *ChannelAdmissionControl, features []st
 				}
 			}
 		}
+
 		var channels []Channel
-		if err = tx.Unscoped().Order("id").Limit(MigrationInventoryMaxRows + 1).Find(&channels).Error; err != nil {
+		if err = tx.Unscoped().
+			Order("id").
+			Limit(MigrationInventoryMaxRows + 1).
+			Find(&channels).
+			Error; err != nil {
 			return err
 		}
-		out := MigrationInventory{Version: 1, Source: "gateway-persistent-inventory-v1", State: "ready", Complete: true, Epoch: control.Epoch, Revision: strconv.FormatInt(control.Revision, 10), StorageGeneration: control.StorageGeneration, Features: append([]string{}, features...), ConfigModels: []string{}, Channels: []MigrationInventoryChannel{}, Configs: []MigrationInventoryConfig{}}
+
+		out := MigrationInventory{
+			Version:           1,
+			Source:            "gateway-persistent-inventory-v1",
+			State:             "ready",
+			Complete:          true,
+			Epoch:             control.Epoch,
+			Revision:          strconv.FormatInt(control.Revision, 10),
+			StorageGeneration: control.StorageGeneration,
+			Features:          append([]string{}, features...),
+			ConfigModels:      []string{},
+			Channels:          []MigrationInventoryChannel{},
+			Configs:           []MigrationInventoryConfig{},
+		}
 		sort.Strings(out.Features)
+
 		out.PinHash, err = admissionHash(rows)
 		if err != nil {
 			return err
 		}
+
 		if len(rawChannels) != len(channels) {
 			return ErrChannelAdmissionConflict
 		}
+
 		secrets := make([]string, 0, len(channels))
 		for _, ch := range channels {
 			if ch.Key != "" {
 				secrets = append(secrets, ch.Key)
 			}
 		}
+
 		for i, ch := range channels {
 			identity, e := ChannelIdentityOf(&ch)
 			if e != nil {
 				return e
 			}
+
 			var config *string
+
 			if !inventoryReviewText(rawChannels[i]["configs"], "channel") {
 				result = inventoryState("unsupported", "inventory_unreviewed_config")
 				return nil
 			}
+
 			if v := rawChannels[i]["configs"]; v != nil {
 				text, ok := v.(string)
 				if !ok {
 					return ErrChannelAdmissionConflict
 				}
+
 				if text != "" {
 					config = &text
 				}
 			}
+
 			var deleted *string
 			if ch.DeletedAt.Valid {
 				text := ch.DeletedAt.Time.UTC().Format(time.RFC3339Nano)
@@ -222,13 +301,40 @@ func migrationInventoryTx(tx *gorm.DB, c *ChannelAdmissionControl, features []st
 			if ch.Models == nil {
 				ch.Models = []string{}
 			}
+
 			if ch.Sets == nil {
 				ch.Sets = []string{}
 			}
+
 			if ch.ModelMapping == nil {
 				ch.ModelMapping = map[string]string{}
 			}
-			item := MigrationInventoryChannel{Identity: identity, Routing: MigrationInventoryRouting{ch.ID, ch.Name, ch.Type, ch.Status, ch.Models, ch.ModelMapping, ch.Sets, ch.Priority, ch.BackupOnly, ch.EnabledNoPermissionBan, ch.WarnErrorRate, ch.MaxErrorRate, deleted}, IdentityProjection: MigrationInventoryIdentityProjection{ch.BaseURL, ch.ProxyURL, ch.SkipTLSVerify, config}}
+
+			item := MigrationInventoryChannel{
+				Identity: identity,
+				Routing: MigrationInventoryRouting{
+					ch.ID,
+					ch.Name,
+					ch.Type,
+					ch.Status,
+					ch.Models,
+					ch.ModelMapping,
+					ch.Sets,
+					ch.Priority,
+					ch.BackupOnly,
+					ch.EnabledNoPermissionBan,
+					ch.WarnErrorRate,
+					ch.MaxErrorRate,
+					deleted,
+				},
+				IdentityProjection: MigrationInventoryIdentityProjection{
+					ch.BaseURL,
+					ch.ProxyURL,
+					ch.SkipTLSVerify,
+					config,
+				},
+			}
+
 			item.ProjectionHash, e = admissionHash(struct {
 				Routing  MigrationInventoryRouting
 				Identity MigrationInventoryIdentityProjection
@@ -236,16 +342,20 @@ func migrationInventoryTx(tx *gorm.DB, c *ChannelAdmissionControl, features []st
 			if e != nil {
 				return e
 			}
+
 			out.Channels = append(out.Channels, item)
 		}
+
 		schema := &gorm.Statement{DB: tx}
 		if err = schema.Parse(&ModelConfig{}); err != nil {
 			return err
 		}
+
 		knownColumns := map[string]bool{}
 		for _, name := range schema.Schema.DBNames {
 			knownColumns[name] = true
 		}
+
 		for _, row := range rows {
 			for column, value := range row {
 				if !knownColumns[column] && !inventoryNumbers(value) {
@@ -253,41 +363,53 @@ func migrationInventoryTx(tx *gorm.DB, c *ChannelAdmissionControl, features []st
 					return nil
 				}
 			}
-			if !inventoryReviewText(row["config"], "config") || !inventoryReviewText(row["plugin"], "plugin") {
+
+			if !inventoryReviewText(row["config"], "config") ||
+				!inventoryReviewText(row["plugin"], "plugin") {
 				result = inventoryState("unsupported", "inventory_unreviewed_config")
 				return nil
 			}
+
 			name, ok := row["model"].(string)
 			if !ok || name == "" {
 				return ErrChannelAdmissionConflict
 			}
+
 			raw, e := json.Marshal(row)
 			if e != nil {
 				return e
 			}
+
 			out.ConfigModels = append(out.ConfigModels, name)
 			out.Configs = append(out.Configs, MigrationInventoryConfig{name, string(raw)})
 		}
+
 		encoded, err := json.Marshal(out)
 		if err != nil {
 			return err
 		}
+
 		if len(encoded) > MigrationInventoryMaxBytes {
 			result = inventoryState("unsupported", "inventory_limit_exceeded")
 			return nil
 		}
+
 		if !inventorySafeJSON(encoded, secrets, 0) {
 			result = inventoryState("unsupported", "inventory_sensitive_or_ambiguous")
 			return nil
 		}
+
 		out.SourceSnapshotHash, err = admissionHash(out)
 		if err != nil {
 			return err
 		}
+
 		result = out
+
 		return nil
 	}()
-	return
+
+	return result, err
 }
 
 // No secret value is included in an error. Raw JSON strings (config/plugin and
@@ -297,24 +419,54 @@ func inventorySafeJSON(raw []byte, secrets []string, depth int) bool {
 	if depth > 32 {
 		return false
 	}
+
 	value, ok := inventoryDecode(raw)
 	if !ok {
 		return false
 	}
+
 	return inventorySafeValue(value, secrets, depth)
 }
+
 func inventorySafeValue(value any, secrets []string, depth int) bool {
 	if depth > 32 {
 		return false
 	}
+
 	switch v := value.(type) {
 	case map[string]any:
 		for k, x := range v {
 			n := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(k))
 			switch n {
-			case "key", "apikey", "authorization", "proxyauthorization", "password", "passwd", "secret", "clientsecret", "accesstoken", "refreshtoken", "privatekey", "cookie", "setcookie", "headers", "httpheaders", "xapikey", "token", "auth", "credentials", "credential", "credentialjson", "credentialsecret", "authentication", "accesskey", "secretkey", "sessiontoken":
+			case "key",
+				"apikey",
+				"authorization",
+				"proxyauthorization",
+				"password",
+				"passwd",
+				"secret",
+				"clientsecret",
+				"accesstoken",
+				"refreshtoken",
+				"privatekey",
+				"cookie",
+				"setcookie",
+				"headers",
+				"httpheaders",
+				"xapikey",
+				"token",
+				"auth",
+				"credentials",
+				"credential",
+				"credentialjson",
+				"credentialsecret",
+				"authentication",
+				"accesskey",
+				"secretkey",
+				"sessiontoken":
 				return false
 			}
+
 			if !inventorySafeValue(x, secrets, depth+1) {
 				return false
 			}
@@ -331,11 +483,17 @@ func inventorySafeValue(value any, secrets []string, depth int) bool {
 				return false
 			}
 		}
+
 		t := strings.TrimSpace(v)
+
 		lower := strings.ToLower(t)
-		if strings.Contains(lower, "bearer ") || strings.Contains(lower, "basic ") || strings.Contains(t, "-----BEGIN ") || strings.HasPrefix(t, "sk-") || strings.HasPrefix(t, "eyJ") {
+		if strings.Contains(lower, "bearer ") || strings.Contains(lower, "basic ") ||
+			strings.Contains(t, "-----BEGIN ") ||
+			strings.HasPrefix(t, "sk-") ||
+			strings.HasPrefix(t, "eyJ") {
 			return false
 		}
+
 		if (strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[")) && json.Valid([]byte(t)) {
 			return inventorySafeJSON([]byte(t), secrets, depth+1)
 		}
@@ -352,6 +510,7 @@ func inventorySafeValue(value any, secrets []string, depth int) bool {
 	default:
 		return false
 	}
+
 	return true
 }
 

@@ -64,7 +64,7 @@ func TestCompiledFalSeedreamContracts(t *testing.T) {
 				}
 			}
 
-			body, _ := json.Marshal(input)
+			body := mustJSON(t, input)
 
 			mapped, err := MapBoundProviderInput(raw, b, "fal-image", s.Endpoint, "async", body)
 			if err != nil {
@@ -90,7 +90,7 @@ func TestCompiledFalSeedreamContracts(t *testing.T) {
 			delete(input, "image_size")
 			delete(input, "output_format")
 
-			withoutDefaults, _ := json.Marshal(input)
+			withoutDefaults := mustJSON(t, input)
 			if _, err := MapBoundProviderInput(
 				raw,
 				b,
@@ -106,7 +106,7 @@ func TestCompiledFalSeedreamContracts(t *testing.T) {
 				input["image_size"] = "landscape_16_9"
 				delete(input, "max_images")
 
-				withoutMultiplier, _ := json.Marshal(input)
+				withoutMultiplier := mustJSON(t, input)
 				if _, err := MapBoundProviderInput(
 					raw,
 					b,
@@ -138,7 +138,7 @@ func TestCompiledFalSeedreamContracts(t *testing.T) {
 			if tc.edit {
 				input["image_urls"] = []string{}
 
-				bad, _ := json.Marshal(input)
+				bad := mustJSON(t, input)
 				if _, err := MapBoundProviderInput(
 					raw,
 					b,
@@ -168,7 +168,7 @@ func TestCompiledFalSeedreamContracts(t *testing.T) {
 				input["n"] = 1
 				input["max_images"] = 5
 
-				boundary, _ := json.Marshal(input)
+				boundary := mustJSON(t, input)
 				if _, err := ValidateImage(
 					raw,
 					"bytedance/seedream-4.5-v2/edit",
@@ -184,7 +184,7 @@ func TestCompiledFalSeedreamContracts(t *testing.T) {
 				input["n"] = 6
 				input["max_images"] = 3
 
-				bad, _ := json.Marshal(input)
+				bad := mustJSON(t, input)
 				if _, err := ValidateImage(raw, "bytedance/seedream-4.5-v2/edit", bad); err == nil {
 					t.Fatal("public contract accepted impossible combined input/output count")
 				}

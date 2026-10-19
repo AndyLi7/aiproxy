@@ -1,15 +1,17 @@
+//nolint:testpackage // White-box coverage needs the package-private setup fixture or implementation.
 package nativetask
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/labring/aiproxy/core/common/balance"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestNativeRecoveryLeaseAndRestart(t *testing.T) {
@@ -17,6 +19,7 @@ func TestNativeRecoveryLeaseAndRestart(t *testing.T) {
 	ctx := context.Background()
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
+
 	now := time.Now()
 	tasks, err := model.ClaimNativeRecovery(e.DB, "worker-a", now, 20)
 	require.NoError(t, err)
@@ -25,30 +28,71 @@ func TestNativeRecoveryLeaseAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, tasks)
 	require.Error(t, model.ReleaseNativeRecovery(e.DB, "req", "worker-b", now))
-	poll := &pollStub{result: nativeresult.PollResult{Status: "result_received", Output: json.RawMessage(`{"labels":[]}`)}}
+
+	poll := &pollStub{
+		result: nativeresult.PollResult{
+			Status: "result_received",
+			Output: json.RawMessage(`{"labels":[]}`),
+		},
+	}
 	resolver := func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }
 	report, err := e.RecoverOnce(ctx, "worker-b", now.Add(3*time.Minute), resolver, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Advanced)
+
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "completed", task.Status)
 	require.Equal(t, 1, provider.calls)
+
 	report, err = e.RecoverOnce(ctx, "worker-c", now.Add(3*time.Minute), resolver, nil)
 	require.NoError(t, err)
 	require.Zero(t, report.Claimed)
 }
+
 func TestNativeRecoveryNeverRetriesUnknownSubmission(t *testing.T) {
 	e, plan, _, provider := setup(t)
 	ctx := context.Background()
-	_, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: "req", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp", OutputSchema: `{}`, FrozenContract: string(plan.Contract), BillingOperationID: "native:req"})
+	_, _, err := model.ReserveNativeTask(
+		e.DB,
+		model.NativeTask{
+			ID:                 "req",
+			GroupID:            "g",
+			TokenID:            1,
+			Model:              "m",
+			Fingerprint:        "fp",
+			OutputSchema:       `{}`,
+			FrozenContract:     string(plan.Contract),
+			BillingOperationID: "native:req",
+		},
+	)
 	require.NoError(t, err)
-	require.NoError(t, model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""))
-	require.NoError(t, model.TransitionNativeSubmission(e.DB, "req", "g", 1, "submitting", "submission_unknown", "submission_outcome_unknown"))
-	report, err := e.RecoverOnce(ctx, "worker", time.Now(), func(context.Context, *model.NativeTask) (Poller, error) {
-		t.Fatal("must not poll unknown identity")
-		return nil, nil
-	}, nil)
+	require.NoError(
+		t,
+		model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""),
+	)
+	require.NoError(
+		t,
+		model.TransitionNativeSubmission(
+			e.DB,
+			"req",
+			"g",
+			1,
+			"submitting",
+			"submission_unknown",
+			"submission_outcome_unknown",
+		),
+	)
+	report, err := e.RecoverOnce(
+		ctx,
+		"worker",
+		time.Now(),
+		func(context.Context, *model.NativeTask) (Poller, error) {
+			t.Fatal("must not poll unknown identity")
+			return nil, nil
+		},
+		nil,
+	)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Advanced)
 	require.Zero(t, provider.calls)
@@ -72,13 +116,27 @@ func TestNativeRecoveryExpiresUndeliverableResultsAfterLongDeadline(t *testing.T
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
 	require.NoError(t, model.SaveNativeTaskResult(e.DB, "req", "g", 1, []byte(`{"labels":[]}`)))
+
 	now := time.Now()
-	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("created_at", now.Add(-NativeTaskDeadline-time.Minute)).Error)
+	require.NoError(
+		t,
+		e.DB.Model(&model.NativeTask{}).
+			Where("id = ?", "req").
+			Update("created_at", now.Add(-NativeTaskDeadline-time.Minute)).
+			Error,
+	)
+
 	once := &failOnceWallet{action: "execution_finished"}
 	e.Wallet = once
-	_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) {
-		return nil, errors.New("a received result is never polled again")
-	}, nil)
+	_, err = e.RecoverOnce(
+		ctx,
+		"worker",
+		now,
+		func(context.Context, *model.NativeTask) (Poller, error) {
+			return nil, errors.New("a received result is never polled again")
+		},
+		nil,
+	)
 	require.NoError(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
@@ -94,12 +152,21 @@ func TestNativeRecoveryRetriesUndeliveredResultsBeforeLongDeadline(t *testing.T)
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
 	require.NoError(t, model.SaveNativeTaskResult(e.DB, "req", "g", 1, []byte(`{"labels":[]}`)))
+
 	now := time.Now()
-	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("created_at", now.Add(-NativeTaskDeadline+time.Minute)).Error)
+	require.NoError(
+		t,
+		e.DB.Model(&model.NativeTask{}).
+			Where("id = ?", "req").
+			Update("created_at", now.Add(-NativeTaskDeadline+time.Minute)).
+			Error,
+	)
+
 	w.fail = "execution_finished"
 	report, err := e.RecoverOnce(ctx, "worker", now, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Deferred)
+
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "result_received", task.Status)
@@ -113,11 +180,15 @@ type failOnceWallet struct {
 	done   bool
 }
 
-func (f *failOnceWallet) Prepayment(ctx context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (f *failOnceWallet) Prepayment(
+	ctx context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	if c.Action == f.action && !f.done {
 		f.done = true
 		f.commands = append(f.commands, c)
 		return balance.PrepaymentReceipt{}, errors.New("wallet timeout")
 	}
+
 	return f.walletStub.Prepayment(ctx, c)
 }

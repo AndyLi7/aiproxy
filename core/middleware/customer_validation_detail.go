@@ -2,11 +2,12 @@ package middleware
 
 import (
 	"encoding/json"
+	"regexp"
+
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/model"
-	"regexp"
 )
 
 const customerValidationDetailKey = "customer_validation_detail"
@@ -14,7 +15,7 @@ const customerValidationDetailKey = "customer_validation_detail"
 var diagnosticScalar = regexp.MustCompile(`^[a-zA-Z0-9_. -]{1,64}$`)
 
 // Only bounded generation controls are persisted for pre-relay rejections.
-// Never retain credentials, prompt content, reference URLs, or arbitrary fields.
+// Never retain credentials, reference URLs, or arbitrary fields.
 func saveCustomerValidationDetail(c *gin.Context, failure *registryvalidation.ValidationError) {
 	summary := map[string]any{}
 	if common.IsJSONContentType(c.Request.Header.Get("Content-Type")) {
@@ -29,6 +30,7 @@ func saveCustomerValidationDetail(c *gin.Context, failure *registryvalidation.Va
 						summary[key] = value
 					}
 				}
+
 				for _, key := range []string{"n", "num_images", "size", "image_size", "width", "height", "seed", "steps", "num_inference_steps", "guidance_scale", "quality", "output_format", "response_format", "watermark", "enable_prompt_expansion", "sequential_image_generation", "max_images", "seconds", "resolution", "aspect_ratio", "stream"} {
 					switch v := input[key].(type) {
 					case float64, bool:
@@ -42,7 +44,19 @@ func saveCustomerValidationDetail(c *gin.Context, failure *registryvalidation.Va
 			}
 		}
 	}
-	requestBody, _ := json.Marshal(summary)
-	responseBody, _ := json.Marshal(map[string]any{"error": failure.PublicError()})
-	c.Set(customerValidationDetailKey, &model.RequestDetail{RequestBody: string(requestBody), ResponseBody: string(responseBody)})
+
+	requestBody, err := json.Marshal(summary)
+	if err != nil {
+		return
+	}
+
+	responseBody, err := json.Marshal(map[string]any{"error": failure.PublicError()})
+	if err != nil {
+		return
+	}
+
+	c.Set(
+		customerValidationDetailKey,
+		&model.RequestDetail{RequestBody: string(requestBody), ResponseBody: string(responseBody)},
+	)
 }

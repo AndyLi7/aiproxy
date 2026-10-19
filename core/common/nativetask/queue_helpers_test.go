@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private walletAttempt fixture or implementation.
 package nativetask
 
 import (
@@ -62,30 +63,45 @@ type queueWallet struct {
 }
 
 func newQueueWallet() *queueWallet {
-	return &queueWallet{holds: map[string]*queueHold{}, balances: map[string]int64{}, maxWaiting: 20, pausedModels: map[string]bool{},
-		down: map[string]bool{}, lose: map[string]bool{}}
+	return &queueWallet{
+		holds:        map[string]*queueHold{},
+		balances:     map[string]int64{},
+		maxWaiting:   20,
+		pausedModels: map[string]bool{},
+		down:         map[string]bool{},
+		lose:         map[string]bool{},
+	}
 }
 
-func (w *queueWallet) Prepayment(_ context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (w *queueWallet) Prepayment(
+	_ context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	if c.Action == "begin_attempt" && w.beforeBegin != nil {
 		w.beforeBegin(c)
 	}
+
 	w.mu.Lock()
+
 	w.commands = append(w.commands, c)
 	if w.down[c.Action] {
 		w.mu.Unlock()
 		return balance.PrepaymentReceipt{}, errWalletLost
 	}
+
 	receipt, err := w.apply(c)
 	lost := err == nil && w.lose[c.Action]
 	delete(w.lose, c.Action)
 	w.mu.Unlock()
+
 	if c.Action == "begin_attempt" && w.afterBegin != nil {
 		w.afterBegin(c)
 	}
+
 	if lost {
 		return balance.PrepaymentReceipt{}, errWalletLost
 	}
+
 	return receipt, err
 }
 
@@ -100,56 +116,81 @@ func (w *queueWallet) balance(group string) int64 {
 func (w *queueWallet) active(group, except string) int {
 	count := 0
 	for id, hold := range w.holds {
-		if id != except && hold.group == group && hold.status == "pending" && hold.submission != "waiting" {
+		if id != except && hold.group == group && hold.status == "pending" &&
+			hold.submission != "waiting" {
 			count++
 		}
 	}
+
 	return count
 }
 
+//nolint:gocyclo // This synthetic wallet models all queue command transitions in one switch for scenario assertions.
 func (w *queueWallet) apply(c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
 	hold := w.holds[c.BillingOperationID]
 	if c.Action == "admit" {
 		if hold != nil {
 			return w.receipt(c.BillingOperationID), nil
 		}
+
 		if c.Queue {
 			waiting := 0
 			for _, other := range w.holds {
-				if other.group == c.Group && other.status == "pending" && other.submission == "waiting" {
+				if other.group == c.Group && other.status == "pending" &&
+					other.submission == "waiting" {
 					waiting++
 				}
 			}
+
 			if waiting >= w.maxWaiting {
-				return balance.PrepaymentReceipt{}, &balance.TaskLimitError{Waiting: true, ActiveLimit: w.activeLimit}
+				return balance.PrepaymentReceipt{}, &balance.TaskLimitError{
+					Waiting:     true,
+					ActiveLimit: w.activeLimit,
+				}
 			}
 		} else if w.activeLimit > 0 && w.active(c.Group, "") >= w.activeLimit {
 			return balance.PrepaymentReceipt{}, &balance.TaskLimitError{ActiveLimit: w.activeLimit}
 		}
+
 		if w.paused {
 			return balance.PrepaymentReceipt{}, balance.ErrPrepaymentModelPaused
 		}
+
 		if w.balance(c.Group) < 200 {
 			return balance.PrepaymentReceipt{}, balance.ErrPrepaymentInsufficientBalance
 		}
+
 		w.balances[c.Group] = w.balance(c.Group) - 200
+
 		submission := "not_submitted"
 		if c.Queue {
 			submission = "waiting"
 		}
-		w.holds[c.BillingOperationID] = &queueHold{group: c.Group, model: c.ModelID, status: "pending", submission: submission, createdAt: time.Now().Add(w.clockSkew)}
+
+		w.holds[c.BillingOperationID] = &queueHold{
+			group:      c.Group,
+			model:      c.ModelID,
+			status:     "pending",
+			submission: submission,
+			createdAt:  time.Now().Add(w.clockSkew),
+		}
+
 		return w.receipt(c.BillingOperationID), nil
 	}
+
 	if hold == nil {
 		return balance.PrepaymentReceipt{}, balance.ErrPrepaymentNotFound
 	}
+
 	final := hold.status != "pending"
+
 	find := func(id string) *walletAttempt {
 		for i := range hold.attempts {
 			if hold.attempts[i].ID == id {
 				return &hold.attempts[i]
 			}
 		}
+
 		return nil
 	}
 	switch c.Action {
@@ -157,37 +198,49 @@ func (w *queueWallet) apply(c balance.PrepaymentCommand) (balance.PrepaymentRece
 		if final {
 			return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
 		}
+
 		if find(c.AttemptID) != nil {
 			return balance.PrepaymentReceipt{ID: c.BillingOperationID, Claimed: false}, nil
 		}
+
 		waiting := hold.submission == "waiting" && len(hold.attempts) == 0
 		if hold.submission != "not_submitted" && !waiting {
 			return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
 		}
+
 		if waiting {
 			if w.balance(hold.group) < 0 {
 				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentInsufficientBalance
 			}
+
 			if w.paused || w.pausedModels[hold.model] {
 				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentModelPaused
 			}
+
 			if w.activeLimit > 0 && w.active(hold.group, c.BillingOperationID) >= w.activeLimit {
-				return balance.PrepaymentReceipt{}, &balance.TaskLimitError{ActiveLimit: w.activeLimit}
+				return balance.PrepaymentReceipt{}, &balance.TaskLimitError{
+					ActiveLimit: w.activeLimit,
+				}
 			}
 		}
+
 		at := time.Now()
+
 		hold.attempts = append(hold.attempts, walletAttempt{ID: c.AttemptID, State: "unknown"})
 		hold.submission, hold.unknownSince = "unknown", &at
+
 		return balance.PrepaymentReceipt{ID: c.BillingOperationID, Claimed: true}, nil
 	case "reject_attempt", "accept_attempt":
 		attempt := find(c.AttemptID)
 		if attempt == nil {
 			return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
 		}
+
 		state := map[string]string{"reject_attempt": "rejected", "accept_attempt": "accepted"}[c.Action]
 		if attempt.State != "unknown" && attempt.State != state {
 			return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
 		}
+
 		attempt.State = state
 		if !final {
 			hold.submission, hold.unknownSince = map[string]string{"rejected": "not_submitted", "accepted": "accepted"}[state], nil
@@ -197,33 +250,48 @@ func (w *queueWallet) apply(c balance.PrepaymentCommand) (balance.PrepaymentRece
 			if c.Outcome.Reason == "not_accepted" && hold.submission == "accepted" {
 				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
 			}
+
 			if c.Outcome.Reason == "not_dispatched" && len(hold.attempts) > 0 {
 				return balance.PrepaymentReceipt{}, balance.ErrPrepaymentRejected
 			}
+
 			hold.status = "refunded"
 			w.balances[hold.group] = w.balance(hold.group) + 200
 		}
 	}
+
 	return w.receipt(c.BillingOperationID), nil
 }
 
 func (w *queueWallet) receipt(id string) balance.PrepaymentReceipt {
 	hold := w.holds[id]
+
 	list := hold.attempts
 	if list == nil {
 		list = []walletAttempt{}
 	}
+
 	unknownSince := rawJSON(nil)
 	if hold.unknownSince != nil {
 		unknownSince = rawJSON(hold.unknownSince.UTC().Format("2006-01-02T15:04:05.000Z"))
 	}
-	r := balance.PrepaymentReceipt{ID: id, Status: hold.status, PrepaidMicros: 200,
-		SubmissionStatus: rawJSON(hold.submission), AttemptsJSON: rawJSON(string(rawJSON(list))),
-		CreatedAt: rawJSON(hold.createdAt.UTC().Format("2006-01-02T15:04:05.000Z")), UnknownSince: unknownSince}
+
+	r := balance.PrepaymentReceipt{
+		ID:               id,
+		Status:           hold.status,
+		PrepaidMicros:    200,
+		SubmissionStatus: rawJSON(hold.submission),
+		AttemptsJSON:     rawJSON(string(rawJSON(list))),
+		CreatedAt: rawJSON(
+			hold.createdAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		),
+		UnknownSince: unknownSince,
+	}
 	if hold.status == "refunded" {
 		zero, full := int64(0), int64(200)
 		r.ChargedMicros, r.RefundMicros = &zero, &full
 	}
+
 	return r
 }
 
@@ -231,10 +299,12 @@ func (w *queueWallet) receipt(id string) balance.PrepaymentReceipt {
 func (w *queueWallet) hold(id string) (status, submission string, attempts int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	hold := w.holds["native:"+id]
 	if hold == nil {
 		return "", "", 0
 	}
+
 	return hold.status, hold.submission, len(hold.attempts)
 }
 
@@ -242,32 +312,39 @@ func (w *queueWallet) hold(id string) (status, submission string, attempts int) 
 func (w *queueWallet) actionsFor(id string) []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	actions := []string{}
 	for _, c := range w.commands {
 		if c.BillingOperationID != "native:"+id {
 			continue
 		}
+
 		action := c.Action
 		if c.Outcome != nil {
 			action += ":" + c.Outcome.Kind + "/" + c.Outcome.Reason
 		}
+
 		if c.Action == "admit" && c.Queue {
 			action += ":queue"
 		}
+
 		actions = append(actions, action)
 	}
+
 	return actions
 }
 
 func (w *queueWallet) count(action string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	n := 0
 	for _, c := range w.commands {
 		if c.Action == action {
 			n++
 		}
 	}
+
 	return n
 }
 
@@ -281,11 +358,13 @@ type queueProvider struct {
 func (p *queueProvider) SubmitNative(_ context.Context, _ string, b []byte) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	p.calls = append(p.calls, string(b))
 	if p.err != nil {
 		return "", p.err
 	}
-	return "upstream-" + string(rune('a'+len(p.calls)-1)), nil
+
+	return fmt.Sprintf("upstream-%c", 'a'+len(p.calls)-1), nil
 }
 
 func (p *queueProvider) count() int {
@@ -320,6 +399,8 @@ func newQueueEnv(t *testing.T) *queueEnv {
 // forEachQueueDatabase runs a test on SQLite and on PostgreSQL, whose queue
 // SQL differs (the claim's advisory lock, the snapshot's time columns).
 func forEachQueueDatabase(t *testing.T, fn func(t *testing.T, env *queueEnv)) {
+	t.Helper()
+
 	t.Run("sqlite", func(t *testing.T) { fn(t, newQueueEnv(t)) })
 	t.Run("postgres", func(t *testing.T) { fn(t, newQueueEnvOn(t, postgresQueueDB(t))) })
 }
@@ -328,12 +409,16 @@ func forEachQueueDatabase(t *testing.T, fn func(t *testing.T, env *queueEnv)) {
 // accepts connections without a password, so none is written here.
 func postgresQueueDB(t *testing.T) *gorm.DB {
 	t.Helper()
+
 	ctx := context.Background()
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        "postgres:16-alpine",
 			ExposedPorts: []string{"5432/tcp"},
-			Env:          map[string]string{"POSTGRES_HOST_AUTH_METHOD": "trust", "POSTGRES_DB": "queue_test"},
+			Env: map[string]string{
+				"POSTGRES_HOST_AUTH_METHOD": "trust",
+				"POSTGRES_DB":               "queue_test",
+			},
 			WaitingFor: wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60 * time.Second),
 		},
@@ -341,12 +426,15 @@ func postgresQueueDB(t *testing.T) *gorm.DB {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, container.Terminate(ctx)) })
+
 	host, err := container.Host(ctx)
 	require.NoError(t, err)
 	port, err := container.MappedPort(ctx, "5432")
 	require.NoError(t, err)
+
 	dsn := fmt.Sprintf("postgres://postgres@%s/queue_test?sslmode=disable&TimeZone=UTC",
 		net.JoinHostPort(host, port.Port()))
+
 	var db *gorm.DB
 	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(500 * time.Millisecond) {
 		if db, err = model.OpenPostgreSQL(dsn); err == nil {
@@ -354,24 +442,32 @@ func postgresQueueDB(t *testing.T) *gorm.DB {
 				break
 			}
 		}
+
 		require.True(t, time.Now().Before(deadline), "postgres did not start: %v", err)
 	}
+
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 	})
+
 	return db
 }
 
 func newQueueEnvOn(t *testing.T, db *gorm.DB) *queueEnv {
 	t.Helper()
+
 	queue = newQueueState()
+
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}, &model.ImageTask{}))
 	_, plan, _, _ := setup(t)
-	env := &queueEnv{t: t, w: newQueueWallet(), p: &queueProvider{}, plan: plan, enabled: true,
-		limits: map[string]int{falScope: 1}, timeout: 5 * time.Minute}
-	env.e = &Engine{DB: db, Wallet: env.w, Provider: env.p, AbandonReservations: true,
+	env := &queueEnv{
+		t: t, w: newQueueWallet(), p: &queueProvider{}, plan: plan, enabled: true,
+		limits: map[string]int{falScope: 1}, timeout: 5 * time.Minute,
+	}
+	env.e = &Engine{
+		DB: db, Wallet: env.w, Provider: env.p, AbandonReservations: true,
 		Queue: &QueueConfig{
 			Enabled: func() bool { env.mu.Lock(); defer env.mu.Unlock(); return env.enabled },
 			Limits:  func() map[string]int { env.mu.Lock(); defer env.mu.Unlock(); return env.limits },
@@ -381,19 +477,24 @@ func newQueueEnvOn(t *testing.T, db *gorm.DB) *queueEnv {
 			Resolve: func(context.Context, *model.NativeTask) (Provider, error) {
 				env.mu.Lock()
 				defer env.mu.Unlock()
+
 				if env.unusable {
 					return nil, ErrChannelUnusable
 				}
+
 				return env.p, nil
 			},
 			OtherInFlight: model.ImageTasksInFlight(model.ChannelTypeFal),
-		}}}
+		}},
+	}
+
 	return env
 }
 
 func (env *queueEnv) set(fn func()) {
 	env.mu.Lock()
 	defer env.mu.Unlock()
+
 	fn()
 }
 
@@ -407,11 +508,27 @@ func (env *queueEnv) submit(id, group string) (*model.NativeTask, error) {
 // submitModel sends a task of another model (same channel and price).
 func (env *queueEnv) submitModel(id, group, name string) (*model.NativeTask, error) {
 	plan := env.plan
-	plan.Contract = json.RawMessage(strings.Replace(string(env.plan.Contract), `"model":"brand/model/native"`, `"model":"`+name+`"`, 1))
+	plan.Contract = json.RawMessage(
+		strings.Replace(
+			string(env.plan.Contract),
+			`"model":"brand/model/native"`,
+			`"model":"`+name+`"`,
+			1,
+		),
+	)
 	engine := *env.e
 	engine.Provider = env.p
-	return engine.Submit(context.Background(), id, group, 1,
-		[]byte(strings.Replace(string(body), `"model":"brand/model/native"`, `"model":"`+name+`"`, 1)), plan)
+
+	return engine.Submit(
+		context.Background(),
+		id,
+		group,
+		1,
+		[]byte(
+			strings.Replace(string(body), `"model":"brand/model/native"`, `"model":"`+name+`"`, 1),
+		),
+		plan,
+	)
 }
 
 func (env *queueEnv) task(id, group string) *model.NativeTask {
@@ -441,16 +558,25 @@ func (env *queueEnv) finish(id string) {
 
 // http is a customer handler; the group is read from X-Group.
 func (env *queueEnv) http() *HTTP {
-	return &HTTP{Engine: env.e, limiter: newReadLimiter(time.Now),
+	return &HTTP{
+		Engine:   env.e,
+		limiter:  newReadLimiter(time.Now),
 		Identity: func(r *http.Request) (string, int, error) { return r.Header.Get("X-Group"), 1, nil },
 		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) {
 			return env.plan, env.p, nil
-		}}
+		},
+	}
 }
 
 func customerRequest(method, path, id, group string) *http.Request {
-	r := httptest.NewRequest(method, path, strings.NewReader(string(body)))
-	r.Header.Set("X-Request-Id", id)
+	r := httptest.NewRequestWithContext(
+		context.Background(),
+		method,
+		path,
+		strings.NewReader(string(body)),
+	)
+	r.Header.Set("X-Request-ID", id)
 	r.Header.Set("X-Group", group)
+
 	return r
 }

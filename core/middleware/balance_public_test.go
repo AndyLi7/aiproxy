@@ -1,7 +1,9 @@
+//nolint:testpackage // Balance consumer fixtures intentionally set the unexported balance field.
 package middleware
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -17,12 +19,27 @@ func TestBalanceFailurePublicMessage(t *testing.T) {
 		for _, explicitMode := range []bool{false, true} {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest("POST", path, nil)
+
+			c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, nil)
 			if explicitMode {
-				AbortOperationallyWithMode(mode.ChatCompletions, c, model.FailureStageBalance, 403, "group private-user balance not enough", relaymodel.WithType(GroupBalanceNotEnough))
+				AbortOperationallyWithMode(
+					mode.ChatCompletions,
+					c,
+					model.FailureStageBalance,
+					403,
+					"group private-user balance not enough",
+					relaymodel.WithType(GroupBalanceNotEnough),
+				)
 			} else {
-				AbortOperationally(c, model.FailureStageBalance, 403, "group private-user balance not enough", relaymodel.WithType(GroupBalanceNotEnough))
+				AbortOperationally(
+					c,
+					model.FailureStageBalance,
+					403,
+					"group private-user balance not enough",
+					relaymodel.WithType(GroupBalanceNotEnough),
+				)
 			}
+
 			require.Equal(t, 402, w.Code)
 			require.Contains(t, w.Body.String(), "Your account balance is insufficient.")
 			require.Contains(t, w.Body.String(), "insufficient_quota")
@@ -33,17 +50,38 @@ func TestBalanceFailurePublicMessage(t *testing.T) {
 
 // balanceRefusal runs the distributor's minimum-balance refusal for a group
 // whose balance the distributor already loaded.
-func balanceRefusal(t *testing.T, path string, explicitMode bool, groupBalance float64) *httptest.ResponseRecorder {
+func balanceRefusal(
+	t *testing.T,
+	path string,
+	explicitMode bool,
+	groupBalance float64,
+) *httptest.ResponseRecorder {
 	t.Helper()
+
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", path, nil)
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, nil)
 	c.Set(GroupBalance, &GroupBalanceConsumer{Group: "private-user", balance: groupBalance})
+
 	if explicitMode {
-		AbortOperationallyWithMode(mode.ChatCompletions, c, model.FailureStageBalance, 402, "group `private-user` balance not enough", relaymodel.WithType(GroupBalanceNotEnough))
+		AbortOperationallyWithMode(
+			mode.ChatCompletions,
+			c,
+			model.FailureStageBalance,
+			402,
+			"group `private-user` balance not enough",
+			relaymodel.WithType(GroupBalanceNotEnough),
+		)
 	} else {
-		AbortOperationally(c, model.FailureStageBalance, 402, "group `private-user` balance not enough", relaymodel.WithType(GroupBalanceNotEnough))
+		AbortOperationally(
+			c,
+			model.FailureStageBalance,
+			402,
+			"group `private-user` balance not enough",
+			relaymodel.WithType(GroupBalanceNotEnough),
+		)
 	}
+
 	return w
 }
 
@@ -63,6 +101,7 @@ func TestNegativeBalanceRefusalNamesTheAmountOwed(t *testing.T) {
 			} {
 				w := balanceRefusal(t, path, explicitMode, balance)
 				require.Equal(t, 402, w.Code)
+
 				var body struct {
 					Error struct {
 						Message string `json:"message"`
@@ -71,7 +110,15 @@ func TestNegativeBalanceRefusalNamesTheAmountOwed(t *testing.T) {
 					} `json:"error"`
 				}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
-				require.Equal(t, message, body.Error.Message, "%s %v %v", path, explicitMode, balance)
+				require.Equal(
+					t,
+					message,
+					body.Error.Message,
+					"%s %v %v",
+					path,
+					explicitMode,
+					balance,
+				)
 				require.Equal(t, "insufficient_quota", body.Error.Type)
 				require.Equal(t, "insufficient_balance", body.Error.Code)
 				require.NotContains(t, w.Body.String(), "$0.00")
@@ -88,8 +135,15 @@ func TestBalanceRefusalBodyUnchangedWhenNotNegative(t *testing.T) {
 		withBalance := balanceRefusal(t, path, true, 0.004)
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("POST", path, nil)
-		AbortOperationallyWithMode(mode.ChatCompletions, c, model.FailureStageBalance, 402, "group `private-user` balance not enough", relaymodel.WithType(GroupBalanceNotEnough))
+		c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, nil)
+		AbortOperationallyWithMode(
+			mode.ChatCompletions,
+			c,
+			model.FailureStageBalance,
+			402,
+			"group `private-user` balance not enough",
+			relaymodel.WithType(GroupBalanceNotEnough),
+		)
 		require.Equal(t, w.Body.String(), withBalance.Body.String())
 	}
 }

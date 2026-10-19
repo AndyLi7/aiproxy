@@ -39,6 +39,9 @@ type ModelCaches struct {
 	// the routing state a request was served from.
 	Version uint64
 	BuiltAt time.Time
+
+	// Published together with this exact routing pointer; never an all-replica ACK.
+	migrationSource *migrationCacheSource
 }
 
 var (
@@ -71,13 +74,27 @@ func InitModelConfigAndChannelCache() error {
 		return err
 	}
 
+	captureMigrationCacheRouting(&snapshot)
 	modelConfig := applyYAMLConfigToModelConfigCache(newModelConfigCache(snapshot.modelConfigs))
 
 	// Channel models are filtered against the configs read above, not against
 	// a fresh query per channel: one rebuild sees one set of model configs.
 	configured := configuredModels(snapshot.modelConfigs)
-	enabledChannels := prepareCachedChannels(snapshot.enabledChannels, ChannelStatusEnabled, configured)
-	disabledChannels := prepareCachedChannels(snapshot.disabledChannels, ChannelStatusDisabled, configured)
+	enabledChannels := prepareCachedChannels(
+		snapshot.enabledChannels,
+		ChannelStatusEnabled,
+		configured,
+	)
+
+	disabledChannels := prepareCachedChannels(
+		snapshot.disabledChannels,
+		ChannelStatusDisabled,
+		configured,
+	)
+	if source := snapshot.migrationSource; source != nil &&
+		(len(enabledChannels) != len(snapshot.enabledChannels) || len(disabledChannels) != len(snapshot.disabledChannels)) {
+		source.reason = "effective_cache_projection_unsupported"
+	}
 
 	enabledModel2ChannelsBySet := buildModelToChannelsBySetMap(enabledChannels)
 	sortChannelsByPriorityBySet(enabledModel2ChannelsBySet)
@@ -97,7 +114,7 @@ func InitModelConfigAndChannelCache() error {
 	}
 
 	cacheVersion++
-	modelCaches.Store(&ModelCaches{
+	next := &ModelCaches{
 		ChannelsByID: channelsByID,
 
 		ModelConfig: modelConfig,
@@ -110,8 +127,10 @@ func InitModelConfigAndChannelCache() error {
 		DisabledModel2ChannelsBySet: disabledModel2ChannelsBySet,
 
 		Version: cacheVersion,
-		BuiltAt: time.Now(),
-	})
+	}
+	next.migrationSource = finishMigrationCacheSource(snapshot, next)
+	next.BuiltAt = time.Now()
+	modelCaches.Store(next)
 
 	return nil
 }
@@ -136,29 +155,47 @@ type cacheSnapshot struct {
 	modelConfigs     []ModelConfig
 	enabledChannels  []*Channel
 	disabledChannels []*Channel
+	migrationSource  *migrationCacheSource
 }
 
 // readCacheSnapshot reads model configs and channels. On PostgreSQL the reads
 // share one REPEATABLE READ, READ ONLY transaction, so the cache reflects one
 // point in time: a write committed between two reads (a model config deleted
 // while a channel listing it is re-pointed, say) can no longer leave a cache
-// mixing both states. SQLite reads as before.
+// mixing both states. SQLite uses one read transaction as well.
 func readCacheSnapshot() (cacheSnapshot, error) {
 	var snapshot cacheSnapshot
 
 	read := func(tx *gorm.DB) error {
-		if err := tx.Model(&ModelConfig{}).Order("created_at desc").Find(&snapshot.modelConfigs).Error; err != nil {
+		var err error
+
+		snapshot.migrationSource, err = readMigrationCacheSource(tx)
+		if err != nil {
 			return err
 		}
 
-		if err := tx.Where("status = ?", ChannelStatusEnabled).Find(&snapshot.enabledChannels).Error; err != nil {
+		if err := tx.Model(&ModelConfig{}).
+			Order("created_at desc").
+			Find(&snapshot.modelConfigs).
+			Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("status = ?", ChannelStatusEnabled).
+			Find(&snapshot.enabledChannels).
+			Error; err != nil {
 			return err
 		}
 
 		return tx.Where("status = ?", ChannelStatusDisabled).Find(&snapshot.disabledChannels).Error
 	}
 
-	if DB.Dialector.Name() != "postgres" {
+	if DB.Name() == "sqlite" {
+		err := DB.Transaction(read, &sql.TxOptions{ReadOnly: true})
+		return snapshot, err
+	}
+
+	if DB.Name() != "postgres" {
 		return snapshot, read(DB)
 	}
 
@@ -185,7 +222,11 @@ func configuredModels(configs []ModelConfig) map[string]struct{} {
 // prepareCachedChannels is LoadEnabledChannels/LoadDisabledChannels for
 // channels already read: YAML channels of that status are added, and every
 // channel's models and mapping are initialized against configured.
-func prepareCachedChannels(channels []*Channel, status int, configured map[string]struct{}) []*Channel {
+func prepareCachedChannels(
+	channels []*Channel,
+	status int,
+	configured map[string]struct{},
+) []*Channel {
 	configChannels := NewConfigChannels(LoadYAMLConfig(), status)
 	if len(configChannels) != 0 {
 		log.Infof("added %d channels from config", len(configChannels))

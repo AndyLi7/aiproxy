@@ -18,14 +18,85 @@ func SetAPIRouter(router *gin.Engine) {
 	healthRouter := api.Group("")
 	healthRouter.GET("/status", controller.GetStatus)
 
+	inventoryRouter := api.Group(
+		"",
+		controller.RequireMigrationInventoryHeaderAuth,
+		middleware.AdminAuth,
+	)
+	inventoryRouter.GET("/channel-migrations/inventory", controller.GetMigrationInventory)
+	inventoryRouter.GET("/channels/:id/routing", controller.GetChannelRouting)
+	inventoryRouter.GET("/channels/:id/routing/requests/:requestId", controller.GetChannelRouting)
+	inventoryRouter.PATCH("/channels/:id/routing", controller.PatchChannelRouting)
+	inventoryRouter.GET("/access-configurations/:id", controller.GetAccessConfiguration)
+	inventoryRouter.PUT("/access-configurations/:id", controller.EnsureAccessConfiguration)
+	inventoryRouter.POST(
+		"/channel-migrations/probe-billing-context/read",
+		controller.ReadMigrationProbeBillingContext,
+	)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/probe",
+		controller.CreateMigrationProbe,
+	)
+	inventoryRouter.GET("/channel-migrations/operations/:id/probe", controller.GetMigrationProbe)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/prepare",
+		controller.PrepareMigrationProbe,
+	)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/cutover",
+		controller.CutoverMigrationProbe,
+	)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/retired-target",
+		controller.CreateMigrationRetiredTarget,
+	)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/retired-target/read",
+		controller.ReadMigrationRetiredTarget,
+	)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/retired-target/cancel",
+		controller.CancelMigrationRetiredTarget,
+	)
+	inventoryRouter.GET("/channel-migrations/protocol", controller.GetMigrationCommandProtocol)
+	inventoryRouter.POST("/channel-migrations/snapshot/read", controller.ReadMigrationSnapshotFacts)
+	inventoryRouter.GET("/channel-migrations/operations/:id", controller.GetPreparedMigrationFacts)
+	inventoryRouter.GET(
+		"/channel-migrations/operations/:id/retention",
+		controller.GetMigrationRetention,
+	)
+	inventoryRouter.GET(
+		"/channel-migrations/operations/:id/cache",
+		controller.GetMigrationCacheObservation,
+	)
+	inventoryRouter.GET("/channel-migrations/operations/:id/shadow", controller.GetMigrationShadow)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/shadow",
+		controller.CreateMigrationShadow,
+	)
+	inventoryRouter.GET(
+		"/channel-migrations/operations/:id/shadow/lifecycle",
+		controller.GetMigrationShadowLifecycle,
+	)
+	inventoryRouter.POST(
+		"/channel-migrations/operations/:id/shadow/cancel",
+		controller.CancelMigrationShadow,
+	)
+
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)
 	apiRouter.POST("/native-contract/validate", controller.ValidateNativeContract)
 	apiRouter.POST("/native-trials/:group/:token", controller.CreateNativeTrial)
 	apiRouter.GET("/native-trials/:group/:token/:id", controller.GetNativeTrial)
-	apiRouter.GET("/native-trials/:group/:token/:id/artifacts/:index", controller.GetNativeTrialArtifact)
+	apiRouter.GET(
+		"/native-trials/:group/:token/:id/artifacts/:index",
+		controller.GetNativeTrialArtifact,
+	)
 	apiRouter.GET("/native-tasks/:group/:id", controller.GetGroupNativeTask)
-	apiRouter.GET("/native-tasks/:group/:id/artifacts/:index", controller.GetGroupNativeTaskArtifact)
+	apiRouter.GET(
+		"/native-tasks/:group/:id/artifacts/:index",
+		controller.GetGroupNativeTaskArtifact,
+	)
 	apiRouter.GET("/native-queue/status", controller.GetNativeQueueStatus)
 	{
 		modelsRoute := apiRouter.Group("/models")

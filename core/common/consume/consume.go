@@ -409,6 +409,7 @@ func processGroupConsume(
 ) float64 {
 	ctx = context.WithValue(ctx, balance.CtxRequestID, meta.RequestID)
 	ctx = balance.ContextWithBillingOperationID(ctx, meta.BillingOperationID)
+
 	ctx = balance.ContextWithUsageIdentity(ctx, RelayUsageIdentity(meta))
 	if currency, version, ok := meta.ModelConfig.RetailPricingMetadata(); ok {
 		ctx = balance.ContextWithPricing(ctx, currency, version)

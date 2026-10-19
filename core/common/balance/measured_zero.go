@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/model"
 )
 
@@ -46,7 +47,10 @@ type externalMeasuredZeroReq struct {
 // MeasuredZero posts the receipt request and returns the wallet's answer:
 // created, existing or not_applicable. Any other answer is an error, so the
 // outbox retries the same request (the receipt key is idempotent).
-func (e *ExternalHTTP) MeasuredZero(ctx context.Context, request MeasuredZeroRequest) (string, error) {
+func (e *ExternalHTTP) MeasuredZero(
+	ctx context.Context,
+	request MeasuredZeroRequest,
+) (string, error) {
 	if request.Group == "" || request.RequestID == "" {
 		return "", errors.New("missing measured-zero identity")
 	}
@@ -82,17 +86,25 @@ func (e *ExternalHTTP) MeasuredZero(ctx context.Context, request MeasuredZeroReq
 	client := *externalHTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
+	if err := actionguard.Check(ctx); err != nil {
+		return "", err
+	}
+
 	response, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("measured-zero receipt unavailable: %w", err)
 	}
+
 	defer func() {
 		_, _ = io.Copy(io.Discard, response.Body)
 		_ = response.Body.Close()
 	}()
 
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("measured-zero receipt failed with status code %d", response.StatusCode)
+		return "", fmt.Errorf(
+			"measured-zero receipt failed with status code %d",
+			response.StatusCode,
+		)
 	}
 
 	var envelope struct {

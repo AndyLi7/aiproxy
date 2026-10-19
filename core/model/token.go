@@ -1,16 +1,16 @@
 package model
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand/v2"
+	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/config"
-	"github.com/labring/aiproxy/core/common/conv"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -62,8 +62,17 @@ type Token struct {
 }
 
 func (t *Token) BeforeCreate(_ *gorm.DB) error {
+	return t.beforeCreate(rand.Reader)
+}
+
+func (t *Token) beforeCreate(entropy io.Reader) error {
 	if t.Key == "" || len(t.Key) != 48 {
-		t.Key = generateKey()
+		key, err := generateKey(entropy)
+		if err != nil {
+			return fmt.Errorf("generate token key: %w", err)
+		}
+
+		t.Key = key
 	}
 	// Initialize period start time to current time if period quota is set
 	if t.PeriodQuota > 0 && t.PeriodLastUpdateTime.IsZero() {
@@ -169,13 +178,30 @@ const (
 	keyChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
 
-func generateKey() string {
-	key := make([]byte, 48)
-	for i := range key {
-		key[i] = keyChars[rand.IntN(len(keyChars))]
+// generateKey uses rejection sampling so every character has equal probability.
+// Taking a reader keeps entropy failure testable without replacing global state.
+func generateKey(entropy io.Reader) (string, error) {
+	const (
+		keyLength = 48
+		limit     = 256 - 256%len(keyChars)
+	)
+
+	key := make([]byte, 0, keyLength)
+
+	var buffer [keyLength]byte
+	for len(key) < keyLength {
+		if _, err := io.ReadFull(entropy, buffer[:keyLength-len(key)]); err != nil {
+			return "", err
+		}
+
+		for _, value := range buffer[:keyLength-len(key)] {
+			if int(value) < limit {
+				key = append(key, keyChars[int(value)%len(keyChars)])
+			}
+		}
 	}
 
-	return conv.BytesToString(key)
+	return string(key), nil
 }
 
 func getTokenOrder(order string) string {

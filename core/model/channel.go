@@ -416,8 +416,21 @@ func BatchInsertChannels(channels []*Channel) (err error) {
 		}
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&channels).Error
+	return withMigrationChannelCreate(func(tx *gorm.DB) error {
+		if _, e := channelRoutingStorageReady(tx); e != nil {
+			return e
+		}
+
+		if e := tx.Create(&channels).Error; e != nil {
+			return e
+		}
+
+		ids := make([]int, 0, len(channels))
+		for _, ch := range channels {
+			ids = append(ids, ch.ID)
+		}
+
+		return initializeChannelRoutingState(tx, ids)
 	})
 }
 
@@ -451,6 +464,7 @@ func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
 	defer func() {
 		if err == nil {
 			rebuildModelCachesAfterWrite()
+
 			_ = monitor.ClearChannelAllModelErrors(context.Background(), channel.ID)
 		}
 	}()
@@ -461,12 +475,22 @@ func UpdateChannel(channel *Channel, update *ChannelPatch) (err error) {
 		}
 	}
 
-	result := DB.Model(channel).
+	return persistChannelPatchWithAdmission(channel, update)
+}
+
+func persistChannelPatch(db *gorm.DB, channel *Channel, update *ChannelPatch) error {
+	if e := bumpChannelRoutingRevision(db, channel.ID); e != nil {
+		return e
+	}
+
+	result := db.Model(channel).
 		Clauses(clause.Returning{}).
 		Where("id = ?", channel.ID).
 		Updates(update)
 	if result.Error == nil && result.RowsAffected == 0 {
-		current, err := GetChannelByID(channel.ID)
+		current := &Channel{}
+
+		err := db.First(current, "id = ?", channel.ID).Error
 		if err != nil {
 			return err
 		}
@@ -557,13 +581,12 @@ func DeleteChannelByID(id int) (err error) {
 	defer func() {
 		if err == nil {
 			rebuildModelCachesAfterWrite()
+
 			_ = monitor.ClearChannelAllModelErrors(context.Background(), id)
 		}
 	}()
 
-	result := DB.Delete(&Channel{ID: id})
-
-	return HandleUpdateResult(result, ErrChannelNotFound)
+	return deleteChannelsWithAdmission([]int{id}, true)
 }
 
 func DeleteChannelsByIDs(ids []int) (err error) {
@@ -580,40 +603,26 @@ func DeleteChannelsByIDs(ids []int) (err error) {
 		}
 	}()
 
-	return DB.Transaction(func(tx *gorm.DB) error {
-		return tx.
-			Where("id IN (?)", ids).
-			Delete(&Channel{}).
-			Error
-	})
+	return deleteChannelsWithAdmission(ids, false)
 }
 
 // UpdateChannelStatusByID sets a channel's status. Enabling a disabled channel
 // whose key is empty is refused (ErrChannelKeyEmpty); re-enabling a channel
 // that is already enabled changes nothing and is not refused.
-func UpdateChannelStatusByID(id, status int) (err error) {
-	if status == ChannelStatusEnabled {
-		stored, err := GetChannelByID(id)
-		if err != nil {
-			return err
-		}
+func UpdateChannelStatusByID(id, status int) error {
+	return UpdateChannelStatusByIDContext(context.Background(), id, status)
+}
 
-		if stored.Status != ChannelStatusEnabled && channelKeyEmpty(stored.Key) {
-			return ErrChannelKeyEmpty
-		}
-	}
-
+// UpdateChannelStatusByIDContext propagates request cancellation through each
+// complete DB attempt. Key and migration guards execute inside that attempt.
+func UpdateChannelStatusByIDContext(ctx context.Context, id, status int) (err error) {
 	defer func() {
 		if err == nil {
 			rebuildModelCachesAfterWrite()
 		}
 	}()
 
-	result := DB.Model(&Channel{}).
-		Where("id = ?", id).
-		Update("status", status)
-
-	return HandleUpdateResult(result, ErrChannelNotFound)
+	return withMigrationChannelStatus(ctx, id, status)
 }
 
 func UpdateChannelUsedAmount(id int, amount float64, requestCount, retryCount int) error {

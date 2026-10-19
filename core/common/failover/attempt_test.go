@@ -1,23 +1,28 @@
-package failover
+package failover_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/labring/aiproxy/core/common/failover"
+)
 
 func TestAttemptAcceptanceIsSticky(t *testing.T) {
-	safe := Failure{Acceptance: NotAccepted, Class: Transient}
+	safe := failover.Failure{Acceptance: failover.NotAccepted, Class: failover.Transient}
 	for _, tc := range []struct {
 		name  string
-		prior Acceptance
-		want  Acceptance
+		prior failover.Acceptance
+		want  failover.Acceptance
 	}{
-		{"first unsent", NotAccepted, NotAccepted},
-		{"prior response", Accepted, Unknown},
-		{"prior uncertain", Unknown, Unknown},
+		{"first unsent", failover.NotAccepted, failover.NotAccepted},
+		{"prior response", failover.Accepted, failover.Unknown},
+		{"prior uncertain", failover.Unknown, failover.Unknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Attempt{}
+			a := &failover.Attempt{}
 			a.BeginCall()
-			a.Observe(Failure{Acceptance: tc.prior})
+			a.Observe(failover.Failure{Acceptance: tc.prior})
 			a.BeginCall()
+
 			got := a.Observe(safe)
 			if got.Acceptance != tc.want {
 				t.Fatalf("%+v", got)
@@ -27,11 +32,14 @@ func TestAttemptAcceptanceIsSticky(t *testing.T) {
 }
 
 func TestSingleCallExplicitRejectionRemainsUsable(t *testing.T) {
-	a := &Attempt{}
+	a := &failover.Attempt{}
 	a.BeginCall()
-	a.Observe(Failure{Acceptance: Unknown}) // HTTP response before protocol parsing.
-	f := a.Observe(Failure{Acceptance: NotAccepted, Class: Transient})
-	if f.Acceptance != NotAccepted {
+	a.Observe(
+		failover.Failure{Acceptance: failover.Unknown},
+	) // HTTP response before protocol parsing.
+
+	f := a.Observe(failover.Failure{Acceptance: failover.NotAccepted, Class: failover.Transient})
+	if f.Acceptance != failover.NotAccepted {
 		t.Fatalf("%+v", f)
 	}
 }

@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private setup fixture or implementation.
 package nativetask
 
 import (
@@ -22,8 +23,10 @@ type publicTaskBody struct {
 
 func decodePublicTask(t *testing.T, raw []byte) publicTaskBody {
 	t.Helper()
+
 	var task publicTaskBody
 	require.NoError(t, json.Unmarshal(raw, &task))
+
 	return task
 }
 
@@ -35,14 +38,16 @@ func decodePublicTask(t *testing.T, raw []byte) publicTaskBody {
 func TestNativeHTTPAcceptedPublicIDIdempotency(t *testing.T) {
 	e, plan, wallet, p := setup(t)
 	plan.AcceptedModel = "brand/model"
-	h := &HTTP{Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
+	h := &HTTP{
+		Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
 		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil },
 		PublicModel: func(id string) string {
 			if id == "brand/model/native" {
 				return "brand/model"
 			}
 			return id
-		}}
+		},
+	}
 
 	response := httptest.NewRecorder()
 	h.Create(response, request(publicIDBody))
@@ -72,7 +77,11 @@ func TestNativeHTTPAcceptedPublicIDIdempotency(t *testing.T) {
 
 	// Reads report the callable ID too.
 	response = httptest.NewRecorder()
-	h.Get(response, httptest.NewRequest(http.MethodGet, "/v1/model-tasks/req", nil), "req")
+	h.Get(
+		response,
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/model-tasks/req", nil),
+		"req",
+	)
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "brand/model", decodePublicTask(t, response.Body.Bytes()).Model)
 }
@@ -81,8 +90,10 @@ func TestNativeHTTPAcceptedPublicIDIdempotency(t *testing.T) {
 // passes the contract.
 func TestNativeHTTPUnresolvedOtherIDIsInvalidInput(t *testing.T) {
 	e, plan, _, p := setup(t)
-	h := &HTTP{Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
-		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil }}
+	h := &HTTP{
+		Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
+		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil },
+	}
 	response := httptest.NewRecorder()
 	h.Create(response, request(publicIDBody))
 	require.Equal(t, http.StatusBadRequest, response.Code)
@@ -126,8 +137,10 @@ type nativeModelErrorBody struct {
 
 func decodeNativeError(t *testing.T, raw []byte) nativeErrorBody {
 	t.Helper()
+
 	var decoded nativeErrorBody
 	require.NoError(t, json.Unmarshal(raw, &decoded))
+
 	return decoded
 }
 
@@ -135,21 +148,31 @@ func TestNativeModelErrorsCarrySuggestedModels(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	WriteErrorDetail(recorder, http.StatusNotFound, "model_not_found", "model", nil)
 	require.Equal(t, http.StatusNotFound, recorder.Code)
-	require.JSONEq(t, `{"error":{"code":"model_not_found","type":"not_found_error","param":"model","suggested_models":[],
+	require.JSONEq(
+		t,
+		`{"error":{"code":"model_not_found","type":"not_found_error","param":"model","suggested_models":[],
 		"message":"This ID cannot be called with this API key. Do not resend it: use an ID from suggested_models or an `+"`id`"+` from GET /v1/models."}}`,
-		recorder.Body.String())
+		recorder.Body.String(),
+	)
 
 	// A model published on another endpoint names the IDs to use there.
 	e, _, _, _ := setup(t)
+
 	var seen []string
-	h := &HTTP{Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
+
+	h := &HTTP{
+		Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
 		OnError: func(_ int, code, _ string) { seen = append(seen, code) },
 		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) {
-			return Plan{}, nil, &NotNativeModelError{SuggestedModels: []string{"brand/image/text-to-image"}}
-		}}
+			return Plan{}, nil, &NotNativeModelError{
+				SuggestedModels: []string{"brand/image/text-to-image"},
+			}
+		},
+	}
 	recorder = httptest.NewRecorder()
 	h.Create(recorder, request(body))
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+
 	var decoded nativeModelErrorBody
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &decoded))
 	require.Equal(t, "native_model_unavailable", decoded.Error.Code)

@@ -17,23 +17,34 @@ func TestFalSubmissionDisablesTransportReplayAndRedirect(t *testing.T) {
 	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				w.Header().Set("Location", "/again")
-				w.WriteHeader(status)
-			}))
+
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+
+					w.Header().Set("Location", "/again")
+					w.WriteHeader(status)
+				}),
+			)
 			defer server.Close()
+
 			client := server.Client()
 			transport := client.Transport
 			inspected := 0
 			client.Transport = imageReplayTransport(func(r *http.Request) (*http.Response, error) {
 				inspected++
+
 				require.Equal(t, http.MethodPost, r.Method)
 				require.Nil(t, r.GetBody)
 				r.Header.Set("Idempotency-Key", "test-logical-request")
+
 				return transport.RoundTrip(r)
 			})
-			_, err := (&fal.Client{HTTP: client, BaseURL: server.URL}).Submit(t.Context(), "fal-ai/test", []byte(`{"prompt":"test"}`))
+			_, err := (&fal.Client{HTTP: client, BaseURL: server.URL}).Submit(
+				t.Context(),
+				"fal-ai/test",
+				[]byte(`{"prompt":"test"}`),
+			)
 			require.Error(t, err)
 			require.Equal(t, 1, calls)
 			require.Equal(t, 1, inspected)

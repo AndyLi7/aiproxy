@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private checkedType fixture or implementation.
 package imageprepayment
 
 import (
@@ -21,23 +22,35 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("start companion prepayment-wallet-server.ts loopback fixture")
 	}
+
 	require.True(t, strings.HasPrefix(endpoint, "http://127.0.0.1:"))
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "gateway.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+
 	oldDB, oldBalance := model.LogDB, balance.Default
 	model.LogDB = db
 	balance.Default = balance.NewExternalHTTP(endpoint, "local-d34-test-only")
 	t.Cleanup(func() { model.LogDB = oldDB; balance.Default = oldBalance })
+
 	post := func(path string, value any) json.RawMessage {
 		encoded, err := json.Marshal(value)
 		require.NoError(t, err)
-		req, err := http.NewRequest(http.MethodPost, endpoint+path, bytes.NewReader(encoded))
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			endpoint+path,
+			bytes.NewReader(encoded),
+		)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer local-d34-test-only")
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
 		response, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer response.Body.Close()
+
 		var result struct {
 			Code    int             `json:"code"`
 			Data    json.RawMessage `json:"data"`
@@ -45,11 +58,21 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		}
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&result))
 		require.Equal(t, 0, result.Code, result.Message)
+
 		return result.Data
 	}
 	makeTask := func(id string) *model.ImageTask {
-		task := &model.ImageTask{ID: id, Model: "d34-test", GroupID: "u_u", BillingOperationID: "server-" + id, Status: "submitting", UpstreamModel: "fal-ai/test", PrepaymentQuoteJSON: `{"version":1,"quoteVersion":"reviewed-test-1","currency":"USD","prepaidMicros":600000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":400000,"prepaidMicros":600000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`}
+		task := &model.ImageTask{
+			ID:                  id,
+			Model:               "d34-test",
+			GroupID:             "u_u",
+			BillingOperationID:  "server-" + id,
+			Status:              "submitting",
+			UpstreamModel:       "fal-ai/test",
+			PrepaymentQuoteJSON: `{"version":1,"quoteVersion":"reviewed-test-1","currency":"USD","prepaidMicros":600000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":400000,"prepaidMicros":600000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`,
+		}
 		require.NoError(t, db.Create(task).Error)
+
 		return task
 	}
 	ctx := context.Background()
@@ -62,16 +85,31 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 	claimed, err = Begin(ctx, task, 7, "fal-ai/test", 0)
 	require.NoError(t, err)
 	require.False(t, claimed)
-	task.Attempts = []model.ImageTaskAttempt{{ChannelID: 7, Failure: failover.Failure{Acceptance: failover.Accepted}}}
+
+	task.Attempts = []model.ImageTaskAttempt{
+		{ChannelID: 7, Failure: failover.Failure{Acceptance: failover.Accepted}},
+	}
 	task.UpstreamID = "provider-completed"
 	task.Status = "completed"
 	require.NoError(t, db.Save(task).Error)
 	receipt, err := Sync(ctx, task)
 	require.NoError(t, err)
 	require.Nil(t, receipt.ChargedMicros)
-	post("/_test/bill", map[string]any{"provider": "fal", "requestId": task.UpstreamID, "endpoint": "fal-ai/test", "currency": "USD", "subtotal": "0.3", "total": "0.2"})
-	client := balance.Default.(*balance.ExternalHTTP)
+	post(
+		"/_test/bill",
+		map[string]any{
+			"provider":  "fal",
+			"requestId": task.UpstreamID,
+			"endpoint":  "fal-ai/test",
+			"currency":  "USD",
+			"subtotal":  "0.3",
+			"total":     "0.2",
+		},
+	)
+
+	client := checkedType[*balance.ExternalHTTP](t, balance.Default)
 	require.NoError(t, client.RecoverPrepayments(ctx))
+
 	for range 2 {
 		receipt, err = Sync(ctx, task)
 		require.NoError(t, err)
@@ -91,7 +129,10 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		claimed, err := Begin(ctx, failed, 7, "fal-ai/test", 0)
 		require.NoError(t, err)
 		require.True(t, claimed)
-		failed.Attempts = []model.ImageTaskAttempt{{ChannelID: 7, Failure: failover.Failure{Acceptance: failover.Accepted}}}
+
+		failed.Attempts = []model.ImageTaskAttempt{
+			{ChannelID: 7, Failure: failover.Failure{Acceptance: failover.Accepted}},
+		}
 		failed.UpstreamID = "provider-" + tc.id
 		failed.Status = "failed"
 		failed.Error = &model.ImageTaskError{Code: "invalid_parameters"}
@@ -101,8 +142,19 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 		require.Equal(t, "refunded", receipt.Status)
 		require.NotNil(t, receipt.ChargedMicros)
 		require.Zero(t, *receipt.ChargedMicros)
-		post("/_test/bill", map[string]any{"provider": "fal", "requestId": failed.UpstreamID, "endpoint": "fal-ai/test", "currency": "USD", "subtotal": tc.total, "total": tc.total})
+		post(
+			"/_test/bill",
+			map[string]any{
+				"provider":  "fal",
+				"requestId": failed.UpstreamID,
+				"endpoint":  "fal-ai/test",
+				"currency":  "USD",
+				"subtotal":  tc.total,
+				"total":     tc.total,
+			},
+		)
 		require.NoError(t, client.RecoverPrepayments(ctx))
+
 		for range 2 {
 			receipt, err = Sync(ctx, failed)
 			require.NoError(t, err)
@@ -111,6 +163,7 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 			require.Zero(t, *receipt.ChargedMicros, "a late bill never charges a failed task")
 		}
 	}
+
 	unknown := makeTask("unknown-case")
 	require.NoError(t, Admit(ctx, unknown, 7, model.UsageIdentity{}))
 	claimed, err = Begin(ctx, unknown, 7, "fal-ai/test", 0)
@@ -122,16 +175,19 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "refunded", receipt.Status)
 	require.Equal(t, "failed", unknown.Status)
+
 	var rows []struct {
 		RequestID string `json:"request_id"`
 		Amount    int64  `json:"amount_micros"`
 	}
 	require.NoError(t, json.Unmarshal(post("/_test/ledger", nil), &rows))
+
 	for _, tc := range []struct {
 		id  string
 		net int64
 	}{{"server-completed-case", -300000}, {"server-unknown-case", 0}, {"server-invalid-free", 0}, {"server-failed-billed", 0}} {
 		count := 0
+
 		net := int64(0)
 		for _, row := range rows {
 			if row.RequestID == "prepay:"+tc.id || row.RequestID == "prepay-refund:"+tc.id {
@@ -139,6 +195,7 @@ func TestRealWalletPrepaymentLifecycle(t *testing.T) {
 				net += row.Amount
 			}
 		}
+
 		require.Equal(t, 2, count)
 		require.Equal(t, tc.net, net)
 	}

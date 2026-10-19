@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private pollStub fixture or implementation.
 package nativetask
 
 import (
@@ -6,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -26,19 +28,32 @@ type cancelPoller struct {
 func (p *cancelPoller) CancelNative(_ context.Context, endpoint, id string) (string, error) {
 	p.cancels = append(p.cancels, endpoint+"|"+id)
 	if p.wallet != nil {
-		p.refundedBeforeCancel = append(p.refundedBeforeCancel, refundedWith(p.wallet, "platform_failure"))
+		p.refundedBeforeCancel = append(
+			p.refundedBeforeCancel,
+			refundedWith(p.wallet, "platform_failure"),
+		)
 	}
+
 	if p.cancelErr != nil {
 		return "", p.cancelErr
 	}
+
 	return "cancellation_requested", nil
 }
 
 // acceptedAgo moves the acceptance time of task "req" into the past.
 func acceptedAgo(t *testing.T, e *Engine, age time.Duration) time.Time {
 	t.Helper()
+
 	now := time.Now()
-	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("created_at", now.Add(-age)).Error)
+	require.NoError(
+		t,
+		e.DB.Model(&model.NativeTask{}).
+			Where("id = ?", "req").
+			Update("created_at", now.Add(-age)).
+			Error,
+	)
+
 	return now
 }
 
@@ -50,17 +65,20 @@ func walletActions(w *walletStub) []string {
 		if c.Outcome != nil {
 			action += ":" + c.Outcome.Kind + "/" + c.Outcome.Reason
 		}
+
 		actions = append(actions, action)
 	}
+
 	return actions
 }
 
 func lastIndex(actions []string, want string) int {
-	for i := len(actions) - 1; i >= 0; i-- {
-		if actions[i] == want {
+	for i, action := range slices.Backward(actions) {
+		if action == want {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -71,6 +89,7 @@ func countAction(actions []string, want string) int {
 			n++
 		}
 	}
+
 	return n
 }
 
@@ -79,12 +98,19 @@ func countAction(actions []string, want string) int {
 // would open a window for an actual-cost charge) and nothing delivered.
 func requireTimeoutRefund(t *testing.T, w *walletStub) {
 	t.Helper()
+
 	actions := walletActions(w)
 	settle := lastIndex(actions, "settle:failed/platform_failure")
 	require.NotEqual(t, -1, settle, "the hold must be refunded in full: %v", actions)
 	require.Equal(t, 1, countAction(actions, "settle:failed/platform_failure"), "%v", actions)
-	require.Zero(t, countAction(actions, "execution_finished"), "a timeout refunds in one call: %v", actions)
+	require.Zero(
+		t,
+		countAction(actions, "execution_finished"),
+		"a timeout refunds in one call: %v",
+		actions,
+	)
 	require.Zero(t, countAction(actions, "delivered"), "%v", actions)
+
 	for _, a := range actions {
 		require.NotContains(t, a, "generation_timeout", "the wallet reason stays platform_failure")
 	}
@@ -113,6 +139,7 @@ func TestGenerationDeadlineFailsRefundsAndCancelsWhateverThePollReturns(t *testi
 			require.NoError(t, err)
 			require.Equal(t, 1, report.Expired)
 			require.Equal(t, 1, poll.calls, "the provider is polled once more before expiry")
+
 			task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, "failed", task.Status)
@@ -120,7 +147,12 @@ func TestGenerationDeadlineFailsRefundsAndCancelsWhateverThePollReturns(t *testi
 			require.NotEmpty(t, task.BillingReceiptJSON)
 			requireTimeoutRefund(t, w)
 			require.Equal(t, []string{"fal-ai/vector/model|upstream-1"}, poll.cancels)
-			require.Equal(t, []bool{true}, poll.refundedBeforeCancel, "cancel never delays the refund")
+			require.Equal(
+				t,
+				[]bool{true},
+				poll.refundedBeforeCancel,
+				"cancel never delays the refund",
+			)
 		})
 	}
 }
@@ -132,8 +164,17 @@ func TestGenerationDeadlineCancelFailureNeverBlocksRefund(t *testing.T) {
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
 	now := acceptedAgo(t, e, 20*time.Minute)
-	poll := &cancelPoller{pollStub: pollStub{result: nativeresult.PollResult{Status: "running"}}, cancelErr: errors.New("fal returned HTTP 500")}
-	_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+	poll := &cancelPoller{
+		pollStub:  pollStub{result: nativeresult.PollResult{Status: "running"}},
+		cancelErr: errors.New("fal returned HTTP 500"),
+	}
+	_, err = e.RecoverOnce(
+		ctx,
+		"worker",
+		now,
+		func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+		nil,
+	)
 	require.NoError(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
@@ -174,8 +215,21 @@ func TestGenerationDeadlineDeliversResultFoundAtTheDeadline(t *testing.T) {
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
 	now := acceptedAgo(t, e, model.AsyncGenerationDeadline+time.Minute)
-	poll := &cancelPoller{pollStub: pollStub{result: nativeresult.PollResult{Status: "result_received", Output: json.RawMessage(`{"labels":[]}`)}}}
-	_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+	poll := &cancelPoller{
+		pollStub: pollStub{
+			result: nativeresult.PollResult{
+				Status: "result_received",
+				Output: json.RawMessage(`{"labels":[]}`),
+			},
+		},
+	}
+	_, err = e.RecoverOnce(
+		ctx,
+		"worker",
+		now,
+		func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+		nil,
+	)
 	require.NoError(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
@@ -195,7 +249,13 @@ func TestGenerationDeadlineSkipsReceivedResults(t *testing.T) {
 	now := acceptedAgo(t, e, time.Hour)
 	w.fail = "execution_finished" // delivery cannot finish yet
 	poll := &cancelPoller{}
-	_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+	_, err = e.RecoverOnce(
+		ctx,
+		"worker",
+		now,
+		func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+		nil,
+	)
 	require.NoError(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
@@ -219,7 +279,13 @@ func TestGenerationDeadlineSchedulesAPollAtTheDeadline(t *testing.T) {
 			require.NoError(t, err)
 			now := acceptedAgo(t, e, model.AsyncGenerationDeadline-30*time.Second)
 			poll := &cancelPoller{pollStub: stub}
-			_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+			_, err = e.RecoverOnce(
+				ctx,
+				"worker",
+				now,
+				func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+				nil,
+			)
 			require.NoError(t, err)
 			task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 			require.NoError(t, err)
@@ -229,7 +295,12 @@ func TestGenerationDeadlineSchedulesAPollAtTheDeadline(t *testing.T) {
 			// Claimable only once the deadline has passed, and no later than ~2s after.
 			require.Greater(t, task.NextRecoveryAt, now.Add(30*time.Second).Unix()-1)
 			require.LessOrEqual(t, task.NextRecoveryAt, now.Add(32*time.Second).Unix())
-			require.True(t, time.Unix(task.NextRecoveryAt, 0).After(task.CreatedAt.Add(model.AsyncGenerationDeadline)), "never claimed before the deadline, which would re-poll in a loop")
+			require.True(
+				t,
+				time.Unix(task.NextRecoveryAt, 0).
+					After(task.CreatedAt.Add(model.AsyncGenerationDeadline)),
+				"never claimed before the deadline, which would re-poll in a loop",
+			)
 		})
 	}
 }
@@ -245,11 +316,19 @@ func TestGenerationDeadlineIsIdempotentAcrossWorkers(t *testing.T) {
 	expired, err := model.ExpireNativeGeneration(e.DB, "req", "g", 1, now)
 	require.NoError(t, err)
 	require.True(t, expired)
+
 	again, err := model.ExpireNativeGeneration(e.DB, "req", "g", 1, now)
 	require.NoError(t, err)
 	require.False(t, again)
+
 	poll := &cancelPoller{}
-	_, err = e.RecoverOnce(ctx, "worker", now, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+	_, err = e.RecoverOnce(
+		ctx,
+		"worker",
+		now,
+		func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+		nil,
+	)
 	require.NoError(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
@@ -272,6 +351,7 @@ func TestExpireNativeGenerationRefusesTasksBeforeTheDeadline(t *testing.T) {
 	expired, err = model.ExpireNativeGeneration(e.DB, "req", "other", 1, now.Add(time.Hour))
 	require.NoError(t, err)
 	require.False(t, expired, "another group's task is never touched")
+
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "queued", task.Status)
@@ -295,7 +375,11 @@ func TestGenerationDeadlineAndResultAreMutuallyExclusive(t *testing.T) {
 	expired, err = model.ExpireNativeGeneration(e2.DB, "req", "g", 1, now)
 	require.NoError(t, err)
 	require.True(t, expired)
-	require.ErrorIs(t, model.SaveNativeTaskResult(e2.DB, "req", "g", 1, []byte(`{"labels":[]}`)), model.ErrNativeTaskConflict)
+	require.ErrorIs(
+		t,
+		model.SaveNativeTaskResult(e2.DB, "req", "g", 1, []byte(`{"labels":[]}`)),
+		model.ErrNativeTaskConflict,
+	)
 }
 
 // A timed-out task that recovery left unsettled is refunded by any later sync.
@@ -304,33 +388,69 @@ func TestSyncBillingRefundsGenerationTimeout(t *testing.T) {
 	ctx := context.Background()
 	_, err := e.Submit(ctx, "req", "g", 1, body, plan)
 	require.NoError(t, err)
-	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Updates(map[string]any{"status": "failed", "error_code": model.AsyncGenerationTimeoutCode}).Error)
+	require.NoError(
+		t,
+		e.DB.Model(&model.NativeTask{}).
+			Where("id = ?", "req").
+			Updates(map[string]any{"status": "failed", "error_code": model.AsyncGenerationTimeoutCode}).
+			Error,
+	)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
+
 	w.commands = nil
+
 	require.NoError(t, e.SyncBilling(ctx, task))
-	require.Equal(t, []string{"accept_attempt", "settle:failed/platform_failure", "get"}, walletActions(w))
+	require.Equal(
+		t,
+		[]string{"accept_attempt", "settle:failed/platform_failure", "get"},
+		walletActions(w),
+	)
 }
 
 // Customers see a terminal failure with the owner-approved explanation.
 func TestGenerationTimeoutPublicError(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	WritePublic(recorder, http.StatusOK, &model.NativeTask{ID: "req", Model: "m", Status: "failed", ErrorCode: "generation_timeout"})
+	WritePublic(
+		recorder,
+		http.StatusOK,
+		&model.NativeTask{ID: "req", Model: "m", Status: "failed", ErrorCode: "generation_timeout"},
+	)
+
 	var got struct {
 		Status string `json:"status"`
-		Error  struct{ Code, Message string }
+		Error  struct {
+			Code    string `json:"Code"`
+			Message string `json:"Message"`
+		} `json:"Error"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &got))
 	require.Equal(t, "failed", got.Status)
 	require.Equal(t, "generation_timeout", got.Error.Code)
-	require.Equal(t, "The provider did not finish this task within 15 minutes, so it was stopped. You were not charged; submit a new task with a new X-Request-Id.", got.Error.Message)
+	require.Equal(
+		t,
+		"The provider did not finish this task within 15 minutes, so it was stopped. You were not charged; submit a new task with a new X-Request-Id.",
+		got.Error.Message,
+	)
 }
 
 // The clock starts when the provider accepts the task, not when the request
 // ID was first reserved (a resumed reservation can be hours old).
 func TestGenerationClockStartsAtAcceptance(t *testing.T) {
 	e, plan, _, _ := setup(t)
-	_, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: "req", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp", OutputSchema: `{}`, FrozenContract: string(plan.Contract), BillingOperationID: "native:req"})
+	_, _, err := model.ReserveNativeTask(
+		e.DB,
+		model.NativeTask{
+			ID:                 "req",
+			GroupID:            "g",
+			TokenID:            1,
+			Model:              "m",
+			Fingerprint:        "fp",
+			OutputSchema:       `{}`,
+			FrozenContract:     string(plan.Contract),
+			BillingOperationID: "native:req",
+		},
+	)
 	require.NoError(t, err)
 	acceptedAgo(t, e, 3*time.Hour)
 	require.NoError(t, model.AcceptNativeTask(e.DB, "req", "g", 1, "upstream-1"))

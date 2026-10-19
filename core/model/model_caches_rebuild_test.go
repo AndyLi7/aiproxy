@@ -26,12 +26,25 @@ func useCacheRebuildDB(t *testing.T) (*gorm.DB, *Channel) {
 	DB = db
 	t.Cleanup(func() {
 		DB = previousDB
+
 		modelCaches.Store(previousCaches)
 		require.NoError(t, sqlDB.Close())
 	})
+	// A coherent cache read now holds a read transaction. WAL lets this test
+	// commit the writer while that old snapshot remains paused, preserving its
+	// original overwrite race. Production DSNs are unchanged.
+	require.NoError(t, db.Exec("PRAGMA journal_mode=WAL").Error)
 	require.NoError(t, db.AutoMigrate(&Channel{}, &ModelConfig{}))
-	require.NoError(t, db.Create(&ModelConfig{Model: rebuildTestModel, Type: mode.NativeTasks}).Error)
-	channel := &Channel{Name: "rebuild", Type: ChannelTypeFal, Key: "k", Models: []string{rebuildTestModel}}
+	require.NoError(
+		t,
+		db.Create(&ModelConfig{Model: rebuildTestModel, Type: mode.NativeTasks}).Error,
+	)
+	channel := &Channel{
+		Name:   "rebuild",
+		Type:   ChannelTypeFal,
+		Key:    "k",
+		Models: []string{rebuildTestModel},
+	}
 	require.NoError(t, db.Create(channel).Error)
 	require.NoError(t, InitModelConfigAndChannelCache())
 
@@ -60,42 +73,64 @@ func TestCacheRebuildStartedBeforeWriteCannotOverwriteIt(t *testing.T) {
 		armed       atomic.Bool
 		channelRead atomic.Int64
 	)
+
 	reached, release := make(chan struct{}), make(chan struct{})
-	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:hold_channel_read", func(tx *gorm.DB) {
-		if tx.Statement.Table != "channels" {
-			return
-		}
-		channelRead.Add(1)
-		if armed.CompareAndSwap(true, false) {
-			close(reached)
-			<-release
-		}
-	}))
+	require.NoError(
+		t,
+		db.Callback().
+			Query().
+			After("gorm:query").
+			Register("test:hold_channel_read", func(tx *gorm.DB) {
+				if tx.Statement.Table != "channels" {
+					return
+				}
+
+				channelRead.Add(1)
+
+				if armed.CompareAndSwap(true, false) {
+					close(reached)
+					<-release
+				}
+			}),
+	)
 
 	// The ticker rebuild reads the channel while it is still enabled, then stalls.
 	armed.Store(true)
+
 	ticker := make(chan error, 1)
 	go func() { ticker <- InitModelConfigAndChannelCache() }()
+
 	<-reached
 
 	// The retire commits and rebuilds.
 	retire := make(chan error, 1)
 	go func() { retire <- UpdateChannelStatusByID(channel.ID, ChannelStatusDisabled) }()
+
 	require.Eventually(t, func() bool {
 		stored, err := GetChannelByID(channel.ID)
 		return err == nil && stored.Status == ChannelStatusDisabled
 	}, 5*time.Second, 5*time.Millisecond)
 	// Give an unserialized rebuild the chance to finish first (it must not).
 	reads := channelRead.Load()
+
 	time.Sleep(100 * time.Millisecond)
-	require.Equal(t, reads, channelRead.Load(), "the retire's rebuild ran while another rebuild was in progress")
+	require.Equal(
+		t,
+		reads,
+		channelRead.Load(),
+		"the retire's rebuild ran while another rebuild was in progress",
+	)
 
 	close(release)
 	require.NoError(t, <-ticker)
 	require.NoError(t, <-retire)
 
 	caches := LoadModelCaches()
-	require.False(t, cachedChannelEnabled(caches, channel.ID), "an older rebuild overwrote the retire")
+	require.False(
+		t,
+		cachedChannelEnabled(caches, channel.ID),
+		"an older rebuild overwrote the retire",
+	)
 	require.Equal(t, ChannelStatusDisabled, caches.ChannelsByID[channel.ID].Status)
 	require.Equal(t, start+2, caches.Version)
 	require.False(t, caches.BuiltAt.IsZero())
@@ -111,10 +146,13 @@ func TestConcurrentCacheRebuildsAreSerialized(t *testing.T) {
 		rebuilds atomic.Uint64
 		wg       sync.WaitGroup
 	)
+
 	stop := make(chan struct{})
+
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
+
 		last := LoadModelCaches().Version
 		for {
 			select {
@@ -122,19 +160,19 @@ func TestConcurrentCacheRebuildsAreSerialized(t *testing.T) {
 				return
 			default:
 			}
+
 			current := LoadModelCaches().Version
 			if current < last {
 				t.Errorf("cache version went back from %d to %d", last, current)
 				return
 			}
+
 			last = current
 		}
 	}()
 
 	for worker := range 6 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 10 {
 				if worker%2 == 0 {
 					if err := InitModelConfigAndChannelCache(); err != nil {
@@ -146,15 +184,18 @@ func TestConcurrentCacheRebuildsAreSerialized(t *testing.T) {
 					if i%2 == 0 {
 						status = ChannelStatusDisabled
 					}
+
 					if err := UpdateChannelStatusByID(channel.ID, status); err != nil {
 						t.Errorf("status write: %v", err)
 						return
 					}
 				}
+
 				rebuilds.Add(1)
 			}
-		}()
+		})
 	}
+
 	wg.Wait()
 	close(stop)
 	<-readerDone

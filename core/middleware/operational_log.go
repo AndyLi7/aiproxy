@@ -251,6 +251,7 @@ func recordRejectedGatewayLog(c *gin.Context) error {
 			entry.RequestDetail = detail
 		}
 	}
+
 	return recordOperationalLog(entry)
 }
 

@@ -24,16 +24,23 @@ const (
 // application's USD formatter.
 func MicrosText(m int64) string {
 	sign := ""
-	magnitude := uint64(m)
+
+	var magnitude uint64
 	if m < 0 {
 		sign = "-"
+		// #nosec G115 -- m is negative; -(m+1) is nonnegative, including MinInt64, so this conversion preserves its magnitude.
 		magnitude = uint64(-(m + 1)) + 1
+	} else {
+		magnitude = uint64(m)
 	}
+
 	whole, fraction := magnitude/microsPerUSD, magnitude%microsPerUSD
+
 	decimals := strings.TrimRight(strconv.FormatUint(fraction+microsPerUSD, 10)[1:], "0")
 	for len(decimals) < 2 {
 		decimals += "0"
 	}
+
 	return sign + "$" + groupThousands(strconv.FormatUint(whole, 10)) + "." + decimals
 }
 
@@ -41,16 +48,20 @@ func groupThousands(digits string) string {
 	if len(digits) <= 3 {
 		return digits
 	}
+
 	head := len(digits) % 3
 	if head == 0 {
 		head = 3
 	}
+
 	var b strings.Builder
 	b.WriteString(digits[:head])
+
 	for i := head; i < len(digits); i += 3 {
 		b.WriteByte(',')
 		b.WriteString(digits[i : i+3])
 	}
+
 	return b.String()
 }
 
@@ -65,6 +76,7 @@ func OwedText(balanceUSD float64) string {
 	// Wallet amounts are safe integers of micro-USD; clamp before converting.
 	owedMicros = math.Min(owedMicros, maxSafeMicros)
 	cents := int64(math.Ceil(owedMicros / microsPerCent))
+
 	return MicrosText(cents * microsPerCent)
 }
 
@@ -76,5 +88,6 @@ func NegativeBalanceMessage(balanceUSD float64) string {
 	if owed == subCentOwedText {
 		return "Your balance is below zero (" + subCentOwedText + " owed). " + negativeBalanceAdvice
 	}
+
 	return "Your balance is below zero (-" + owed + "). " + negativeBalanceAdvice
 }

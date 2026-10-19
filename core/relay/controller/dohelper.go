@@ -17,6 +17,7 @@ import (
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/conv"
 	"github.com/labring/aiproxy/core/common/failover"
+	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
 	relaymodel "github.com/labring/aiproxy/core/relay/model"
@@ -104,6 +105,43 @@ func DoHelper(
 	*BodyDetail,
 	adaptor.Error,
 ) {
+	execution, admissionErr := admitRelayAttempt(c, meta)
+	if admissionErr != nil {
+		return adaptor.DoResponseResult{}, &BodyDetail{}, admissionErr
+	}
+	// A panic/crash never reaches RecordReturn. The inner helper's deferred
+	// response-body cleanup runs before recording the invocation's return.
+	result, detail, relayErr := doAdmittedHelper(a, c, meta, store, opts...)
+	if execution != nil {
+		state := model.RelayExecutionReturned
+		if result.AsyncUsage {
+			state = model.RelayExecutionAsyncReturned
+		}
+
+		if relayErr != nil {
+			state = model.RelayExecutionErrorReturned
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := execution.RecordReturn(ctx, state)
+
+		cancel()
+
+		if err != nil {
+			common.GetLogger(c).Warn("relay execution return not persisted; admission retained")
+		}
+	}
+
+	return result, detail, relayErr
+}
+
+func doAdmittedHelper(
+	a adaptor.Adaptor,
+	c *gin.Context,
+	meta *meta.Meta,
+	store adaptor.Store,
+	opts ...BodyDetailOption,
+) (adaptor.DoResponseResult, *BodyDetail, adaptor.Error) {
 	detail := BodyDetail{}
 	detailOption := mergeBodyDetailOptions(opts...)
 
@@ -315,20 +353,27 @@ func doRequest(
 	req *http.Request,
 ) (*http.Response, adaptor.Error) {
 	traceCtx, classify := failover.TraceTransport(req.Context())
+
 	req = req.WithContext(traceCtx)
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		// Do not let Transport or 307/308 redirects replay generation bodies.
 		req.GetBody = nil
 	}
+
 	value, _ := c.Get(failover.AttemptContextKey)
 	evidence, _ := value.(*failover.Attempt)
 	evidence.BeginCall()
+
 	resp, err := a.DoRequest(meta, store, c, req)
 	if resp != nil {
 		evidence.Observe(failover.Failure{Acceptance: failover.Unknown})
 	}
+
 	if err != nil {
-		return nil, adaptor.WithFailover(mapRequestError(meta, err, http.StatusInternalServerError, "request error"), evidence.Observe(classify(err)))
+		return nil, adaptor.WithFailover(
+			mapRequestError(meta, err, http.StatusInternalServerError, "request error"),
+			evidence.Observe(classify(err)),
+		)
 	}
 
 	return resp, nil

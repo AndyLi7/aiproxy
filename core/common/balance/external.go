@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/model"
 	gcache "github.com/patrickmn/go-cache"
 	log "github.com/sirupsen/logrus"
@@ -303,8 +304,8 @@ func (e *ExternalHTTP) getRemainBalance(ctx context.Context, group string) (floa
 
 		lastErr = err
 
-		if ctx.Err() != nil {
-			break
+		if err := actionguard.Check(ctx); err != nil {
+			return 0, err
 		}
 	}
 
@@ -352,10 +353,15 @@ func (e *ExternalHTTP) fetchBalanceFromAPI(ctx context.Context, group string) (f
 
 	req.Header.Set("Authorization", "Bearer "+e.key)
 
-	resp, err := externalHTTPClient.Do(req)
+	if err := actionguard.Check(ctx); err != nil {
+		return 0, err
+	}
+
+	resp, err := actionguard.DoHTTP(externalHTTPClient, req)
 	if err != nil {
 		return 0, err
 	}
+
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
@@ -432,8 +438,8 @@ func (c *ExternalPostGroupConsumer) PostGroupConsume(
 
 		lastErr = err
 
-		if ctx.Err() != nil {
-			break
+		if err := actionguard.Check(ctx); err != nil {
+			return 0, err
 		}
 	}
 
@@ -479,10 +485,15 @@ func (e *ExternalHTTP) postConsume(
 	req.Header.Set("Authorization", "Bearer "+e.key)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := externalHTTPClient.Do(req)
+	if err := actionguard.Check(ctx); err != nil {
+		return 0, err
+	}
+
+	resp, err := actionguard.DoHTTP(externalHTTPClient, req)
 	if err != nil {
 		return 0, err
 	}
+
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()

@@ -141,11 +141,17 @@ func TestMeasuredRetryWritesOneCallRow(t *testing.T) {
 	t.Cleanup(func() { model.LogDB = old })
 
 	oldRetryHours := config.GetRetryLogStorageHours()
+
 	config.SetRetryLogStorageHours(24)
 	t.Cleanup(func() { config.SetRetryLogStorageHours(oldRetryHours) })
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/generations", nil)
+	c.Request = httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/images/generations",
+		nil,
+	)
 
 	price := model.Price{
 		OutputPrice:     1,
@@ -161,6 +167,7 @@ func TestMeasuredRetryWritesOneCallRow(t *testing.T) {
 			Token:       model.TokenCache{ID: 3, Name: "prod"},
 			Channel:     meta.ChannelMeta{ID: channelID},
 		}
+
 		result := &relaycontroller.HandleResult{
 			UsageContext: model.UsageContext{ImageUsage: &model.ImageUsage{
 				Version:  1,
@@ -170,7 +177,11 @@ func TestMeasuredRetryWritesOneCallRow(t *testing.T) {
 			}},
 		}
 		if failure != nil {
-			result.Error = relaymodel.WrapperOpenAIError(failure, "upstream_failed", http.StatusBadGateway)
+			result.Error = relaymodel.WrapperOpenAIError(
+				failure,
+				"upstream_failed",
+				http.StatusBadGateway,
+			)
 		}
 
 		recordResult(c, m, price, result, channelID-1, downstream, nil)

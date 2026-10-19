@@ -1,15 +1,18 @@
+//nolint:testpackage // White-box coverage needs the package-private trialProvider fixture or implementation.
 package controller
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,16 +32,26 @@ import (
 func TestNativePrivateTrialApplicationFlow(t *testing.T) {
 	for _, image := range []bool{false, true} {
 		for _, actualCost := range []bool{false, true} {
-			t.Run(fmt.Sprintf("image-priced-%t-actual-cost-%t", image, actualCost), func(t *testing.T) { runNativePrivateApplicationFlow(t, image, actualCost, false) })
+			t.Run(
+				fmt.Sprintf("image-priced-%t-actual-cost-%t", image, actualCost),
+				func(t *testing.T) { runNativePrivateApplicationFlow(t, image, actualCost, false) },
+			)
 		}
 	}
+
 	for _, image := range []bool{false, true} {
-		t.Run(fmt.Sprintf("historical-image-%t", image), func(t *testing.T) { runNativePrivateApplicationFlow(t, image, true, true) })
-	}
-	for _, image := range []bool{false, true} {
-		t.Run(fmt.Sprintf("platform-image-%t", image), func(t *testing.T) { runNativePrivateApplicationFlow(t, image, true, false, true) })
+		t.Run(
+			fmt.Sprintf("historical-image-%t", image),
+			func(t *testing.T) { runNativePrivateApplicationFlow(t, image, true, true) },
+		)
 	}
 
+	for _, image := range []bool{false, true} {
+		t.Run(
+			fmt.Sprintf("platform-image-%t", image),
+			func(t *testing.T) { runNativePrivateApplicationFlow(t, image, true, false, true) },
+		)
+	}
 }
 
 type applicationTrialProvider struct {
@@ -46,16 +59,29 @@ type applicationTrialProvider struct {
 	upstreamID string
 }
 
-func (p *applicationTrialProvider) SubmitNative(ctx context.Context, endpoint string, input []byte) (string, error) {
+func (p *applicationTrialProvider) SubmitNative(
+	ctx context.Context,
+	endpoint string,
+	input []byte,
+) (string, error) {
 	_, err := p.trialProvider.SubmitNative(ctx, endpoint, input)
 	return p.upstreamID, err
 }
-func runNativePrivateApplicationFlow(t *testing.T, image, actualCost, historical bool, platform ...bool) {
+
+func runNativePrivateApplicationFlow(
+	t *testing.T,
+	image, actualCost, historical bool,
+	platform ...bool,
+) {
+	t.Helper()
+
 	platformReserve := len(platform) > 0 && platform[0]
+
 	appRoot, walletURL := os.Getenv("NATIVE_TEST_APP_ROOT"), os.Getenv("D34_TEST_WALLET_URL")
 	if appRoot == "" || walletURL == "" {
 		t.Skip("requires disposable application runner")
 	}
+
 	require.True(t, strings.HasPrefix(walletURL, "http://127.0.0.1:"))
 	database, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native-private.db"))
 	require.NoError(t, err)
@@ -63,9 +89,21 @@ func runNativePrivateApplicationFlow(t *testing.T, image, actualCost, historical
 	conn, err := database.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	engine := &nativetask.Engine{DB: database, Wallet: balance.NewExternalHTTP(walletURL, "local-d34-test-only")}
-	provider := &applicationTrialProvider{upstreamID: fmt.Sprintf("private-upstream-%t-%t-%t", image, actualCost, historical)}
-	channel := &model.Channel{ID: 9, Type: model.ChannelTypeFal, Status: model.ChannelStatusDisabled, Key: "trial-secret", BaseURL: "https://queue.fal.run"}
+
+	engine := &nativetask.Engine{
+		DB:     database,
+		Wallet: balance.NewExternalHTTP(walletURL, "local-d34-test-only"),
+	}
+	provider := &applicationTrialProvider{
+		upstreamID: fmt.Sprintf("private-upstream-%t-%t-%t", image, actualCost, historical),
+	}
+	channel := &model.Channel{
+		ID:      9,
+		Type:    model.ChannelTypeFal,
+		Status:  model.ChannelStatusDisabled,
+		Key:     "trial-secret",
+		BaseURL: "https://queue.fal.run",
+	}
 	deps := nativeTrialDependencies{
 		engine: func() (*nativetask.Engine, bool) { return engine, true },
 		token: func(id int) (*model.Token, error) {
@@ -80,6 +118,7 @@ func runNativePrivateApplicationFlow(t *testing.T, image, actualCost, historical
 	oldKey := config.AdminKey
 	config.AdminKey = "private-admin-test"
 	t.Cleanup(func() { config.AdminKey = oldKey })
+
 	router := gin.New()
 	api := router.Group("/api", middleware.AdminAuth)
 	api.POST("/native-trials/:group/:token", deps.create)
@@ -89,35 +128,53 @@ func runNativePrivateApplicationFlow(t *testing.T, image, actualCost, historical
 	api.POST("/_test/complete/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		result := []byte(`{"text":"isolated native result","seed":9007199254740993}`)
+
 		var archive nativetask.ArchiveFunc
 		if image {
-			result = []byte(`{"image":{"url":"https://provider.example/vector.svg"},"seed":9007199254740993}`)
+			result = []byte(
+				`{"image":{"url":"https://provider.example/vector.svg"},"seed":9007199254740993}`,
+			)
 			if actualCost {
-				result = []byte(`{"images":[{"url":"https://provider.example/vector.svg"}],"seed":9007199254740993}`)
+				result = []byte(
+					`{"images":[{"url":"https://provider.example/vector.svg"}],"seed":9007199254740993}`,
+				)
 			}
+
 			base := os.Getenv("NATIVE_ARTIFACT_TEST_URL")
 			if !strings.HasPrefix(base, "http://127.0.0.1:") {
 				c.Status(500)
 				return
 			}
+
 			archive = func(ctx context.Context, task string, index int, source string) (ownedartifact.Receipt, error) {
 				var empty ownedartifact.Receipt
 				if source != "https://provider.example/vector.svg" {
-					return empty, fmt.Errorf("unexpected test source")
+					return empty, errors.New("unexpected test source")
 				}
-				req, err := http.NewRequestWithContext(ctx, "POST", base+"/api/internal/media/files", bytes.NewBufferString("<svg>isolated</svg>"))
+
+				// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+				req, err := http.NewRequestWithContext(
+					ctx,
+					http.MethodPost,
+					base+"/api/internal/media/files",
+					bytes.NewBufferString("<svg>isolated</svg>"),
+				)
 				if err != nil {
 					return empty, err
 				}
+
 				req.Header.Set("Authorization", "Bearer local-native-test-only")
 				req.Header.Set("Content-Type", "application/octet-stream")
-				req.Header.Set("X-Native-Task-ID", task)
-				req.Header.Set("X-Native-Artifact-Index", fmt.Sprint(index))
+				req.Header.Set("X-Native-Task-Id", task)
+				req.Header.Set("X-Native-Artifact-Index", strconv.Itoa(index))
+
+				// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
 				response, err := http.DefaultClient.Do(req)
 				if err != nil {
 					return empty, err
 				}
 				defer response.Body.Close()
+
 				var stored struct {
 					Code int                   `json:"code"`
 					Data ownedartifact.Receipt `json:"data"`
@@ -125,29 +182,55 @@ func runNativePrivateApplicationFlow(t *testing.T, image, actualCost, historical
 				if err := json.NewDecoder(response.Body).Decode(&stored); err != nil {
 					return empty, err
 				}
-				if response.StatusCode != 200 || stored.Code != 0 || !ownedartifact.ValidReceipt(task, index, stored.Data) {
-					return empty, fmt.Errorf("invalid isolated archive receipt")
+
+				if response.StatusCode != http.StatusOK || stored.Code != 0 ||
+					!ownedartifact.ValidReceipt(task, index, stored.Data) {
+					return empty, errors.New("invalid isolated archive receipt")
 				}
+
 				return stored.Data, nil
 			}
 		}
+
 		if err := model.SaveNativeTaskResult(database, id, "u_u", 7, result); err != nil {
 			c.Status(500)
 			return
 		}
+
 		if _, err := engine.Deliver(c.Request.Context(), id, "u_u", 7, archive); err != nil {
 			c.Status(500)
 			return
 		}
+
 		c.JSON(200, gin.H{"success": true, "data": true})
 	})
+
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", "--import", "tsx", "tests/fixtures/native-admin-trial-client.ts")
+
+	cmd := exec.CommandContext(
+		ctx,
+		"node",
+		"--import",
+		"tsx",
+		"tests/fixtures/native-admin-trial-client.ts",
+	)
 	cmd.Dir = appRoot
-	cmd.Env = append(os.Environ(), "AIPROXY_BASE_URL="+server.URL, "AIPROXY_ADMIN_KEY=private-admin-test", "NATIVE_PRIVATE_TEST_URL="+server.URL, fmt.Sprintf("NATIVE_PRIVATE_TEST_IMAGE=%t", image), fmt.Sprintf("NATIVE_PRIVATE_TEST_ACTUAL_COST=%t", actualCost), fmt.Sprintf("NATIVE_PRIVATE_TEST_HISTORICAL=%t", historical), "NATIVE_PRIVATE_TEST_UPSTREAM_ID="+provider.upstreamID, fmt.Sprintf("NATIVE_PRIVATE_TEST_PLATFORM=%t", platformReserve))
+
+	cmd.Env = append(
+		os.Environ(),
+		"AIPROXY_BASE_URL="+server.URL,
+		"AIPROXY_ADMIN_KEY=private-admin-test",
+		"NATIVE_PRIVATE_TEST_URL="+server.URL,
+		fmt.Sprintf("NATIVE_PRIVATE_TEST_IMAGE=%t", image),
+		fmt.Sprintf("NATIVE_PRIVATE_TEST_ACTUAL_COST=%t", actualCost),
+		fmt.Sprintf("NATIVE_PRIVATE_TEST_HISTORICAL=%t", historical),
+		"NATIVE_PRIVATE_TEST_UPSTREAM_ID="+provider.upstreamID,
+		fmt.Sprintf("NATIVE_PRIVATE_TEST_PLATFORM=%t", platformReserve),
+	)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	t.Log(string(output))

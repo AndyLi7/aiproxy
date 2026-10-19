@@ -32,7 +32,10 @@ func (panickingConsumer) PostGroupConsume(context.Context, string, float64) (flo
 	panic("balance backend exploded")
 }
 
-func asyncConsumeFixture(t *testing.T, requestID string) (*gorm.DB, *meta.Meta, model.Usage, model.Price) {
+func asyncConsumeFixture(
+	t *testing.T,
+	requestID string,
+) (*gorm.DB, *meta.Meta, model.Usage, model.Price) {
 	t.Helper()
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -99,7 +102,10 @@ func TestAsyncConsumeWaitCoversTheDebitAndLogWrite(t *testing.T) {
 	}
 
 	var count int64
-	require.NoError(t, db.Model(&model.Log{}).Where("request_id = ?", requestMeta.RequestID).Count(&count).Error)
+	require.NoError(
+		t,
+		db.Model(&model.Log{}).Where("request_id = ?", requestMeta.RequestID).Count(&count).Error,
+	)
 	require.Equal(t, int64(1), count, "the log row is written before Wait returns")
 }
 
@@ -109,8 +115,21 @@ func TestAsyncConsumeRecoversPanicInTheConsumingGoroutine(t *testing.T) {
 	_, requestMeta, usage, price := asyncConsumeFixture(t, "async_panic")
 
 	consume.AsyncConsume(
-		panickingConsumer{}, http.StatusOK, time.Now(), requestMeta, usage, model.UsageContext{}, price,
-		"", "127.0.0.1", 0, nil, true, nil, "", model.AsyncUsageStatusNone,
+		panickingConsumer{},
+		http.StatusOK,
+		time.Now(),
+		requestMeta,
+		usage,
+		model.UsageContext{},
+		price,
+		"",
+		"127.0.0.1",
+		0,
+		nil,
+		true,
+		nil,
+		"",
+		model.AsyncUsageStatusNone,
 	)
 
 	done := make(chan struct{})

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -54,28 +55,40 @@ type ImageTaskError struct {
 // ImageTask and its accounting outbox live in LogDB so reservation/activation are atomic.
 // These records are deliberately retained: removing them would permit paid resubmission.
 type ImageTask struct {
+	admissionPreparation *imageAdmissionPreparation
+	imageRecoveryClaim   *imageBillingRecoveryClaim
+	imageSyncPermit      *imageSyncPermit
+	imageSubmitReceipt   *imageSubmitReceipt
+	imageProducer        *imageProducerHandle
+
+	// Server-only transient generation/identity captured by the real admission
+	// path. Persistent authority lives in channel_admission_uses.
+	AdmissionGeneration   string `gorm:"-" json:"-"`
+	AdmissionIdentityHash string `gorm:"-" json:"-"`
+	AdmissionAttempt      string `gorm:"-" json:"-"`
+
 	ProviderMetadata    map[string]json.RawMessage `gorm:"serializer:json;type:text" json:"provider_metadata,omitempty"`
-	NumImages           *int64                     `json:"num_images,omitempty"`
-	SeedExact           string                     `gorm:"type:text" json:"-"`
-	Description         string                     `gorm:"type:text" json:"description,omitempty"`
+	NumImages           *int64                     `                                 json:"num_images,omitempty"`
+	SeedExact           string                     `gorm:"type:text"                 json:"-"`
+	Description         string                     `gorm:"type:text"                 json:"description,omitempty"`
 	Billing             *ImageTaskBilling          `gorm:"serializer:json;type:text" json:"billing,omitempty"`
-	BillingSettled      bool                       `gorm:"not null;default:false" json:"-"`
-	BillingNextCheckAt  *time.Time                 `gorm:"index" json:"-"`
-	PrepaymentQuoteJSON string                     `gorm:"type:text" json:"-"`
-	BillingOperationID  string                     `gorm:"type:varchar(128)" json:"-"`
-	Prompt              string                     `gorm:"type:text" json:"prompt,omitempty"`
-	Seed                *int64                     `json:"seed,omitempty"`
-	BillableUnits       string                     `gorm:"type:text" json:"-"`
-	Phase               string                     `gorm:"-" json:"phase,omitempty"`
-	ResultAvailability  string                     `gorm:"-" json:"result_availability,omitempty"`
-	RequestSummary      string                     `gorm:"-" json:"-"`
-	ArchiveRequired     bool                       `gorm:"not null;default:false" json:"-"`
-	QueuedAt            *time.Time                 `json:"queued_at,omitempty"`
-	RunningAt           *time.Time                 `json:"running_at,omitempty"`
-	ResultReceivedAt    *time.Time                 `json:"result_received_at,omitempty"`
-	CompletedAt         *time.Time                 `json:"completed_at,omitempty"`
-	ResultExpiresAt     *time.Time                 `json:"result_expires_at,omitempty"`
-	RetainUntil         *time.Time                 `json:"retention_guaranteed_until,omitempty"`
+	BillingSettled      bool                       `gorm:"not null;default:false"    json:"-"`
+	BillingNextCheckAt  *time.Time                 `gorm:"index"                     json:"-"`
+	PrepaymentQuoteJSON string                     `gorm:"type:text"                 json:"-"`
+	BillingOperationID  string                     `gorm:"type:varchar(128)"         json:"-"`
+	Prompt              string                     `gorm:"type:text"                 json:"prompt,omitempty"`
+	Seed                *int64                     `                                 json:"seed,omitempty"`
+	BillableUnits       string                     `gorm:"type:text"                 json:"-"`
+	Phase               string                     `gorm:"-"                         json:"phase,omitempty"`
+	ResultAvailability  string                     `gorm:"-"                         json:"result_availability,omitempty"`
+	RequestSummary      string                     `gorm:"-"                         json:"-"`
+	ArchiveRequired     bool                       `gorm:"not null;default:false"    json:"-"`
+	QueuedAt            *time.Time                 `                                 json:"queued_at,omitempty"`
+	RunningAt           *time.Time                 `                                 json:"running_at,omitempty"`
+	ResultReceivedAt    *time.Time                 `                                 json:"result_received_at,omitempty"`
+	CompletedAt         *time.Time                 `                                 json:"completed_at,omitempty"`
+	ResultExpiresAt     *time.Time                 `                                 json:"result_expires_at,omitempty"`
+	RetainUntil         *time.Time                 `                                 json:"retention_guaranteed_until,omitempty"`
 
 	Attempts           []ImageTaskAttempt `gorm:"serializer:json;type:text" json:"-"`
 	RequestModel       string             `gorm:"size:128"                  json:"-"`
@@ -112,6 +125,7 @@ func GetImageTask(id, group string, token int) (*ImageTask, error) {
 // token, so deleting or rotating a key does not hide a completed generation.
 func GetGroupImageTask(id, group string) (*ImageTask, error) {
 	var task ImageTask
+
 	err := LogDB.Where("id = ? AND group_id = ?", id, group).First(&task).Error
 	return &task, err
 }
@@ -121,9 +135,37 @@ func ReserveImageTask(
 	info *AsyncUsageInfo,
 	operational ...OperationalFields,
 ) (*ImageTask, bool, error) {
+	return ReserveImageTaskContext(context.Background(), task, info, operational...)
+}
+
+func ReserveImageTaskContext(
+	ctx context.Context,
+	task *ImageTask,
+	info *AsyncUsageInfo,
+	operational ...OperationalFields,
+) (*ImageTask, bool, error) {
+	saved, created, err := reserveImageTaskWithAdmission(ctx, task, info, operational...)
+	if err == nil && created && saved.RequestSummary != "" {
+		if detailErr := LogDB.WithContext(ctx).
+			Create(&RequestDetail{LogID: info.LogID, RequestBody: saved.RequestSummary}).
+			Error; detailErr != nil {
+			log.WithError(detailErr).
+				WithField("log_id", info.LogID).
+				Warn("save image request summary")
+		}
+	}
+
+	return saved, created, err
+}
+
+func reserveImageTask(
+	database *gorm.DB,
+	task *ImageTask,
+	info *AsyncUsageInfo,
+	operational ...OperationalFields,
+) (*ImageTask, bool, error) {
 	created := false
-	var reservationLogID int
-	err := LogDB.Transaction(func(tx *gorm.DB) error {
+	err := database.Transaction(func(tx *gorm.DB) error {
 		task.Status = "submitting"
 		now := time.Now().UTC()
 		task.CreatedAt = now
@@ -154,12 +196,17 @@ func ReserveImageTask(
 
 		var prior []Log
 		if err := tx.Select("group_id", "token_id", "code", "failure_stage", "channel_id", "upstream_id", "used_amount").
-			Where("request_id = ?", task.ID).Limit(101).Find(&prior).Error; err != nil {
+			Where("request_id = ?", task.ID).
+			Limit(101).
+			Find(&prior).
+			Error; err != nil {
 			return err
 		}
+
 		if len(prior) > 100 {
 			return ErrImageTaskConflict
 		}
+
 		for _, previous := range prior {
 			if !gatewayOnlyImageRejection(previous, task) {
 				return ErrImageTaskConflict
@@ -172,6 +219,7 @@ func ReserveImageTask(
 		if info.UsageAtMs > 0 {
 			requestAt = time.UnixMilli(int64(info.UsageAtMs)).UTC()
 		}
+
 		entry := &Log{
 			RequestID:          EmptyNullString(task.ID),
 			RequestAt:          requestAt,
@@ -195,10 +243,10 @@ func ReserveImageTask(
 			entry.RequestSource = fields.RequestSource
 			entry.Model, entry.Capability = CallLogModel(info.Model, info.Capability, fields)
 		}
+
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
-		reservationLogID = entry.ID
 		// Pending starts only once an upstream id is durably attached. GORM's default
 		// status is pending, so explicitly overwrite it within this transaction.
 		info.ImageTaskID = task.ID
@@ -221,11 +269,6 @@ func ReserveImageTask(
 
 		return nil
 	})
-	if err == nil && created && task.RequestSummary != "" {
-		if detailErr := LogDB.Create(&RequestDetail{LogID: reservationLogID, RequestBody: task.RequestSummary}).Error; detailErr != nil {
-			log.WithError(detailErr).WithField("log_id", reservationLogID).Warn("save image request summary")
-		}
-	}
 
 	return task, created, err
 }
@@ -300,7 +343,20 @@ func UpdateImageTaskCallLog(
 // so the same X-Request-Id and body can be retried after a top-up. A
 // reservation that may have reached a provider is never released.
 func ReleaseImageTaskReservation(id string) error {
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return releaseImageTaskWithAdmission(id, nil)
+}
+
+// ReleaseImageTaskReservationGeneration is for a definite wallet refusal only.
+func ReleaseImageTaskReservationGeneration(task *ImageTask) error {
+	return ReleaseImageTaskReservationGenerationContext(context.Background(), task)
+}
+
+func ReleaseImageTaskReservationGenerationContext(ctx context.Context, task *ImageTask) error {
+	return releaseImageTaskWithAdmissionContext(ctx, task.ID, task)
+}
+
+func releaseImageTaskReservation(database *gorm.DB, id string) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		var task ImageTask
 		if err := tx.First(&task, "id = ?", id).Error; err != nil {
 			return err
@@ -312,20 +368,29 @@ func ReleaseImageTaskReservation(id string) error {
 		}
 
 		var info AsyncUsageInfo
-		if err := tx.First(&info, "id = ? AND image_task_id = ? AND status = ?", task.UsageID, id, AsyncUsageStatusNone).
+		if err := tx.First(
+			&info,
+			"id = ? AND image_task_id = ? AND status = ?",
+			task.UsageID,
+			id,
+			AsyncUsageStatusNone,
+		).
 			Error; err != nil {
 			return err
 		}
 
 		if info.LogID != 0 {
 			if tx.Migrator().HasTable(&RequestDetail{}) {
-				if err := tx.Where("log_id = ?", info.LogID).Delete(&RequestDetail{}).Error; err != nil {
+				if err := tx.Where("log_id = ?", info.LogID).
+					Delete(&RequestDetail{}).
+					Error; err != nil {
 					return err
 				}
 			}
 
 			if err := tx.Where("id = ? AND request_id = ? AND (upstream_id IS NULL OR upstream_id = '')", info.LogID, id).
-				Delete(&Log{}).Error; err != nil {
+				Delete(&Log{}).
+				Error; err != nil {
 				return err
 			}
 		}
@@ -350,9 +415,15 @@ func ReleaseImageTaskReservation(id string) error {
 }
 
 func AcceptImageTask(id, upstream string) error {
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return acceptImageTask(LogDB, id, upstream)
+}
+
+func acceptImageTask(database *gorm.DB, id, upstream string) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		var task ImageTask
-		if err := tx.First(&task, "id = ?", id).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&task, "id = ?", id).
+			Error; err != nil {
 			return err
 		}
 
@@ -364,23 +435,40 @@ func AcceptImageTask(id, upstream string) error {
 			return errors.New("missing upstream id")
 		}
 
-		if err := tx.Model(&task).
-			Updates(map[string]any{"status": "queued", "upstream_id": upstream, "queued_at": gorm.Expr("COALESCE(queued_at, ?)", time.Now().UTC())}).
-			Error; err != nil {
-			return err
+		result := tx.Model(&ImageTask{}).
+			Where("id = ? AND status = ? AND usage_id = ?", id, task.Status, task.UsageID).
+			Updates(map[string]any{"status": "queued", "upstream_id": upstream, "queued_at": gorm.Expr("COALESCE(queued_at, ?)", time.Now().UTC())})
+		if result.Error != nil {
+			return result.Error
 		}
 
-		if err := tx.Model(&Log{}).
-			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
-			Update("upstream_id", upstream).
-			Error; err != nil {
-			return err
+		if result.RowsAffected != 1 {
+			return ErrImageTaskConflict
 		}
 
-		return tx.Model(&AsyncUsageInfo{}).
-			Where("id = ?", task.UsageID).
-			Updates(map[string]any{"status": AsyncUsageStatusPending, "upstream_id": upstream, "next_poll_at": time.Now()}).
-			Error
+		usage := tx.Model(&AsyncUsageInfo{}).
+			Where("id = ? AND image_task_id = ? AND status = ?", task.UsageID, id, AsyncUsageStatusNone).
+			Updates(map[string]any{"status": AsyncUsageStatusPending, "upstream_id": upstream, "next_poll_at": time.Now()})
+		if usage.Error != nil {
+			return usage.Error
+		}
+
+		if usage.RowsAffected != 1 {
+			return ErrImageTaskConflict
+		}
+
+		entry := tx.Model(&Log{}).
+			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("id = ?", task.UsageID)).
+			Update("upstream_id", upstream)
+		if entry.Error != nil {
+			return entry.Error
+		}
+
+		if entry.RowsAffected != 1 {
+			return ErrImageTaskConflict
+		}
+
+		return nil
 	})
 }
 
@@ -421,44 +509,161 @@ func ImageGenerationExpired(task *ImageTask, now time.Time) bool {
 // and a later result is discarded (SetImageTaskResult never leaves failed). The
 // accounting outbox and request log fail in the same commit. expired reports
 // whether this call made the change; only that caller refunds and cancels.
-func ExpireImageGeneration(id string, now time.Time) (bool, error) {
-	encodedError, err := json.Marshal(&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage})
+// The original live claim is required; the token is cleared in this commit,
+// which does not prove any executor has exited or any external refund finished.
+func ExpireImageGeneration(id string, now time.Time, claim *AsyncUsageInfo) (bool, error) {
+	if claim == nil || claim.ID == 0 || claim.ProcessingToken == "" || claim.ImageTaskID != id {
+		return false, nil
+	}
+
+	if LogDB == nil {
+		return false, errors.New("async usage database unavailable")
+	}
+
+	clock, err := asyncUsageLeaseClockSQL(LogDB)
+	if err != nil {
+		return false, err
+	}
+
+	encodedError, err := json.Marshal(
+		&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage},
+	)
 	if err != nil {
 		return false, err
 	}
 
 	expired := false
-	err = LogDB.Transaction(func(tx *gorm.DB) error {
-		at := time.Now().UTC()
-		result := tx.Model(&ImageTask{}).
-			Where("id = ? AND upstream_id <> ? AND status IN ? AND COALESCE(queued_at, created_at) <= ?",
-				id, "", []string{"queued", "in_progress"}, now.UTC().Add(-AsyncGenerationDeadline)).
-			Updates(map[string]any{
-				"status": "failed", "data": "null", "error": string(encodedError), "updated_at": at,
-				"completed_at": at, "retain_until": at.Add(30 * 24 * time.Hour),
-			})
-		if result.Error != nil || result.RowsAffected != 1 {
-			return result.Error
-		}
-		expired = true
 
-		if err := tx.Model(&AsyncUsageInfo{}).
-			Where("image_task_id = ?", id).
-			Update("status", AsyncUsageStatusFailed).
-			Error; err != nil {
-			return err
-		}
+	var granted *ImageTask
 
-		return tx.Model(&Log{}).
-			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
-			Updates(map[string]any{
-				"async_usage_status": AsyncUsageStatusFailed, "code": 502,
-				"error_code": AsyncGenerationTimeoutCode, "safe_error": "Image generation timed out",
-			}).
-			Error
-	})
+	err = imageWalletPollTransaction(
+		imagePollParentContext(claim),
+		claim,
+		func(tx *gorm.DB, authority *imageWalletClaimContext) error {
+			// Keep the existing task -> usage -> log lock order. Re-read the
+			// original claim only after the task lock; stale workers cannot fail a
+			// newer owner's task, accounting outbox or request log.
+			var task ImageTask
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id=?", id).
+				First(&task).
+				Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+
+			var current AsyncUsageInfo
+
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id=? AND image_task_id=? AND group_id=? AND token_id=? AND status=? AND processing_token=?", claim.ID, id, task.GroupID, task.TokenID, AsyncUsageStatusPending, claim.ProcessingToken).
+				First(&current).
+				Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+
+			if err != nil {
+				return err
+			}
+
+			var dbNow int64
+			if err = tx.Raw("SELECT " + clock).Scan(&dbNow).Error; err != nil {
+				return err
+			}
+
+			if dbNow <= 0 {
+				return errors.New("async usage database clock unavailable")
+			}
+
+			if current.NextPollAt.IsZero() || current.NextPollAt.UnixMilli() <= dbNow {
+				return nil
+			}
+
+			deadline := current.NextPollAt.UnixMilli()
+			at := time.UnixMilli(dbNow).UTC()
+
+			result := tx.Model(&ImageTask{}).
+				Where("id = ? AND upstream_id <> ? AND status IN ? AND COALESCE(queued_at, created_at) <= ?",
+					id, "", []string{"queued", "in_progress"}, now.UTC().Add(-AsyncGenerationDeadline)).
+				Where("? > "+clock, deadline).
+				Updates(map[string]any{
+					"status":       "failed",
+					"data":         "null",
+					"error":        string(encodedError),
+					"updated_at":   at,
+					"completed_at": at,
+					"retain_until": at.Add(30 * 24 * time.Hour),
+				})
+			if result.Error != nil || result.RowsAffected != 1 {
+				return result.Error
+			}
+
+			expired = true
+
+			receipt := tx.Model(&AsyncUsageInfo{}).
+				Where("id=? AND status=? AND processing_token=? AND next_poll_at=?", current.ID, AsyncUsageStatusPending, claim.ProcessingToken, current.NextPollAt).
+				Where("? > "+clock, deadline).
+				Updates(map[string]any{"status": AsyncUsageStatusFailed, "processing_token": "", "error": "image generation timed out", "updated_at": at})
+			if receipt.Error != nil {
+				return receipt.Error
+			}
+
+			if receipt.RowsAffected != 1 {
+				return errAsyncUsageClaimExpired
+			}
+
+			granted, err = prepareImageWalletSync(tx, authority, &task, &current, true)
+			if err != nil {
+				return err
+			}
+
+			logReceipt := tx.Model(&Log{}).
+				Where("request_id = ? AND id = ? AND group_id = ? AND token_id = ? AND async_usage_status = ?", id, current.LogID, current.GroupID, current.TokenID, AsyncUsageStatusPending).
+				Updates(map[string]any{
+					"async_usage_status": AsyncUsageStatusFailed,
+					"code":               502,
+					"error_code":         AsyncGenerationTimeoutCode,
+					"safe_error":         "Image generation timed out",
+					"content":            "image generation timed out",
+				})
+			if logReceipt.Error != nil {
+				return logReceipt.Error
+			}
+
+			if logReceipt.RowsAffected != 1 {
+				return NotFoundError("image timeout log receipt")
+			}
+
+			var count int64
+
+			err = tx.Model(&AsyncUsageInfo{}).
+				Where("id=? AND status=? AND processing_token=?", current.ID, AsyncUsageStatusFailed, "").
+				Where("? > "+clock, deadline).
+				Count(&count).
+				Error
+			if err != nil {
+				return err
+			}
+
+			if count != 1 {
+				return errAsyncUsageClaimExpired
+			}
+
+			return finishImageWalletClaimCheck(tx, authority, granted)
+		},
+	)
+	if errors.Is(err, errAsyncUsageClaimExpired) {
+		return false, nil
+	}
+
 	if err != nil {
 		return false, err
+	}
+
+	if expired {
+		claim.imageTerminalWallet = granted
 	}
 
 	return expired, nil
@@ -478,8 +683,10 @@ func unconfirmedImageSubmission(tx *gorm.DB, now time.Time) *gorm.DB {
 // would fail at now, oldest first.
 func UnconfirmedImageSubmissions(now time.Time, limit int) ([]ImageTask, error) {
 	var tasks []ImageTask
+
 	err := unconfirmedImageSubmission(LogDB.Model(&ImageTask{}), now).
 		Order("created_at ASC").Limit(limit).Find(&tasks).Error
+
 	return tasks, err
 }
 
@@ -493,14 +700,18 @@ func UnconfirmedImageSubmissions(now time.Time, limit int) ([]ImageTask, error) 
 // prepaid hold is refunded in full by imageprepayment.Sync. expired reports
 // whether this call made the change.
 func ExpireUnconfirmedImageSubmission(id string, now time.Time) (bool, error) {
-	encodedError, err := json.Marshal(&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage})
+	encodedError, err := json.Marshal(
+		&ImageTaskError{Code: AsyncGenerationTimeoutCode, Message: AsyncGenerationTimeoutMessage},
+	)
 	if err != nil {
 		return false, err
 	}
 
 	expired := false
+
 	err = LogDB.Transaction(func(tx *gorm.DB) error {
 		at := time.Now().UTC()
+
 		result := unconfirmedImageSubmission(tx.Model(&ImageTask{}).Where("id = ?", id), now).
 			Updates(map[string]any{
 				"status": "failed", "data": "null", "error": string(encodedError), "updated_at": at,
@@ -509,6 +720,7 @@ func ExpireUnconfirmedImageSubmission(id string, now time.Time) (bool, error) {
 		if result.Error != nil || result.RowsAffected != 1 {
 			return result.Error
 		}
+
 		expired = true
 
 		if err := tx.Model(&AsyncUsageInfo{}).
@@ -521,8 +733,10 @@ func ExpireUnconfirmedImageSubmission(id string, now time.Time) (bool, error) {
 		return tx.Model(&Log{}).
 			Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
 			Updates(map[string]any{
-				"async_usage_status": AsyncUsageStatusFailed, "code": 502,
-				"error_code": AsyncGenerationTimeoutCode, "safe_error": "Image submission was not confirmed",
+				"async_usage_status": AsyncUsageStatusFailed,
+				"code":               502,
+				"error_code":         AsyncGenerationTimeoutCode,
+				"safe_error":         "Image submission was not confirmed",
 			}).
 			Error
 	})
@@ -533,7 +747,46 @@ func ExpireUnconfirmedImageSubmission(id string, now time.Time) (bool, error) {
 	return expired, nil
 }
 
-func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageTaskError, metadata ...ImageResultMetadata) error {
+func SetImageTaskResult(
+	id, status string,
+	data []ImageOutput,
+	taskError *ImageTaskError,
+	metadata ...ImageResultMetadata,
+) error {
+	return setImageTaskResult(LogDB, id, status, data, taskError, metadata...)
+}
+
+func SetImageTaskResultGeneration(
+	task *ImageTask,
+	status string,
+	data []ImageOutput,
+	taskError *ImageTaskError,
+) error {
+	return withImageTaskGeneration(
+		task,
+		func(tx *gorm.DB) error { return setImageTaskResult(tx, task.ID, status, data, taskError) },
+	)
+}
+
+func setImageTaskResult(
+	database *gorm.DB,
+	id, status string,
+	data []ImageOutput,
+	taskError *ImageTaskError,
+	metadata ...ImageResultMetadata,
+) error {
+	return writeImageTaskResult(database, id, status, data, taskError, true, metadata...)
+}
+
+//nolint:gocyclo // Result updates preserve prepaid/owned compatibility, output integrity, terminal-state rules, and metadata CAS ordering.
+func writeImageTaskResult(
+	database *gorm.DB,
+	id, status string,
+	data []ImageOutput,
+	taskError *ImageTaskError,
+	legacyFailure bool,
+	metadata ...ImageResultMetadata,
+) error {
 	if status == "completed" && len(data) == 0 {
 		return errors.New("empty completed image result")
 	}
@@ -548,17 +801,25 @@ func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageT
 		return err
 	}
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return database.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		changes := map[string]any{"status": status, "data": string(encodedData), "error": string(encodedError), "updated_at": now}
+		changes := map[string]any{
+			"status":     status,
+			"data":       string(encodedData),
+			"error":      string(encodedError),
+			"updated_at": now,
+		}
+
 		if len(metadata) > 1 {
 			return errors.New("multiple image result metadata")
 		}
+
 		if len(metadata) == 1 && (status == "completed" || status == "result_processing") {
 			providerMetadata, err := json.Marshal(metadata[0].ProviderMetadata)
 			if err != nil {
 				return err
 			}
+
 			changes["provider_metadata"] = string(providerMetadata)
 			changes["seed"] = metadata[0].Seed
 			changes["seed_exact"] = metadata[0].SeedExact
@@ -567,32 +828,44 @@ func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageT
 			changes["num_images"] = metadata[0].NumImages
 			changes["billable_units"] = metadata[0].BillableUnits
 		}
+
 		if status == "queued" {
 			changes["queued_at"] = gorm.Expr("COALESCE(queued_at, ?)", now)
 		}
+
 		if status == "in_progress" {
 			changes["running_at"] = gorm.Expr("COALESCE(running_at, ?)", now)
 		}
+
 		if status == "result_processing" || status == "completed" {
 			changes["result_received_at"] = gorm.Expr("COALESCE(result_received_at, ?)", now)
 		}
+
 		if status == "completed" || status == "failed" {
 			changes["completed_at"] = now
 			changes["retain_until"] = now.Add(30 * 24 * time.Hour)
 		}
+
 		allowed := []string{"submitting", "submission_unknown", "queued", "in_progress"}
 		if status == "failed" {
 			allowed = append(allowed, "result_processing")
 		}
+
 		if status == "submission_unknown" {
 			allowed = []string{"submitting", "submission_unknown"}
 		}
+
 		if status == "queued" {
 			allowed = []string{"submitting", "submission_unknown", "queued"}
 		}
-		if status != "submission_unknown" && status != "queued" && status != "in_progress" && status != "result_processing" && status != "completed" && status != "failed" {
+
+		if status != "submission_unknown" && status != "queued" && status != "in_progress" &&
+			status != "result_processing" &&
+			status != "completed" &&
+			status != "failed" {
 			return errors.New("invalid image task status")
 		}
+
 		result := tx.Model(&ImageTask{}).
 			Where("id = ? AND status IN ?", id, allowed).
 			Updates(changes)
@@ -604,7 +877,7 @@ func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageT
 			return nil
 		}
 
-		if status == "failed" {
+		if status == "failed" && legacyFailure {
 			if err := tx.Model(&AsyncUsageInfo{}).
 				Where("image_task_id = ?", id).
 				Update("status", AsyncUsageStatusFailed).
@@ -612,12 +885,17 @@ func SetImageTaskResult(id, status string, data []ImageOutput, taskError *ImageT
 				return err
 			}
 
-			logChanges := map[string]any{"async_usage_status": AsyncUsageStatusFailed, "code": 502, "safe_error": "Image generation failed"}
+			logChanges := map[string]any{
+				"async_usage_status": AsyncUsageStatusFailed,
+				"code":               502,
+				"safe_error":         "Image generation failed",
+			}
 			if taskError != nil && PublicTaskErrorMessage(taskError.Code) != "" {
 				// The request log carries the same platform-owned code customers
 				// receive from the task API (for example upstream_unavailable).
 				logChanges["error_code"] = taskError.Code
 			}
+
 			return tx.Model(&Log{}).
 				Where("request_id = ? AND id IN (?)", id, tx.Model(&AsyncUsageInfo{}).Select("log_id").Where("image_task_id = ?", id)).
 				Updates(logChanges).
@@ -708,7 +986,11 @@ func preserveImageAccountingLogs(tx *gorm.DB) *gorm.DB {
 }
 
 func RecoverStaleImageSubmissions(now time.Time) error {
-	return LogDB.Model(&ImageTask{}).
+	return RecoverStaleImageSubmissionsContext(context.Background(), now)
+}
+
+func RecoverStaleImageSubmissionsContext(ctx context.Context, now time.Time) error {
+	return LogDB.WithContext(ctx).Model(&ImageTask{}).
 		Where("status = ? AND updated_at < ?", "submitting", now.Add(-2*time.Minute)).
 		Update("status", "submission_unknown").
 		Error
@@ -718,9 +1000,19 @@ func RecoverStaleImageSubmissions(now time.Time) error {
 // together. A crash before this commit leaves the reservation unknown; it must
 // never cause a second upstream submission.
 func CompleteSyncImageTask(id string, data []ImageOutput, metadata ...ImageResultMetadata) error {
+	return completeSyncImageTask(LogDB, id, data, metadata...)
+}
+
+func completeSyncImageTask(
+	database *gorm.DB,
+	id string,
+	data []ImageOutput,
+	metadata ...ImageResultMetadata,
+) error {
 	if len(metadata) > 1 {
 		return errors.New("multiple image result metadata")
 	}
+
 	if len(data) == 0 {
 		return errors.New("empty synchronous image result")
 	}
@@ -730,13 +1022,29 @@ func CompleteSyncImageTask(id string, data []ImageOutput, metadata ...ImageResul
 		return err
 	}
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
-		changes := map[string]any{"status": "completed", "data": string(encoded), "updated_at": time.Now()}
+	return database.Transaction(func(tx *gorm.DB) error {
+		var current ImageTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&current, "id = ?", id).
+			Error; err != nil {
+			return err
+		}
+
+		if current.Status != "submitting" {
+			return ErrImageTaskConflict
+		}
+
+		changes := map[string]any{
+			"status":     "completed",
+			"data":       string(encoded),
+			"updated_at": time.Now(),
+		}
 		if len(metadata) == 1 {
 			providerMetadata, err := json.Marshal(metadata[0].ProviderMetadata)
 			if err != nil {
 				return err
 			}
+
 			changes["provider_metadata"] = string(providerMetadata)
 			changes["seed"] = metadata[0].Seed
 			changes["seed_exact"] = metadata[0].SeedExact
@@ -745,6 +1053,7 @@ func CompleteSyncImageTask(id string, data []ImageOutput, metadata ...ImageResul
 			changes["num_images"] = metadata[0].NumImages
 			changes["billable_units"] = metadata[0].BillableUnits
 		}
+
 		result := tx.Model(&ImageTask{}).
 			Where("id = ? AND status = ?", id, "submitting").
 			Updates(changes)
@@ -783,10 +1092,26 @@ func SaveImageTaskBilling(task *ImageTask) error {
 	if task.Billing == nil {
 		return errors.New("missing image billing receipt")
 	}
+
 	encoded, err := json.Marshal(task.Billing)
 	if err != nil {
 		return err
 	}
+
 	task.BillingSettled = task.Billing.Status != "pending"
-	return LogDB.Model(&ImageTask{}).Where("id = ?", task.ID).Updates(map[string]any{"billing": string(encoded), "billing_settled": task.BillingSettled}).Error
+
+	return withImageTaskGeneration(task, func(tx *gorm.DB) error {
+		result := tx.Model(&ImageTask{}).
+			Where("id = ?", task.ID).
+			Updates(map[string]any{"billing": string(encoded), "billing_settled": task.BillingSettled})
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected != 1 {
+			return ErrChannelAdmissionConflict
+		}
+
+		return nil
+	})
 }

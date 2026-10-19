@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private walletStub fixture or implementation.
 package nativetask
 
 import (
@@ -14,7 +15,10 @@ import (
 
 type insufficientWallet struct{ walletStub }
 
-func (w *insufficientWallet) Prepayment(ctx context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (w *insufficientWallet) Prepayment(
+	ctx context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	if c.Action == "admit" {
 		return balance.PrepaymentReceipt{}, balance.ErrPrepaymentInsufficientBalance
 	}
@@ -27,7 +31,10 @@ type refusingWallet struct {
 	err error
 }
 
-func (w *refusingWallet) Prepayment(ctx context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (w *refusingWallet) Prepayment(
+	ctx context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	if c.Action == "admit" {
 		return balance.PrepaymentReceipt{}, w.err
 	}
@@ -47,11 +54,14 @@ type nativeErrorBody struct {
 // hook with the same code.
 func TestNativeErrorsCarryCodeMessageAndType(t *testing.T) {
 	e, plan, _, p := setup(t)
+
 	type logged struct {
 		status        int
 		code, message string
 	}
+
 	var seen []logged
+
 	h := &HTTP{
 		Engine:   e,
 		Identity: func(*http.Request) (string, int, error) { return "g", 1, nil },
@@ -68,7 +78,7 @@ func TestNativeErrorsCarryCodeMessageAndType(t *testing.T) {
 	}{
 		{"invalid request id", func(w *httptest.ResponseRecorder) {
 			r := request(body)
-			r.Header.Set("X-Request-Id", "bad id")
+			r.Header.Set("X-Request-ID", "bad id")
 			h.Create(w, r)
 		}, 400, "invalid_request_id", "invalid_request_error", errorMessages["invalid_request_id"]},
 		{"not a native model", func(w *httptest.ResponseRecorder) {
@@ -98,7 +108,7 @@ func TestNativeErrorsCarryCodeMessageAndType(t *testing.T) {
 			h.Engine = e
 		}, 503, "model_unavailable", "api_error", "This model is temporarily unavailable. Retry later with the same X-Request-Id."},
 		{"unknown task", func(w *httptest.ResponseRecorder) {
-			h.Get(w, httptest.NewRequest(http.MethodGet, "/v1/model-tasks/missing", nil), "missing")
+			h.Get(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/model-tasks/missing", nil), "missing")
 		}, 404, "task_not_found", "not_found_error", "No task with this ID exists for this API key. If your POST may not have reached us (timeout or network error), resend the exact same request body with the same X-Request-Id; it is idempotent and is not charged twice. Do not keep polling an ID that returns 404."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,6 +116,7 @@ func TestNativeErrorsCarryCodeMessageAndType(t *testing.T) {
 			w := httptest.NewRecorder()
 			tc.do(w)
 			require.Equal(t, tc.status, w.Code, w.Body.String())
+
 			var response nativeErrorBody
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.Equal(t, tc.code, response.Error.Code)
@@ -114,6 +125,7 @@ func TestNativeErrorsCarryCodeMessageAndType(t *testing.T) {
 			require.Equal(t, []logged{{tc.status, tc.code, tc.message}}, seen)
 		})
 	}
+
 	require.Zero(t, p.calls, "no rejected request may reach the provider")
 }
 
@@ -128,7 +140,12 @@ func TestFailedNativeTaskExplainsItsCode(t *testing.T) {
 		"something_new":            "This task failed. Contact support with the task ID.",
 	} {
 		w := httptest.NewRecorder()
-		WritePublic(w, http.StatusOK, &model.NativeTask{ID: "t", Model: "m", Status: "failed", ErrorCode: code})
+		WritePublic(
+			w,
+			http.StatusOK,
+			&model.NativeTask{ID: "t", Model: "m", Status: "failed", ErrorCode: code},
+		)
+
 		var response struct {
 			Status string            `json:"status"`
 			Error  map[string]string `json:"error"`
@@ -152,7 +169,18 @@ func TestFailedNativeTaskListsOnlyValidIssues(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			WritePublic(w, http.StatusOK, &model.NativeTask{ID: "t", Model: "m", Status: tc.status, ErrorCode: tc.code, PublicError: tc.publicError})
+			WritePublic(
+				w,
+				http.StatusOK,
+				&model.NativeTask{
+					ID:          "t",
+					Model:       "m",
+					Status:      tc.status,
+					ErrorCode:   tc.code,
+					PublicError: tc.publicError,
+				},
+			)
+
 			var response struct {
 				Error json.RawMessage `json:"error"`
 			}
@@ -160,7 +188,18 @@ func TestFailedNativeTaskListsOnlyValidIssues(t *testing.T) {
 			require.JSONEq(t, tc.want, string(response.Error))
 		})
 	}
+
 	w := httptest.NewRecorder()
-	WritePublic(w, http.StatusOK, &model.NativeTask{ID: "t", Model: "m", Status: "running", ErrorCode: "invalid_parameters", PublicError: stored})
+	WritePublic(
+		w,
+		http.StatusOK,
+		&model.NativeTask{
+			ID:          "t",
+			Model:       "m",
+			Status:      "running",
+			ErrorCode:   "invalid_parameters",
+			PublicError: stored,
+		},
+	)
 	require.NotContains(t, w.Body.String(), "issues")
 }

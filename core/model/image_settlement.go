@@ -11,6 +11,13 @@ import (
 // No external debit can start before this transaction succeeds. Pending evidence
 // is immutable; a billing worker must never repeat inference to repair it.
 func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
+	if err := validateMeasuredLegacy(LogDB, info); err != nil {
+		return err
+	}
+	return createMeasuredImageSettlement(LogDB, entry, info)
+}
+
+func createMeasuredImageSettlement(db *gorm.DB, entry *Log, info *AsyncUsageInfo) error {
 	if entry == nil || info == nil || info.Amount.ImageBillingResult == nil {
 		return errors.New("missing measured image settlement")
 	}
@@ -38,7 +45,7 @@ func CreateMeasuredImageSettlement(entry *Log, info *AsyncUsageInfo) error {
 	entry.Amount = info.Amount
 	info.NextPollAt = time.Now().Add(AsyncUsageDefaultPollDelay)
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
@@ -71,6 +78,13 @@ func measuredImageSettlementStatus(info *AsyncUsageInfo) (AsyncUsageStatus, erro
 // call row. The outbox claims only pending rows and evidence must never be
 // charged, so a pending status is stored as failed.
 func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
+	if err := validateMeasuredLegacy(LogDB, info); err != nil {
+		return err
+	}
+	return createMeasuredImageAttemptEvidence(LogDB, info)
+}
+
+func createMeasuredImageAttemptEvidence(db *gorm.DB, info *AsyncUsageInfo) error {
 	if info == nil || info.Amount.ImageBillingResult == nil {
 		return errors.New("missing measured image attempt evidence")
 	}
@@ -89,27 +103,33 @@ func CreateMeasuredImageAttemptEvidence(info *AsyncUsageInfo) error {
 	info.LogID = 0
 	info.NextPollAt = time.Now().Add(AsyncUsageDefaultPollDelay)
 
-	return LogDB.Create(info).Error
+	return db.Create(info).Error
 }
 
 func ParkMeasuredImageUsage(info *AsyncUsageInfo) error {
-	return LogDB.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&AsyncUsageInfo{}).
-			Where("id = ? AND processing_token = ?", info.ID, info.ProcessingToken).
-			Updates(map[string]any{"status": AsyncUsageStatusMeasurementPending, "processing_token": "", "error": "immutable image measurement pending"})
-		if result.Error != nil {
-			return result.Error
-		}
+	return withImageAccountingClaim(
+		imagePollParentContext(info),
+		info,
+		func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			if err := writeImageAccountingUsage(
+				tx,
+				current,
+				map[string]any{
+					"status":           AsyncUsageStatusMeasurementPending,
+					"processing_token": "",
+					"error":            "immutable image measurement pending",
+				},
+			); err != nil {
+				return err
+			}
 
-		if result.RowsAffected != 1 {
-			return errors.New("measured usage claim lost")
-		}
-
-		return tx.Model(&Log{}).
-			Where("id = ?", info.LogID).
-			Update("async_usage_status", AsyncUsageStatusMeasurementPending).
-			Error
-	})
+			return writeImageAccountingLog(
+				tx,
+				entry,
+				map[string]any{"async_usage_status": AsyncUsageStatusMeasurementPending},
+			)
+		},
+	)
 }
 
 // PrepareClaimedImageTaskMeasurement freezes both the outbox and audit evidence
@@ -143,32 +163,24 @@ func PrepareClaimedImageTaskMeasurement(
 		return err
 	}
 
-	return LogDB.Transaction(func(tx *gorm.DB) error {
-		row := tx.Model(&AsyncUsageInfo{}).
-			Where("id = ? AND processing_token = ? AND status = ?", info.ID, info.ProcessingToken, AsyncUsageStatusPending).
-			Updates(values)
-		if row.Error != nil {
-			return row.Error
-		}
+	return withImageAccountingClaim(
+		imagePollParentContext(info),
+		info,
+		func(tx *gorm.DB, current *AsyncUsageInfo, entry *Log) error {
+			if current.MeasuredImage {
+				return errors.New("image measurement already frozen")
+			}
 
-		if row.RowsAffected != 1 {
-			return errors.New("image measurement claim lost")
-		}
+			if err := writeImageAccountingUsage(tx, current, values); err != nil {
+				return err
+			}
 
-		logValues, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount")
-		if err != nil {
-			return err
-		}
+			logValues, err := asyncUsageUpdateValues(update, "Usage", "UsageContext", "Amount")
+			if err != nil {
+				return err
+			}
 
-		row = tx.Model(&Log{}).Where("id = ?", info.LogID).Updates(logValues)
-		if row.Error != nil {
-			return row.Error
-		}
-
-		if row.RowsAffected != 1 {
-			return errors.New("image measurement log missing")
-		}
-
-		return nil
-	})
+			return writeImageAccountingLog(tx, entry, logValues)
+		},
+	)
 }

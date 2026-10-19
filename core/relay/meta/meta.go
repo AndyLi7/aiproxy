@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 )
@@ -39,11 +38,14 @@ type Meta struct {
 	RetryAt            time.Time
 	RequestID          string
 	BillingOperationID string
-	OriginModel        string
-	RoutingModel       string
-	ActualModel        string
-	VideoCapability    string
-	Mode               mode.Mode
+	// Internal durable use reference, never supplied through request metadata.
+	ChannelAdmissionUseID string
+	MeasuredRelay         *model.MeasuredRelayIntent `json:"-"`
+	OriginModel           string
+	RoutingModel          string
+	ActualModel           string
+	VideoCapability       string
+	Mode                  mode.Mode
 
 	RequestTimeout time.Duration
 

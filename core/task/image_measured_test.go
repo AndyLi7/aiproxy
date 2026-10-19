@@ -105,12 +105,18 @@ type zeroReceiptBalance struct {
 	receipts *[]string
 }
 
-func (b zeroReceiptBalance) MeasuredZero(_ context.Context, request balance.MeasuredZeroRequest) (string, error) {
+func (b zeroReceiptBalance) MeasuredZero(
+	_ context.Context,
+	request balance.MeasuredZeroRequest,
+) (string, error) {
 	*b.receipts = append(*b.receipts, request.RequestID)
 	return "created", nil
 }
 
-func (zeroReceiptBalance) GetGroupRemainBalance(context.Context, model.GroupCache) (float64, balance.PostGroupConsumer, error) {
+func (zeroReceiptBalance) GetGroupRemainBalance(
+	context.Context,
+	model.GroupCache,
+) (float64, balance.PostGroupConsumer, error) {
 	return 0, nil, errors.New("a zero or incomplete measured bill must never be debited")
 }
 

@@ -1,9 +1,11 @@
+//nolint:testpackage // White-box coverage needs the package-private consumeAsyncUsageGroupBalance fixture or implementation.
 package task
 
 import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -93,13 +95,7 @@ func (c *capturedAlerts) has(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, got := range c.keys {
-		if got == "notifylimit:error:"+key {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(c.keys, "notifylimit:error:"+key)
 }
 
 func captureAlerts(t *testing.T) *capturedAlerts {
@@ -123,16 +119,25 @@ func attributionDB(t *testing.T, groupID string) *gorm.DB {
 	model.LogDB = db
 	t.Cleanup(func() { model.LogDB = oldLogDB })
 
-	require.NoError(t, model.CacheSetGroup(&model.GroupCache{ID: groupID, Status: model.GroupStatusEnabled}))
+	require.NoError(
+		t,
+		model.CacheSetGroup(&model.GroupCache{ID: groupID, Status: model.GroupStatusEnabled}),
+	)
 	t.Cleanup(func() { require.NoError(t, model.CacheDeleteGroup(groupID)) })
 
 	return db
 }
 
-var attributionAt = time.Date(2026, 10, 12, 1, 2, 3, 456_000_000, time.UTC)
+var attributionAt = time.Date(2026, time.October, 12, 1, 2, 3, 456_000_000, time.UTC)
 
 func p2Identity() model.UsageIdentity {
-	return model.NewUsageIdentity(7, "vendor/model", "text-to-video", model.RequestSourcePlayground, attributionAt)
+	return model.NewUsageIdentity(
+		7,
+		"vendor/model",
+		"text-to-video",
+		model.RequestSourcePlayground,
+		attributionAt,
+	)
 }
 
 func requireBodyIdentity(t *testing.T, body map[string]any, op string) {
@@ -167,7 +172,11 @@ func TestOutboxConsumeCarriesInfoIdentity(t *testing.T) {
 	}
 
 	_, _, err := consumeAsyncUsageGroupBalance(t.Context(), &model.AsyncUsageInfo{
-		RequestID: "pre-p2", BillingOperationID: "op-pre", GroupID: groupID, TokenID: 7, TokenName: "prod",
+		RequestID:          "pre-p2",
+		BillingOperationID: "op-pre",
+		GroupID:            groupID,
+		TokenID:            7,
+		TokenName:          "prod",
 	}, 1)
 	require.NoError(t, err)
 
@@ -182,28 +191,60 @@ func TestOutboxConsumeCarriesInfoIdentity(t *testing.T) {
 	}
 }
 
-func measuredZeroOutbox(t *testing.T, db *gorm.DB, groupID, requestID string, requestAt time.Time) *model.AsyncUsageInfo {
+func measuredZeroOutbox(
+	t *testing.T,
+	groupID, requestID string,
+	requestAt time.Time,
+) *model.AsyncUsageInfo {
 	t.Helper()
 
 	zero := int64(0)
+	// #nosec G101 -- Synthetic test identifiers and ownership tokens; these are not live credentials.
 	info := &model.AsyncUsageInfo{
-		RequestID: requestID, BillingOperationID: "op-" + requestID, RequestAt: requestAt,
-		GroupID: groupID, TokenID: 7, TokenName: "prod", PricingVersion: "v9",
-		Mode: int(mode.ImagesGenerations), Model: "image",
-		Price: model.Price{ImageBilling: &model.ImageBillingPolicy{Version: 1, Scenario: "generation"}},
+		RequestID:          requestID,
+		BillingOperationID: "op-" + requestID,
+		RequestAt:          requestAt,
+		GroupID:            groupID,
+		TokenID:            7,
+		TokenName:          "prod",
+		PricingVersion:     "v9",
+		Mode:               int(mode.ImagesGenerations),
+		Model:              "image",
+		Price: model.Price{
+			ImageBilling: &model.ImageBillingPolicy{Version: 1, Scenario: "generation"},
+		},
 		Amount: model.Amount{ImageBillingResult: &model.ImageBillingResult{
 			State: "complete", AmountMicros: &zero, Lines: []model.ImageBillingLine{},
 		}},
 	}
 	info.SetUsageIdentity(p2Identity())
 	entry := &model.Log{
-		RequestID: model.EmptyNullString(requestID), RequestAt: requestAt, GroupID: groupID, TokenID: 7,
-		Mode: int(mode.ImagesGenerations), Code: http.StatusOK, BillingOperationID: model.EmptyNullString(info.BillingOperationID),
+		RequestID: model.EmptyNullString(
+			requestID,
+		),
+		RequestAt: requestAt,
+		GroupID:   groupID,
+		TokenID:   7,
+		Mode: int(
+			mode.ImagesGenerations,
+		),
+		Code:               http.StatusOK,
+		BillingOperationID: model.EmptyNullString(info.BillingOperationID),
 	}
 	require.NoError(t, model.CreateMeasuredImageSettlement(entry, info))
-	require.Equal(t, model.AsyncUsageStatusPending, info.Status, "a complete zero bill is claimable (C3)")
+	require.Equal(
+		t,
+		model.AsyncUsageStatusPending,
+		info.Status,
+		"a complete zero bill is claimable (C3)",
+	)
 
-	claimed, err := model.TryClaimAsyncUsageInfo(info, "claim-"+requestID, time.Now().Add(time.Minute), time.Now().Add(time.Minute))
+	claimed, err := model.TryClaimAsyncUsageInfo(
+		info,
+		"claim-"+requestID,
+		time.Now().Add(time.Minute),
+		time.Now().Add(time.Minute),
+	)
 	require.NoError(t, err)
 	require.True(t, claimed)
 
@@ -221,7 +262,7 @@ func TestMeasuredZeroOutboxReportsReceipt(t *testing.T) {
 	wallet := newAttributionWallet(t, db)
 	alerts := captureAlerts(t)
 
-	info := measuredZeroOutbox(t, db, groupID, "zero-ok", time.Now())
+	info := measuredZeroOutbox(t, groupID, "zero-ok", time.Now())
 	processOneAsyncUsage(t.Context(), info)
 
 	require.Len(t, wallet.zeros, 1)
@@ -229,8 +270,12 @@ func TestMeasuredZeroOutboxReportsReceipt(t *testing.T) {
 	require.Equal(t, groupID, wallet.zeros[0]["group"])
 	require.Equal(t, "zero-ok", wallet.zeros[0]["requestId"])
 	require.Equal(t, "v9", wallet.zeros[0]["pricingVersion"])
-	require.Equal(t, []model.AsyncUsageStatus{model.AsyncUsageStatusCompleted}, wallet.zeroLogStatus,
-		"the call row is settled (async 2) before the receipt is requested")
+	require.Equal(
+		t,
+		[]model.AsyncUsageStatus{model.AsyncUsageStatusCompleted},
+		wallet.zeroLogStatus,
+		"the call row is settled (async 2) before the receipt is requested",
+	)
 	require.Empty(t, wallet.consumes, "a zero bill is never debited")
 
 	var got model.AsyncUsageInfo
@@ -239,19 +284,29 @@ func TestMeasuredZeroOutboxReportsReceipt(t *testing.T) {
 
 	// A wallet error keeps the outbox pending and retries in 3 minutes.
 	wallet.failZero = true
-	failing := measuredZeroOutbox(t, db, groupID, "zero-retry", time.Now())
+	failing := measuredZeroOutbox(t, groupID, "zero-retry", time.Now())
 	processOneAsyncUsage(t.Context(), failing)
 
 	got = model.AsyncUsageInfo{}
 	require.NoError(t, db.First(&got, failing.ID).Error)
 	require.Equal(t, model.AsyncUsageStatusPending, got.Status)
 	require.Empty(t, got.ProcessingToken)
-	require.WithinDuration(t, time.Now().Add(model.AsyncUsageMaxPollDelay), got.NextPollAt, 10*time.Second)
+	require.WithinDuration(
+		t,
+		time.Now().Add(model.AsyncUsageMaxPollDelay),
+		got.NextPollAt,
+		10*time.Second,
+	)
 	require.False(t, alerts.has("asyncUsageMeasuredZero"))
 
 	// 24 hours after the request it completes with an alert; the catch-up and
 	// the invariant cover the missing receipt.
-	expired := measuredZeroOutbox(t, db, groupID, "zero-expired", time.Now().Add(-measuredZeroReceiptWindow-time.Hour))
+	expired := measuredZeroOutbox(
+		t,
+		groupID,
+		"zero-expired",
+		time.Now().Add(-measuredZeroReceiptWindow-time.Hour),
+	)
 	processOneAsyncUsage(t.Context(), expired)
 
 	got = model.AsyncUsageInfo{}
@@ -271,6 +326,7 @@ func TestVideoMissingLogWaitsThenCharges(t *testing.T) {
 	wallet := newAttributionWallet(t, db)
 	alerts := captureAlerts(t)
 
+	// #nosec G101 -- Synthetic test identifiers and ownership tokens; these are not live credentials.
 	info := &model.AsyncUsageInfo{
 		RequestID: "video-missing", BillingOperationID: "op-video-missing", RequestAt: time.Now(),
 		GroupID: groupID, TokenID: 7, TokenName: "prod", Mode: int(mode.VideoGenerationsJobs),
@@ -288,8 +344,13 @@ func TestVideoMissingLogWaitsThenCharges(t *testing.T) {
 
 	// The row arrives: the retry settles it and charges once.
 	require.NoError(t, db.Create(&model.Log{
-		RequestID: "video-missing", GroupID: groupID, TokenID: 7, Mode: int(mode.VideoGenerationsJobs),
-		Code: 200, AsyncUsageStatus: model.AsyncUsageStatusPending, BillingOperationID: "op-video-missing",
+		RequestID:          "video-missing",
+		GroupID:            groupID,
+		TokenID:            7,
+		Mode:               int(mode.VideoGenerationsJobs),
+		Code:               200,
+		AsyncUsageStatus:   model.AsyncUsageStatusPending,
+		BillingOperationID: "op-video-missing",
 	}).Error)
 	require.NoError(t, completeAsyncUsage(t.Context(), info, model.Usage{}, model.UsageContext{}))
 	require.Len(t, wallet.consumes, 1)
@@ -310,7 +371,11 @@ func TestVideoMissingLogWaitsThenCharges(t *testing.T) {
 	late.SetUsageIdentity(p2Identity())
 	require.NoError(t, model.CreateAsyncUsageInfo(late))
 
-	require.ErrorIs(t, completeAsyncUsage(t.Context(), late, model.Usage{}, model.UsageContext{}), errAsyncUsageSettlementPending)
+	require.ErrorIs(
+		t,
+		completeAsyncUsage(t.Context(), late, model.Usage{}, model.UsageContext{}),
+		errAsyncUsageSettlementPending,
+	)
 	require.Len(t, wallet.consumes, 1)
 
 	late.CreatedAt = time.Now().Add(-asyncUsageLogMissingGrace - time.Second)
@@ -325,7 +390,10 @@ func TestVideoMissingLogWaitsThenCharges(t *testing.T) {
 	require.Equal(t, model.AsyncUsageStatusCompleted, completed.Status)
 
 	var rows int64
-	require.NoError(t, db.Model(&model.Log{}).Where("request_id = ?", "video-never").Count(&rows).Error)
+	require.NoError(
+		t,
+		db.Model(&model.Log{}).Where("request_id = ?", "video-never").Count(&rows).Error,
+	)
 	require.Zero(t, rows, "no row is touched or invented")
 }
 
@@ -339,7 +407,13 @@ func TestImageTaskOutboxPricesAtHandlerTime(t *testing.T) {
 	wallet := newAttributionWallet(t, db)
 
 	windowStart := time.Now().Truncate(time.Second)
-	usage := model.NewUsageIdentity(7, "vendor/image", "text-to-image", model.RequestSourceAPI, windowStart.Add(-2*time.Second))
+	usage := model.NewUsageIdentity(
+		7,
+		"vendor/image",
+		"text-to-image",
+		model.RequestSourceAPI,
+		windowStart.Add(-2*time.Second),
+	)
 
 	row := &model.Log{
 		RequestID: "image-pricing", GroupID: groupID, TokenID: 7, Code: http.StatusAccepted,
@@ -348,10 +422,18 @@ func TestImageTaskOutboxPricesAtHandlerTime(t *testing.T) {
 	}
 	require.NoError(t, db.Create(row).Error)
 
+	// #nosec G101 -- Synthetic test identifiers and ownership tokens; these are not live credentials.
 	info := &model.AsyncUsageInfo{
-		RequestID: "image-pricing", BillingOperationID: "op-image-pricing", ImageTaskID: "image-pricing",
-		LogID: row.ID, RequestAt: windowStart.Add(time.Second), GroupID: groupID, TokenID: 7, TokenName: "prod",
-		Mode: int(mode.ImagesGenerations), ProcessingToken: "claim-image-pricing",
+		RequestID:          "image-pricing",
+		BillingOperationID: "op-image-pricing",
+		ImageTaskID:        "image-pricing",
+		LogID:              row.ID,
+		RequestAt:          windowStart.Add(time.Second),
+		GroupID:            groupID,
+		TokenID:            7,
+		TokenName:          "prod",
+		Mode:               int(mode.ImagesGenerations),
+		ProcessingToken:    "claim-image-pricing",
 		Price: model.Price{PerRequestPrice: 1, ConditionalPrices: []model.ConditionalPrice{{
 			Condition: model.PriceCondition{StartTime: windowStart.Unix()},
 			Price:     model.Price{PerRequestPrice: 5},
@@ -359,9 +441,36 @@ func TestImageTaskOutboxPricesAtHandlerTime(t *testing.T) {
 	}
 	info.SetUsageIdentity(usage)
 	require.NoError(t, model.CreateAsyncUsageInfo(info))
+	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+	require.NoError(
+		t,
+		db.Create(
+			&model.ImageTask{
+				ID:                 info.ImageTaskID,
+				GroupID:            info.GroupID,
+				TokenID:            info.TokenID,
+				UsageID:            info.ID,
+				Status:             "completed",
+				BillingOperationID: info.BillingOperationID,
+			},
+		).Error,
+	)
 
-	require.NoError(t, completeAsyncUsage(t.Context(), info, model.Usage{ImageOutputTokens: 1}, model.UsageContext{}))
+	require.NoError(
+		t,
+		completeAsyncUsage(
+			t.Context(),
+			info,
+			model.Usage{ImageOutputTokens: 1},
+			model.UsageContext{},
+		),
+	)
 	require.Len(t, wallet.consumes, 1)
 	require.InDelta(t, 5, wallet.consumes[0]["amount"], 1e-9)
-	require.EqualValues(t, usage.UsageAtMs(), wallet.consumes[0]["usageAtMs"], "attribution keeps the request start")
+	require.EqualValues(
+		t,
+		usage.UsageAtMs(),
+		wallet.consumes[0]["usageAtMs"],
+		"attribution keeps the request start",
+	)
 }

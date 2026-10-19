@@ -1,3 +1,4 @@
+//nolint:testpackage // Exercises doRequest and testAdaptor private transport evidence handling.
 package controller
 
 import (
@@ -20,27 +21,55 @@ func TestDoRequestPreservesEarlierCallUncertainty(t *testing.T) {
 		t.Run(prior, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Set(failover.AttemptContextKey, &failover.Attempt{})
-			req := httptest.NewRequest(http.MethodPost, "http://provider.test", nil)
+
+			req := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"http://provider.test",
+				nil,
+			)
+
 			m := &meta.Meta{}
 			if prior != "none" {
-				a := testAdaptor{doRequest: func(*meta.Meta, adaptor.Store, *gin.Context, *http.Request) (*http.Response, error) {
-					if prior == "response" {
-						return &http.Response{StatusCode: 200}, nil
-					}
-					return nil, context.DeadlineExceeded
-				}}
-				doRequest(a, c, m, nil, req)
+				a := testAdaptor{
+					doRequest: func(*meta.Meta, adaptor.Store, *gin.Context, *http.Request) (*http.Response, error) {
+						if prior == "response" {
+							return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+						}
+						return nil, context.DeadlineExceeded
+					},
+				}
+
+				resp, priorErr := doRequest(a, c, m, nil, req)
+				if prior == "response" && priorErr != nil {
+					t.Fatal(priorErr)
+				}
+
+				if resp != nil {
+					resp.Body.Close()
+				}
 			}
-			a := testAdaptor{doRequest: func(_ *meta.Meta, _ adaptor.Store, _ *gin.Context, r *http.Request) (*http.Response, error) {
-				httptrace.ContextClientTrace(r.Context()).ConnectStart("tcp", "provider.test:80")
-				return nil, &net.OpError{Op: "dial", Err: errors.New("refused")}
-			}}
-			_, err := doRequest(a, c, m, nil, req)
+
+			a := testAdaptor{
+				doRequest: func(_ *meta.Meta, _ adaptor.Store, _ *gin.Context, r *http.Request) (*http.Response, error) {
+					httptrace.ContextClientTrace(r.Context()).
+						ConnectStart("tcp", "provider.test:80")
+					return nil, &net.OpError{Op: "dial", Err: errors.New("refused")}
+				},
+			}
+
+			resp, err := doRequest(a, c, m, nil, req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+
 			got := failover.FromError(err)
+
 			want := failover.Unknown
 			if prior == "none" {
 				want = failover.NotAccepted
 			}
+
 			if got.Acceptance != want {
 				t.Fatalf("acceptance=%s want=%s", got.Acceptance, want)
 			}

@@ -3,6 +3,7 @@ package utils_test
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"io"
 	"net"
@@ -385,6 +386,9 @@ func TestChannelTLSVerificationIsIsolated(t *testing.T) {
 		}
 
 		if skipTLSVerify {
+			transport, ok := client.Transport.(*http.Transport)
+			require.True(t, ok)
+			require.Equal(t, uint16(tls.VersionTLS12), transport.TLSClientConfig.MinVersion)
 			require.NoError(t, err)
 			assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 		} else {

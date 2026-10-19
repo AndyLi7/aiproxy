@@ -19,17 +19,35 @@ import (
 // AsyncUsage, with the relay modes that reach it (from each adaptor's
 // DoResponse switch). Reviewed 2026-10-11.
 var asyncUsageProducers = map[string][]mode.Mode{
-	"ali.AliNativeVideoHandler":                   {mode.AliVideo},
-	"ali.AliVideoHandler":                         {mode.VideoGenerationsJobs},
-	"ali.aliVideosHandler":                        {mode.Videos, mode.VideosRemix, mode.VideosEdits, mode.VideosExtensions},
-	"doubao.DoubaoNativeVideoSubmitHandler":       {mode.DoubaoVideo},
-	"doubao.VideoGenerationJobSubmitHandler":      {mode.VideoGenerationsJobs},
-	"doubao.VideosSubmitHandler":                  {mode.Videos, mode.VideosEdits, mode.VideosExtensions},
-	"gemini.NativeVideoHandler":                   {mode.GeminiVideo},
-	"gemini.VideoGenerationJobSubmitHandler":      {mode.VideoGenerationsJobs},
-	"gemini.VideosSubmitHandler":                  {mode.Videos, mode.VideosEdits, mode.VideosExtensions},
-	"openai.VideoHandler":                         {mode.VideoGenerationsJobs},
-	"openai.videosHandler":                        {mode.Videos, mode.VideosRemix, mode.VideosEdits, mode.VideosExtensions},
+	"ali.AliNativeVideoHandler": {mode.AliVideo},
+	"ali.AliVideoHandler":       {mode.VideoGenerationsJobs},
+	"ali.aliVideosHandler": {
+		mode.Videos,
+		mode.VideosRemix,
+		mode.VideosEdits,
+		mode.VideosExtensions,
+	},
+	"doubao.DoubaoNativeVideoSubmitHandler":  {mode.DoubaoVideo},
+	"doubao.VideoGenerationJobSubmitHandler": {mode.VideoGenerationsJobs},
+	"doubao.VideosSubmitHandler": {
+		mode.Videos,
+		mode.VideosEdits,
+		mode.VideosExtensions,
+	},
+	"gemini.NativeVideoHandler":              {mode.GeminiVideo},
+	"gemini.VideoGenerationJobSubmitHandler": {mode.VideoGenerationsJobs},
+	"gemini.VideosSubmitHandler": {
+		mode.Videos,
+		mode.VideosEdits,
+		mode.VideosExtensions,
+	},
+	"openai.VideoHandler": {mode.VideoGenerationsJobs},
+	"openai.videosHandler": {
+		mode.Videos,
+		mode.VideosRemix,
+		mode.VideosEdits,
+		mode.VideosExtensions,
+	},
 	"siliconflow.VideoGenerationJobSubmitHandler": {mode.VideoGenerationsJobs},
 	"siliconflow.VideosSubmitHandler":             {mode.Videos},
 	// Background responses are accepted queued or in progress (async-submit).
@@ -38,10 +56,16 @@ var asyncUsageProducers = map[string][]mode.Mode{
 	"openai.CancelResponseHandler": {mode.ResponsesCancel},
 	// Responses-only models behind chat, completions, Anthropic and Gemini
 	// requests: only the bill is fetched later (billing-only sync modes).
-	"openai.ConvertResponsesToChatCompletionResponse":       {mode.Completions, mode.ChatCompletions},
-	"openai.ConvertResponsesToChatCompletionStreamResponse": {mode.Completions, mode.ChatCompletions},
-	"openai.ConvertResponsesToClaudeResponse":               {mode.Anthropic},
-	"openai.ConvertResponsesToGeminiResponse":               {mode.Gemini},
+	"openai.ConvertResponsesToChatCompletionResponse": {
+		mode.Completions,
+		mode.ChatCompletions,
+	},
+	"openai.ConvertResponsesToChatCompletionStreamResponse": {
+		mode.Completions,
+		mode.ChatCompletions,
+	},
+	"openai.ConvertResponsesToClaudeResponse": {mode.Anthropic},
+	"openai.ConvertResponsesToGeminiResponse": {mode.Gemini},
 	"openai.responsesStreamErrorState.result": {
 		mode.Responses,
 		mode.Completions,
@@ -170,16 +194,24 @@ func TestAsyncUsageProducersAreAsyncSubmit(t *testing.T) {
 
 	slices.Sort(foundNames)
 	slices.Sort(pinnedNames)
-	require.Equal(t, pinnedNames, foundNames,
-		"review new AsyncUsage producers, list the relay modes that reach them, and classify those modes")
+	require.Equal(
+		t,
+		pinnedNames,
+		foundNames,
+		"review new AsyncUsage producers, list the relay modes that reach them, and classify those modes",
+	)
 
 	for name, modes := range asyncUsageProducers {
 		require.NotEmpty(t, modes, name)
 
 		for _, relayMode := range modes {
-			require.True(t, model.AsyncUsageExpected(relayMode),
+			require.True(
+				t,
+				model.AsyncUsageExpected(relayMode),
 				"%s returns AsyncUsage on mode %s, which the call classifier treats as a plain sync call",
-				name, relayMode)
+				name,
+				relayMode,
+			)
 		}
 	}
 }

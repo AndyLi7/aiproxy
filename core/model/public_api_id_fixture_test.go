@@ -65,6 +65,7 @@ func TestPublicAPIIDFixtureListingAndResolution(t *testing.T) {
 	fixture := readPublicAPIIDFixture(t)
 
 	listed := make([]string, 0, len(fixture.Configs))
+
 	byRoute := make(map[string]model.ModelConfig, len(fixture.Configs))
 	for _, config := range fixture.Configs {
 		listed = append(listed, model.ListedPublicModelID(config))
@@ -86,7 +87,12 @@ func TestPublicAPIIDFixtureListingAndResolution(t *testing.T) {
 	}
 
 	for capabilityModel, want := range fixture.ResponseModels {
-		require.Equal(t, want, model.NativeCallableModelID(capabilityModel, byRoute), capabilityModel)
+		require.Equal(
+			t,
+			want,
+			model.NativeCallableModelID(capabilityModel, byRoute),
+			capabilityModel,
+		)
 	}
 
 	for _, example := range fixture.NativeErrors {

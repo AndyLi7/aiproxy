@@ -27,15 +27,21 @@ type channelRouteResponse struct {
 }
 
 // serveChannelRoute sends one admin request through the real channel handlers.
-func serveChannelRoute(t *testing.T, method, path, body string) (int, channelRouteResponse, string) {
+func serveChannelRoute(
+	t *testing.T,
+	method, path, body string,
+) (int, channelRouteResponse, string) {
 	t.Helper()
+
 	router := gin.New()
 	router.POST("/api/channel/", AddChannel)
 	router.POST("/api/channels/", AddChannels)
 	router.PUT("/api/channel/:id", UpdateChannel)
 	router.POST("/api/channel/:id/status", UpdateChannelStatus)
-	request := httptest.NewRequest(method, path, strings.NewReader(body))
+
+	request := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
+
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 
@@ -62,12 +68,25 @@ func countChannels(t *testing.T, db *gorm.DB) int64 {
 // model of its type; omitting models (or null) keeps the list as before.
 func TestChannelPutRefusesExplicitEmptyModels(t *testing.T) {
 	db := useChannelRetentionDB(t)
-	require.NoError(t, db.Create(&model.ModelConfig{Model: "vendor/m", Type: mode.ChatCompletions}).Error)
+	require.NoError(
+		t,
+		db.Create(&model.ModelConfig{Model: "vendor/m", Type: mode.ChatCompletions}).Error,
+	)
 
-	ch := &model.Channel{Name: "routes", Type: model.ChannelTypeOpenAI, Key: "k", Models: []string{"vendor/m"}}
+	ch := &model.Channel{
+		Name:   "routes",
+		Type:   model.ChannelTypeOpenAI,
+		Key:    "k",
+		Models: []string{"vendor/m"},
+	}
 	require.NoError(t, db.Create(ch).Error)
 
-	status, response, _ := serveChannelRoute(t, http.MethodPut, channelPath(ch.ID, ""), `{"models":[]}`)
+	status, response, _ := serveChannelRoute(
+		t,
+		http.MethodPut,
+		channelPath(ch.ID, ""),
+		`{"models":[]}`,
+	)
 	require.Equal(t, http.StatusBadRequest, status)
 	require.False(t, response.Success)
 	require.Contains(t, response.Message, "models must not be an empty list")
@@ -86,7 +105,12 @@ func TestEnablingChannelWithEmptyKeyIsRefused(t *testing.T) {
 	db := useChannelRetentionDB(t)
 
 	// Status 0 takes the column default, enabled: that is why it is checked.
-	status, response, _ := serveChannelRoute(t, http.MethodPost, "/api/channel/", `{"name":"keyed","type":1,"key":"k"}`)
+	status, response, _ := serveChannelRoute(
+		t,
+		http.MethodPost,
+		"/api/channel/",
+		`{"name":"keyed","type":1,"key":"k"}`,
+	)
 	require.Equal(t, http.StatusOK, status, response.Message)
 
 	var created ChannelCreateResponse
@@ -114,12 +138,22 @@ func TestEnablingChannelWithEmptyKeyIsRefused(t *testing.T) {
 	require.Equal(t, before, countChannels(t, db))
 
 	// Created disabled, it is allowed; enabling it is not, until it has a key.
-	status, response, _ = serveChannelRoute(t, http.MethodPost, "/api/channel/", `{"name":"later","type":1,"key":"","status":2}`)
+	status, response, _ = serveChannelRoute(
+		t,
+		http.MethodPost,
+		"/api/channel/",
+		`{"name":"later","type":1,"key":"","status":2}`,
+	)
 	require.Equal(t, http.StatusOK, status, response.Message)
 	require.NoError(t, json.Unmarshal(response.Data, &created))
 	id := created.ID
 
-	status, response, _ = serveChannelRoute(t, http.MethodPost, channelPath(id, "/status"), `{"status":1}`)
+	status, response, _ = serveChannelRoute(
+		t,
+		http.MethodPost,
+		channelPath(id, "/status"),
+		`{"status":1}`,
+	)
 	require.Equal(t, http.StatusBadRequest, status)
 	require.Contains(t, response.Message, "channel key is empty")
 	require.Equal(t, model.ChannelStatusDisabled, storedChannel(t, id).Status)
@@ -129,7 +163,12 @@ func TestEnablingChannelWithEmptyKeyIsRefused(t *testing.T) {
 
 	status, response, _ = serveChannelRoute(t, http.MethodPut, channelPath(id, ""), `{"key":"k2"}`)
 	require.Equal(t, http.StatusOK, status, response.Message)
-	status, response, _ = serveChannelRoute(t, http.MethodPost, channelPath(id, "/status"), `{"status":1}`)
+	status, response, _ = serveChannelRoute(
+		t,
+		http.MethodPost,
+		channelPath(id, "/status"),
+		`{"status":1}`,
+	)
 	require.Equal(t, http.StatusOK, status, response.Message)
 	require.Equal(t, model.ChannelStatusEnabled, storedChannel(t, id).Status)
 
@@ -149,11 +188,25 @@ func TestEnablingChannelWithEmptyKeyIsRefused(t *testing.T) {
 
 	// A row that is already enabled without a key (written before this rule)
 	// is not a new one: re-enabling it and routine edits still work.
-	legacy := &model.Channel{Name: "legacy", Type: model.ChannelTypeOpenAI, Status: model.ChannelStatusEnabled}
+	legacy := &model.Channel{
+		Name:   "legacy",
+		Type:   model.ChannelTypeOpenAI,
+		Status: model.ChannelStatusEnabled,
+	}
 	require.NoError(t, db.Create(legacy).Error)
-	status, response, _ = serveChannelRoute(t, http.MethodPost, channelPath(legacy.ID, "/status"), `{"status":1}`)
+	status, response, _ = serveChannelRoute(
+		t,
+		http.MethodPost,
+		channelPath(legacy.ID, "/status"),
+		`{"status":1}`,
+	)
 	require.Equal(t, http.StatusOK, status, response.Message)
-	status, response, _ = serveChannelRoute(t, http.MethodPut, channelPath(legacy.ID, ""), `{"priority":5,"key":""}`)
+	status, response, _ = serveChannelRoute(
+		t,
+		http.MethodPut,
+		channelPath(legacy.ID, ""),
+		`{"priority":5,"key":""}`,
+	)
 	require.Equal(t, http.StatusOK, status, response.Message)
 }
 
@@ -163,15 +216,24 @@ func TestEnablingChannelWithEmptyKeyIsRefused(t *testing.T) {
 func TestChannelPutRetentionCoversTLSAndIdentityConfigs(t *testing.T) {
 	db := useChannelRetentionDB(t)
 
-	ch := &model.Channel{Name: "fal", Type: model.ChannelTypeFal, Key: "old-key", Configs: model.ChannelConfigs{
-		"region":                             "us",
-		"limits":                             map[string]any{"a": 1, "b": []any{"x"}},
-		"x_token_platform_provider_bindings": map[string]any{"vendor/m": map[string]any{"version": 1}},
-		"outbound_policy":                    "public_only",
-	}}
+	ch := &model.Channel{
+		Name: "fal",
+		Type: model.ChannelTypeFal,
+		Key:  "old-key",
+		Configs: model.ChannelConfigs{
+			"region": "us",
+			"limits": map[string]any{"a": 1, "b": []any{"x"}},
+			"x_token_platform_provider_bindings": map[string]any{
+				"vendor/m": map[string]any{"version": 1},
+			},
+			"outbound_policy": "public_only",
+		},
+	}
 	require.NoError(t, db.Create(ch).Error)
-	task := &model.NativeTask{ID: "native-in-flight", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp",
-		OutputSchema: "{}", OutputSchemaHash: "sha", Status: "queued", ChannelID: ch.ID}
+	task := &model.NativeTask{
+		ID: "native-in-flight", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp",
+		OutputSchema: "{}", OutputSchemaHash: "sha", Status: "queued", ChannelID: ch.ID,
+	}
 	require.NoError(t, db.Create(task).Error)
 
 	for _, body := range []string{
@@ -212,7 +274,12 @@ func TestChannelPutRetentionCoversTLSAndIdentityConfigs(t *testing.T) {
 	require.EqualValues(t, 7, stored.Priority)
 
 	// Without tasks needing the channel, identity changes go through.
-	require.NoError(t, db.Model(task).Updates(map[string]any{"status": "completed", "billing_settled": true}).Error)
+	require.NoError(
+		t,
+		db.Model(task).
+			Updates(map[string]any{"status": "completed", "billing_settled": true}).
+			Error,
+	)
 	status, response, _ := serveChannelRoute(t, http.MethodPut, channelPath(ch.ID, ""),
 		`{"skip_tls_verify":true,"configs":{"region":"eu"}}`)
 	require.Equal(t, http.StatusOK, status, response.Message)
@@ -225,18 +292,34 @@ func TestChannelPutRetentionCoversTLSAndIdentityConfigs(t *testing.T) {
 // field of the channel JSON.
 func TestChannelPutResponseOmitsKey(t *testing.T) {
 	db := useChannelRetentionDB(t)
-	require.NoError(t, db.Create(&model.ModelConfig{Model: "vendor/m", Type: mode.ChatCompletions}).Error)
+	require.NoError(
+		t,
+		db.Create(&model.ModelConfig{Model: "vendor/m", Type: mode.ChatCompletions}).Error,
+	)
 
-	ch := &model.Channel{Name: "secret-holder", Type: model.ChannelTypeOpenAI, Key: "sk-stored-secret",
-		BaseURL: "https://upstream.invalid", Models: []string{"vendor/m"},
-		ModelMapping: map[string]string{"vendor/m": "m"}, Configs: model.ChannelConfigs{"region": "us"}}
+	ch := &model.Channel{
+		Name:    "secret-holder",
+		Type:    model.ChannelTypeOpenAI,
+		Key:     "sk-stored-secret",
+		BaseURL: "https://upstream.invalid",
+		Models:  []string{"vendor/m"},
+		ModelMapping: map[string]string{
+			"vendor/m": "m",
+		},
+		Configs: model.ChannelConfigs{"region": "us"},
+	}
 	require.NoError(t, db.Create(ch).Error)
 
 	for _, test := range []struct{ body, secret string }{
 		{`{"priority":3}`, "sk-stored-secret"},
 		{`{"key":"sk-replacement-secret"}`, "sk-replacement-secret"},
 	} {
-		status, response, raw := serveChannelRoute(t, http.MethodPut, channelPath(ch.ID, ""), test.body)
+		status, response, raw := serveChannelRoute(
+			t,
+			http.MethodPut,
+			channelPath(ch.ID, ""),
+			test.body,
+		)
 		require.Equal(t, http.StatusOK, status, response.Message)
 		require.NotContains(t, raw, test.secret)
 		require.NotContains(t, raw, "sk-stored-secret")
@@ -279,6 +362,7 @@ func TestStatusAdvertisesChannelRoutingFeatures(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
+
 	model.LogDB = db
 
 	features := func() []string {
@@ -316,7 +400,11 @@ func TestStatusAdvertisesChannelRoutingFeatures(t *testing.T) {
 			got := features()
 			require.Contains(t, got, ChannelRoutingGuardFeature)
 			require.Equal(t, test.configured, slices.Contains(got, "native_task_v1"))
-			require.Equal(t, test.advertised, slices.Contains(got, NativeRouteFollowsBindingFeature))
+			require.Equal(
+				t,
+				test.advertised,
+				slices.Contains(got, NativeRouteFollowsBindingFeature),
+			)
 		})
 	}
 }

@@ -12,7 +12,12 @@ import (
 // application parses these four strictly.
 func PublicStatus(status string) string {
 	switch status {
-	case "reserved", model.NativeStatusWaiting, model.NativeStatusDispatching, "submitting", "submission_unknown", "queued":
+	case "reserved",
+		model.NativeStatusWaiting,
+		model.NativeStatusDispatching,
+		"submitting",
+		"submission_unknown",
+		"queued":
 		return "queued"
 	case "running", "result_received", "delivery_ready":
 		return "running"
@@ -20,7 +25,8 @@ func PublicStatus(status string) string {
 		return status
 	}
 
-	log.WithFields(log.Fields{"lane": "native", "status": status}).Warn("native task has an unknown status; shown as running")
+	log.WithFields(log.Fields{"lane": "native", "status": status}).
+		Warn("native task has an unknown status; shown as running")
 
 	return "running"
 }

@@ -4,23 +4,34 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"github.com/labring/aiproxy/core/controller"
-	log "github.com/sirupsen/logrus"
 	"sync"
 	"time"
+
+	"github.com/labring/aiproxy/core/controller"
+	log "github.com/sirupsen/logrus"
 )
 
 // nativeRecoveryWorkers bound concurrent provider polls and archives per
-// instance; each archive buffers at most one artifact.
+// instance; each archive streams with bounded buffers.
 const nativeRecoveryWorkers = 4
 
 // NativeTaskRecoveryTask is separate from legacy image usage projection. It is
 // the only place native tasks advance: customer reads never poll or archive.
 func NativeTaskRecoveryTask(ctx context.Context) {
-	for i := 0; i < nativeRecoveryWorkers; i++ {
-		go nativeRecoveryWorker(ctx)
+	runNativeTaskRecovery(ctx, nativeRecoveryWorker)
+}
+
+func runNativeTaskRecovery(ctx context.Context, worker func(context.Context)) {
+	var wg sync.WaitGroup
+	for i := 0; i < nativeRecoveryWorkers && ctx.Err() == nil; i++ {
+		wg.Go(func() {
+			if ctx.Err() == nil {
+				worker(ctx)
+			}
+		})
 	}
-	<-ctx.Done()
+
+	wg.Wait()
 }
 
 func nativeRecoveryWorker(ctx context.Context) {
@@ -28,19 +39,17 @@ func nativeRecoveryWorker(ctx context.Context) {
 	if _, err := rand.Read(id[:]); err != nil {
 		return
 	}
+
 	owner := "native-" + hex.EncodeToString(id[:])
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := controller.RecoverNativeTasks(ctx, owner); err != nil {
-				log.Warn("native task recovery deferred")
-			}
+
+	runRecoveryTicks(ctx, ticker.C, func(ctx context.Context) {
+		if err := controller.RecoverNativeTasks(ctx, owner); err != nil {
+			log.Warn("native task recovery deferred")
 		}
-	}
+	})
 }
 
 // NativeQueueDispatcherTask runs the own task queue dispatcher. On shutdown
@@ -48,5 +57,6 @@ func nativeRecoveryWorker(ctx context.Context) {
 // handed to their leases), so wg.Wait covers them (spec §6.8).
 func NativeQueueDispatcherTask(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
+
 	controller.RunNativeQueueDispatcher(ctx)
 }

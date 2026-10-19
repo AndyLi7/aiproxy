@@ -70,8 +70,12 @@ func (f *featureReadiness) ready(db *gorm.DB) bool {
 	}
 
 	if !ready {
-		log.Warnf("%s unavailable: LogDB lacks logs.billing_operation_id, the usage attribution indexes"+
-			" (migrations/usage-attribution-v1 step 2) or the task tables", f.name)
+		log.Warnf(
+			"%s unavailable: LogDB lacks logs.billing_operation_id, the usage attribution indexes"+
+				" (migrations/usage-attribution-v1 step 2) or the task tables",
+			f.name,
+		)
+
 		return false
 	}
 

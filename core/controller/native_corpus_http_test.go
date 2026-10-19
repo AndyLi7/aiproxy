@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private nativeControllerWallet fixture or implementation.
 package controller
 
 import (
@@ -27,51 +28,86 @@ func TestNativeCorpusHTTPDelivery(t *testing.T) {
 	if path == "" {
 		t.Skip("requires exact 66-endpoint exported cases")
 	}
+
+	// #nosec G703 -- The opt-in local integration harness owns this fixture or rendezvous path; no HTTP input supplies it.
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
+
 	var cases []struct {
-		Endpoint, SourceHash    string
-		Contract, Input, Output json.RawMessage
-		Error                   string
+		Endpoint   string `json:"Endpoint"`
+		SourceHash string `json:"SourceHash"`
+
+		Contract json.RawMessage `json:"Contract"`
+		Input    json.RawMessage `json:"Input"`
+		Output   json.RawMessage `json:"Output"`
+
+		Error string `json:"Error"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &cases))
 	require.Len(t, cases, 66)
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "corpus.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
+
 	oldDB, oldWallet := model.LogDB, balance.Default
 	model.LogDB, balance.Default = db, nativeControllerWallet{}
-	t.Cleanup(func() { model.LogDB, balance.Default = oldDB, oldWallet; sql, _ := db.DB(); _ = sql.Close() })
+	t.Cleanup(
+		func() { model.LogDB, balance.Default = oldDB, oldWallet; sql, _ := db.DB(); _ = sql.Close() },
+	)
+
 	seen := map[string]bool{}
-	evidence := []map[string]any{}
+
+	evidence := make([]map[string]any, 0, len(cases))
 	for index, c := range cases {
 		require.False(t, seen[c.Endpoint])
 		seen[c.Endpoint] = true
 		passed := t.Run(c.Endpoint, func(t *testing.T) {
 			require.Empty(t, c.Error)
 			require.Len(t, c.SourceHash, 64)
+
 			var contract nativeresult.TaskContract
 			require.NoError(t, json.Unmarshal(c.Contract, &contract))
 			compiled, err := nativeresult.CompileTaskContract(c.Contract)
 			require.NoError(t, err)
 			artifacts, err := nativeresult.PlanArtifacts(c.Output, contract.Artifacts)
 			require.NoError(t, err)
+
 			id := fmt.Sprintf("corpus-http-%d", index)
+
 			owned := map[string]string{}
 			for n, artifact := range artifacts {
-				owned[artifact.Pointer] = fmt.Sprintf("https://gateway.example/v1/model-tasks/%s/artifacts/%d", id, n)
+				owned[artifact.Pointer] = fmt.Sprintf(
+					"https://gateway.example/v1/model-tasks/%s/artifacts/%d",
+					id,
+					n,
+				)
 			}
+
 			delivered, err := nativeresult.RewriteArtifacts(c.Output, contract.Artifacts, owned)
 			require.NoError(t, err)
 			_, err = compiled.ValidateOutput(delivered)
 			require.NoError(t, err)
 			body, err := json.Marshal(map[string]any{"model": contract.Model, "input": c.Input})
 			require.NoError(t, err)
+
 			digest := sha256.Sum256(body)
-			require.NoError(t, db.Create(&model.NativeTask{ID: id, GroupID: "owner", TokenID: 7, Model: contract.Model,
-				Fingerprint: hex.EncodeToString(digest[:]), OutputSchema: string(contract.OutputSchema), OutputSchemaHash: c.SourceHash,
-				Status: "completed", DeliveredOutput: string(delivered), NativeOutput: `{"private_marker":true}`,
-				BillingOperationID: "native:" + id, CredentialScope: "private_marker"}).Error)
+			require.NoError(t, db.Create(&model.NativeTask{
+				ID:      id,
+				GroupID: "owner",
+				TokenID: 7,
+				Model:   contract.Model,
+				Fingerprint: hex.EncodeToString(
+					digest[:],
+				),
+				OutputSchema:       string(contract.OutputSchema),
+				OutputSchemaHash:   c.SourceHash,
+				Status:             "completed",
+				DeliveredOutput:    string(delivered),
+				NativeOutput:       `{"private_marker":true}`,
+				BillingOperationID: "native:" + id,
+				CredentialScope:    "private_marker",
+			}).Error)
+
 			request := func(group string, token int, method, requestBody string) *httptest.ResponseRecorder {
 				router := gin.New()
 				router.Use(func(ctx *gin.Context) {
@@ -81,14 +117,23 @@ func TestNativeCorpusHTTPDelivery(t *testing.T) {
 				})
 				router.GET("/v1/model-tasks/:id", GetNativeTask)
 				router.POST("/v1/model-tasks", NativeTasks()...)
+
 				url := "/v1/model-tasks/" + id
 				if method == http.MethodPost {
 					url = "/v1/model-tasks"
 				}
-				req := httptest.NewRequest(method, url, strings.NewReader(requestBody))
-				req.Header.Set("X-Request-Id", id)
+
+				req := httptest.NewRequestWithContext(
+					t.Context(),
+					method,
+					url,
+					strings.NewReader(requestBody),
+				)
+				req.Header.Set("X-Request-ID", id)
+
 				response := httptest.NewRecorder()
 				router.ServeHTTP(response, req)
+
 				return response
 			}
 			for _, auth := range []struct {
@@ -98,24 +143,42 @@ func TestNativeCorpusHTTPDelivery(t *testing.T) {
 				response := request(auth.group, auth.token, http.MethodGet, "")
 				require.Equal(t, auth.status, response.Code)
 				require.NotContains(t, response.Body.String(), "private_marker")
+
 				if auth.status == 200 {
-					var result struct{ Output json.RawMessage }
+					var result struct {
+						Output json.RawMessage `json:"Output"`
+					}
 					require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
 					require.JSONEq(t, string(delivered), string(result.Output))
 				}
 			}
+
 			replay := request("owner", 7, http.MethodPost, string(body))
 			require.Equal(t, 202, replay.Code)
 			require.NotContains(t, replay.Body.String(), "private_marker")
+
 			changed := request("owner", 7, http.MethodPost, `{"model":"changed","input":{}}`)
 			require.Equal(t, 409, changed.Code)
 		})
-		evidence = append(evidence, map[string]any{"endpoint": c.Endpoint, "sourceHash": c.SourceHash, "httpDeliveryReplayPassed": passed, "syntheticRecords": true, "injectedAuthenticatedIdentity": true, "providerAdmissionVerified": false, "paidGenerationVerified": false})
+		evidence = append(
+			evidence,
+			map[string]any{
+				"endpoint":                      c.Endpoint,
+				"sourceHash":                    c.SourceHash,
+				"httpDeliveryReplayPassed":      passed,
+				"syntheticRecords":              true,
+				"injectedAuthenticatedIdentity": true,
+				"providerAdmissionVerified":     false,
+				"paidGenerationVerified":        false,
+			},
+		)
 	}
+
 	if out := os.Getenv("FAL_NATIVE_HTTP_REPORT"); out != "" {
 		data, err := json.MarshalIndent(evidence, "", "  ")
 		require.NoError(t, err)
-		f, err := os.OpenFile(out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		// #nosec G703 -- The opt-in local integration harness owns this fixture or rendezvous path; no HTTP input supplies it.
+		f, err := os.OpenFile(out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		require.NoError(t, err)
 		_, err = f.Write(data)
 		require.NoError(t, err)

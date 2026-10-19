@@ -21,40 +21,83 @@ func nativeLogDB(t *testing.T) *gorm.DB {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native-log.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}, &model.Log{}, &model.RequestDetail{}))
+
 	return db
 }
 
 func submittedNativeTask(t *testing.T, db *gorm.DB, id string) *model.NativeTask {
 	t.Helper()
+
 	task, created, err := model.ReserveNativeTask(db, model.NativeTask{
-		ID: id, GroupID: "g", TokenID: 1, Model: "alibaba/wan-2.2-5b/text-to-image",
-		Fingerprint: "hash", OutputSchema: nativeLogSchema, ChannelID: 7, BillingOperationID: "native:" + id,
+		ID:                  id,
+		GroupID:             "g",
+		TokenID:             1,
+		Model:               "alibaba/wan-2.2-5b/text-to-image",
+		Fingerprint:         "hash",
+		OutputSchema:        nativeLogSchema,
+		ChannelID:           7,
+		BillingOperationID:  "native:" + id,
 		PrepaymentQuoteJSON: `{"version":1,"currency":"USD","quoteVersion":"q1","prepaidMicros":200,"routes":[{"routeId":"r","channelId":7,"provider":"fal","endpoint":"fal-ai/x","credentialScope":"s","quantityMetric":"request","estimatedMicros":100,"prepaidMicros":200,"rule":{"mode":"cost_markup","ratio":"1"}}]}`,
 	})
 	require.NoError(t, err)
 	require.True(t, created)
-	require.NoError(t, model.TransitionNativeSubmission(db, id, "g", 1, "reserved", "submitting", ""))
+	require.NoError(
+		t,
+		model.TransitionNativeSubmission(db, id, "g", 1, "reserved", "submitting", ""),
+	)
+
 	return task
 }
 
 func nativeLogRows(t *testing.T, db *gorm.DB, id string) []model.Log {
 	t.Helper()
+
 	var rows []model.Log
 	require.NoError(t, db.Where("request_id = ?", id).Order("id").Find(&rows).Error)
+
 	return rows
 }
 
 func TestNativeTaskLogFollowsTaskToCompletionAndCharge(t *testing.T) {
 	db := nativeLogDB(t)
 	task := submittedNativeTask(t, db, "pg_native_log")
-	info := model.NativeTaskLog{TokenName: "playground", Endpoint: "POST /v1/model-tasks", RequestSource: model.RequestSourcePlayground, IP: "127.0.0.1", Mode: int(mode.NativeTasks)}
+	info := model.NativeTaskLog{
+		TokenName:     "playground",
+		Endpoint:      "POST /v1/model-tasks",
+		RequestSource: model.RequestSourcePlayground,
+		IP:            "127.0.0.1",
+		Mode:          int(mode.NativeTasks),
+	}
 	require.NoError(t, model.RecordNativeTaskLog(db, task, info))
 	// A replayed submission never adds a second row.
 	require.NoError(t, model.RecordNativeTaskLog(db, task, info))
 	// A gateway rejection for the same request id is a separate row and stays untouched.
-	require.NoError(t, db.Create(&model.Log{RequestID: "pg_native_log", GroupID: "g", TokenID: 1, Code: 503, Endpoint: "POST /v1/model-tasks"}).Error)
+	require.NoError(
+		t,
+		db.Create(
+			&model.Log{
+				RequestID: "pg_native_log",
+				GroupID:   "g",
+				TokenID:   1,
+				Code:      503,
+				Endpoint:  "POST /v1/model-tasks",
+			},
+		).Error,
+	)
 	// So is an async image task of the same key that reused the request id.
-	require.NoError(t, db.Create(&model.Log{RequestID: "pg_native_log", GroupID: "g", TokenID: 1, Code: 202, Mode: int(mode.ImagesGenerations), AsyncUsageStatus: model.AsyncUsageStatusPending}).Error)
+	require.NoError(
+		t,
+		db.Create(
+			&model.Log{
+				RequestID:        "pg_native_log",
+				GroupID:          "g",
+				TokenID:          1,
+				Code:             202,
+				Mode:             int(mode.ImagesGenerations),
+				AsyncUsageStatus: model.AsyncUsageStatusPending,
+			},
+		).Error,
+	)
 
 	rows := nativeLogRows(t, db, "pg_native_log")
 	require.Len(t, rows, 3)
@@ -69,13 +112,31 @@ func TestNativeTaskLogFollowsTaskToCompletionAndCharge(t *testing.T) {
 	require.Equal(t, "native:q1", rows[0].PricingVersion)
 
 	require.NoError(t, model.AcceptNativeTask(db, "pg_native_log", "g", 1, "fal-request-1"))
-	require.NoError(t, model.SaveNativeBillingTerminal(db, "pg_native_log", "g", 1, `{"status":"accepted"}`))
+	require.NoError(
+		t,
+		model.SaveNativeBillingTerminal(db, "pg_native_log", "g", 1, `{"status":"accepted"}`),
+	)
 	rows = nativeLogRows(t, db, "pg_native_log")
 	require.Equal(t, "fal-request-1", string(rows[0].UpstreamID))
 	require.Equal(t, model.AsyncUsageStatusPending, rows[0].AsyncUsageStatus)
 
-	require.NoError(t, db.Model(&model.NativeTask{}).Where("id = ?", "pg_native_log").Update("status", "completed").Error)
-	require.NoError(t, model.SaveNativeBillingTerminal(db, "pg_native_log", "g", 1, `{"status":"settled","chargedMicros":19200}`))
+	require.NoError(
+		t,
+		db.Model(&model.NativeTask{}).
+			Where("id = ?", "pg_native_log").
+			Update("status", "completed").
+			Error,
+	)
+	require.NoError(
+		t,
+		model.SaveNativeBillingTerminal(
+			db,
+			"pg_native_log",
+			"g",
+			1,
+			`{"status":"settled","chargedMicros":19200}`,
+		),
+	)
 	rows = nativeLogRows(t, db, "pg_native_log")
 	require.Equal(t, model.AsyncUsageStatusCompleted, rows[0].AsyncUsageStatus)
 	require.InDelta(t, 0.0192, rows[0].Amount.UsedAmount, 1e-9)
@@ -90,9 +151,40 @@ func TestNativeTaskLogFollowsTaskToCompletionAndCharge(t *testing.T) {
 func TestNativeTaskLogMarksFailedTasks(t *testing.T) {
 	db := nativeLogDB(t)
 	task := submittedNativeTask(t, db, "trial_native_failed")
-	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Endpoint: "POST /api/native-trials", RequestSource: model.RequestSourceAdminDemo, Mode: int(mode.NativeTasks)}))
-	require.NoError(t, model.TransitionNativeSubmission(db, "trial_native_failed", "g", 1, "submitting", "failed", "upstream_rejected"))
-	require.NoError(t, model.SaveNativeBillingTerminal(db, "trial_native_failed", "g", 1, `{"status":"refunded","chargedMicros":0}`))
+	require.NoError(
+		t,
+		model.RecordNativeTaskLog(
+			db,
+			task,
+			model.NativeTaskLog{
+				Endpoint:      "POST /api/native-trials",
+				RequestSource: model.RequestSourceAdminDemo,
+				Mode:          int(mode.NativeTasks),
+			},
+		),
+	)
+	require.NoError(
+		t,
+		model.TransitionNativeSubmission(
+			db,
+			"trial_native_failed",
+			"g",
+			1,
+			"submitting",
+			"failed",
+			"upstream_rejected",
+		),
+	)
+	require.NoError(
+		t,
+		model.SaveNativeBillingTerminal(
+			db,
+			"trial_native_failed",
+			"g",
+			1,
+			`{"status":"refunded","chargedMicros":0}`,
+		),
+	)
 	rows := nativeLogRows(t, db, "trial_native_failed")
 	require.Len(t, rows, 1)
 	require.Equal(t, 502, rows[0].Code)
@@ -110,30 +202,97 @@ func TestNativeTaskLogMarksFailedTasks(t *testing.T) {
 func TestNativeTaskLogNamesRejectedParameters(t *testing.T) {
 	db := nativeLogDB(t)
 	task := submittedNativeTask(t, db, "pg_native_invalid")
-	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Endpoint: "POST /v1/model-tasks", Mode: int(mode.NativeTasks)}))
+	require.NoError(
+		t,
+		model.RecordNativeTaskLog(
+			db,
+			task,
+			model.NativeTaskLog{Endpoint: "POST /v1/model-tasks", Mode: int(mode.NativeTasks)},
+		),
+	)
 	require.NoError(t, model.AcceptNativeTask(db, "pg_native_invalid", "g", 1, "fal-request-1"))
-	issues := []nativeresult.ParameterIssue{{Field: "voice", Rule: "unsupported_value"}, {Field: "image_urls[0]", Rule: "file_size"}}
-	require.NoError(t, model.UpdateNativePoll(db, "pg_native_invalid", "g", 1, "failed", "invalid_parameters", issues...))
-	require.NoError(t, model.SaveNativeBillingTerminal(db, "pg_native_invalid", "g", 1, `{"status":"refunded","chargedMicros":0}`))
+
+	issues := []nativeresult.ParameterIssue{
+		{Field: "voice", Rule: "unsupported_value"},
+		{Field: "image_urls[0]", Rule: "file_size"},
+	}
+	require.NoError(
+		t,
+		model.UpdateNativePoll(
+			db,
+			"pg_native_invalid",
+			"g",
+			1,
+			"failed",
+			"invalid_parameters",
+			issues...,
+		),
+	)
+	require.NoError(
+		t,
+		model.SaveNativeBillingTerminal(
+			db,
+			"pg_native_invalid",
+			"g",
+			1,
+			`{"status":"refunded","chargedMicros":0}`,
+		),
+	)
 	rows := nativeLogRows(t, db, "pg_native_invalid")
 	require.Len(t, rows, 1)
 	require.Equal(t, 502, rows[0].Code)
 	require.Equal(t, model.AsyncUsageStatusFailed, rows[0].AsyncUsageStatus)
 	require.Equal(t, "invalid_parameters", rows[0].ErrorCode)
-	require.Equal(t, "Invalid parameters: voice (unsupported_value), image_urls[0] (file_size)", rows[0].SafeError)
+	require.Equal(
+		t,
+		"Invalid parameters: voice (unsupported_value), image_urls[0] (file_size)",
+		rows[0].SafeError,
+	)
 	require.Empty(t, rows[0].FailureStage)
 
 	long := submittedNativeTask(t, db, "pg_native_invalid_long")
-	require.NoError(t, model.RecordNativeTaskLog(db, long, model.NativeTaskLog{Mode: int(mode.NativeTasks)}))
+	require.NoError(
+		t,
+		model.RecordNativeTaskLog(db, long, model.NativeTaskLog{Mode: int(mode.NativeTasks)}),
+	)
+
 	many := make([]nativeresult.ParameterIssue, 8)
 	for i := range many {
-		many[i] = nativeresult.ParameterIssue{Field: "voice_setting.voice_id_" + strings.Repeat("x", 40), Rule: "unsupported_value"}
+		many[i] = nativeresult.ParameterIssue{
+			Field: "voice_setting.voice_id_" + strings.Repeat("x", 40),
+			Rule:  "unsupported_value",
+		}
 	}
-	require.NoError(t, model.TransitionNativeSubmission(db, "pg_native_invalid_long", "g", 1, "submitting", "failed", "invalid_parameters", many...))
-	require.NoError(t, model.SaveNativeBillingTerminal(db, "pg_native_invalid_long", "g", 1, `{"status":"refunded","chargedMicros":0}`))
+
+	require.NoError(
+		t,
+		model.TransitionNativeSubmission(
+			db,
+			"pg_native_invalid_long",
+			"g",
+			1,
+			"submitting",
+			"failed",
+			"invalid_parameters",
+			many...,
+		),
+	)
+	require.NoError(
+		t,
+		model.SaveNativeBillingTerminal(
+			db,
+			"pg_native_invalid_long",
+			"g",
+			1,
+			`{"status":"refunded","chargedMicros":0}`,
+		),
+	)
 	rows = nativeLogRows(t, db, "pg_native_invalid_long")
 	require.LessOrEqual(t, len(rows[0].SafeError), 256)
-	require.True(t, strings.HasPrefix(rows[0].SafeError, "Invalid parameters: voice_setting.voice_id_"))
+	require.True(
+		t,
+		strings.HasPrefix(rows[0].SafeError, "Invalid parameters: voice_setting.voice_id_"),
+	)
 	require.True(t, strings.HasSuffix(rows[0].SafeError, "(unsupported_value)"))
 }
 
@@ -141,10 +300,23 @@ func TestNativeTaskLogIsSkippedWithoutLogStorage(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native-only.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
-	task, _, err := model.ReserveNativeTask(db, model.NativeTask{ID: "no_logs", GroupID: "g", TokenID: 1, Model: "a/b/c", Fingerprint: "hash", OutputSchema: nativeLogSchema})
+	task, _, err := model.ReserveNativeTask(
+		db,
+		model.NativeTask{
+			ID:           "no_logs",
+			GroupID:      "g",
+			TokenID:      1,
+			Model:        "a/b/c",
+			Fingerprint:  "hash",
+			OutputSchema: nativeLogSchema,
+		},
+	)
 	require.NoError(t, err)
 	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{}))
-	require.NoError(t, model.SaveNativeBillingTerminal(db, "no_logs", "g", 1, `{"status":"accepted"}`))
+	require.NoError(
+		t,
+		model.SaveNativeBillingTerminal(db, "no_logs", "g", 1, `{"status":"accepted"}`),
+	)
 }
 
 // A task requested by another accepted ID (public_api_id or an alias) is
@@ -154,7 +326,9 @@ func TestNativeTaskLogKeepsCapabilityIdentityAndRequestedModel(t *testing.T) {
 	db := nativeLogDB(t)
 	task := submittedNativeTask(t, db, "requested_by_public_id")
 	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{
-		Endpoint: "POST /v1/model-tasks", Mode: int(mode.NativeTasks), RequestedModel: "alibaba/wan-2.2-5b",
+		Endpoint:       "POST /v1/model-tasks",
+		Mode:           int(mode.NativeTasks),
+		RequestedModel: "alibaba/wan-2.2-5b",
 	}))
 	rows := nativeLogRows(t, db, "requested_by_public_id")
 	require.Len(t, rows, 1)
@@ -174,15 +348,19 @@ func TestNativeTaskLogKeepsCapabilityIdentityAndRequestedModel(t *testing.T) {
 
 // nativeReceipt is a stored wallet receipt carrying the hold's attribution.
 func nativeReceipt(status string, usageAt time.Time, source string) string {
-	return fmt.Sprintf(`{"id":"x","status":%q,"chargedMicros":0,"refundMicros":200,"usageAtMs":%d,"usageSource":%q}`,
-		status, usageAt.UnixMilli(), source)
+	return fmt.Sprintf(
+		`{"id":"x","status":%q,"chargedMicros":0,"refundMicros":200,"usageAtMs":%d,"usageSource":%q}`,
+		status,
+		usageAt.UnixMilli(),
+		source,
+	)
 }
 
 // Plan §1.4 rule 4: a billing sync inserts the call row a submission lost
 // (RecordNativeTaskLog's failure is only logged), only for a task some request
 // already answered with 202, never twice, and only with the hold's identity.
 func TestNativeMissingRowInsert(t *testing.T) {
-	usageAt := time.Date(2026, 10, 12, 1, 2, 3, 456_000_000, time.UTC)
+	usageAt := time.Date(2026, time.October, 12, 1, 2, 3, 456_000_000, time.UTC)
 
 	t.Run("a: lost row is inserted by recovery", func(t *testing.T) {
 		db := nativeLogDB(t)
@@ -196,8 +374,26 @@ func TestNativeMissingRowInsert(t *testing.T) {
 		submittedNativeTask(t, db, "lost_row")
 		require.NoError(t, model.AcceptNativeTask(db, "lost_row", "g", 1, "fal-1"))
 		// Old: 0 rows; the task completed and was charged without a call row.
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "lost_row", "g", 1, nativeReceipt("pending", usageAt, model.RequestSourcePlayground)))
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "lost_row", "g", 1, nativeReceipt("pending", usageAt, model.RequestSourcePlayground)))
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"lost_row",
+				"g",
+				1,
+				nativeReceipt("pending", usageAt, model.RequestSourcePlayground),
+			),
+		)
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"lost_row",
+				"g",
+				1,
+				nativeReceipt("pending", usageAt, model.RequestSourcePlayground),
+			),
+		)
 
 		rows := nativeLogRows(t, db, "lost_row")
 		require.Len(t, rows, 1)
@@ -218,7 +414,10 @@ func TestNativeMissingRowInsert(t *testing.T) {
 		// The submitting request's own writer then adds nothing.
 		task, err := model.GetNativeTask(db, "lost_row", "g", 1)
 		require.NoError(t, err)
-		require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Mode: int(mode.NativeTasks)}))
+		require.NoError(
+			t,
+			model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Mode: int(mode.NativeTasks)}),
+		)
 		require.Len(t, nativeLogRows(t, db, "lost_row"), 1)
 	})
 
@@ -231,7 +430,16 @@ func TestNativeMissingRowInsert(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, created)
 
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "never_sent", "g", 1, nativeReceipt("refunded", usageAt, model.RequestSourceAPI)))
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"never_sent",
+				"g",
+				1,
+				nativeReceipt("refunded", usageAt, model.RequestSourceAPI),
+			),
+		)
 
 		task, err := model.GetNativeTask(db, "never_sent", "g", 1)
 		require.NoError(t, err)
@@ -248,13 +456,38 @@ func TestNativeMissingRowInsert(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.True(t, created)
-		abandoned, err := model.AbandonNativeReservation(db, "not_started", "g", 1, time.Now().Add(time.Minute))
+
+		abandoned, err := model.AbandonNativeReservation(
+			db,
+			"not_started",
+			"g",
+			1,
+			time.Now().Add(time.Minute),
+		)
 		require.NoError(t, err)
 		require.True(t, abandoned)
 
 		// The refund's syncs see a failed task; it still never got a 202.
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "not_started", "g", 1, nativeReceipt("pending", usageAt, model.RequestSourceAPI)))
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "not_started", "g", 1, nativeReceipt("refunded", usageAt, model.RequestSourceAPI)))
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"not_started",
+				"g",
+				1,
+				nativeReceipt("pending", usageAt, model.RequestSourceAPI),
+			),
+		)
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"not_started",
+				"g",
+				1,
+				nativeReceipt("refunded", usageAt, model.RequestSourceAPI),
+			),
+		)
 		require.Empty(t, nativeLogRows(t, db, "not_started"))
 		task, err := model.GetNativeTask(db, "not_started", "g", 1)
 		require.NoError(t, err)
@@ -266,11 +499,25 @@ func TestNativeMissingRowInsert(t *testing.T) {
 		db := nativeLogDB(t)
 		submittedNativeTask(t, db, "after_503")
 		require.NoError(t, db.Create(&model.Log{
-			RequestID: "after_503", GroupID: "g", TokenID: 1, Code: 503, Mode: int(mode.NativeTasks),
-			FailureStage: model.FailureStageRouting, BillingOperationID: "native:after_503",
+			RequestID:          "after_503",
+			GroupID:            "g",
+			TokenID:            1,
+			Code:               503,
+			Mode:               int(mode.NativeTasks),
+			FailureStage:       model.FailureStageRouting,
+			BillingOperationID: "native:after_503",
 		}).Error)
 
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "after_503", "g", 1, nativeReceipt("pending", usageAt, model.RequestSourceAPI)))
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"after_503",
+				"g",
+				1,
+				nativeReceipt("pending", usageAt, model.RequestSourceAPI),
+			),
+		)
 
 		rows := nativeLogRows(t, db, "after_503")
 		require.Len(t, rows, 2)
@@ -282,16 +529,49 @@ func TestNativeMissingRowInsert(t *testing.T) {
 	t.Run("d: a receipt without the hold's time inserts nothing", func(t *testing.T) {
 		db := nativeLogDB(t)
 		submittedNativeTask(t, db, "pre_p2_hold")
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "pre_p2_hold", "g", 1, `{"status":"pending"}`))
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "pre_p2_hold", "g", 1, `{"status":"pending","usageAtMs":0,"usageSource":"api"}`))
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "pre_p2_hold", "g", 1, fmt.Sprintf(`{"status":"pending","usageAtMs":%d,"usageSource":"web"}`, usageAt.UnixMilli())))
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(db, "pre_p2_hold", "g", 1, `{"status":"pending"}`),
+		)
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"pre_p2_hold",
+				"g",
+				1,
+				`{"status":"pending","usageAtMs":0,"usageSource":"api"}`,
+			),
+		)
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"pre_p2_hold",
+				"g",
+				1,
+				fmt.Sprintf(
+					`{"status":"pending","usageAtMs":%d,"usageSource":"web"}`,
+					usageAt.UnixMilli(),
+				),
+			),
+		)
 		require.Empty(t, nativeLogRows(t, db, "pre_p2_hold"))
 	})
 
 	t.Run("admin trial row keeps its endpoint", func(t *testing.T) {
 		db := nativeLogDB(t)
 		submittedNativeTask(t, db, "trial_lost")
-		require.NoError(t, model.SaveNativeBillingTerminal(db, "trial_lost", "g", 1, nativeReceipt("pending", usageAt, model.RequestSourceAdminDemo)))
+		require.NoError(
+			t,
+			model.SaveNativeBillingTerminal(
+				db,
+				"trial_lost",
+				"g",
+				1,
+				nativeReceipt("pending", usageAt, model.RequestSourceAdminDemo),
+			),
+		)
 
 		rows := nativeLogRows(t, db, "trial_lost")
 		require.Len(t, rows, 1)
@@ -305,7 +585,10 @@ func TestNativeTaskLogCarriesOperation(t *testing.T) {
 	db := nativeLogDB(t)
 	task := submittedNativeTask(t, db, "with_op")
 	require.Equal(t, "native:with_op", task.BillingOperationID)
-	require.NoError(t, model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Mode: int(mode.NativeTasks)}))
+	require.NoError(
+		t,
+		model.RecordNativeTaskLog(db, task, model.NativeTaskLog{Mode: int(mode.NativeTasks)}),
+	)
 
 	rows := nativeLogRows(t, db, "with_op")
 	require.Len(t, rows, 1)

@@ -1,13 +1,7 @@
 package conv
 
-import "unsafe"
+// BytesToString returns a string that does not alias the caller's mutable bytes.
+func BytesToString(b []byte) string { return string(b) }
 
-// The change of bytes will cause the change of string synchronously
-func BytesToString(b []byte) string {
-	return unsafe.String(unsafe.SliceData(b), len(b))
-}
-
-// If string is readonly, modifying bytes will cause panic
-func StringToBytes(s string) []byte {
-	return unsafe.Slice(unsafe.StringData(s), len(s))
-}
+// StringToBytes returns independently mutable bytes, including for string literals.
+func StringToBytes(s string) []byte { return []byte(s) }

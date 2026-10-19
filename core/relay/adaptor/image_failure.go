@@ -8,6 +8,8 @@ import (
 // ImageSubmissionFailure contains safe evidence, never upstream bodies or credentials.
 // ProviderStatus and ProviderReason are operator evidence for server logs only:
 // they are never returned to customers and never persisted with a task.
+//
+//nolint:errname // Public failure-evidence API name retained for existing adaptor consumers.
 type ImageSubmissionFailure struct {
 	Failure     failover.Failure
 	PublicError *model.ImageTaskError

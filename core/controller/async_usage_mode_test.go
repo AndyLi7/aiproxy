@@ -33,7 +33,12 @@ func (n *captureNotifier) Notify(level notify.Level, title, message string) {
 	n.NotifyThrottle(level, "", 0, title, message)
 }
 
-func (n *captureNotifier) NotifyThrottle(_ notify.Level, key string, _ time.Duration, title, _ string) {
+func (n *captureNotifier) NotifyThrottle(
+	_ notify.Level,
+	key string,
+	_ time.Duration,
+	title, _ string,
+) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -72,7 +77,12 @@ func TestAsyncUsageOnSyncModeAlerts(t *testing.T) {
 
 	record := func(relayMode mode.Mode) {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/embeddings", nil)
+		c.Request = httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/v1/embeddings",
+			nil,
+		)
 		c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{})
 
 		m := &meta.Meta{
@@ -82,7 +92,15 @@ func TestAsyncUsageOnSyncModeAlerts(t *testing.T) {
 			Group:       model.GroupCache{ID: "g"},
 			Token:       model.TokenCache{ID: 1},
 		}
-		recordResult(c, m, model.Price{}, &relaycontroller.HandleResult{AsyncUsage: true}, 0, true, nil)
+		recordResult(
+			c,
+			m,
+			model.Price{},
+			&relaycontroller.HandleResult{AsyncUsage: true},
+			0,
+			true,
+			nil,
+		)
 
 		// Consume writes the row in the background; it stays pending.
 		require.Eventually(t, func() bool {

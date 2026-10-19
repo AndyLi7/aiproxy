@@ -189,7 +189,24 @@ func TestMarkAsyncUsageFailedFailsOnlyTheOutboxOwnersLog(t *testing.T) {
 			info.TokenID = 1
 			info.Status = model.AsyncUsageStatusPending
 			info.ProcessingToken = "claim-token"
+			info.NextPollAt = time.Now().Add(time.Minute)
 			require.NoError(t, db.Create(info).Error)
+
+			if info.ImageTaskID != "" {
+				require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+				require.NoError(
+					t,
+					db.Create(
+						&model.ImageTask{
+							ID:      info.ImageTaskID,
+							GroupID: info.GroupID,
+							TokenID: info.TokenID,
+							UsageID: info.ID,
+							Status:  "failed",
+						},
+					).Error,
+				)
+			}
 
 			markAsyncUsageFailed(info, "upstream task failed")
 			requireForeignAsyncLogsUntouched(t, db, foreign)

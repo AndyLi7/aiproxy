@@ -7,14 +7,18 @@ import (
 )
 
 func TestOfficialStepReflectionObjectArrayReplay(t *testing.T) {
-	raw, err := os.ReadFile("../../common/registryvalidation/testdata/stepx-reflection-metadata.json")
+	raw, err := os.ReadFile(
+		"../../common/registryvalidation/testdata/stepx-reflection-metadata.json",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var s sample
 	if err = json.Unmarshal(raw, &s); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, tc := range []struct {
 		value any
 		pass  bool
@@ -23,9 +27,11 @@ func TestOfficialStepReflectionObjectArrayReplay(t *testing.T) {
 		if err = json.Unmarshal(s.Response, &response); err != nil {
 			t.Fatal(err)
 		}
+
 		response["best_info"] = tc.value
 		changed := s
-		changed.Response, _ = json.Marshal(response)
+		changed.Response = marshalFixture(t, response)
+
 		result := run(changed)
 		if !result.Passed || result.OutputPassed != tc.pass {
 			t.Fatalf("value=%v result=%+v", tc.value, result)

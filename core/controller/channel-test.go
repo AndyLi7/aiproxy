@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	// Only shuffles channel/model test order; no secrets or security identifiers.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"

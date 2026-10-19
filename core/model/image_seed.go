@@ -9,6 +9,7 @@ import (
 // legacy integer column. Public JSON keeps the documented integer type.
 func (task ImageTask) MarshalJSON() ([]byte, error) {
 	type alias ImageTask
+
 	var seed *json.Number
 	if task.SeedExact != "" {
 		value := json.Number(task.SeedExact)
@@ -17,6 +18,7 @@ func (task ImageTask) MarshalJSON() ([]byte, error) {
 		value := json.Number(strconv.FormatInt(*task.Seed, 10))
 		seed = &value
 	}
+
 	return json.Marshal(struct {
 		*alias
 		Seed *json.Number `json:"seed,omitempty"`

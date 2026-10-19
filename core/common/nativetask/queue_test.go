@@ -1,9 +1,11 @@
+//nolint:testpackage // White-box coverage needs the package-private newQueueEnv fixture or implementation.
 package nativetask
 
 import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -38,7 +40,11 @@ func TestFastPathAnswersAsBeforeWhenNobodyWaits(t *testing.T) {
 	response := httptest.NewRecorder()
 	env.http().Create(response, customerRequest("POST", "/v1/model-tasks", "a1", "ga"))
 	require.Equal(t, 202, response.Code, response.Body.String())
-	require.JSONEq(t, `{"id":"a1","model":"brand/model/native","status":"queued"}`, response.Body.String())
+	require.JSONEq(
+		t,
+		`{"id":"a1","model":"brand/model/native","status":"queued"}`,
+		response.Body.String(),
+	)
 	require.Equal(t, 1, env.p.count())
 	task := env.task("a1", "ga")
 	require.Equal(t, "queued", task.Status)
@@ -46,29 +52,50 @@ func TestFastPathAnswersAsBeforeWhenNobodyWaits(t *testing.T) {
 	require.NotNil(t, task.EnqueuedAt)
 	require.NotNil(t, task.DispatchedAt)
 	require.Equal(t, falScope, task.QueueScope)
-	require.Equal(t, []string{"admit:queue", "begin_attempt", "accept_attempt"}, env.w.actionsFor("a1"))
+	require.Equal(
+		t,
+		[]string{"admit:queue", "begin_attempt", "accept_attempt"},
+		env.w.actionsFor("a1"),
+	)
 
 	// A provider rejection on the fast path answers failed and refunds, as before.
 	env.set(func() { env.limits = map[string]int{} })
-	env.p.err = &adaptor.ImageSubmissionFailure{Failure: failover.Failure{Acceptance: failover.NotAccepted}, ProviderStatus: 400}
+	env.p.err = &adaptor.ImageSubmissionFailure{
+		Failure:        failover.Failure{Acceptance: failover.NotAccepted},
+		ProviderStatus: 400,
+	}
 	response = httptest.NewRecorder()
 	env.http().Create(response, customerRequest("POST", "/v1/model-tasks", "a2", "ga"))
 	require.Equal(t, 202, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"status":"failed"`)
-	require.Equal(t, []string{"admit:queue", "begin_attempt", "reject_attempt", "settle:failed/not_accepted"}, env.w.actionsFor("a2"))
+	require.Equal(
+		t,
+		[]string{"admit:queue", "begin_attempt", "reject_attempt", "settle:failed/not_accepted"},
+		env.w.actionsFor("a2"),
+	)
 }
 
 func TestFullScopeQueuesWithAPositionAndDispatchesWhenRoomFrees(t *testing.T) {
 	env := newQueueEnv(t)
 	_, err := env.submit("a1", "ga")
 	require.NoError(t, err)
+
 	response := httptest.NewRecorder()
 	env.http().Create(response, customerRequest("POST", "/v1/model-tasks", "a2", "ga"))
 	require.Equal(t, 202, response.Code)
-	require.JSONEq(t, `{"id":"a2","model":"brand/model/native","status":"queued","queue_position":1}`, response.Body.String())
+	require.JSONEq(
+		t,
+		`{"id":"a2","model":"brand/model/native","status":"queued","queue_position":1}`,
+		response.Body.String(),
+	)
 	require.Equal(t, model.NativeStatusWaiting, env.task("a2", "ga").Status)
 	require.Equal(t, 1, env.p.count())
-	require.Equal(t, []string{"admit:queue"}, env.w.actionsFor("a2"), "no claim while the scope is full")
+	require.Equal(
+		t,
+		[]string{"admit:queue"},
+		env.w.actionsFor("a2"),
+		"no claim while the scope is full",
+	)
 	_, submission, _ := env.w.hold("a2")
 	require.Equal(t, "waiting", submission)
 
@@ -85,6 +112,7 @@ func TestFullScopeQueuesWithAPositionAndDispatchesWhenRoomFrees(t *testing.T) {
 	env.round()
 	require.Equal(t, "queued", env.task("a2", "ga").Status)
 	require.Equal(t, 2, env.p.count())
+
 	get := httptest.NewRecorder()
 	env.http().Get(get, customerRequest("GET", "/v1/model-tasks/a2", "", "ga"), "a2")
 	require.NotContains(t, get.Body.String(), "queue_position")
@@ -95,10 +123,12 @@ func TestFullScopeQueuesWithAPositionAndDispatchesWhenRoomFrees(t *testing.T) {
 func TestFairnessAndPositionsMatchTheDispatchOrder(t *testing.T) {
 	env := newQueueEnv(t)
 	env.set(func() { env.limits = map[string]int{falScope: 2} })
+
 	for _, id := range []string{"x1", "x2"} { // another customer fills the scope
 		_, err := env.submit(id, "gx")
 		require.NoError(t, err)
 	}
+
 	groups := map[string]string{"x1": "gx", "x2": "gx", "b1": "gb"}
 	for _, id := range []string{"a1", "a2", "a3", "a4"} {
 		groups[id] = "ga"
@@ -106,12 +136,14 @@ func TestFairnessAndPositionsMatchTheDispatchOrder(t *testing.T) {
 		require.NoError(t, err)
 		time.Sleep(2 * time.Millisecond)
 	}
+
 	_, err := env.submit("b1", "gb")
 	require.NoError(t, err)
 
 	want := []string{"a1", "b1", "a2", "a3", "a4"}
 	for place, id := range want {
 		queue.positions = map[string]cachedPositions{}
+
 		require.Equal(t, place+1, env.e.QueuePosition(env.task(id, groups[id])), id)
 	}
 	// Room for one more each round; nothing finishes, so the simulated order holds.
@@ -119,13 +151,16 @@ func TestFairnessAndPositionsMatchTheDispatchOrder(t *testing.T) {
 	for limit := 3; limit <= 7; limit++ {
 		env.set(func() { env.limits = map[string]int{falScope: limit} })
 		env.round()
+
 		for _, id := range want {
 			if env.task(id, groups[id]).Status == "queued" && !contains(order, id) {
 				order = append(order, id)
 			}
 		}
+
 		require.Len(t, order, limit-2)
 	}
+
 	require.Equal(t, want, order)
 }
 
@@ -133,6 +168,7 @@ func TestFairnessAndPositionsMatchTheDispatchOrder(t *testing.T) {
 // behind another's backlog goes next, and the position they are told at
 // submission is the real one.
 func TestLatecomerGoesNextWhenTheScopeTakesOne(t *testing.T) {
+	//nolint:thelper // This callback is a subtest body invoked by t.Run in the database-matrix adapter.
 	forEachQueueDatabase(t, func(t *testing.T, env *queueEnv) {
 		groups := map[string]string{"b1": "gb"}
 		for _, id := range []string{"a1", "a2", "a3", "a4"} {
@@ -141,6 +177,7 @@ func TestLatecomerGoesNextWhenTheScopeTakesOne(t *testing.T) {
 			require.NoError(t, err)
 			time.Sleep(2 * time.Millisecond)
 		}
+
 		response := httptest.NewRecorder()
 		env.http().Create(response, customerRequest("POST", "/v1/model-tasks", "b1", "gb"))
 		require.Equal(t, 202, response.Code)
@@ -149,8 +186,10 @@ func TestLatecomerGoesNextWhenTheScopeTakesOne(t *testing.T) {
 		want := []string{"b1", "a2", "a3", "a4"}
 		for place, id := range want {
 			queue.positions = map[string]cachedPositions{}
+
 			require.Equal(t, place+1, env.e.QueuePosition(env.task(id, groups[id])), id)
 		}
+
 		require.Equal(t, append([]string{"a1"}, want...), env.dispatchOneAtATime("a1", groups))
 	})
 }
@@ -158,6 +197,7 @@ func TestLatecomerGoesNextWhenTheScopeTakesOne(t *testing.T) {
 // §5.5 rule 2: customers with backlogs take turns, one task each, and the
 // positions estimated before any of them runs are the real order.
 func TestCustomersTakeTurnsWhenTheScopeTakesOne(t *testing.T) {
+	//nolint:thelper // This callback is a subtest body invoked by t.Run in the database-matrix adapter.
 	forEachQueueDatabase(t, func(t *testing.T, env *queueEnv) {
 		groups := map[string]string{}
 		for _, task := range []struct{ id, group string }{
@@ -172,8 +212,10 @@ func TestCustomersTakeTurnsWhenTheScopeTakesOne(t *testing.T) {
 		want := []string{"b1", "c1", "a2", "b2", "c2", "a3"}
 		for place, id := range want {
 			queue.positions = map[string]cachedPositions{}
+
 			require.Equal(t, place+1, env.e.QueuePosition(env.task(id, groups[id])), id)
 		}
+
 		require.Equal(t, append([]string{"a1"}, want...), env.dispatchOneAtATime("a1", groups))
 	})
 }
@@ -182,10 +224,12 @@ func TestCustomersTakeTurnsWhenTheScopeTakesOne(t *testing.T) {
 // which task takes its place, until every listed task has been dispatched.
 func (env *queueEnv) dispatchOneAtATime(running string, groups map[string]string) []string {
 	env.t.Helper()
+
 	order := []string{running}
 	for len(order) < len(groups) {
 		env.finish(running)
 		env.round()
+
 		running = ""
 		for id, group := range groups {
 			if !contains(order, id) && env.task(id, group).Status == "queued" {
@@ -193,19 +237,16 @@ func (env *queueEnv) dispatchOneAtATime(running string, groups map[string]string
 				running = id
 			}
 		}
+
 		require.NotEmpty(env.t, running, "a round dispatches the next task")
 		order = append(order, running)
 	}
+
 	return order
 }
 
 func contains(list []string, value string) bool {
-	for _, item := range list {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, value)
 }
 
 // §6.3, §5.5 rule 0: a full active limit puts the task back unchanged and the
@@ -220,6 +261,7 @@ func TestActiveLimitPutsTheTaskBackAndSkipsTheCustomer(t *testing.T) {
 	queued, err := env.submit("a2", "ga")
 	require.NoError(t, err)
 	require.Equal(t, model.NativeStatusWaiting, queued.Status)
+
 	stored := env.task("a2", "ga")
 	require.Empty(t, stored.DispatchOwner)
 	require.Nil(t, stored.DispatchedAt)
@@ -231,6 +273,7 @@ func TestActiveLimitPutsTheTaskBackAndSkipsTheCustomer(t *testing.T) {
 
 	// Backed off, then known to be at its limit: no further wallet call.
 	queue.backoff = map[string]time.Time{}
+
 	env.round()
 	env.round()
 	require.Equal(t, []string{"admit:queue", "begin_attempt"}, env.w.actionsFor("a2"))
@@ -264,12 +307,17 @@ func TestPausedModelPutsTheTaskBack(t *testing.T) {
 	require.Equal(t, 1, env.p.count())
 	// Review 3: only this customer's tasks of this model are held back.
 	require.False(t, queue.backedOff("ga"))
-	require.True(t, queue.modelBackedOff(model.NativeQueueEntry{GroupID: "ga", Model: "brand/model/native"}))
+	require.True(
+		t,
+		queue.modelBackedOff(model.NativeQueueEntry{GroupID: "ga", Model: "brand/model/native"}),
+	)
 
 	env.w.mu.Lock()
 	env.w.paused = false
 	env.w.mu.Unlock()
+
 	queue.modelBackoff = map[string]time.Time{}
+
 	env.round()
 	require.Equal(t, "queued", env.task("a1", "ga").Status)
 }
@@ -283,17 +331,24 @@ func TestCancelAndDispatchExcludeEachOther(t *testing.T) {
 		require.NoError(t, err)
 		_, err = env.submit("a1", "ga")
 		require.NoError(t, err)
+
 		h := env.http()
 		for range 2 {
 			response := httptest.NewRecorder()
 			h.Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
 			require.Equal(t, 200, response.Code, response.Body.String())
+
 			var public publicTask
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &public))
 			require.Equal(t, "failed", public.Status)
 			require.Equal(t, model.CancelledCode, public.Error.Code)
 		}
-		require.Equal(t, []string{"admit:queue", "get", "settle:failed/not_dispatched", "get"}, env.w.actionsFor("a1"))
+
+		require.Equal(
+			t,
+			[]string{"admit:queue", "get", "settle:failed/not_dispatched", "get"},
+			env.w.actionsFor("a1"),
+		)
 		status, _, _ := env.w.hold("a1")
 		require.Equal(t, "refunded", status)
 		require.True(t, env.task("a1", "ga").BillingSettled)
@@ -315,10 +370,19 @@ func TestCancelAndDispatchExcludeEachOther(t *testing.T) {
 		claimed, _, err := env.e.claim(falScope, "")
 		require.NoError(t, err)
 		require.Equal(t, "a1", claimed.ID)
+
 		response := httptest.NewRecorder()
-		env.http().Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
+		env.http().
+			Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
 		require.Equal(t, 409, response.Code)
-		require.JSONEq(t, `{"error":{"code":"task_not_cancellable","message":"`+ErrorMessage("task_not_cancellable")+`","type":"invalid_request_error"},"status":"queued"}`, response.Body.String())
+		require.JSONEq(
+			t,
+			`{"error":{"code":"task_not_cancellable","message":"`+ErrorMessage(
+				"task_not_cancellable",
+			)+`","type":"invalid_request_error"},"status":"queued"}`,
+			response.Body.String(),
+		)
+
 		_, err = env.e.dispatchClaimed(context.Background(), claimed, nil)
 		require.NoError(t, err)
 		require.Equal(t, "queued", env.task("a1", "ga").Status)
@@ -332,16 +396,24 @@ func TestCancelAndDispatchExcludeEachOther(t *testing.T) {
 			_, err = env.submit("a1", "ga")
 			require.NoError(t, err)
 			env.finish("x1")
+
 			response := httptest.NewRecorder()
+
 			var wg sync.WaitGroup
+
 			wg.Add(2)
 			go func() { defer wg.Done(); env.round() }()
 			go func() {
 				defer wg.Done()
-				env.http().Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
+
+				env.http().
+					Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
 			}()
+
 			wg.Wait()
+
 			task := env.task("a1", "ga")
+
 			status, _, _ := env.w.hold("a1")
 			if response.Code == 200 {
 				require.Equal(t, model.CancelledCode, task.ErrorCode)
@@ -361,8 +433,10 @@ func TestCancelAndDispatchExcludeEachOther(t *testing.T) {
 		_, err := env.submit("a1", "ga")
 		require.Error(t, err)
 		require.Equal(t, "reserved", env.task("a1", "ga").Status)
+
 		response := httptest.NewRecorder()
-		env.http().Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
+		env.http().
+			Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
 		require.Equal(t, 409, response.Code)
 	})
 }
@@ -376,16 +450,28 @@ func TestQueueTimeoutAndDispatchExcludeEachOther(t *testing.T) {
 		require.NoError(t, err)
 		_, err = env.submit("a1", "ga")
 		require.NoError(t, err)
-		_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(5*time.Minute+2*time.Second), nil, nil)
+		_, err = env.e.RecoverOnce(
+			context.Background(),
+			"worker",
+			time.Now().Add(5*time.Minute+2*time.Second),
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
+
 		task := env.task("a1", "ga")
 		require.Equal(t, "failed", task.Status)
 		require.Equal(t, model.QueueTimeoutCode, task.ErrorCode)
 		require.True(t, task.BillingSettled)
-		require.Equal(t, []string{"admit:queue", "get", "settle:failed/not_dispatched", "get"}, env.w.actionsFor("a1"))
+		require.Equal(
+			t,
+			[]string{"admit:queue", "get", "settle:failed/not_dispatched", "get"},
+			env.w.actionsFor("a1"),
+		)
 		env.finish("x1")
 		env.round()
 		require.Equal(t, 1, env.p.count())
+
 		get := httptest.NewRecorder()
 		env.http().Get(get, customerRequest("GET", "/v1/model-tasks/a1", "", "ga"), "a1")
 		require.Contains(t, get.Body.String(), "waited in the queue too long")
@@ -400,7 +486,13 @@ func TestQueueTimeoutAndDispatchExcludeEachOther(t *testing.T) {
 		env.finish("x1")
 		claimed, _, err := env.e.claim(falScope, "")
 		require.NoError(t, err)
-		_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(3*time.Second), nil, nil)
+		_, err = env.e.RecoverOnce(
+			context.Background(),
+			"worker",
+			time.Now().Add(3*time.Second),
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		require.Equal(t, model.NativeStatusDispatching, env.task("a1", "ga").Status)
 		_, err = env.e.dispatchClaimed(context.Background(), claimed, nil)
@@ -413,6 +505,7 @@ func TestQueueTimeoutAndDispatchExcludeEachOther(t *testing.T) {
 // refunded by what the wallet holds; it is never put back in the queue.
 func TestExpiredDispatchLeaseFailsAndRefunds(t *testing.T) {
 	claimOnly := func(t *testing.T) (*queueEnv, *model.NativeTask) {
+		t.Helper()
 		env := newQueueEnv(t)
 		_, err := env.submit("x1", "gx")
 		require.NoError(t, err)
@@ -422,29 +515,78 @@ func TestExpiredDispatchLeaseFailsAndRefunds(t *testing.T) {
 		claimed, _, err := env.e.claim(falScope, "")
 		require.NoError(t, err)
 		require.NotNil(t, claimed)
+
 		return env, claimed
 	}
 	t.Run("no attempt: not_dispatched", func(t *testing.T) {
 		env, _ := claimOnly(t)
-		_, err := env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(time.Minute), nil, nil)
+		_, err := env.e.RecoverOnce(
+			context.Background(),
+			"worker",
+			time.Now().Add(time.Minute),
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
-		require.Equal(t, model.NativeStatusDispatching, env.task("a1", "ga").Status, "lease still held")
-		_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(model.NativeDispatchLease+2*time.Second), nil, nil)
+		require.Equal(
+			t,
+			model.NativeStatusDispatching,
+			env.task("a1", "ga").Status,
+			"lease still held",
+		)
+		_, err = env.e.RecoverOnce(
+			context.Background(),
+			"worker",
+			time.Now().Add(model.NativeDispatchLease+2*time.Second),
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
+
 		task := env.task("a1", "ga")
 		require.Equal(t, "failed", task.Status)
 		require.Equal(t, model.NotStartedCode, task.ErrorCode)
-		require.Equal(t, []string{"admit:queue", "get", "settle:failed/not_dispatched", "get"}, env.w.actionsFor("a1"))
+		require.Equal(
+			t,
+			[]string{"admit:queue", "get", "settle:failed/not_dispatched", "get"},
+			env.w.actionsFor("a1"),
+		)
 		require.Equal(t, 1, env.p.count())
 	})
 	t.Run("claimed attempt: not started refund", func(t *testing.T) {
 		env, _ := claimOnly(t)
-		_, err := env.w.Prepayment(context.Background(), balance.PrepaymentCommand{Action: "begin_attempt", Group: "ga", BillingOperationID: "native:a1", RouteID: "r", AttemptID: "native:a1:1"})
+		_, err := env.w.Prepayment(
+			context.Background(),
+			balance.PrepaymentCommand{
+				Action:             "begin_attempt",
+				Group:              "ga",
+				BillingOperationID: "native:a1",
+				RouteID:            "r",
+				AttemptID:          "native:a1:1",
+			},
+		)
 		require.NoError(t, err)
-		_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(model.NativeDispatchLease+2*time.Second), nil, nil)
+		_, err = env.e.RecoverOnce(
+			context.Background(),
+			"worker",
+			time.Now().Add(model.NativeDispatchLease+2*time.Second),
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		require.Equal(t, model.NotStartedCode, env.task("a1", "ga").ErrorCode)
-		require.Equal(t, []string{"admit:queue", "begin_attempt", "get", "reject_attempt", "settle:failed/not_accepted", "get"}, env.w.actionsFor("a1"))
+		require.Equal(
+			t,
+			[]string{
+				"admit:queue",
+				"begin_attempt",
+				"get",
+				"reject_attempt",
+				"settle:failed/not_accepted",
+				"get",
+			},
+			env.w.actionsFor("a1"),
+		)
 		status, submission, _ := env.w.hold("a1")
 		require.Equal(t, "refunded", status)
 		require.Equal(t, "not_submitted", submission, "the wallet is not left unknown")
@@ -452,10 +594,29 @@ func TestExpiredDispatchLeaseFailsAndRefunds(t *testing.T) {
 	t.Run("a stale holder changes nothing", func(t *testing.T) {
 		env, claimed := claimOnly(t)
 		db := env.e.DB
-		require.ErrorIs(t, model.ReturnNativeDispatch(db, "a1", "ga", 1, "stale", time.Now()), model.ErrNativeTaskConflict)
-		require.ErrorIs(t, model.FailNativeDispatch(db, "a1", "ga", 1, "stale", model.NotStartedCode), model.ErrNativeTaskConflict)
-		require.ErrorIs(t, model.StartNativeDispatchSubmission(db, "a1", "ga", 1, "stale", time.Now()), model.ErrNativeTaskConflict)
-		expired, err := model.ExpireNativeDispatch(db, "a1", "ga", 1, "stale", time.Now().Add(time.Hour))
+		require.ErrorIs(
+			t,
+			model.ReturnNativeDispatch(db, "a1", "ga", 1, "stale", time.Now()),
+			model.ErrNativeTaskConflict,
+		)
+		require.ErrorIs(
+			t,
+			model.FailNativeDispatch(db, "a1", "ga", 1, "stale", model.NotStartedCode),
+			model.ErrNativeTaskConflict,
+		)
+		require.ErrorIs(
+			t,
+			model.StartNativeDispatchSubmission(db, "a1", "ga", 1, "stale", time.Now()),
+			model.ErrNativeTaskConflict,
+		)
+		expired, err := model.ExpireNativeDispatch(
+			db,
+			"a1",
+			"ga",
+			1,
+			"stale",
+			time.Now().Add(time.Hour),
+		)
 		require.NoError(t, err)
 		require.False(t, expired)
 		require.Equal(t, claimed.DispatchOwner, env.task("a1", "ga").DispatchOwner)
@@ -478,17 +639,31 @@ func TestSlowClaimAfterTheLeaseNeverSends(t *testing.T) {
 			env.finish("x1")
 			claimed, _, err := env.e.claim(falScope, "")
 			require.NoError(t, err)
+
 			expire := func(balance.PrepaymentCommand) {
-				_, recoverErr := env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(model.NativeDispatchLease+2*time.Second), nil, nil)
+				_, recoverErr := env.e.RecoverOnce(
+					context.Background(),
+					"worker",
+					time.Now().Add(model.NativeDispatchLease+2*time.Second),
+					nil,
+					nil,
+				)
 				require.NoError(t, recoverErr)
 				// Real time has not reached the lease: let the holder see it run out.
-				require.NoError(t, env.e.DB.Model(&model.NativeTask{}).Where("id = ?", "a1").Update("dispatch_until", time.Now().Add(-time.Second).UTC()).Error)
+				require.NoError(
+					t,
+					env.e.DB.Model(&model.NativeTask{}).
+						Where("id = ?", "a1").
+						Update("dispatch_until", time.Now().Add(-time.Second).UTC()).
+						Error,
+				)
 			}
 			if landed == "before recovery" {
 				env.w.afterBegin = expire
 			} else {
 				env.w.beforeBegin = expire
 			}
+
 			_, _ = env.e.dispatchClaimed(context.Background(), claimed, nil)
 			task := env.task("a1", "ga")
 			require.Equal(t, "failed", task.Status)
@@ -510,7 +685,16 @@ func TestClaimedFalseFailsAndRefunds(t *testing.T) {
 	_, err = env.submit("a1", "ga")
 	require.NoError(t, err)
 	env.finish("x1")
-	_, err = env.w.Prepayment(context.Background(), balance.PrepaymentCommand{Action: "begin_attempt", Group: "ga", BillingOperationID: "native:a1", RouteID: "r", AttemptID: "native:a1:1"})
+	_, err = env.w.Prepayment(
+		context.Background(),
+		balance.PrepaymentCommand{
+			Action:             "begin_attempt",
+			Group:              "ga",
+			BillingOperationID: "native:a1",
+			RouteID:            "r",
+			AttemptID:          "native:a1:1",
+		},
+	)
 	require.NoError(t, err)
 	env.round()
 	task := env.task("a1", "ga")
@@ -537,7 +721,11 @@ func TestNegativeBalanceAtDispatchFailsAndRefunds(t *testing.T) {
 	task := env.task("a1", "ga")
 	require.Equal(t, "failed", task.Status)
 	require.Equal(t, model.InsufficientBalanceCode, task.ErrorCode)
-	require.Equal(t, []string{"admit:queue", "begin_attempt", "get", "settle:failed/not_dispatched", "get"}, env.w.actionsFor("a1"))
+	require.Equal(
+		t,
+		[]string{"admit:queue", "begin_attempt", "get", "settle:failed/not_dispatched", "get"},
+		env.w.actionsFor("a1"),
+	)
 	require.Equal(t, 1, env.p.count())
 }
 
@@ -553,7 +741,11 @@ func TestUnusableFrozenChannelFailsTheQueuedTask(t *testing.T) {
 	env.round()
 	task := env.task("a1", "ga")
 	require.Equal(t, model.ModelUnavailableWhileQueuedCode, task.ErrorCode)
-	require.Equal(t, []string{"admit:queue", "get", "settle:failed/not_dispatched", "get"}, env.w.actionsFor("a1"))
+	require.Equal(
+		t,
+		[]string{"admit:queue", "get", "settle:failed/not_dispatched", "get"},
+		env.w.actionsFor("a1"),
+	)
 	require.Equal(t, 1, env.p.count())
 }
 
@@ -564,13 +756,21 @@ func TestFailedCancelRefundIsRetriedByRecovery(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.submit("a1", "ga")
 	require.NoError(t, err)
+
 	env.w.down["settle"] = true
 	response := httptest.NewRecorder()
-	env.http().Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
+	env.http().
+		Cancel(response, customerRequest("POST", "/v1/model-tasks/a1/cancel", "", "ga"), "a1")
 	require.Equal(t, 200, response.Code)
 	require.False(t, env.task("a1", "ga").BillingSettled)
 	env.w.down = map[string]bool{}
-	_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(time.Second), nil, nil)
+	_, err = env.e.RecoverOnce(
+		context.Background(),
+		"worker",
+		time.Now().Add(time.Second),
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
 	require.True(t, env.task("a1", "ga").BillingSettled)
 	status, _, _ := env.w.hold("a1")
@@ -590,7 +790,11 @@ func TestSwitchChangeFollowsTheWalletHold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "queued", task.Status)
 		require.NotNil(t, env.task("a1", "ga").EnqueuedAt, "went through the queue")
-		require.Equal(t, []string{"admit:queue", "admit", "begin_attempt", "accept_attempt"}, env.w.actionsFor("a1"))
+		require.Equal(
+			t,
+			[]string{"admit:queue", "admit", "begin_attempt", "accept_attempt"},
+			env.w.actionsFor("a1"),
+		)
 	})
 	t.Run("direct hold, switch now on", func(t *testing.T) {
 		env := newQueueEnv(t)
@@ -617,10 +821,18 @@ func TestRecoveryKeepsQueueTimesWhenReleasing(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.submit("a1", "ga")
 	require.NoError(t, err)
+
 	waiting := env.task("a1", "ga")
 	due := waiting.EnqueuedAt.Add(5 * time.Minute).Add(time.Second).Unix()
 	require.Equal(t, due, waiting.NextRecoveryAt)
-	_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(6*time.Minute), nil, nil)
+
+	_, err = env.e.RecoverOnce(
+		context.Background(),
+		"worker",
+		time.Now().Add(6*time.Minute),
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
 
 	env2 := newQueueEnv(t)
@@ -635,15 +847,57 @@ func TestRecoveryKeepsQueueTimesWhenReleasing(t *testing.T) {
 
 	// Recovery leases a reserved row; the request enqueues it meanwhile.
 	env3 := newQueueEnv(t)
-	reserved, _, err := model.ReserveNativeTask(env3.e.DB, model.NativeTask{ID: "r1", GroupID: "ga", TokenID: 1, Model: "brand/model/native", Fingerprint: "f", OutputSchema: `{"type":"object"}`, BillingOperationID: "native:r1", QueueScope: falScope})
+	reserved, _, err := model.ReserveNativeTask(
+		env3.e.DB,
+		model.NativeTask{
+			ID:                 "r1",
+			GroupID:            "ga",
+			TokenID:            1,
+			Model:              "brand/model/native",
+			Fingerprint:        "f",
+			OutputSchema:       `{"type":"object"}`,
+			BillingOperationID: "native:r1",
+			QueueScope:         falScope,
+		},
+	)
 	require.NoError(t, err)
 	leased, err := model.ClaimNativeRecovery(env3.e.DB, "worker", time.Now(), 1)
 	require.NoError(t, err)
 	require.NotEmpty(t, leased)
+
 	enqueuedAt := time.Now()
-	require.NoError(t, model.EnqueueNativeTask(env3.e.DB, "r1", "ga", 1, falScope, enqueuedAt, enqueuedAt.Add(5*time.Minute+time.Second)))
-	require.NoError(t, env3.e.releaseRecovery("r1", "ga", 1, "worker", reserved, time.Now(), 0, false, false, time.Time{}))
-	require.Equal(t, enqueuedAt.Add(5*time.Minute+time.Second).Unix(), env3.task("r1", "ga").NextRecoveryAt)
+	require.NoError(
+		t,
+		model.EnqueueNativeTask(
+			env3.e.DB,
+			"r1",
+			"ga",
+			1,
+			falScope,
+			enqueuedAt,
+			enqueuedAt.Add(5*time.Minute+time.Second),
+		),
+	)
+	require.NoError(
+		t,
+		env3.e.releaseRecovery(
+			"r1",
+			"ga",
+			1,
+			leased[0].RecoveryOwner,
+			reserved,
+			time.Now(),
+			0,
+			false,
+			false,
+			time.Time{},
+		),
+	)
+	require.Equal(
+		t,
+		enqueuedAt.Add(5*time.Minute+time.Second).Unix(),
+		env3.task("r1", "ga").NextRecoveryAt,
+	)
 }
 
 // §6.7: the process stopped after the queued admission and before the
@@ -652,6 +906,7 @@ func TestRecoveryEnqueuesAReservedTaskWithAWaitingHold(t *testing.T) {
 	env := newQueueEnv(t)
 	_, err := env.submit("x1", "gx")
 	require.NoError(t, err)
+
 	env.w.lose["admit"] = true
 	_, err = env.submit("a1", "ga")
 	require.Error(t, err)
@@ -659,16 +914,30 @@ func TestRecoveryEnqueuesAReservedTaskWithAWaitingHold(t *testing.T) {
 	_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now(), nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, "reserved", env.task("a1", "ga").Status, "a live request may still enqueue it")
-	_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(reservedEnqueueGrace+time.Second), nil, nil)
+	_, err = env.e.RecoverOnce(
+		context.Background(),
+		"worker",
+		time.Now().Add(reservedEnqueueGrace+time.Second),
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
+
 	task := env.task("a1", "ga")
 	require.Equal(t, model.NativeStatusWaiting, task.Status)
 	require.NotNil(t, task.EnqueuedAt)
+
 	for _, action := range env.w.actionsFor("a1") {
 		require.NotContains(t, action, "settle")
 	}
 	// Long after the stop-loss grace it is timed out by the queue, never abandoned.
-	_, err = env.e.RecoverOnce(context.Background(), "worker", time.Now().Add(reservationGrace+time.Minute), nil, nil)
+	_, err = env.e.RecoverOnce(
+		context.Background(),
+		"worker",
+		time.Now().Add(reservationGrace+time.Minute),
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
 	require.Equal(t, model.QueueTimeoutCode, env.task("a1", "ga").ErrorCode)
 }
@@ -680,7 +949,12 @@ func TestAcceptedAttemptIsNotAcceptedAgain(t *testing.T) {
 	task, err := env.submit("a1", "ga")
 	require.NoError(t, err)
 	require.NoError(t, env.e.SyncBilling(context.Background(), env.task("a1", "ga")))
-	require.Equal(t, 2, env.w.count("accept_attempt"), "the first sync stores a receipt without the acceptance")
+	require.Equal(
+		t,
+		2,
+		env.w.count("accept_attempt"),
+		"the first sync stores a receipt without the acceptance",
+	)
 	require.NoError(t, env.e.SyncBilling(context.Background(), env.task("a1", "ga")))
 	require.NoError(t, env.e.SyncBilling(context.Background(), env.task("a1", "ga")))
 	require.Equal(t, 2, env.w.count("accept_attempt"))
@@ -701,7 +975,12 @@ func TestSwitchOffSendsDirectlyAndDrainsTheQueue(t *testing.T) {
 	require.Equal(t, "queued", task.Status)
 	require.Nil(t, env.task("b1", "gb").EnqueuedAt)
 	require.Equal(t, []string{"admit", "begin_attempt", "accept_attempt"}, env.w.actionsFor("b1"))
-	require.Equal(t, falScope, env.task("b1", "gb").QueueScope, "direct tasks still count in flight")
+	require.Equal(
+		t,
+		falScope,
+		env.task("b1", "gb").QueueScope,
+		"direct tasks still count in flight",
+	)
 	env.finish("x1")
 	env.finish("b1")
 	env.round()
@@ -711,12 +990,40 @@ func TestSwitchOffSendsDirectlyAndDrainsTheQueue(t *testing.T) {
 // §5.3: image tasks of the provider and direct (trial) tasks count in flight.
 func TestInFlightCountsImageTasksAndTrials(t *testing.T) {
 	env := newQueueEnv(t)
-	require.NoError(t, env.e.DB.Create(&model.ImageTask{ID: "img", GroupID: "gi", TokenID: 1, Status: "in_progress", ChannelType: model.ChannelTypeFal}).Error)
-	require.NoError(t, env.e.DB.Create(&model.ImageTask{ID: "other", GroupID: "gi", TokenID: 1, Status: "in_progress", ChannelType: model.ChannelTypeFal + 1}).Error)
+	require.NoError(
+		t,
+		env.e.DB.Create(
+			&model.ImageTask{
+				ID:          "img",
+				GroupID:     "gi",
+				TokenID:     1,
+				Status:      "in_progress",
+				ChannelType: model.ChannelTypeFal,
+			},
+		).Error,
+	)
+	require.NoError(
+		t,
+		env.e.DB.Create(
+			&model.ImageTask{
+				ID:          "other",
+				GroupID:     "gi",
+				TokenID:     1,
+				Status:      "in_progress",
+				ChannelType: model.ChannelTypeFal + 1,
+			},
+		).Error,
+	)
 	task, err := env.submit("a1", "ga")
 	require.NoError(t, err)
 	require.Equal(t, model.NativeStatusWaiting, task.Status, "the fal image task fills the scope")
-	require.NoError(t, env.e.DB.Model(&model.ImageTask{}).Where("id = ?", "img").Update("status", "completed").Error)
+	require.NoError(
+		t,
+		env.e.DB.Model(&model.ImageTask{}).
+			Where("id = ?", "img").
+			Update("status", "completed").
+			Error,
+	)
 
 	trial := env.plan
 	trial.Direct = true
@@ -725,9 +1032,18 @@ func TestInFlightCountsImageTasksAndTrials(t *testing.T) {
 	sent, err := engine.Submit(context.Background(), "trial_1", "internal", 1, body, trial)
 	require.NoError(t, err)
 	require.Equal(t, "queued", sent.Status, "trials are never queued")
-	require.Equal(t, []string{"admit", "begin_attempt", "accept_attempt"}, env.w.actionsFor("trial_1"))
+	require.Equal(
+		t,
+		[]string{"admit", "begin_attempt", "accept_attempt"},
+		env.w.actionsFor("trial_1"),
+	)
 	env.round()
-	require.Equal(t, model.NativeStatusWaiting, env.task("a1", "ga").Status, "the trial fills the scope")
+	require.Equal(
+		t,
+		model.NativeStatusWaiting,
+		env.task("a1", "ga").Status,
+		"the trial fills the scope",
+	)
 	env.finish("trial_1")
 	env.round()
 	require.Equal(t, "queued", env.task("a1", "ga").Status)
@@ -741,11 +1057,13 @@ func TestFullQueueRefusesWithAQueueMessage(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.submit("a1", "ga")
 	require.NoError(t, err)
+
 	response := httptest.NewRecorder()
 	env.http().Create(response, customerRequest("POST", "/v1/model-tasks", "a2", "ga"))
 	require.Equal(t, 429, response.Code)
 	require.Contains(t, response.Body.String(), `"code":"too_many_active_tasks"`)
 	require.Contains(t, response.Body.String(), queueFullMessage)
+
 	_, err = model.GetNativeTask(env.e.DB, "a2", "ga", 1)
 	require.Error(t, err, "a refused request leaves no row")
 }
@@ -759,25 +1077,30 @@ func TestDispatcherWaitsForClaimedTasksOnShutdown(t *testing.T) {
 	_, err = env.submit("a1", "ga")
 	require.NoError(t, err)
 	env.finish("x1")
+
 	entered, release := make(chan struct{}), make(chan struct{})
 	env.w.beforeBegin = func(balance.PrepaymentCommand) {
 		close(entered)
 		<-release
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+
 	done := make(chan struct{})
 	go func() {
 		RunDispatcher(ctx, func() (*Engine, bool) { return env.e, true })
 		close(done)
 	}()
+
 	wakeDispatcher()
 	<-entered
 	cancel()
+
 	select {
 	case <-done:
 		t.Fatal("the dispatcher returned while a claimed task was being sent")
 	case <-time.After(100 * time.Millisecond):
 	}
+
 	close(release)
 	<-done
 	require.Equal(t, "queued", env.task("a1", "ga").Status)
@@ -785,6 +1108,7 @@ func TestDispatcherWaitsForClaimedTasksOnShutdown(t *testing.T) {
 
 func TestFalDispatchResolverRefusesAChangedChannel(t *testing.T) {
 	key := "test-native-key"
+
 	task := &model.NativeTask{ChannelID: 1, KeyFingerprint: model.ImageChannelKeyFingerprint(key)}
 	for name, tc := range map[string]struct {
 		channel *model.Channel
@@ -800,7 +1124,12 @@ func TestFalDispatchResolverRefusesAChangedChannel(t *testing.T) {
 		"another type": {channel: &model.Channel{ID: 1, Type: model.ChannelTypeFal + 1, Key: key, Status: model.ChannelStatusEnabled}, want: ErrChannelUnusable},
 	} {
 		t.Run(name, func(t *testing.T) {
-			provider, err := ResolveFalDispatch(func(int) (*model.Channel, error) { return tc.channel, tc.err })(context.Background(), task)
+			provider, err := ResolveFalDispatch(
+				func(int) (*model.Channel, error) { return tc.channel, tc.err },
+			)(
+				context.Background(),
+				task,
+			)
 			if tc.want == nil {
 				require.NoError(t, err)
 				require.NotNil(t, provider)
@@ -816,27 +1145,33 @@ func TestConcurrentClaimsNeverExceedTheLimit(t *testing.T) {
 	env := newQueueEnv(t)
 	_, err := env.submit("x1", "gx")
 	require.NoError(t, err)
+
 	for _, id := range []string{"a1", "a2", "a3", "a4"} {
 		_, err = env.submit(id, "g"+id)
 		require.NoError(t, err)
 	}
+
 	env.finish("x1")
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+
 	claimed := 0
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			task, _, claimErr := env.e.claim(falScope, "")
 			require.NoError(t, claimErr)
+
 			if task != nil {
 				mu.Lock()
 				claimed++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
+
 	wg.Wait()
 	require.Equal(t, 1, claimed)
 }
@@ -852,11 +1187,16 @@ func TestRetryOfAClaimedTaskNeverDispatchesIt(t *testing.T) {
 	claimed, _, err := env.e.claim(falScope, "")
 	require.NoError(t, err)
 	require.Equal(t, "a1", claimed.ID)
+
 	before := env.w.actionsFor("a1")
 	retry := httptest.NewRecorder()
 	env.http().Create(retry, customerRequest("POST", "/v1/model-tasks", "a1", "ga"))
 	require.Equal(t, 202, retry.Code)
-	require.JSONEq(t, `{"id":"a1","model":"brand/model/native","status":"queued"}`, retry.Body.String())
+	require.JSONEq(
+		t,
+		`{"id":"a1","model":"brand/model/native","status":"queued"}`,
+		retry.Body.String(),
+	)
 	require.Equal(t, before, env.w.actionsFor("a1"))
 	require.Equal(t, 1, env.p.count())
 	require.Equal(t, model.NativeStatusDispatching, env.task("a1", "ga").Status)

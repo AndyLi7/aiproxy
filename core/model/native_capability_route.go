@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -58,13 +59,7 @@ func (p PublicCapabilityIdentity) Accepted() []string {
 
 // Accepts reports whether id calls this capability (exact, case-sensitive).
 func (p PublicCapabilityIdentity) Accepts(id string) bool {
-	for _, accepted := range p.Accepted() {
-		if accepted == id {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(p.Accepted(), id)
 }
 
 // PublicCapabilityIdentityFromConfig reads a capability config's public IDs.
@@ -106,7 +101,11 @@ func PublicCapabilityIdentityFromConfig(config ModelConfig) (PublicCapabilityIde
 
 	if config.Type != mode.NativeTasks {
 		if hasPublicAPIID || hasAliases {
-			logInvalidPublicID(config.Model, "public IDs", "only native task configs may declare them")
+			logInvalidPublicID(
+				config.Model,
+				"public IDs",
+				"only native task configs may declare them",
+			)
 		}
 
 		return identity, true
@@ -123,7 +122,10 @@ func PublicCapabilityIdentityFromConfig(config ModelConfig) (PublicCapabilityIde
 			logInvalidPublicID(
 				config.Model,
 				string(ModelConfigPublicAPIIDKey),
-				fmt.Sprintf("%.200q must equal public_model or public_capability_model", fmt.Sprint(config.Config[ModelConfigPublicAPIIDKey])),
+				fmt.Sprintf(
+					"%.200q must equal public_model or public_capability_model",
+					fmt.Sprint(config.Config[ModelConfigPublicAPIIDKey]),
+				),
 			)
 		}
 	}
@@ -150,7 +152,12 @@ func publicCapabilityAliases(config ModelConfig, identity PublicCapabilityIdenti
 	case nil:
 		return nil
 	default:
-		logInvalidPublicID(config.Model, string(ModelConfigPublicCapabilityAliasesKey), "must be a list of strings")
+		logInvalidPublicID(
+			config.Model,
+			string(ModelConfigPublicCapabilityAliasesKey),
+			"must be a list of strings",
+		)
+
 		return nil
 	}
 
@@ -205,7 +212,10 @@ func validPublicAlias(alias string) bool {
 var invalidPublicIDsLogged sync.Map
 
 func logInvalidPublicID(configModel, key, reason string) {
-	if _, logged := invalidPublicIDsLogged.LoadOrStore(configModel+"\x00"+key+"\x00"+reason, true); logged {
+	if _, logged := invalidPublicIDsLogged.LoadOrStore(
+		configModel+"\x00"+key+"\x00"+reason,
+		true,
+	); logged {
 		return
 	}
 
@@ -255,7 +265,10 @@ func ResolveNativeCapabilityRoute(
 		}
 
 		identity, ok := PublicCapabilityIdentityFromConfig(config)
-		candidates = append(candidates, candidate{config: config, identity: identity, hasIdentity: ok})
+		candidates = append(
+			candidates,
+			candidate{config: config, identity: identity, hasIdentity: ok},
+		)
 	}
 
 	tiers := []func(candidate) bool{
@@ -271,13 +284,7 @@ func ResolveNativeCapabilityRoute(
 				return false
 			}
 
-			for _, alias := range c.identity.Aliases {
-				if alias == requested {
-					return true
-				}
-			}
-
-			return false
+			return slices.Contains(c.identity.Aliases, requested)
 		},
 	}
 
@@ -379,6 +386,7 @@ func SuggestNativeModels(requested string, entitled []ModelConfig) NativeModelSu
 		}
 
 		identity, ok := PublicCapabilityIdentityFromConfig(config)
+
 		published, _ := config.Config[ModelConfigPublicCapabilityModelKey].(string)
 		if requested == config.Model || (published != "" && requested == published) ||
 			(ok && (requested == identity.CapabilityModel || requested == identity.PublicModel)) {
@@ -413,7 +421,10 @@ func SuggestNativeModels(requested string, entitled []ModelConfig) NativeModelSu
 				return false
 			}
 
-			return strings.EqualFold(n.identity.PublicModel, requested[:strings.LastIndex(requested, "/")])
+			return strings.EqualFold(
+				n.identity.PublicModel,
+				requested[:strings.LastIndex(requested, "/")],
+			)
 		},
 	}
 
@@ -477,6 +488,7 @@ func (s *suggestedModels) list() []string {
 	}
 
 	sort.Strings(list)
+
 	if len(list) > maxSuggestedModels {
 		list = list[:maxSuggestedModels]
 	}

@@ -126,6 +126,7 @@ func AbortWithMessageWithMode(
 		abortBalanceFailure(m, c, statusCode, opts)
 		return
 	}
+
 	if IsPublicVideoRequest(c.Request.URL.Path, m) ||
 		(strings.HasPrefix(c.Request.URL.Path, "/v1/") && (statusCode == 401 || statusCode >= 500)) {
 		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
@@ -154,9 +155,11 @@ func abortBalanceFailure(
 	for _, apply := range opts {
 		apply(options)
 	}
+
 	if statusCode == http.StatusForbidden && options.Type == GroupBalanceNotEnough {
 		statusCode = http.StatusPaymentRequired
 	}
+
 	negative, belowZero := negativeBalanceMessage(c, statusCode)
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
 		if belowZero {
@@ -168,14 +171,22 @@ func abortBalanceFailure(
 		} else {
 			c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))
 		}
+
 		c.Abort()
+
 		return
 	}
+
 	message := "Your account balance is insufficient."
 	if belowZero {
 		message = negative
 	}
-	opts = append(opts, relaymodel.WithType("insufficient_quota"), relaymodel.WithCode("insufficient_balance"))
+
+	opts = append(
+		opts,
+		relaymodel.WithType("insufficient_quota"),
+		relaymodel.WithCode("insufficient_balance"),
+	)
 	c.JSON(statusCode, relaymodel.WrapperErrorWithMessage(m, statusCode, message, opts...))
 	c.Abort()
 }
@@ -186,14 +197,17 @@ func negativeBalanceMessage(c *gin.Context, statusCode int) (string, bool) {
 	if statusCode != http.StatusPaymentRequired {
 		return "", false
 	}
+
 	value, ok := c.Get(GroupBalance)
 	if !ok {
 		return "", false
 	}
+
 	gbc, ok := value.(*GroupBalanceConsumer)
 	if !ok || gbc == nil || !(gbc.balance < 0) {
 		return "", false
 	}
+
 	return balance.NegativeBalanceMessage(gbc.balance), true
 }
 
@@ -231,6 +245,7 @@ func AbortWithMessage(
 		abortBalanceFailure(GetMode(c), c, statusCode, opts)
 		return
 	}
+
 	if IsPublicVideoRequest(c.Request.URL.Path, GetMode(c)) ||
 		(strings.HasPrefix(c.Request.URL.Path, "/v1/") && (statusCode == http.StatusUnauthorized || statusCode >= 500)) {
 		c.JSON(statusCode, relaymodel.PublicVideoError(statusCode))

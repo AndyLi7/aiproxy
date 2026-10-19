@@ -1,14 +1,26 @@
+//nolint:testpackage // White-box coverage needs the package-private permission fixture or implementation.
 package controller
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPublicModelJSONOmitsLegacyPermissions(t *testing.T) {
-	encoded, err := json.Marshal(OpenAIModels{ID: "vendor/image", Object: "model", OwnedBy: "vendor", Created: 1, Root: "private-root", Permission: permission})
+	encoded, err := json.Marshal(
+		OpenAIModels{
+			ID:         "vendor/image",
+			Object:     "model",
+			OwnedBy:    "vendor",
+			Created:    1,
+			Root:       "private-root",
+			Permission: permission,
+		},
+	)
 	require.NoError(t, err)
+
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(encoded, &body))
 	require.Len(t, body, 4)

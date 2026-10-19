@@ -31,8 +31,10 @@ type ParameterIssue struct {
 const MaxParameterIssues = 8
 
 var (
-	issueField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\[[0-9]+\])*(\.[A-Za-z_][A-Za-z0-9_]*(\[[0-9]+\])*)*$`)
-	issueRule  = regexp.MustCompile(`^[a-z][a-z_]{0,31}$`)
+	issueField = regexp.MustCompile(
+		`^[A-Za-z_][A-Za-z0-9_]*(\[[0-9]+\])*(\.[A-Za-z_][A-Za-z0-9_]*(\[[0-9]+\])*)*$`,
+	)
+	issueRule = regexp.MustCompile(`^[a-z][a-z_]{0,31}$`)
 )
 
 // ValidParameterIssues reports 1..MaxParameterIssues issues whose fields are
@@ -42,10 +44,13 @@ func ValidParameterIssues(issues []ParameterIssue) bool {
 	if len(issues) == 0 || len(issues) > MaxParameterIssues {
 		return false
 	}
+
 	for _, issue := range issues {
-		if len(issue.Field) > 256 || !issueField.MatchString(issue.Field) || !issueRule.MatchString(issue.Rule) {
+		if len(issue.Field) > 256 || !issueField.MatchString(issue.Field) ||
+			!issueRule.MatchString(issue.Rule) {
 			return false
 		}
 	}
+
 	return true
 }

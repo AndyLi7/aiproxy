@@ -30,16 +30,27 @@ func TestImageGenerationInputErrorsAreCodedClientErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(tc.body))
+			c.Request = httptest.NewRequestWithContext(t.Context(),
+				http.MethodPost,
+				"/v1/images/generations",
+				strings.NewReader(tc.body),
+			)
 			c.Request.Header.Set("Content-Type", "application/json")
-			c.Set(middleware.ModelConfig, model.ModelConfig{Model: "image", Type: mode.ImagesGenerations})
+			c.Set(
+				middleware.ModelConfig,
+				model.ModelConfig{Model: "image", Type: mode.ImagesGenerations},
+			)
 
 			relay(c, mode.ImagesGenerations, relayController(mode.ImagesGenerations))
 
 			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
 			var response struct {
 				Error struct {
-					Code, Message, Type, Param string
+					Code    string `json:"Code"`
+					Message string `json:"Message"`
+					Type    string `json:"Type"`
+					Param   string `json:"Param"`
 				} `json:"error"`
 			}
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))

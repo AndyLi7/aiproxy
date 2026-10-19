@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,7 +22,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func serveUsage(t *testing.T, handler gin.HandlerFunc, path string, query url.Values) (int, []byte) {
+func serveUsage(
+	t *testing.T,
+	handler gin.HandlerFunc,
+	path string,
+	query url.Values,
+) (int, []byte) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -53,7 +59,13 @@ func TestUsageEndpointsRejectInvalidParameters(t *testing.T) {
 	}
 	// 400 days ago, plus a minute so the request still lands inside the limit.
 	oldest := time.Now().Add(-400*24*time.Hour + time.Minute).UnixMilli()
-	tooLong := "start=" + strconv.FormatInt(oldest, 10) + "&end=" + strconv.FormatInt(oldest+400*day+1, 10)
+	tooLong := "start=" + strconv.FormatInt(
+		oldest,
+		10,
+	) + "&end=" + strconv.FormatInt(
+		oldest+400*day+1,
+		10,
+	)
 	// A one-day window from 1970: narrow, but it would scan the whole history.
 	tooOld := "start=0&end=86400000"
 	hundredOne := make([]string, 0, 101)
@@ -72,7 +84,12 @@ func TestUsageEndpointsRejectInvalidParameters(t *testing.T) {
 		"start=" + at(30*day+1) + "&end=" + at(30*day),
 		tooLong,
 		tooOld,
-		"start=" + strconv.FormatInt(time.Now().Add(-401*24*time.Hour).UnixMilli(), 10) + "&end=" + at(0),
+		"start=" + strconv.FormatInt(
+			time.Now().Add(-401*24*time.Hour).UnixMilli(),
+			10,
+		) + "&end=" + at(
+			0,
+		),
 		window("&group_by=model"),
 		window("&bucket=day"),
 		window("&tz=Asia/Shanghai"),
@@ -112,12 +129,28 @@ func TestUsageEndpointsRejectInvalidParameters(t *testing.T) {
 		})
 	}
 
-	exactly400Days := "start=" + strconv.FormatInt(oldest, 10) + "&end=" + strconv.FormatInt(oldest+400*day, 10)
+	exactly400Days := "start=" + strconv.FormatInt(
+		oldest,
+		10,
+	) + "&end=" + strconv.FormatInt(
+		oldest+400*day,
+		10,
+	)
 
-	code, body := serveUsage(t, GetGroupUsageCalls, "/api/usage/g/calls", mustQuery(t, exactly400Days+"&group_by=source"))
+	code, body := serveUsage(
+		t,
+		GetGroupUsageCalls,
+		"/api/usage/g/calls",
+		mustQuery(t, exactly400Days+"&group_by=source"),
+	)
 	require.Equal(t, http.StatusOK, code, string(body))
 
-	code, body = serveUsage(t, GetGroupUsageKeys, "/api/usage/g/keys", mustQuery(t, exactly400Days+"&token_ids="+strings.Join(hundredOne[:100], ",")))
+	code, body = serveUsage(
+		t,
+		GetGroupUsageKeys,
+		"/api/usage/g/keys",
+		mustQuery(t, exactly400Days+"&token_ids="+strings.Join(hundredOne[:100], ",")),
+	)
 	require.Equal(t, http.StatusOK, code, string(body))
 }
 
@@ -164,9 +197,7 @@ func TestUsageCountsAgreeWithTheCallList(t *testing.T) {
 	window := url.Values{"start": {ms(start)}, "end": {ms(now.Add(time.Minute))}}
 
 	keys := url.Values{"token_ids": {"3,4,9"}}
-	for name, values := range window {
-		keys[name] = values
-	}
+	maps.Copy(keys, window)
 
 	code, body := serveUsage(t, GetGroupUsageKeys, "/api/usage/g/keys", keys)
 	require.Equal(t, http.StatusOK, code, string(body))
@@ -186,11 +217,9 @@ func TestUsageCountsAgreeWithTheCallList(t *testing.T) {
 
 	for _, key := range keyStats.Data.Keys[:2] {
 		list := url.Values{"kind": {"calls"}, "token_id": {strconv.Itoa(key.TokenID)}}
-		for name, values := range window {
-			list[name] = values
-		}
+		maps.Copy(list, window)
 
-		code, page, listBody := serveGroupLogs(t, "g", list)
+		code, page, listBody := serveGroupLogs(t, list)
 		require.Equal(t, http.StatusOK, code, listBody)
 		require.Equal(t, page.Total, key.Requests, "key %d", key.TokenID)
 		require.Equal(
@@ -203,9 +232,7 @@ func TestUsageCountsAgreeWithTheCallList(t *testing.T) {
 	}
 
 	callsQuery := url.Values{"group_by": {"source"}}
-	for name, values := range window {
-		callsQuery[name] = values
-	}
+	maps.Copy(callsQuery, window)
 
 	code, body = serveUsage(t, GetGroupUsageCalls, "/api/usage/g/calls", callsQuery)
 	require.Equal(t, http.StatusOK, code, string(body))
@@ -253,7 +280,8 @@ func failOlderHistoryOf(t *testing.T, db *gorm.DB, tokenID int) {
 				older = true
 			}
 
-			if expr.SQL == "group_id = ? AND token_id = ?" && len(expr.Vars) == 2 && expr.Vars[1] == tokenID {
+			if expr.SQL == "group_id = ? AND token_id = ?" && len(expr.Vars) == 2 &&
+				expr.Vars[1] == tokenID {
 				forKey = true
 			}
 		}

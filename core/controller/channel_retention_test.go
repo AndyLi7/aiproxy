@@ -20,6 +20,7 @@ import (
 func useChannelRetentionDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
+
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "retention.db"))
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -31,6 +32,7 @@ func useChannelRetentionDB(t *testing.T) *gorm.DB {
 	model.DB, model.LogDB, common.UsingSQLite = db, db, true
 	t.Cleanup(func() {
 		model.DB, model.LogDB, common.UsingSQLite = previousDB, previousLogDB, previousUsingSQLite
+
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -42,13 +44,25 @@ type channelAdminResponse struct {
 	Message string `json:"message"`
 }
 
-func serveChannelAdmin(t *testing.T, method string, id int, body string) (int, channelAdminResponse) {
+func serveChannelAdmin(
+	t *testing.T,
+	method string,
+	id int,
+	body string,
+) (int, channelAdminResponse) {
 	t.Helper()
+
 	router := gin.New()
 	router.PUT("/api/channel/:id", UpdateChannel)
 	router.DELETE("/api/channel/:id", DeleteChannel)
-	request := httptest.NewRequest(method, "/api/channel/"+strconv.Itoa(id), strings.NewReader(body))
+
+	request := httptest.NewRequestWithContext(t.Context(),
+		method,
+		"/api/channel/"+strconv.Itoa(id),
+		strings.NewReader(body),
+	)
 	request.Header.Set("Content-Type", "application/json")
+
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 
@@ -60,6 +74,7 @@ func serveChannelAdmin(t *testing.T, method string, id int, body string) (int, c
 
 func storedChannel(t *testing.T, id int) *model.Channel {
 	t.Helper()
+
 	channel, err := model.GetChannelByID(id)
 	require.NoError(t, err)
 
@@ -71,10 +86,17 @@ func storedChannel(t *testing.T, id int) *model.Channel {
 func TestChannelPutRefusesCredentialChangeWhileTasksNeedIt(t *testing.T) {
 	db := useChannelRetentionDB(t)
 
-	ch := &model.Channel{Name: "fal", Type: model.ChannelTypeFal, Key: "old-key", BaseURL: "https://queue.fal.run"}
+	ch := &model.Channel{
+		Name:    "fal",
+		Type:    model.ChannelTypeFal,
+		Key:     "old-key",
+		BaseURL: "https://queue.fal.run",
+	}
 	require.NoError(t, db.Create(ch).Error)
-	task := &model.NativeTask{ID: "native-in-flight", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp",
-		OutputSchema: "{}", OutputSchemaHash: "sha", Status: "queued", ChannelID: ch.ID}
+	task := &model.NativeTask{
+		ID: "native-in-flight", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp",
+		OutputSchema: "{}", OutputSchemaHash: "sha", Status: "queued", ChannelID: ch.ID,
+	}
 	require.NoError(t, db.Create(task).Error)
 
 	for _, body := range []string{`{"key":"new-key"}`, `{"base_url":"https://example.invalid"}`, `{"proxy_url":"http://proxy.invalid:8080"}`} {
@@ -83,6 +105,7 @@ func TestChannelPutRefusesCredentialChangeWhileTasksNeedIt(t *testing.T) {
 		require.False(t, response.Success)
 		require.Contains(t, response.Message, "native tasks")
 	}
+
 	status, response := serveChannelAdmin(t, http.MethodDelete, ch.ID, "")
 	require.NotEqual(t, http.StatusOK, status)
 	require.Contains(t, response.Message, "native tasks")
@@ -96,10 +119,20 @@ func TestChannelPutRefusesCredentialChangeWhileTasksNeedIt(t *testing.T) {
 	require.EqualValues(t, 3, storedChannel(t, ch.ID).Priority)
 
 	// Completed but unsettled still retains; completed and settled releases.
-	require.NoError(t, db.Model(task).Updates(map[string]any{"status": "completed", "billing_settled": false}).Error)
+	require.NoError(
+		t,
+		db.Model(task).
+			Updates(map[string]any{"status": "completed", "billing_settled": false}).
+			Error,
+	)
 	status, _ = serveChannelAdmin(t, http.MethodPut, ch.ID, `{"key":"new-key"}`)
 	require.NotEqual(t, http.StatusOK, status)
-	require.NoError(t, db.Model(task).Updates(map[string]any{"status": "completed", "billing_settled": true}).Error)
+	require.NoError(
+		t,
+		db.Model(task).
+			Updates(map[string]any{"status": "completed", "billing_settled": true}).
+			Error,
+	)
 	status, response = serveChannelAdmin(t, http.MethodPut, ch.ID, `{"key":"new-key"}`)
 	require.Equal(t, http.StatusOK, status, response.Message)
 	require.Equal(t, "new-key", storedChannel(t, ch.ID).Key)
@@ -129,10 +162,13 @@ func TestChannelPutAllowsCredentialChangeWithoutTasks(t *testing.T) {
 
 	ch := &model.Channel{Name: "fal", Type: model.ChannelTypeFal, Key: "old-key"}
 	other := &model.Channel{Name: "other", Type: model.ChannelTypeFal, Key: "other-key"}
+
 	require.NoError(t, db.Create(ch).Error)
 	require.NoError(t, db.Create(other).Error)
-	require.NoError(t, db.Create(&model.NativeTask{ID: "native-other", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp",
-		OutputSchema: "{}", OutputSchemaHash: "sha", Status: "queued", ChannelID: other.ID}).Error)
+	require.NoError(t, db.Create(&model.NativeTask{
+		ID: "native-other", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp",
+		OutputSchema: "{}", OutputSchemaHash: "sha", Status: "queued", ChannelID: other.ID,
+	}).Error)
 
 	status, response := serveChannelAdmin(t, http.MethodPut, ch.ID, `{"key":"new-key"}`)
 	require.Equal(t, http.StatusOK, status, response.Message)

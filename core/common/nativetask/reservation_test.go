@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private walletStub fixture or implementation.
 package nativetask
 
 import (
@@ -20,11 +21,15 @@ type scriptedWallet struct {
 	errs map[string]error
 }
 
-func (w *scriptedWallet) Prepayment(ctx context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (w *scriptedWallet) Prepayment(
+	ctx context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	if err := w.errs[c.Action]; err != nil {
 		w.commands = append(w.commands, c)
 		return balance.PrepaymentReceipt{}, err
 	}
+
 	return w.walletStub.Prepayment(ctx, c)
 }
 
@@ -50,7 +55,9 @@ func TestRefusedAdmissionLeavesNoReservation(t *testing.T) {
 
 func TestAmbiguousAdmissionKeepsReservation(t *testing.T) {
 	e, plan, _, p := setup(t)
-	e.Wallet = &scriptedWallet{errs: map[string]error{"admit": errors.New("prepayment outcome unknown")}}
+	e.Wallet = &scriptedWallet{
+		errs: map[string]error{"admit": errors.New("prepayment outcome unknown")},
+	}
 	_, err := e.Submit(context.Background(), "req", "g", 1, body, plan)
 	require.Error(t, err)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
@@ -61,7 +68,9 @@ func TestAmbiguousAdmissionKeepsReservation(t *testing.T) {
 
 func TestRetryKeepsReservationFromConcurrentRelease(t *testing.T) {
 	e, plan, _, _ := setup(t)
-	e.Wallet = &scriptedWallet{errs: map[string]error{"admit": errors.New("prepayment outcome unknown")}}
+	e.Wallet = &scriptedWallet{
+		errs: map[string]error{"admit": errors.New("prepayment outcome unknown")},
+	}
 	_, _ = e.Submit(context.Background(), "req", "g", 1, body, plan)
 	first, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
@@ -71,6 +80,7 @@ func TestRetryKeepsReservationFromConcurrentRelease(t *testing.T) {
 	released, err := model.ReleaseNativeReservation(e.DB, "req", "g", 1, first.UpdatedAt)
 	require.NoError(t, err)
 	require.False(t, released)
+
 	retried, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.True(t, retried.UpdatedAt.After(first.UpdatedAt))
@@ -96,12 +106,15 @@ func TestRecoveryDeletesOnlyStaleReservationsTheWalletNeverAdmitted(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, plan, _, _ := setup(t)
-			e.Wallet = &scriptedWallet{errs: map[string]error{"admit": errors.New("prepayment outcome unknown")}}
+			e.Wallet = &scriptedWallet{
+				errs: map[string]error{"admit": errors.New("prepayment outcome unknown")},
+			}
 			_, _ = e.Submit(ctx, "req", "g", 1, body, plan)
 			e.Wallet = &scriptedWallet{errs: map[string]error{"get": tc.getErr}}
 			report, err := e.RecoverOnce(ctx, "worker", time.Now().Add(tc.after), nil, nil)
 			require.NoError(t, err)
 			require.Equal(t, 1, report.Claimed)
+
 			_, err = model.GetNativeTask(e.DB, "req", "g", 1)
 			if tc.deleted {
 				require.ErrorIs(t, err, gorm.ErrRecordNotFound)
@@ -117,18 +130,26 @@ func TestRecoveryDeletesOnlyStaleReservationsTheWalletNeverAdmitted(t *testing.T
 func TestReplayReportsStoredStateWithoutWalletCalls(t *testing.T) {
 	e, plan, w, p := setup(t)
 	clock := time.Now()
-	h := &HTTP{Engine: e, Identity: func(*http.Request) (string, int, error) { return "g", 1, nil }, ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil },
-		limiter: newReadLimiter(func() time.Time { return clock })}
+	h := &HTTP{
+		Engine:      e,
+		Identity:    func(*http.Request) (string, int, error) { return "g", 1, nil },
+		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, p, nil },
+		limiter:     newReadLimiter(func() time.Time { return clock }),
+	}
 	response := httptest.NewRecorder()
 	h.Create(response, request(body))
 	require.Equal(t, 202, response.Code)
+
 	calls := len(w.commands)
+
 	for range statusReadBurst {
 		response = httptest.NewRecorder()
 		h.Create(response, request(body))
 		require.Equal(t, 202, response.Code)
 	}
+
 	require.Equal(t, calls, len(w.commands), "a replay must not call the wallet")
+
 	response = httptest.NewRecorder()
 	h.Create(response, request(body))
 	require.Equal(t, 429, response.Code)

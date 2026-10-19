@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"maps"
 	"math"
 	"reflect"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 type ValidationError struct {
@@ -29,16 +29,24 @@ func (e *ValidationError) PublicError() map[string]any {
 	if e.Param != "" {
 		param = e.Param
 	}
-	result := map[string]any{"message": e.Error(), "type": "invalid_request_error", "code": "invalid_parameter", "param": param}
+
+	result := map[string]any{
+		"message": e.Error(),
+		"type":    "invalid_request_error",
+		"code":    "invalid_parameter",
+		"param":   param,
+	}
 	if e.Code != "" {
 		result["code"] = e.Code
 	}
+
 	if len(e.Expected) > 0 {
 		result["expected"] = e.Expected
 		if values, ok := e.Expected["enum"]; ok {
 			result["allowed_values"] = values
 		}
 	}
+
 	return result
 }
 
@@ -46,21 +54,33 @@ func (e *ValidationError) PublicError() map[string]any {
 // raw validator errors, schema URLs or provider metadata.
 func schemaInputError(err error, schema map[string]any) *ValidationError {
 	result := &ValidationError{Status: 400}
+
 	var validation *jsonschema.ValidationError
 	if !errors.As(err, &validation) {
 		return result
 	}
+
 	for len(validation.Causes) > 0 {
 		validation = validation.Causes[0]
 	}
+
 	path := append([]string{}, validation.InstanceLocation...)
 	if required, ok := validation.ErrorKind.(*kind.Required); ok && len(required.Missing) > 0 {
 		path = append(path, required.Missing[0])
 	}
-	if extra, ok := validation.ErrorKind.(*kind.AdditionalProperties); ok && len(extra.Properties) > 0 {
+
+	if extra, ok := validation.ErrorKind.(*kind.AdditionalProperties); ok &&
+		len(extra.Properties) > 0 {
 		path = append(path, extra.Properties[0])
-		return &ValidationError{Status: 400, Param: strings.Join(path, "."), Message: "This parameter is not supported by the selected model.", Expected: map[string]any{"allowed": false}}
+
+		return &ValidationError{
+			Status:   400,
+			Param:    strings.Join(path, "."),
+			Message:  "This parameter is not supported by the selected model.",
+			Expected: map[string]any{"allowed": false},
+		}
 	}
+
 	node := schema
 	for _, part := range path {
 		properties, _ := node["properties"].(map[string]any)
@@ -73,13 +93,16 @@ func schemaInputError(err error, schema map[string]any) *ValidationError {
 			break
 		}
 	}
+
 	result.Param = strings.Join(path, ".")
+
 	result.Expected = map[string]any{}
 	for _, key := range []string{"type", "enum", "const", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength", "maxLength", "minItems", "maxItems", "format"} {
 		if value, ok := node[key]; ok {
 			result.Expected[key] = value
 		}
 	}
+
 	return result
 }
 
@@ -87,12 +110,14 @@ func (e *ValidationError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
+
 	if e.Status == 400 {
 		if e.Param != "" {
 			return "Invalid parameter: " + e.Param + ". See expected constraints."
 		}
 		return "Image request does not satisfy the model schema"
 	}
+
 	return "Image model validation contract is unavailable"
 }
 
@@ -202,28 +227,9 @@ func ValidateImage(contract []byte, publicID string, body []byte) ([]byte, *Vali
 
 		delete(input, key)
 	}
-	// OpenAI-style clients send size as WIDTHxHEIGHT. A capability that
-	// publishes image_size may accept it as an alias; validate the translated
-	// value against that capability's frozen schema before dispatch.
-	if rawSize, supplied := input["size"]; supplied && properties["size"] == nil && properties["image_size"] != nil {
-		if _, duplicate := input["image_size"]; duplicate {
-			return nil, &ValidationError{Status: 400, Param: "size", Message: "Provide either size or image_size, not both."}
-		}
-		value, stringValue := rawSize.(string)
-		if !stringValue {
-			return nil, &ValidationError{Status: 400, Param: "size", Expected: map[string]any{"type": "string"}}
-		}
-		if dimensions := dimensionsPattern.FindStringSubmatch(value); dimensions != nil {
-			width, widthErr := strconv.ParseInt(dimensions[1], 10, 64)
-			height, heightErr := strconv.ParseInt(dimensions[2], 10, 64)
-			if widthErr != nil || heightErr != nil {
-				return nil, &ValidationError{Status: 400, Param: "size", Expected: map[string]any{"format": "WIDTHxHEIGHT"}}
-			}
-			input["image_size"] = map[string]any{"width": width, "height": height}
-		} else {
-			input["image_size"] = value
-		}
-		delete(input, "size")
+
+	if aliasErr := normalizeImageSizeAlias(input, properties); aliasErr != nil {
+		return nil, aliasErr
 	}
 
 	applyDefaults(input, entry.Schema)
@@ -231,31 +237,18 @@ func ValidateImage(contract []byte, publicID string, body []byte) ([]byte, *Vali
 	if err := schema.Validate(input); err != nil {
 		return nil, schemaInputError(err, entry.Schema)
 	}
-	// Old published contracts can require prompt without a minLength. Reject a
-	// blank prompt before a paid synchronous or asynchronous submission.
-	// Bound provider contracts can explicitly publish an empty default (e.g.
-	// upscale/redux). Their schema remains authoritative for that exact value.
-	promptSchema, _ := properties["prompt"].(map[string]any)
-	emptyDefault, hasDefault := promptSchema["default"].(string)
-	allowsEmptyDefault := entry.ProviderVersion != nil && hasDefault && emptyDefault == ""
-	if required, ok := entry.Schema["required"].([]any); ok {
-		for _, name := range required {
-			if name == "prompt" {
-				if prompt, isString := input["prompt"].(string); isString && strings.TrimSpace(prompt) == "" && !(allowsEmptyDefault && prompt == "") {
-					return nil, &ValidationError{Status: 400, Param: "prompt", Expected: map[string]any{"minLength": 1}}
-				}
-			}
-		}
+
+	if promptErr := validateRequiredImagePrompt(
+		input,
+		properties,
+		entry.Schema,
+		entry.ProviderVersion != nil,
+	); promptErr != nil {
+		return nil, promptErr
 	}
 
-	if !validateImageConstraints(input, rules) {
-		if d := rules.Dimensions; d != nil {
-			dimensionOnly := imageRules{Dimensions: d}
-			if !validateImageConstraints(input, dimensionOnly) {
-				return nil, &ValidationError{Status: 400, Param: "size", Expected: dimensionExpectations(rules)}
-			}
-		}
-		return nil, &ValidationError{Status: 400, Param: "sequential_image_generation_options.max_images", Expected: map[string]any{"maximum_combined_images": rules.CombinedImages.Maximum}}
+	if constraintErr := imageConstraintError(input, rules); constraintErr != nil {
+		return nil, constraintErr
 	}
 
 	input["model"] = publicID
@@ -378,4 +371,104 @@ func validateImageConstraints(input map[string]any, rules imageRules) bool {
 	}
 
 	return true
+}
+
+func normalizeImageSizeAlias(input, properties map[string]any) *ValidationError {
+	// OpenAI-style clients send size as WIDTHxHEIGHT. A capability that
+	// publishes image_size may accept it as an alias; validate the translated
+	// value against that capability's frozen schema before dispatch.
+	if rawSize, supplied := input["size"]; supplied && properties["size"] == nil &&
+		properties["image_size"] != nil {
+		if _, duplicate := input["image_size"]; duplicate {
+			return &ValidationError{
+				Status:  400,
+				Param:   "size",
+				Message: "Provide either size or image_size, not both.",
+			}
+		}
+
+		value, stringValue := rawSize.(string)
+		if !stringValue {
+			return &ValidationError{
+				Status:   400,
+				Param:    "size",
+				Expected: map[string]any{"type": "string"},
+			}
+		}
+
+		if dimensions := dimensionsPattern.FindStringSubmatch(value); dimensions != nil {
+			width, widthErr := strconv.ParseInt(dimensions[1], 10, 64)
+
+			height, heightErr := strconv.ParseInt(dimensions[2], 10, 64)
+			if widthErr != nil || heightErr != nil {
+				return &ValidationError{
+					Status:   400,
+					Param:    "size",
+					Expected: map[string]any{"format": "WIDTHxHEIGHT"},
+				}
+			}
+
+			input["image_size"] = map[string]any{"width": width, "height": height}
+		} else {
+			input["image_size"] = value
+		}
+
+		delete(input, "size")
+	}
+
+	return nil
+}
+
+func validateRequiredImagePrompt(
+	input, properties, schema map[string]any,
+	hasProviderVersion bool,
+) *ValidationError {
+	// Old published contracts can require prompt without a minLength. Reject a
+	// blank prompt before a paid synchronous or asynchronous submission.
+	// Bound provider contracts can explicitly publish an empty default (e.g.
+	// upscale/redux). Their schema remains authoritative for that exact value.
+	promptSchema, _ := properties["prompt"].(map[string]any)
+	emptyDefault, hasDefault := promptSchema["default"].(string)
+
+	allowsEmptyDefault := hasProviderVersion && hasDefault && emptyDefault == ""
+	if required, ok := schema["required"].([]any); ok {
+		for _, name := range required {
+			if name == "prompt" {
+				if prompt, isString := input["prompt"].(string); isString &&
+					strings.TrimSpace(prompt) == "" &&
+					(!allowsEmptyDefault || prompt != "") {
+					return &ValidationError{
+						Status:   400,
+						Param:    "prompt",
+						Expected: map[string]any{"minLength": 1},
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func imageConstraintError(input map[string]any, rules imageRules) *ValidationError {
+	if !validateImageConstraints(input, rules) {
+		if d := rules.Dimensions; d != nil {
+			dimensionOnly := imageRules{Dimensions: d}
+			if !validateImageConstraints(input, dimensionOnly) {
+				return &ValidationError{
+					Status:   400,
+					Param:    "size",
+					Expected: dimensionExpectations(rules),
+				}
+			}
+		}
+
+		return &ValidationError{
+			Status:   400,
+			Param:    "sequential_image_generation_options.max_images",
+			Expected: map[string]any{"maximum_combined_images": rules.CombinedImages.Maximum},
+		}
+	}
+
+	return nil
 }

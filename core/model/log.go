@@ -130,7 +130,7 @@ func CreateLogIndexes(db *gorm.DB) error {
 	var indexes []string
 	if common.UsingSQLite {
 		// not support INCLUDE
-		indexes = []string{
+		indexes = append(make([]string, 0, 7+len(usageAttributionSQLiteIndexes)), []string{
 			// used by global search logs
 			"CREATE INDEX IF NOT EXISTS idx_model_creat ON logs (model, created_at DESC)",
 			// used by global search logs
@@ -146,7 +146,7 @@ func CreateLogIndexes(db *gorm.DB) error {
 			"CREATE INDEX IF NOT EXISTS idx_group_model_creat ON logs (group_id, model, created_at DESC)",
 			// used by search group logs
 			"CREATE INDEX IF NOT EXISTS idx_group_token_model_creat ON logs (group_id, token_name, model, created_at DESC)",
-		}
+		}...)
 		// Key usage P2 (migrations/usage-attribution-v1). SQLite is development
 		// only, so startup may build them; a production LogDB gets them from
 		// the reviewed SQL, built CONCURRENTLY.
@@ -177,7 +177,7 @@ func CreateLogIndexes(db *gorm.DB) error {
 		}
 	}
 
-	if !common.UsingSQLite && db.Dialector.Name() == "postgres" {
+	if !common.UsingSQLite && db.Name() == "postgres" {
 		warnMissingUsageIndexes(db)
 	}
 
@@ -246,7 +246,12 @@ func warnMissingUsageIndexes(db *gorm.DB) {
 	message := "missing or invalid logs indexes " + strings.Join(missing, ", ") +
 		": apply migrations/usage-attribution-v1/postgres.sql step 2"
 	log.Warn(message)
-	notify.ErrorThrottle("usageAttributionIndexes", time.Hour, "Usage attribution indexes missing", message)
+	notify.ErrorThrottle(
+		"usageAttributionIndexes",
+		time.Hour,
+		"Usage attribution indexes missing",
+		message,
+	)
 }
 
 const (
@@ -688,7 +693,12 @@ const (
 
 func (k GroupLogKind) Valid() bool {
 	switch k {
-	case "", GroupLogKindAll, GroupLogKindCalls, GroupLogKindReads, GroupLogKindTasks, GroupLogKindNonTask:
+	case "",
+		GroupLogKindAll,
+		GroupLogKindCalls,
+		GroupLogKindReads,
+		GroupLogKindTasks,
+		GroupLogKindNonTask:
 		return true
 	default:
 		return false
@@ -1863,6 +1873,10 @@ func GetIPGroups(threshold int, start, end time.Time) (map[string][]string, erro
 		}
 
 		result[ip] = strings.Split(groups, ",")
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return result, nil

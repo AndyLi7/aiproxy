@@ -2,6 +2,8 @@ package monitor
 
 import (
 	"context"
+	// Only randomizes retry/ban duration; no credentials or security tokens.
+	// nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"math/rand/v2"
 	"sync"
 	"time"

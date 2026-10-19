@@ -147,10 +147,12 @@ func TokenAuth(c *gin.Context) {
 			}
 
 			oncall.AlertDBError("TokenAuth", err)
+
 			if key != "" {
 				// Operators identify the key by its masked form; clients never see it.
 				log.Data["key"] = maskTokenKey(key)
 			}
+
 			abortTokenRejection(c, tokenRejectionFor(err), err)
 
 			return

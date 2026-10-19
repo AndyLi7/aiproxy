@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,9 +29,7 @@ func publicIDConfig(
 		model.ModelConfigPublicCapabilityModelKey:     publicModel + "/" + capability,
 		model.ModelConfigCapabilityKey:                capability,
 	}
-	for key, value := range extra {
-		config[key] = value
-	}
+	maps.Copy(config, extra)
 
 	return model.ModelConfig{Model: publicModel + "::" + capability, Type: m, Config: config}
 }
@@ -76,6 +75,7 @@ func distributeAs(
 	}
 
 	var result distributedRequest
+
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(Group, group)
@@ -93,11 +93,18 @@ func distributeAs(
 	})
 	router.POST(path, NewDistribute(requestMode), func(c *gin.Context) {
 		result.reached = true
+
 		c.Status(http.StatusOK)
 	})
 
-	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		path,
+		strings.NewReader(body),
+	)
 	request.Header.Set("Content-Type", "application/json")
+
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	result.status = recorder.Code
@@ -118,8 +125,10 @@ type modelErrorBody struct {
 
 func decodeModelError(t *testing.T, raw string) modelErrorBody {
 	t.Helper()
+
 	var decoded modelErrorBody
 	require.NoError(t, json.Unmarshal([]byte(raw), &decoded), raw)
+
 	return decoded
 }
 
@@ -127,14 +136,20 @@ const ttsCapabilityID = "elevenlabs/eleven-v4/text-to-speech"
 
 func publicIDCatalog() ([]model.ModelConfig, []string) {
 	configs := []model.ModelConfig{
-		publicIDConfig(mode.NativeTasks, "elevenlabs/eleven-v4", "text-to-speech", map[model.ModelConfigKey]any{
-			model.ModelConfigPublicAPIIDKey:             "elevenlabs/eleven-v4",
-			model.ModelConfigPublicCapabilityAliasesKey: []any{"elevenlabs/eleven-4"},
-		}),
+		publicIDConfig(
+			mode.NativeTasks,
+			"elevenlabs/eleven-v4",
+			"text-to-speech",
+			map[model.ModelConfigKey]any{
+				model.ModelConfigPublicAPIIDKey:             "elevenlabs/eleven-v4",
+				model.ModelConfigPublicCapabilityAliasesKey: []any{"elevenlabs/eleven-4"},
+			},
+		),
 		publicIDConfig(mode.NativeTasks, "alibaba/wan-2.7", "text-to-image", nil),
 		publicIDConfig(mode.NativeTasks, "alibaba/wan-2.7", "image-to-image", nil),
 		publicIDConfig(mode.ImagesGenerations, "bytedance/seedream-4.5", "text-to-image", nil),
 	}
+
 	entitled := make([]string, 0, len(configs))
 	for _, config := range configs {
 		entitled = append(entitled, config.Model)
@@ -170,17 +185,25 @@ func TestNativeTasksUnknownModelSuggestions(t *testing.T) {
 		want      []string
 	}{
 		{"elevenlabs/eleven-v9", http.StatusNotFound, "model_not_found", []string{}},
-		{"alibaba/wan-2.7", http.StatusNotFound, "model_not_found",
-			[]string{"alibaba/wan-2.7/image-to-image", "alibaba/wan-2.7/text-to-image"}},
+		{
+			"alibaba/wan-2.7", http.StatusNotFound, "model_not_found",
+			[]string{"alibaba/wan-2.7/image-to-image", "alibaba/wan-2.7/text-to-image"},
+		},
 		{"Elevenlabs/Eleven-V4", http.StatusNotFound, "model_not_found", []string{"elevenlabs/eleven-v4"}},
 		{"elevenlabs/eleven-v4/text-to-speech-2", http.StatusNotFound, "model_not_found", []string{"elevenlabs/eleven-v4"}},
-		{"bytedance/seedream-4.5/text-to-image", http.StatusBadRequest, "native_model_unavailable",
-			[]string{"bytedance/seedream-4.5/text-to-image"}},
-		{"bytedance/seedream-4.5", http.StatusBadRequest, "native_model_unavailable",
-			[]string{"bytedance/seedream-4.5/text-to-image"}},
+		{
+			"bytedance/seedream-4.5/text-to-image", http.StatusBadRequest, "native_model_unavailable",
+			[]string{"bytedance/seedream-4.5/text-to-image"},
+		},
+		{
+			"bytedance/seedream-4.5", http.StatusBadRequest, "native_model_unavailable",
+			[]string{"bytedance/seedream-4.5/text-to-image"},
+		},
 		// An internal route key the key may call, on the wrong endpoint.
-		{"bytedance/seedream-4.5::text-to-image", http.StatusBadRequest, "native_model_unavailable",
-			[]string{"bytedance/seedream-4.5/text-to-image"}},
+		{
+			"bytedance/seedream-4.5::text-to-image", http.StatusBadRequest, "native_model_unavailable",
+			[]string{"bytedance/seedream-4.5/text-to-image"},
+		},
 	} {
 		got := distributeAs(t, mode.NativeTasks, "/v1/model-tasks", configs, entitled, false,
 			`{"model":"`+tc.requested+`","input":{}}`)
@@ -193,11 +216,13 @@ func TestNativeTasksUnknownModelSuggestions(t *testing.T) {
 		require.Equal(t, "model", decoded.Error.Param)
 		require.NotNil(t, decoded.Error.SuggestedModels)
 		require.Equal(t, tc.want, *decoded.Error.SuggestedModels, tc.requested)
+
 		if tc.status == http.StatusNotFound {
 			require.Equal(t, "not_found_error", decoded.Error.Type)
 		} else {
 			require.Equal(t, "invalid_request_error", decoded.Error.Type)
 		}
+
 		for _, leak := range []string{"aiproxy", "::", "fal", "elevenlabs/eleven-4\""} {
 			require.NotContains(t, got.body, leak, tc.requested)
 		}
@@ -211,34 +236,67 @@ func TestNativeTasksUnknownModelSuggestions(t *testing.T) {
 
 func TestNativeTasksSuggestOnlyWhatTheKeyMayCall(t *testing.T) {
 	configs, _ := publicIDCatalog()
-	got := distributeAs(t, mode.NativeTasks, "/v1/model-tasks", configs,
-		[]string{"elevenlabs/eleven-v4::text-to-speech"}, false, `{"model":"alibaba/wan-2.7","input":{}}`)
+	got := distributeAs(
+		t,
+		mode.NativeTasks,
+		"/v1/model-tasks",
+		configs,
+		[]string{
+			"elevenlabs/eleven-v4::text-to-speech",
+		},
+		false,
+		`{"model":"alibaba/wan-2.7","input":{}}`,
+	)
 	require.Equal(t, http.StatusNotFound, got.status)
 	require.Equal(t, []string{}, *decodeModelError(t, got.body).Error.SuggestedModels)
 
 	// Another key's model is unknown to this key, by every ID.
-	got = distributeAs(t, mode.NativeTasks, "/v1/model-tasks", configs,
-		[]string{"alibaba/wan-2.7::text-to-image"}, false, `{"model":"elevenlabs/eleven-v4","input":{}}`)
+	got = distributeAs(
+		t,
+		mode.NativeTasks,
+		"/v1/model-tasks",
+		configs,
+		[]string{
+			"alibaba/wan-2.7::text-to-image",
+		},
+		false,
+		`{"model":"elevenlabs/eleven-v4","input":{}}`,
+	)
 	require.Equal(t, http.StatusNotFound, got.status)
 	require.Equal(t, []string{}, *decodeModelError(t, got.body).Error.SuggestedModels)
 
 	// A model the key may call whose config is missing: 404 in the native envelope.
-	got = distributeAs(t, mode.NativeTasks, "/v1/model-tasks", configs,
-		[]string{"vendor/ghost::text-to-speech"}, false, `{"model":"vendor/ghost::text-to-speech","input":{}}`)
+	got = distributeAs(
+		t,
+		mode.NativeTasks,
+		"/v1/model-tasks",
+		configs,
+		[]string{
+			"vendor/ghost::text-to-speech",
+		},
+		false,
+		`{"model":"vendor/ghost::text-to-speech","input":{}}`,
+	)
 	require.Equal(t, http.StatusNotFound, got.status, got.body)
 	require.Equal(t, "model_not_found", decodeModelError(t, got.body).Error.Code)
 }
 
 func TestNativeTasksAmbiguousPublicIDIsOurs(t *testing.T) {
 	configs, entitled := publicIDCatalog()
-	twin := publicIDConfig(mode.NativeTasks, "elevenlabs/eleven-v4", "text-to-music", map[model.ModelConfigKey]any{
-		model.ModelConfigPublicAPIIDKey: "elevenlabs/eleven-v4",
-	})
+	twin := publicIDConfig(
+		mode.NativeTasks,
+		"elevenlabs/eleven-v4",
+		"text-to-music",
+		map[model.ModelConfigKey]any{
+			model.ModelConfigPublicAPIIDKey: "elevenlabs/eleven-v4",
+		},
+	)
 	configs = append(configs, twin)
 	entitled = append(entitled, twin.Model)
 
 	hook := new(logtest.Hook)
 	oldHooks := logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
+
 	logrus.AddHook(hook)
 	t.Cleanup(func() { logrus.StandardLogger().ReplaceHooks(oldHooks) })
 
@@ -273,24 +331,33 @@ func TestNativeVideoCapabilityPassesRouteKeyCheck(t *testing.T) {
 
 func imageContractConfig(publicModel, capability string) model.ModelConfig {
 	id := publicModel + "/" + capability
-	return publicIDConfig(mode.ImagesGenerations, publicModel, capability, map[model.ModelConfigKey]any{
-		model.ModelConfigParameterSchemaKey: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{"prompt": map[string]any{"type": "string"}},
-		},
-		model.ModelConfigDefaultParametersKey: map[string]any{},
-		"x_token_platform_capability_contract": map[string]any{
-			"entry_id": id,
-			"contract": map[string]any{
-				"entry_id": id, "validation_version": 1,
-				"input_schema": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{"prompt": map[string]any{"type": "string", "minLength": 1}},
-					"required":   []string{"prompt"}, "additionalProperties": false,
+
+	return publicIDConfig(
+		mode.ImagesGenerations,
+		publicModel,
+		capability,
+		map[model.ModelConfigKey]any{
+			model.ModelConfigParameterSchemaKey: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"prompt": map[string]any{"type": "string"}},
+			},
+			model.ModelConfigDefaultParametersKey: map[string]any{},
+			"x_token_platform_capability_contract": map[string]any{
+				"entry_id": id,
+				"contract": map[string]any{
+					"entry_id": id, "validation_version": 1,
+					"input_schema": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"prompt": map[string]any{"type": "string", "minLength": 1},
+						},
+						"required":             []string{"prompt"},
+						"additionalProperties": false,
+					},
 				},
 			},
 		},
-	})
+	)
 }
 
 // Owner decision D3 (2026-10-10), turned on by DISABLE_IMAGE_GROUP_IDS: image
@@ -323,7 +390,11 @@ func TestImageEndpointsRefuseModelGroupIDs(t *testing.T) {
 		require.Equal(t, "not_found_error", decoded.Error.Type)
 		require.Equal(t, "model", decoded.Error.Param)
 		require.Equal(t, imageGroupModelMessage, decoded.Error.Message)
-		require.Equal(t, []string{"bytedance/seedream-4.5/text-to-image"}, *decoded.Error.SuggestedModels)
+		require.Equal(
+			t,
+			[]string{"bytedance/seedream-4.5/text-to-image"},
+			*decoded.Error.SuggestedModels,
+		)
 		require.NotContains(t, got.body, "::")
 		require.False(t, got.balanced)
 		require.Equal(t, "bytedance/seedream-4.5", got.fields.RequestedModel)
@@ -351,6 +422,7 @@ func TestImageEndpointsAnswerUnknownModelsWithModelNotFound(t *testing.T) {
 
 	for _, refuseGroupIDs := range []bool{false, true} {
 		config.DisableImageGroupIDs = refuseGroupIDs
+
 		for _, requested := range []string{
 			"bytedance/seedream-4.5/text-to-imag",
 			"bytedance/seedream-9",
@@ -380,6 +452,7 @@ func TestImageEndpointsAnswerUnknownModelsWithModelNotFound(t *testing.T) {
 // and the error code, for every model error on the native endpoint.
 func TestNativeModelRejectionLogRowNamesRequestedID(t *testing.T) {
 	var rows []*model.Log
+
 	original := recordOperationalLog
 	recordOperationalLog = func(entry *model.Log) error {
 		rows = append(rows, entry)
@@ -388,10 +461,12 @@ func TestNativeModelRejectionLogRowNamesRequestedID(t *testing.T) {
 	t.Cleanup(func() { recordOperationalLog = original })
 
 	configs, entitled := publicIDCatalog()
+
 	enabled := make(map[string]model.ModelConfig, len(configs))
 	for _, config := range configs {
 		enabled[config.Model] = config
 	}
+
 	token := model.TokenCache{ID: 7, Name: "key"}
 	token.SetAvailableSets([]string{model.ChannelDefaultSet})
 	token.SetModelsBySet(map[string][]string{model.ChannelDefaultSet: entitled})
@@ -413,7 +488,7 @@ func TestNativeModelRejectionLogRowNamesRequestedID(t *testing.T) {
 		"bytedance/seedream-4.5": "native_model_unavailable",
 	} {
 		rows = nil
-		request := httptest.NewRequest(http.MethodPost, "/v1/model-tasks",
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/model-tasks",
 			strings.NewReader(`{"model":"`+requested+`","input":{}}`))
 		request.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(httptest.NewRecorder(), request)

@@ -52,13 +52,17 @@ func TestUsageSource(t *testing.T) {
 }
 
 func TestUsageIdentityCompleteAndTime(t *testing.T) {
-	at := time.Date(2026, 10, 12, 3, 4, 5, 123_999_999, time.FixedZone("CST", 8*3600))
+	at := time.Date(2026, time.October, 12, 3, 4, 5, 123_999_999, time.FixedZone("CST", 8*3600))
 	identity := NewUsageIdentity(7, "vendor/model", "text-to-image", "", at)
 
 	require.Equal(t, "vendor/model/text-to-image", identity.ModelID)
 	require.Equal(t, RequestSourceAPI, identity.Source, "an empty source is api")
-	require.Equal(t, time.Date(2026, 10, 11, 19, 4, 5, 123_000_000, time.UTC), identity.UsageAt,
-		"UTC, truncated (never rounded) to the millisecond")
+	require.Equal(
+		t,
+		time.Date(2026, time.October, 11, 19, 4, 5, 123_000_000, time.UTC),
+		identity.UsageAt,
+		"UTC, truncated (never rounded) to the millisecond",
+	)
 	require.Equal(t, at.UnixMilli(), identity.UsageAtMs())
 	require.True(t, identity.Complete())
 
@@ -76,6 +80,7 @@ func TestUsageIdentityCompleteAndTime(t *testing.T) {
 	require.True(t, NewUsageIdentity(1, "m", "", RequestSourceAPI, time.Time{}).UsageAt.IsZero())
 
 	var info AsyncUsageInfo
+
 	_, ok := info.UsageIdentity()
 	require.False(t, ok, "an info without usage columns was created before P2")
 
@@ -91,7 +96,10 @@ func usageIdentityDB(t *testing.T) *gorm.DB {
 
 	db, err := OpenSQLite(filepath.Join(t.TempDir(), "usage-identity.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&Log{}, &AsyncUsageInfo{}, &ImageTask{}, &NativeTask{}, &RequestDetail{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(&Log{}, &AsyncUsageInfo{}, &ImageTask{}, &NativeTask{}, &RequestDetail{}),
+	)
 
 	old := LogDB
 	LogDB = db
@@ -107,8 +115,10 @@ func usageIdentityDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func storedLog(t *testing.T, db *gorm.DB, where string, args ...any) *Log {
+func storedLog(t *testing.T, db *gorm.DB, args ...any) *Log {
 	t.Helper()
+
+	where := "request_id = ?"
 
 	var rows []Log
 	require.NoError(t, db.Where(where, args...).Order("id").Find(&rows).Error)
@@ -120,8 +130,8 @@ func storedLog(t *testing.T, db *gorm.DB, where string, args ...any) *Log {
 // G2: for every call path, the identity built from the path's inputs (what
 // its money payloads carry) equals the identity of the row it writes.
 func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
-	requestAt := time.Date(2026, 10, 12, 1, 2, 3, 456_789_123, time.UTC)
-	wantAt := time.Date(2026, 10, 12, 1, 2, 3, 456_000_000, time.UTC)
+	requestAt := time.Date(2026, time.October, 12, 1, 2, 3, 456_789_123, time.UTC)
+	wantAt := time.Date(2026, time.October, 12, 1, 2, 3, 456_000_000, time.UTC)
 
 	t.Run("relay with public fields", func(t *testing.T) {
 		db := usageIdentityDB(t)
@@ -131,13 +141,45 @@ func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
 			ResolvedCapability: "image-to-video",
 			BillingOperationID: "op-relay-public",
 		}
-		require.NoError(t, RecordConsumeLog("relay-public", time.Time{}, requestAt, time.Time{}, time.Time{},
-			"g", 200, 3, "seedance-upstream", "", 7, PlaygroundCredentialName, "/v1/videos", "", int(mode.Videos), "",
-			0, nil, Usage{}, UsageContext{}, Price{}, Amount{}, "", nil, "", "", "", "", AsyncUsageStatusPending, fields))
+		require.NoError(
+			t,
+			RecordConsumeLog(
+				"relay-public",
+				time.Time{},
+				requestAt,
+				time.Time{},
+				time.Time{},
+				"g",
+				200,
+				3,
+				"seedance-upstream",
+				"",
+				7,
+				PlaygroundCredentialName,
+				"/v1/videos",
+				"",
+				int(mode.Videos),
+				"",
+				0,
+				nil,
+				Usage{},
+				UsageContext{},
+				Price{},
+				Amount{},
+				"",
+				nil,
+				"",
+				"",
+				"",
+				"",
+				AsyncUsageStatusPending,
+				fields,
+			),
+		)
 
 		model, capability := CallLogModel("seedance-upstream", "", fields)
 		want := NewUsageIdentity(7, model, capability, fields.RequestSource, requestAt)
-		row := storedLog(t, db, "request_id = ?", "relay-public")
+		row := storedLog(t, db, "relay-public")
 
 		require.Equal(t, want, row.UsageIdentity())
 		require.Equal(t, "bytedance/seedance-1-0-pro/image-to-video", want.ModelID)
@@ -147,28 +189,71 @@ func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
 
 	t.Run("relay with only a video capability", func(t *testing.T) {
 		db := usageIdentityDB(t)
-		require.NoError(t, RecordConsumeLog("relay-video", time.Time{}, requestAt, time.Time{}, time.Time{},
-			"g", 200, 3, "veo-3", "text-to-video", 7, "prod", "/v1/videos", "", int(mode.Videos), "",
-			0, nil, Usage{}, UsageContext{}, Price{}, Amount{}, "", nil, "", "", "", "", AsyncUsageStatusPending,
-			OperationalFields{BillingOperationID: "op-video"}))
+		require.NoError(
+			t,
+			RecordConsumeLog(
+				"relay-video",
+				time.Time{},
+				requestAt,
+				time.Time{},
+				time.Time{},
+				"g",
+				200,
+				3,
+				"veo-3",
+				"text-to-video",
+				7,
+				"prod",
+				"/v1/videos",
+				"",
+				int(mode.Videos),
+				"",
+				0,
+				nil,
+				Usage{},
+				UsageContext{},
+				Price{},
+				Amount{},
+				"",
+				nil,
+				"",
+				"",
+				"",
+				"",
+				AsyncUsageStatusPending,
+				OperationalFields{BillingOperationID: "op-video"},
+			),
+		)
 
 		want := NewUsageIdentity(7, "veo-3", "text-to-video", "", requestAt)
-		require.Equal(t, want, storedLog(t, db, "request_id = ?", "relay-video").UsageIdentity())
+		require.Equal(t, want, storedLog(t, db, "relay-video").UsageIdentity())
 		require.Equal(t, "veo-3/text-to-video", want.ModelID)
 		require.Equal(t, RequestSourceAPI, want.Source)
 	})
 
 	t.Run("measured final row", func(t *testing.T) {
 		db := usageIdentityDB(t)
-		fields := OperationalFields{PublicModel: "openai/gpt-image-1", ResolvedCapability: "text-to-image", BillingOperationID: "op-measured"}
+		fields := OperationalFields{
+			PublicModel:        "openai/gpt-image-1",
+			ResolvedCapability: "text-to-image",
+			BillingOperationID: "op-measured",
+		}
 		logModel, capability := CallLogModel("gpt-image-1", "", fields)
 		zero := int64(0)
 		info := &AsyncUsageInfo{
-			RequestID: "measured", BillingOperationID: fields.BillingOperationID, RequestAt: requestAt,
-			GroupID: "g", TokenID: 7, Model: "gpt-image-1",
-			Amount: Amount{ImageBillingResult: &ImageBillingResult{State: "complete", AmountMicros: &zero}},
+			RequestID:          "measured",
+			BillingOperationID: fields.BillingOperationID,
+			RequestAt:          requestAt,
+			GroupID:            "g",
+			TokenID:            7,
+			Model:              "gpt-image-1",
+			Amount: Amount{
+				ImageBillingResult: &ImageBillingResult{State: "complete", AmountMicros: &zero},
+			},
 		}
-		info.SetUsageIdentity(NewUsageIdentity(7, logModel, capability, fields.RequestSource, requestAt))
+		info.SetUsageIdentity(
+			NewUsageIdentity(7, logModel, capability, fields.RequestSource, requestAt),
+		)
 		entry := &Log{
 			RequestID: "measured", RequestAt: requestAt, GroupID: "g", TokenID: 7, Model: logModel,
 			Capability: capability, BillingOperationID: EmptyNullString(fields.BillingOperationID),
@@ -177,19 +262,31 @@ func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
 
 		stored, ok := info.UsageIdentity()
 		require.True(t, ok)
-		require.Equal(t, stored, storedLog(t, db, "request_id = ?", "measured").UsageIdentity())
+		require.Equal(t, stored, storedLog(t, db, "measured").UsageIdentity())
 	})
 
 	t.Run("image task reservation row", func(t *testing.T) {
 		db := usageIdentityDB(t)
 		pricingAt := requestAt.Add(2 * time.Second) // handler time, later than the request start
-		fields := OperationalFields{RequestSource: RequestSourcePlayground, PublicModel: "fal/flux", ResolvedCapability: "text-to-image"}
+		fields := OperationalFields{
+			RequestSource:      RequestSourcePlayground,
+			PublicModel:        "fal/flux",
+			ResolvedCapability: "text-to-image",
+		}
 		info := &AsyncUsageInfo{
-			RequestID: "image-task", RequestAt: pricingAt, GroupID: "g", TokenID: 7, Model: "flux-entry",
-			Capability: "text-to-image", Mode: int(mode.ImagesGenerations), BillingOperationID: "op-image",
+			RequestID:          "image-task",
+			RequestAt:          pricingAt,
+			GroupID:            "g",
+			TokenID:            7,
+			Model:              "flux-entry",
+			Capability:         "text-to-image",
+			Mode:               int(mode.ImagesGenerations),
+			BillingOperationID: "op-image",
 		}
 		logModel, capability := CallLogModel(info.Model, info.Capability, fields)
-		info.SetUsageIdentity(NewUsageIdentity(7, logModel, capability, fields.RequestSource, requestAt))
+		info.SetUsageIdentity(
+			NewUsageIdentity(7, logModel, capability, fields.RequestSource, requestAt),
+		)
 
 		_, created, err := ReserveImageTask(&ImageTask{
 			ID: "image-task", GroupID: "g", TokenID: 7, Model: "flux-entry", Fingerprint: "f",
@@ -198,7 +295,7 @@ func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, created)
 
-		row := storedLog(t, db, "request_id = ?", "image-task")
+		row := storedLog(t, db, "image-task")
 		stored, ok := info.UsageIdentity()
 		require.True(t, ok)
 		require.Equal(t, stored, row.UsageIdentity())
@@ -207,7 +304,12 @@ func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
 
 		var saved AsyncUsageInfo
 		require.NoError(t, db.First(&saved, info.ID).Error)
-		require.Equal(t, pricingAt, saved.RequestAt.UTC(), "request_at stays the pricing instant (C8)")
+		require.Equal(
+			t,
+			pricingAt,
+			saved.RequestAt.UTC(),
+			"request_at stays the pricing instant (C8)",
+		)
 	})
 
 	for _, id := range []string{"vendor/model", "vendor/model/text-to-image"} {
@@ -219,30 +321,47 @@ func TestUsageIdentityIsTheRowIdentity(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			info := NativeTaskLog{RequestAt: requestAt, RequestSource: RequestSourcePlayground, Mode: int(mode.NativeTasks)}
+			info := NativeTaskLog{
+				RequestAt:     requestAt,
+				RequestSource: RequestSourcePlayground,
+				Mode:          int(mode.NativeTasks),
+			}
 			require.NoError(t, RecordNativeTaskLog(db, task, info))
 
 			want := NativeUsageIdentity(task, info)
 			require.Equal(t, id, want.ModelID, "the native model id is the frozen contract id")
-			require.Equal(t, want, storedLog(t, db, "request_id = ?", "native").UsageIdentity())
+			require.Equal(t, want, storedLog(t, db, "native").UsageIdentity())
 		})
 	}
 
 	t.Run("recovery-inserted native row", func(t *testing.T) {
 		db := usageIdentityDB(t)
 		_, _, err := ReserveNativeTask(db, NativeTask{
-			ID: "recovered", GroupID: "g", TokenID: 7, Model: "vendor/model/text-to-image", Fingerprint: "f",
-			OutputSchema: `{"type":"object"}`, BillingOperationID: "native:recovered",
+			ID:                 "recovered",
+			GroupID:            "g",
+			TokenID:            7,
+			Model:              "vendor/model/text-to-image",
+			Fingerprint:        "f",
+			OutputSchema:       `{"type":"object"}`,
+			BillingOperationID: "native:recovered",
 		})
 		require.NoError(t, err)
-		require.NoError(t, TransitionNativeSubmission(db, "recovered", "g", 7, "reserved", "submitting", ""))
+		require.NoError(
+			t,
+			TransitionNativeSubmission(db, "recovered", "g", 7, "reserved", "submitting", ""),
+		)
 
 		receipt := `{"id":"native:recovered","status":"pending","usageAtMs":` +
 			strconv.FormatInt(wantAt.UnixMilli(), 10) + `,"usageSource":"playground"}`
 		require.NoError(t, SaveNativeBillingTerminal(db, "recovered", "g", 7, receipt))
 
-		want := UsageIdentity{APIKeyID: 7, ModelID: "vendor/model/text-to-image", Source: RequestSourcePlayground, UsageAt: wantAt}
-		require.Equal(t, want, storedLog(t, db, "request_id = ?", "recovered").UsageIdentity())
+		want := UsageIdentity{
+			APIKeyID: 7,
+			ModelID:  "vendor/model/text-to-image",
+			Source:   RequestSourcePlayground,
+			UsageAt:  wantAt,
+		}
+		require.Equal(t, want, storedLog(t, db, "recovered").UsageIdentity())
 	})
 }
 
@@ -255,7 +374,7 @@ func sqlStatements(script string) []string {
 		dollar     bool
 	)
 
-	for _, line := range strings.Split(script, "\n") {
+	for line := range strings.SplitSeq(script, "\n") {
 		if !dollar {
 			if index := strings.Index(line, "--"); index >= 0 {
 				line = line[:index]
@@ -265,7 +384,9 @@ func sqlStatements(script string) []string {
 		for i := 0; i < len(line); i++ {
 			if strings.HasPrefix(line[i:], "$$") {
 				dollar = !dollar
+
 				current.WriteString("$$")
+
 				i++
 
 				continue
@@ -297,7 +418,9 @@ func sqlStatements(script string) []string {
 func reviewedUsageSQL(t *testing.T, dialect string) []string {
 	t.Helper()
 
-	raw, err := os.ReadFile(filepath.Join("..", "migrations", "usage-attribution-v1", dialect+".sql"))
+	raw, err := os.ReadFile(
+		filepath.Join("..", "migrations", "usage-attribution-v1", dialect+".sql"),
+	)
 	require.NoError(t, err)
 
 	return sqlStatements(string(raw))
@@ -372,7 +495,10 @@ func assertUsageColumnsMatchReviewedSQL(t *testing.T, db *gorm.DB, dialect strin
 	// The tags must equal the reviewed SQL, or AutoMigrate would alter the
 	// columns of a large production table without lock_timeout.
 	capture := &ddlCapture{Interface: logger.Discard}
-	require.NoError(t, db.Session(&gorm.Session{Logger: capture}).AutoMigrate(&Log{}, &AsyncUsageInfo{}))
+	require.NoError(
+		t,
+		db.Session(&gorm.Session{Logger: capture}).AutoMigrate(&Log{}, &AsyncUsageInfo{}),
+	)
 
 	for _, statement := range capture.statements {
 		require.NotRegexp(t, schemaChange, statement, "AutoMigrate changed the reviewed schema")
@@ -381,17 +507,36 @@ func assertUsageColumnsMatchReviewedSQL(t *testing.T, db *gorm.DB, dialect strin
 	// 'native:' + a 128-character request id: the spec's varchar(128) fails here.
 	op := "native:" + strings.Repeat("a", 128)
 	require.Len(t, op, 135)
-	require.NoError(t, db.Create(&Log{RequestID: "long-op", GroupID: "g", BillingOperationID: EmptyNullString(op)}).Error)
+	require.NoError(
+		t,
+		db.Create(
+			&Log{RequestID: "long-op", GroupID: "g", BillingOperationID: EmptyNullString(op)},
+		).Error,
+	)
 
 	// A rejection row without an op stores NULL, never ''.
 	require.NoError(t, db.Create(&Log{RequestID: "rejected", GroupID: "g", Code: 402}).Error)
 
 	var nulls int64
-	require.NoError(t, db.Model(&Log{}).Where("request_id = ? AND billing_operation_id IS NULL", "rejected").Count(&nulls).Error)
+	require.NoError(
+		t,
+		db.Model(&Log{}).
+			Where("request_id = ? AND billing_operation_id IS NULL", "rejected").
+			Count(&nulls).
+			Error,
+	)
 	require.EqualValues(t, 1, nulls)
 
 	info := &AsyncUsageInfo{RequestID: "outbox", GroupID: "g", TokenID: 7}
-	info.SetUsageIdentity(NewUsageIdentity(7, strings.Repeat("m", MaxUsageModelIDLength), "", RequestSourcePlayground, time.Now()))
+	info.SetUsageIdentity(
+		NewUsageIdentity(
+			7,
+			strings.Repeat("m", MaxUsageModelIDLength),
+			"",
+			RequestSourcePlayground,
+			time.Now(),
+		),
+	)
 	require.NoError(t, db.Create(info).Error)
 
 	var stored AsyncUsageInfo
@@ -442,7 +587,12 @@ func TestUsageAttributionColumnsMatchReviewedSQL(t *testing.T) {
 
 		for _, name := range usageAttributionIndexNames {
 			var count int64
-			require.NoError(t, db.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?", name).Scan(&count).Error)
+			require.NoError(
+				t,
+				db.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?", name).
+					Scan(&count).
+					Error,
+			)
 			require.EqualValues(t, 1, count, name)
 		}
 
@@ -456,7 +606,12 @@ func TestUsageAttributionColumnsMatchReviewedSQL(t *testing.T) {
 
 		for _, name := range usageAttributionIndexNames {
 			var count int64
-			require.NoError(t, fresh.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?", name).Scan(&count).Error)
+			require.NoError(
+				t,
+				fresh.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?", name).
+					Scan(&count).
+					Error,
+			)
 			require.EqualValues(t, 1, count, name)
 		}
 	})
@@ -467,7 +622,12 @@ func TestUsageAttributionColumnsMatchReviewedSQL(t *testing.T) {
 
 			missing, err := MissingUsageIndexes(LogDB)
 			require.NoError(t, err)
-			require.Equal(t, usageAttributionIndexNames, missing, "startup never builds them on Postgres")
+			require.Equal(
+				t,
+				usageAttributionIndexNames,
+				missing,
+				"startup never builds them on Postgres",
+			)
 
 			assertUsageColumnsMatchReviewedSQL(t, LogDB, "postgres")
 

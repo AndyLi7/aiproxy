@@ -32,7 +32,7 @@ func newUsageStatsDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedUsageLog(t *testing.T, db *gorm.DB, entry model.Log) model.Log {
+func seedUsageLog(t *testing.T, db *gorm.DB, entry model.Log) {
 	t.Helper()
 
 	if entry.GroupID == "" {
@@ -49,11 +49,9 @@ func seedUsageLog(t *testing.T, db *gorm.DB, entry model.Log) model.Log {
 	}
 
 	require.NoError(t, db.Create(&entry).Error)
-
-	return entry
 }
 
-func ptr(value int64) *int64 { return &value }
+//go:fix inline
 
 func TestGroupCallTotalsBySource(t *testing.T) {
 	db := newUsageStatsDB(t)
@@ -81,7 +79,14 @@ func TestGroupCallTotalsBySource(t *testing.T) {
 		seedUsageLog(t, db, entry)
 	}
 
-	totals, err := model.GetGroupCallTotals(context.Background(), "g", start, end, now, model.CallUnitRequests)
+	totals, err := model.GetGroupCallTotals(
+		context.Background(),
+		"g",
+		start,
+		end,
+		now,
+		model.CallUnitRequests,
+	)
 	require.NoError(t, err)
 
 	lastMS := latest.UnixMilli()
@@ -95,11 +100,18 @@ func TestGroupCallTotalsBySource(t *testing.T) {
 			Requests: 4, Succeeded: 1, Failed: 1, Rejected: 1, Unknown: 1, LastRequestAt: &lastMS,
 		}},
 		{Source: "playground", CallCounts: model.CallCounts{
-			Requests: 1, Processing: 1, LastRequestAt: ptr(now.Add(-4 * time.Hour).UnixMilli()),
+			Requests: 1, Processing: 1, LastRequestAt: new(now.Add(-4 * time.Hour).UnixMilli()),
 		}},
 	}, totals.BySource)
 
-	empty, err := model.GetGroupCallTotals(context.Background(), "nobody", start, end, now, model.CallUnitRequests)
+	empty, err := model.GetGroupCallTotals(
+		context.Background(),
+		"nobody",
+		start,
+		end,
+		now,
+		model.CallUnitRequests,
+	)
 	require.NoError(t, err)
 	require.Equal(t, model.CallCounts{}, empty.Totals)
 	require.Empty(t, empty.BySource)
@@ -111,26 +123,79 @@ func TestGroupKeyCallStats(t *testing.T) {
 	start, end := now.Add(-30*24*time.Hour), now
 
 	// Key 3 was renamed: its latest call carries the new name.
-	seedUsageLog(t, db, model.Log{TokenID: 3, TokenName: "old-name", Code: 200, RequestAt: now.Add(-5 * time.Hour)})
-	seedUsageLog(t, db, model.Log{TokenID: 3, TokenName: "prod", Code: 502, FailureStage: model.FailureStageUpstream, RequestAt: now.Add(-2 * time.Hour)})
-	seedUsageLog(t, db, model.Log{TokenID: 3, TokenName: "prod", Code: 200, RequestAt: now.Add(-time.Hour)})
+	seedUsageLog(
+		t,
+		db,
+		model.Log{TokenID: 3, TokenName: "old-name", Code: 200, RequestAt: now.Add(-5 * time.Hour)},
+	)
+	seedUsageLog(
+		t,
+		db,
+		model.Log{
+			TokenID:      3,
+			TokenName:    "prod",
+			Code:         502,
+			FailureStage: model.FailureStageUpstream,
+			RequestAt:    now.Add(-2 * time.Hour),
+		},
+	)
+	seedUsageLog(
+		t,
+		db,
+		model.Log{TokenID: 3, TokenName: "prod", Code: 200, RequestAt: now.Add(-time.Hour)},
+	)
 	// A failed poll after the last call is not a call and does not move last used.
-	seedUsageLog(t, db, model.Log{TokenID: 3, TokenName: "prod", Code: 404, Endpoint: "GET /v1/model-tasks/x", RequestAt: now.Add(-time.Minute)})
+	seedUsageLog(
+		t,
+		db,
+		model.Log{
+			TokenID:   3,
+			TokenName: "prod",
+			Code:      404,
+			Endpoint:  "GET /v1/model-tasks/x",
+			RequestAt: now.Add(-time.Minute),
+		},
+	)
 	// Key 5 is idle in the window; its last call is older.
 	idleAt := now.Add(-90 * 24 * time.Hour)
 	seedUsageLog(t, db, model.Log{TokenID: 5, TokenName: "idle", Code: 200, RequestAt: idleAt})
 	// Key 9 belongs to another group.
-	seedUsageLog(t, db, model.Log{GroupID: "other", TokenID: 9, TokenName: "theirs", Code: 200, RequestAt: now.Add(-time.Hour)})
+	seedUsageLog(
+		t,
+		db,
+		model.Log{
+			GroupID:   "other",
+			TokenID:   9,
+			TokenName: "theirs",
+			Code:      200,
+			RequestAt: now.Add(-time.Hour),
+		},
+	)
 
-	stats, err := model.GetGroupKeyCallStats(context.Background(), "g", []int{9, 3, 7, 5}, start, end, now, model.CallUnitRequests)
+	stats, err := model.GetGroupKeyCallStats(
+		context.Background(),
+		"g",
+		[]int{9, 3, 7, 5},
+		start,
+		end,
+		now,
+		model.CallUnitRequests,
+	)
 	require.NoError(t, err)
 
 	require.Equal(t, []model.KeyCallStats{
 		{TokenID: 9},
 		{TokenID: 3, CallCounts: model.CallCounts{
-			Requests: 3, Succeeded: 2, Failed: 1, LastRequestAt: ptr(now.Add(-time.Hour).UnixMilli()),
+			Requests:      3,
+			Succeeded:     2,
+			Failed:        1,
+			LastRequestAt: new(now.Add(-time.Hour).UnixMilli()),
 		}, LastTokenName: "prod"},
 		{TokenID: 7},
-		{TokenID: 5, CallCounts: model.CallCounts{LastRequestAt: ptr(idleAt.UnixMilli())}, LastTokenName: "idle"},
+		{
+			TokenID:       5,
+			CallCounts:    model.CallCounts{LastRequestAt: new(idleAt.UnixMilli())},
+			LastTokenName: "idle",
+		},
 	}, stats)
 }

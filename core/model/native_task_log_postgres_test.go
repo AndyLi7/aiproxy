@@ -42,9 +42,16 @@ func TestNativeLogWritersAreSerialized(t *testing.T) {
 	withTestPostgresStoreDB(t, func() {
 		require.NoError(t, LogDB.AutoMigrate(&NativeTask{}, &Log{}))
 
-		usageAt := time.Date(2026, 10, 12, 1, 2, 3, 0, time.UTC)
-		receipt := fmt.Sprintf(`{"status":"pending","usageAtMs":%d,"usageSource":"api"}`, usageAt.UnixMilli())
-		info := NativeTaskLog{RequestAt: usageAt, Mode: int(mode.NativeTasks), Endpoint: "POST /v1/model-tasks"}
+		usageAt := time.Date(2026, time.October, 12, 1, 2, 3, 0, time.UTC)
+		receipt := fmt.Sprintf(
+			`{"status":"pending","usageAtMs":%d,"usageSource":"api"}`,
+			usageAt.UnixMilli(),
+		)
+		info := NativeTaskLog{
+			RequestAt: usageAt,
+			Mode:      int(mode.NativeTasks),
+			Endpoint:  "POST /v1/model-tasks",
+		}
 
 		// A writer holding the lock with an uncommitted row makes the other wait,
 		// then the other sees the row and adds nothing.
@@ -65,6 +72,7 @@ func TestNativeLogWritersAreSerialized(t *testing.T) {
 			select {
 			case err := <-done:
 				_ = tx.Rollback()
+
 				t.Fatalf("billing sync did not wait for the task lock: %v", err)
 			case <-time.After(300 * time.Millisecond):
 			}
@@ -79,6 +87,7 @@ func TestNativeLogWritersAreSerialized(t *testing.T) {
 			tx := LogDB.Begin()
 			locked, err := lockNativeTask(tx, task.ID, "g", 1)
 			require.NoError(t, err)
+
 			parsed, ok := parseNativeReceiptUsage(receipt)
 			require.True(t, ok)
 			require.NoError(t, insertMissingNativeTaskLog(tx, locked, locked.Status, parsed, ""))
@@ -89,6 +98,7 @@ func TestNativeLogWritersAreSerialized(t *testing.T) {
 			select {
 			case err := <-done:
 				_ = tx.Rollback()
+
 				t.Fatalf("RecordNativeTaskLog did not wait for the task lock: %v", err)
 			case <-time.After(300 * time.Millisecond):
 			}
@@ -110,12 +120,16 @@ func TestNativeLogWritersAreSerialized(t *testing.T) {
 
 				go func() {
 					defer wg.Done()
+
 					<-start
+
 					errs <- RecordNativeTaskLog(LogDB, task, info)
 				}()
 				go func() {
 					defer wg.Done()
+
 					<-start
+
 					errs <- SaveNativeBillingTerminal(LogDB, task.ID, "g", 1, receipt)
 				}()
 
@@ -141,24 +155,45 @@ func TestAbandonedReservationGainsNoCallRow(t *testing.T) {
 	withTestPostgresStoreDB(t, func() {
 		require.NoError(t, LogDB.AutoMigrate(&NativeTask{}, &Log{}))
 
-		usageAt := time.Date(2026, 10, 13, 11, 21, 0, 0, time.UTC)
+		usageAt := time.Date(2026, time.October, 13, 11, 21, 0, 0, time.UTC)
 		_, created, err := ReserveNativeTask(LogDB, NativeTask{
-			ID: "abandoned", GroupID: "g", TokenID: 1, Model: "vendor/model/text-to-image", Fingerprint: "f",
-			OutputSchema: `{"type":"object"}`, BillingOperationID: "native:abandoned",
+			ID:                 "abandoned",
+			GroupID:            "g",
+			TokenID:            1,
+			Model:              "vendor/model/text-to-image",
+			Fingerprint:        "f",
+			OutputSchema:       `{"type":"object"}`,
+			BillingOperationID: "native:abandoned",
 		})
 		require.NoError(t, err)
 		require.True(t, created)
 
 		// The compare-and-set only takes a reservation older than its bound.
-		abandoned, err := AbandonNativeReservation(LogDB, "abandoned", "g", 1, time.Now().Add(-time.Hour))
+		abandoned, err := AbandonNativeReservation(
+			LogDB,
+			"abandoned",
+			"g",
+			1,
+			time.Now().Add(-time.Hour),
+		)
 		require.NoError(t, err)
 		require.False(t, abandoned)
-		abandoned, err = AbandonNativeReservation(LogDB, "abandoned", "g", 1, time.Now().Add(time.Minute))
+		abandoned, err = AbandonNativeReservation(
+			LogDB,
+			"abandoned",
+			"g",
+			1,
+			time.Now().Add(time.Minute),
+		)
 		require.NoError(t, err)
 		require.True(t, abandoned)
 
 		for _, status := range []string{"pending", "refunded"} {
-			receipt := fmt.Sprintf(`{"status":%q,"chargedMicros":0,"refundMicros":200,"usageAtMs":%d,"usageSource":"api"}`, status, usageAt.UnixMilli())
+			receipt := fmt.Sprintf(
+				`{"status":%q,"chargedMicros":0,"refundMicros":200,"usageAtMs":%d,"usageSource":"api"}`,
+				status,
+				usageAt.UnixMilli(),
+			)
 			require.NoError(t, SaveNativeBillingTerminal(LogDB, "abandoned", "g", 1, receipt))
 		}
 
@@ -171,7 +206,13 @@ func TestAbandonedReservationGainsNoCallRow(t *testing.T) {
 
 		// A submission that already left reserved is never abandoned.
 		reserveSubmittingNativeTask(t, LogDB, "submitting")
-		abandoned, err = AbandonNativeReservation(LogDB, "submitting", "g", 1, time.Now().Add(time.Minute))
+		abandoned, err = AbandonNativeReservation(
+			LogDB,
+			"submitting",
+			"g",
+			1,
+			time.Now().Add(time.Minute),
+		)
 		require.NoError(t, err)
 		require.False(t, abandoned)
 	})

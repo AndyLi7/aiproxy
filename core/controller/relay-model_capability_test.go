@@ -4,6 +4,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -102,7 +103,10 @@ func TestListModelsProjectsEntitledCapabilityModelsWithoutInternalIDs(t *testing
 	}, ids)
 }
 
-func nativePublicIDConfig(publicModel, capability string, extra map[model.ModelConfigKey]any) model.ModelConfig {
+func nativePublicIDConfig(
+	publicModel, capability string,
+	extra map[model.ModelConfigKey]any,
+) model.ModelConfig {
 	config := map[model.ModelConfigKey]any{
 		model.ModelConfigCapabilityContractVersionKey: float64(1),
 		model.ModelConfigPublicModelKey:               publicModel,
@@ -110,18 +114,25 @@ func nativePublicIDConfig(publicModel, capability string, extra map[model.ModelC
 		model.ModelConfigCapabilityKey:                capability,
 		NativeResultConfigKey:                         map[string]any{"version": 1},
 	}
-	for key, value := range extra {
-		config[key] = value
-	}
+	maps.Copy(config, extra)
 
-	return model.ModelConfig{Model: publicModel + "::" + capability, Type: mode.NativeTasks, Config: config}
+	return model.ModelConfig{
+		Model:  publicModel + "::" + capability,
+		Type:   mode.NativeTasks,
+		Config: config,
+	}
 }
 
-func publicIDModelContext(t *testing.T, path string, configs ...model.ModelConfig) (*gin.Context, *httptest.ResponseRecorder) {
+func publicIDModelContext(
+	t *testing.T,
+	path string,
+	configs ...model.ModelConfig,
+) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	names := make([]string, 0, len(configs))
+
 	enabled := make(map[string]model.ModelConfig, len(configs))
 	for _, config := range configs {
 		names = append(names, config.Model)
@@ -162,14 +173,17 @@ func TestListModelsListsCallableIDsAndNeverRouteKeys(t *testing.T) {
 	ListModels(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
+
 	var body struct {
 		Data []OpenAIModels `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+
 	ids := make([]string, 0, len(body.Data))
 	for _, entry := range body.Data {
 		ids = append(ids, entry.ID)
 	}
+
 	require.Equal(t, []string{
 		"alibaba/wan-2.7/text-to-image",
 		"elevenlabs/eleven-v3/text-to-speech",
@@ -182,15 +196,20 @@ func TestListModelsListsCallableIDsAndNeverRouteKeys(t *testing.T) {
 }
 
 func TestRetrieveModelAcceptsEveryCallableID(t *testing.T) {
-	tts := nativePublicIDConfig("elevenlabs/eleven-v4", "text-to-speech", map[model.ModelConfigKey]any{
-		model.ModelConfigPublicAPIIDKey:             "elevenlabs/eleven-v4",
-		model.ModelConfigPublicCapabilityAliasesKey: []any{"elevenlabs/eleven-4"},
-	})
+	tts := nativePublicIDConfig(
+		"elevenlabs/eleven-v4",
+		"text-to-speech",
+		map[model.ModelConfigKey]any{
+			model.ModelConfigPublicAPIIDKey:             "elevenlabs/eleven-v4",
+			model.ModelConfigPublicCapabilityAliasesKey: []any{"elevenlabs/eleven-4"},
+		},
+	)
 	for _, id := range []string{"elevenlabs/eleven-v4", "elevenlabs/eleven-v4/text-to-speech", "elevenlabs/eleven-4", "ElevenLabs/Eleven-V4"} {
 		ctx, recorder := publicIDModelContext(t, "/v1/models/"+id, tts)
 		ctx.Params = gin.Params{{Key: "model", Value: id}}
 		RetrieveModel(ctx)
 		require.Equal(t, http.StatusOK, recorder.Code, id)
+
 		var entry OpenAIModels
 		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &entry))
 		require.Equal(t, "elevenlabs/eleven-v4", entry.ID, id)
@@ -201,6 +220,7 @@ func TestRetrieveModelAcceptsEveryCallableID(t *testing.T) {
 		ctx.Params = gin.Params{{Key: "model", Value: id}}
 		RetrieveModel(ctx)
 		require.Equal(t, http.StatusNotFound, recorder.Code, id)
+
 		var body struct {
 			Error struct {
 				Code  string `json:"code"`
@@ -222,8 +242,10 @@ func TestNativeTaskResponsesNameTheCallableID(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "native.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
+
 	previousDB, previousWallet := model.LogDB, balance.Default
 	t.Cleanup(func() { model.LogDB = previousDB; balance.Default = previousWallet })
+
 	model.LogDB, balance.Default = db, nativeControllerWallet{}
 	for _, task := range []model.NativeTask{
 		{ID: "tts", Model: "elevenlabs/eleven-v4/text-to-speech"},
@@ -233,9 +255,14 @@ func TestNativeTaskResponsesNameTheCallableID(t *testing.T) {
 		task.Status, task.DeliveredOutput, task.BillingOperationID = "completed", "null", "native:"+task.ID
 		require.NoError(t, db.Create(&task).Error)
 	}
-	tts := nativePublicIDConfig("elevenlabs/eleven-v4", "text-to-speech", map[model.ModelConfigKey]any{
-		model.ModelConfigPublicAPIIDKey: "elevenlabs/eleven-v4",
-	})
+
+	tts := nativePublicIDConfig(
+		"elevenlabs/eleven-v4",
+		"text-to-speech",
+		map[model.ModelConfigKey]any{
+			model.ModelConfigPublicAPIIDKey: "elevenlabs/eleven-v4",
+		},
+	)
 
 	for id, want := range map[string]string{"tts": "elevenlabs/eleven-v4", "gone": "vendor/removed/text-to-speech"} {
 		router := gin.New()
@@ -248,9 +275,14 @@ func TestNativeTaskResponsesNameTheCallableID(t *testing.T) {
 			c.Next()
 		})
 		router.GET("/v1/model-tasks/:id", GetNativeTask)
+
 		response := httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/model-tasks/"+id, nil))
+		router.ServeHTTP(
+			response,
+			httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/model-tasks/"+id, nil),
+		)
 		require.Equal(t, http.StatusOK, response.Code)
+
 		var body struct {
 			Model string `json:"model"`
 		}
@@ -260,10 +292,14 @@ func TestNativeTaskResponsesNameTheCallableID(t *testing.T) {
 }
 
 func TestNativeAcceptedModelOnlyForResolvedAcceptedIDs(t *testing.T) {
-	tts := nativePublicIDConfig("elevenlabs/eleven-v4", "text-to-speech", map[model.ModelConfigKey]any{
-		model.ModelConfigPublicAPIIDKey:             "elevenlabs/eleven-v4",
-		model.ModelConfigPublicCapabilityAliasesKey: []any{"elevenlabs/eleven-4"},
-	})
+	tts := nativePublicIDConfig(
+		"elevenlabs/eleven-v4",
+		"text-to-speech",
+		map[model.ModelConfigKey]any{
+			model.ModelConfigPublicAPIIDKey:             "elevenlabs/eleven-v4",
+			model.ModelConfigPublicCapabilityAliasesKey: []any{"elevenlabs/eleven-4"},
+		},
+	)
 	for requested, want := range map[string]string{
 		"elevenlabs/eleven-v4":                "elevenlabs/eleven-v4",
 		"elevenlabs/eleven-4":                 "elevenlabs/eleven-4",

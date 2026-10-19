@@ -34,6 +34,7 @@ func InputRejectionStatus(status int) bool {
 	case 400, 413, 422, 451:
 		return true
 	}
+
 	return false
 }
 
@@ -44,18 +45,26 @@ func ProviderUnavailableStatus(status int) bool {
 	case 401, 402, 403, 404, 429:
 		return true
 	}
+
 	return false
 }
 
 // UpstreamUnavailableError is a fresh copy of the fixed public error.
 func UpstreamUnavailableError() *model.ImageTaskError {
-	return &model.ImageTaskError{Code: model.UpstreamUnavailableCode, Message: model.UpstreamUnavailableMessage}
+	return &model.ImageTaskError{
+		Code:    model.UpstreamUnavailableCode,
+		Message: model.UpstreamUnavailableMessage,
+	}
 }
 
 // NewSubmissionRejected is the not-accepted failure of an input rejection.
 // public, when set, is the structured public error (for example the fields a
 // 422 named); callers otherwise use their lane's generic rejection.
-func NewSubmissionRejected(status int, reason string, public *model.ImageTaskError) *ImageSubmissionFailure {
+func NewSubmissionRejected(
+	status int,
+	reason string,
+	public *model.ImageTaskError,
+) *ImageSubmissionFailure {
 	return &ImageSubmissionFailure{
 		Failure:        ErrImageSubmissionRejected.Failure,
 		PublicError:    public,
@@ -114,10 +123,15 @@ func NotAcceptedTaskError(err error) *model.ImageTaskError {
 	if errors.As(err, &failure) && failure.PublicError != nil {
 		return failure.PublicError
 	}
+
 	if ProviderUnavailable(err) {
 		return UpstreamUnavailableError()
 	}
-	return &model.ImageTaskError{Code: "submission_rejected", Message: "Upstream rejected image submission"}
+
+	return &model.ImageTaskError{
+		Code:    "submission_rejected",
+		Message: "Upstream rejected image submission",
+	}
 }
 
 // SubmissionEvidence returns the provider status and reason carried by err,
@@ -128,10 +142,12 @@ func SubmissionEvidence(err error) (int, string) {
 	if !errors.As(err, &failure) {
 		return 0, "no provider evidence"
 	}
+
 	reason := failure.ProviderReason
 	if reason == "" {
 		reason = failure.Failure.Evidence
 	}
+
 	return failure.ProviderStatus, reason
 }
 
@@ -148,8 +164,10 @@ const providerReasonLimit = 200
 // cut to about 200 bytes. Request bodies and headers are never included.
 func ProviderErrorReason(status int, body []byte, secrets ...string) string {
 	var fields map[string]json.RawMessage
+
 	_ = json.Unmarshal(body, &fields)
 	structured := structuredProviderReason(fields)
+
 	reason := structured
 	if !InputRejectionStatus(status) {
 		if text := providerMessage(fields); text != "" {
@@ -158,6 +176,7 @@ func ProviderErrorReason(status int, body []byte, secrets ...string) string {
 			reason = string(body)
 		}
 	}
+
 	reason = strings.Join(strings.FieldsFunc(reason, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r) || r == utf8.RuneError
 	}), " ")
@@ -166,19 +185,23 @@ func ProviderErrorReason(status int, body []byte, secrets ...string) string {
 			reason = strings.ReplaceAll(reason, secret, "[redacted]")
 		}
 	}
+
 	if len(reason) > providerReasonLimit {
 		cut := providerReasonLimit
 		for cut > 0 && !utf8.RuneStart(reason[cut]) {
 			cut--
 		}
+
 		reason = reason[:cut] + "..."
 	}
+
 	if reason == "" {
 		if InputRejectionStatus(status) {
 			return "input rejected (details withheld)"
 		}
 		return "no error message"
 	}
+
 	return reason
 }
 
@@ -190,12 +213,14 @@ func providerMessage(fields map[string]json.RawMessage) string {
 			return text
 		}
 	}
+
 	var nested struct {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(fields["error"], &nested) == nil {
 		return nested.Message
 	}
+
 	return ""
 }
 
@@ -203,23 +228,28 @@ func providerMessage(fields map[string]json.RawMessage) string {
 // FastAPI/pydantic detail types with their field paths, and error codes with
 // their parameter names. Values, messages and echoed input are dropped.
 func structuredProviderReason(fields map[string]json.RawMessage) string {
-	var parts []string
-	var details []struct {
-		Type string `json:"type"`
-		Loc  []any  `json:"loc"`
-	}
+	var (
+		parts   []string
+		details []struct {
+			Type string `json:"type"`
+			Loc  []any  `json:"loc"`
+		}
+	)
 	if json.Unmarshal(fields["detail"], &details) == nil {
 		for _, detail := range details {
 			if len(parts) == 4 {
 				break
 			}
+
 			path := make([]string, 0, len(detail.Loc))
 			for _, part := range detail.Loc {
 				path = append(path, reasonToken(fmt.Sprint(part)))
 			}
+
 			parts = append(parts, reasonToken(detail.Type)+"@"+strings.Join(path, "."))
 		}
 	}
+
 	var coded struct {
 		Code  string `json:"code"`
 		Type  string `json:"type"`
@@ -230,16 +260,20 @@ func structuredProviderReason(fields map[string]json.RawMessage) string {
 		if part == "" {
 			part = coded.Type
 		}
+
 		part = reasonToken(part)
 		if coded.Param != "" {
 			part += "@" + reasonToken(coded.Param)
 		}
+
 		parts = append(parts, part)
 	}
+
 	var code string
 	if json.Unmarshal(fields["code"], &code) == nil && code != "" {
 		parts = append(parts, reasonToken(code))
 	}
+
 	return strings.Join(parts, ", ")
 }
 
@@ -249,10 +283,13 @@ func reasonToken(value string) string {
 	if value == "" || len(value) > 64 {
 		return "*"
 	}
+
 	for _, r := range value {
-		if !(r == '_' || r == '-' || r == '.' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+		if r != '_' && r != '-' && r != '.' && (r < '0' || r > '9') && (r < 'a' || r > 'z') &&
+			(r < 'A' || r > 'Z') {
 			return "*"
 		}
 	}
+
 	return value
 }

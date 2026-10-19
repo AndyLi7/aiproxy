@@ -20,6 +20,7 @@ func TestImagePrepaymentScanReachesNeverCheckedTasks(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "scan.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}))
+
 	now := time.Now().UTC()
 
 	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
@@ -36,6 +37,7 @@ func TestImagePrepaymentScanReachesNeverCheckedTasks(t *testing.T) {
 			PrepaymentQuoteJSON: quote, BillingNextCheckAt: &due, CreatedAt: now.Add(-time.Minute),
 		}).Error)
 	}
+
 	require.NoError(t, db.Create(&model.ImageTask{
 		ID: "never-checked", GroupID: "g", TokenID: 1, Status: "failed",
 		PrepaymentQuoteJSON: quote, CreatedAt: now.Add(-time.Hour),
@@ -53,7 +55,13 @@ func TestImagePrepaymentScanReachesNeverCheckedTasks(t *testing.T) {
 	var tasks []model.ImageTask
 	require.NoError(t, dueImagePrepayments(db, now).Find(&tasks).Error)
 	require.Len(t, tasks, imagePrepaymentBatch)
-	require.Equal(t, "never-checked", tasks[0].ID, "the oldest never-checked task is in the first page")
+	require.Equal(
+		t,
+		"never-checked",
+		tasks[0].ID,
+		"the oldest never-checked task is in the first page",
+	)
+
 	for _, task := range tasks {
 		require.NotEqual(t, "leased", task.ID)
 		require.NotEqual(t, "settled", task.ID)

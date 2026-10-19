@@ -36,7 +36,14 @@ func TestUsageStatsPostgres(t *testing.T) {
 
 		start := now.Add(-30 * 24 * time.Hour)
 
-		totals, err := GetGroupCallTotals(context.Background(), "g", start, now, now, CallUnitRequests)
+		totals, err := GetGroupCallTotals(
+			context.Background(),
+			"g",
+			start,
+			now,
+			now,
+			CallUnitRequests,
+		)
 		require.NoError(t, err)
 
 		lastMS := last.UnixMilli()
@@ -47,10 +54,22 @@ func TestUsageStatsPostgres(t *testing.T) {
 		require.Equal(t, RequestSourceAPI, totals.BySource[0].Source)
 		require.Equal(t, RequestSourcePlayground, totals.BySource[1].Source)
 
-		keys, err := GetGroupKeyCallStats(context.Background(), "g", []int{3, 5}, start, now, now, CallUnitRequests)
+		keys, err := GetGroupKeyCallStats(
+			context.Background(),
+			"g",
+			[]int{3, 5},
+			start,
+			now,
+			now,
+			CallUnitRequests,
+		)
 		require.NoError(t, err)
 		require.Len(t, keys, 2)
-		require.Equal(t, CallCounts{Requests: 2, Succeeded: 1, Failed: 1, LastRequestAt: &lastMS}, keys[0].CallCounts)
+		require.Equal(
+			t,
+			CallCounts{Requests: 2, Succeeded: 1, Failed: 1, LastRequestAt: &lastMS},
+			keys[0].CallCounts,
+		)
 		require.Equal(t, "prod", keys[0].LastTokenName)
 		require.Zero(t, keys[1].Requests)
 		require.Equal(t, "idle", keys[1].LastTokenName)

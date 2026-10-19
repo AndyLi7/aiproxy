@@ -13,13 +13,19 @@ import (
 // 2026-10-02 and 2026-10-08), with no prepayment recovery pass in between.
 func requireFailedImageRefund(t *testing.T, wallet *deadlineWallet) {
 	t.Helper()
-	require.Equal(t, []string{"accept_attempt", "settle:failed/platform_failure", "get"}, wallet.list())
+	require.Equal(
+		t,
+		[]string{"accept_attempt", "settle:failed/platform_failure", "get"},
+		wallet.list(),
+	)
+
 	saved, err := model.GetImageTask("deadline", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "failed", saved.Status)
 	require.NotNil(t, saved.Billing)
 	require.Equal(t, "refunded", saved.Billing.Status)
 	require.True(t, saved.BillingSettled)
+
 	var usage model.AsyncUsageInfo
 	require.NoError(t, model.LogDB.First(&usage).Error)
 	require.Equal(t, model.AsyncUsageStatusFailed, usage.Status)
@@ -32,6 +38,7 @@ func TestImagePollRefundsProviderFailureImmediately(t *testing.T) {
 	setupDeadlineTask(t, time.Minute, "in_progress", fal, wallet)
 	processOneImageUsage(t.Context(), claimDeadlineUsage(t))
 	requireFailedImageRefund(t, wallet)
+
 	saved, err := model.GetImageTask("deadline", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "upstream_failed", saved.Error.Code)
@@ -54,6 +61,7 @@ func TestImagePollFailureWithoutPrepaymentCallsNoWallet(t *testing.T) {
 	fal := &deadlineFal{status: "FAILED"}
 	setupDeadlineTask(t, time.Minute, "in_progress", fal, nil)
 	processOneImageUsage(t.Context(), claimDeadlineUsage(t))
+
 	saved, err := model.GetImageTask("deadline", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "failed", saved.Status)

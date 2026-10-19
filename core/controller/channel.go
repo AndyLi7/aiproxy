@@ -745,7 +745,7 @@ func UpdateChannelStatus(c *gin.Context) {
 		return
 	}
 
-	err = model.UpdateChannelStatusByID(id, status.Status)
+	err = model.UpdateChannelStatusByIDContext(c.Request.Context(), id, status.Status)
 	if err != nil {
 		middleware.ErrorResponse(c, channelWriteErrorStatus(err), err.Error())
 		return

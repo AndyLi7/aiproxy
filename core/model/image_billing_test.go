@@ -10,11 +10,14 @@ import (
 func TestImageBillingFixtures(t *testing.T) {
 	testImageBillingFixtures(t, "testdata/media-billing-v1.json")
 }
+
 func TestImagePixelBillingFixtures(t *testing.T) {
 	testImageBillingFixtures(t, "testdata/media-billing-v2.json")
 }
+
 func testImageBillingFixtures(t *testing.T, path string) {
 	t.Helper()
+
 	b, e := os.ReadFile(path)
 	if e != nil {
 		t.Fatal(e)

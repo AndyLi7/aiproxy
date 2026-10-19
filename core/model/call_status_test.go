@@ -2,7 +2,6 @@
 package model
 
 import (
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -31,7 +30,7 @@ func TestEveryRelayModeIsClassified(t *testing.T) {
 }
 
 func TestCallStatusRules(t *testing.T) {
-	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, time.October, 11, 12, 0, 0, 0, time.UTC)
 	fresh := now.Add(-time.Hour)
 	stale := now.Add(-25 * time.Hour)
 
@@ -75,7 +74,12 @@ func TestCallStatusRules(t *testing.T) {
 }
 
 func TestIsCall(t *testing.T) {
-	call := Log{GroupID: "g", TokenID: 7, Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions"}
+	call := Log{
+		GroupID:  "g",
+		TokenID:  7,
+		Mode:     int(mode.ChatCompletions),
+		Endpoint: "/v1/chat/completions",
+	}
 	require.True(t, call.IsCall())
 
 	for _, tc := range []struct {
@@ -139,7 +143,12 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 		int(mode.VideosGet),
 		int(mode.NativeTasks),
 	}
-	endpoints := []EmptyNullString{"", "/v1/images/generations", "POST /v1/model-tasks", "GET /v1/model-tasks/x"}
+	endpoints := []EmptyNullString{
+		"",
+		"/v1/images/generations",
+		"POST /v1/model-tasks",
+		"GET /v1/model-tasks/x",
+	}
 	stages := []FailureStage{
 		FailureStageNone,
 		FailureStageUpstream,
@@ -203,6 +212,7 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 			values["code"] = 402
 			values["failure_stage"] = string(FailureStageBalance)
 		}
+
 		values[column] = nil
 		require.NoError(t, db.Table("logs").Create(values).Error, column)
 	}
@@ -243,10 +253,11 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 		entry := byID[row.ID]
 		require.NotNil(t, entry)
 
-		description := fmt.Sprintf("%+v", *entry)
-		require.Equal(t, string(entry.CallStatus(now)), row.Status, description)
-		require.Equal(t, entry.IsCall(), row.IsCall == 1, description)
-		require.Equal(t, entry.isAdminLogCall(), row.IsAdminCall == 1, description)
+		// Format the full row only on failure; this exhaustive matrix has tens
+		// of thousands of rows and successful assertions need no diagnostic.
+		require.Equal(t, string(entry.CallStatus(now)), row.Status, "row: %+v", *entry)
+		require.Equal(t, entry.IsCall(), row.IsCall == 1, "row: %+v", *entry)
+		require.Equal(t, entry.isAdminLogCall(), row.IsAdminCall == 1, "row: %+v", *entry)
 		counts[row.Status]++
 
 		if row.IsAdminCall == 1 {

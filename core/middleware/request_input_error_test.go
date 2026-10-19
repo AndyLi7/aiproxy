@@ -40,16 +40,25 @@ func TestMalformedRequestBodyIsClientError(t *testing.T) {
 			})
 
 			w := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(body))
+			request := httptest.NewRequestWithContext(t.Context(),
+				http.MethodPost,
+				"/v1/images/generations",
+				strings.NewReader(body),
+			)
 			request.Header.Set("Content-Type", "application/json")
 			router.ServeHTTP(w, request)
 
 			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
 			var response publicErrorBody
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.Equal(t, "invalid_request", response.Error.Code)
 			require.Equal(t, "invalid_request_error", response.Error.Type)
-			require.Equal(t, "The request body must be a valid JSON object.", response.Error.Message)
+			require.Equal(
+				t,
+				"The request body must be a valid JSON object.",
+				response.Error.Message,
+			)
 
 			require.Len(t, *logs, 1)
 			require.Equal(t, http.StatusBadRequest, (*logs)[0].Code)
@@ -86,7 +95,11 @@ func TestWronglyTypedRequestFieldsNameTheParameter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.body))
+			c.Request = httptest.NewRequestWithContext(t.Context(),
+				http.MethodPost,
+				"/v1/chat/completions",
+				strings.NewReader(tc.body),
+			)
 			c.Request.Header.Set("Content-Type", "application/json")
 
 			err := tc.read(c, tc.mode)
@@ -94,6 +107,7 @@ func TestWronglyTypedRequestFieldsNameTheParameter(t *testing.T) {
 			abortRequestFieldError(c, tc.mode, err)
 
 			require.Equal(t, http.StatusBadRequest, w.Code)
+
 			var response publicErrorBody
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.Equal(t, "invalid_parameter", response.Error.Code)
@@ -112,7 +126,7 @@ func TestRequestFieldErrorKeepsAnthropicEnvelope(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages",
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/messages",
 		strings.NewReader(`{"model":"m","metadata":{"user_id":{"id":1}}}`))
 	c.Set(Mode, mode.Anthropic)
 
@@ -121,6 +135,7 @@ func TestRequestFieldErrorKeepsAnthropicEnvelope(t *testing.T) {
 	abortRequestFieldError(c, mode.Anthropic, err)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+
 	var response struct {
 		Type  string `json:"type"`
 		Error struct {
@@ -140,7 +155,12 @@ func TestRequestBodyReadFailureStaysServerError(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", failingReader{})
+	c.Request = httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/chat/completions",
+		failingReader{},
+	)
 	c.Request.ContentLength = -1
 
 	_, err := getRequestUser(c, mode.ChatCompletions)

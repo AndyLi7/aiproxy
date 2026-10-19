@@ -236,9 +236,11 @@ func TestAdminImageTaskCompletionNeverChargesCustomerWallet(t *testing.T) {
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "admin.db"))
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}))
+
 	oldDB, oldLog, oldBalance := model.DB, model.LogDB, balance.Default
 	model.DB, model.LogDB = db, db
 	t.Cleanup(func() { model.DB, model.LogDB, balance.Default = oldDB, oldLog, oldBalance })
+
 	consumer := &replaySafeAmbiguousAsyncUsageConsumer{charges: map[string]int{}}
 	balance.Default = replaySafeAmbiguousAsyncUsageBalance{consumer: consumer}
 	info := &model.AsyncUsageInfo{
@@ -250,7 +252,16 @@ func TestAdminImageTaskCompletionNeverChargesCustomerWallet(t *testing.T) {
 	}, info, model.OperationalFields{RequestSource: model.RequestSourceAdminDemo})
 	require.NoError(t, err)
 	require.NoError(t, model.AcceptImageTask("admin-image", "pinned-upstream"))
-	require.NoError(t, model.SetImageTaskResult("admin-image", "completed", []model.ImageOutput{{URL: "https://cdn.example/admin.png"}}, nil))
+	require.NoError(
+		t,
+		model.SetImageTaskResult(
+			"admin-image",
+			"completed",
+			[]model.ImageOutput{{URL: "https://cdn.example/admin.png"}},
+			nil,
+		),
+	)
+
 	var fresh model.AsyncUsageInfo
 	require.NoError(t, db.First(&fresh).Error)
 	require.True(t, fresh.InternalImageTask)
@@ -260,6 +271,7 @@ func TestAdminImageTaskCompletionNeverChargesCustomerWallet(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 	processOneImageUsage(t.Context(), &fresh)
+
 	var saved model.AsyncUsageInfo
 	require.NoError(t, db.First(&saved).Error)
 	require.Equal(t, model.AsyncUsageStatusCompleted, saved.Status)
@@ -267,6 +279,7 @@ func TestAdminImageTaskCompletionNeverChargesCustomerWallet(t *testing.T) {
 	require.False(t, saved.BalanceConsumed)
 	require.False(t, saved.BalanceConsumeAttempted)
 	require.Empty(t, consumer.charges)
+
 	var entry model.Log
 	require.NoError(t, db.First(&entry).Error)
 	require.Equal(t, model.RequestSourceAdminDemo, entry.RequestSource)
@@ -274,6 +287,7 @@ func TestAdminImageTaskCompletionNeverChargesCustomerWallet(t *testing.T) {
 	charged, _, err := consumeAsyncUsageGroupBalance(t.Context(), &saved, 100)
 	require.NoError(t, err)
 	require.False(t, charged)
+
 	claimed, err = claimAsyncUsage(&saved)
 	require.NoError(t, err)
 	require.False(t, claimed)

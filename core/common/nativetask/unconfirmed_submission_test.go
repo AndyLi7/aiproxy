@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private walletStub fixture or implementation.
 package nativetask
 
 import (
@@ -20,15 +21,20 @@ type refundingWallet struct {
 	refunded bool
 }
 
-func (w *refundingWallet) Prepayment(ctx context.Context, c balance.PrepaymentCommand) (balance.PrepaymentReceipt, error) {
+func (w *refundingWallet) Prepayment(
+	ctx context.Context,
+	c balance.PrepaymentCommand,
+) (balance.PrepaymentReceipt, error) {
 	r, err := w.walletStub.Prepayment(ctx, c)
 	if err == nil && c.Action == "settle" {
 		w.refunded = true
 	}
+
 	r.Status = "pending"
 	if w.refunded {
 		r.Status = "refunded"
 	}
+
 	return r, err
 }
 
@@ -39,6 +45,7 @@ func unconfirmed(t *testing.T, status string) (*Engine, *refundingWallet, *provi
 	t.Helper()
 	e, plan, _, p := setup(t)
 	w := &refundingWallet{}
+
 	e.Wallet = w
 	if status == "submission_unknown" {
 		p.err = errors.New("connection lost after write")
@@ -46,17 +53,36 @@ func unconfirmed(t *testing.T, status string) (*Engine, *refundingWallet, *provi
 		require.ErrorIs(t, err, ErrPending)
 		require.Equal(t, "submission_unknown", task.Status)
 	} else {
-		_, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: "req", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp", OutputSchema: `{}`, FrozenContract: string(plan.Contract), BillingOperationID: "native:req"})
+		_, _, err := model.ReserveNativeTask(
+			e.DB,
+			model.NativeTask{
+				ID:                 "req",
+				GroupID:            "g",
+				TokenID:            1,
+				Model:              "m",
+				Fingerprint:        "fp",
+				OutputSchema:       `{}`,
+				FrozenContract:     string(plan.Contract),
+				BillingOperationID: "native:req",
+			},
+		)
 		require.NoError(t, err)
-		require.NoError(t, model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""))
+		require.NoError(
+			t,
+			model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""),
+		)
 	}
+
 	w.commands = nil
+
 	return e, w, p
 }
 
 // neverPoll fails the test if recovery tries to reach the provider: a task
 // without an upstream ID has nothing to poll or cancel.
 func neverPoll(t *testing.T) ResolvePoller {
+	t.Helper()
+
 	return func(context.Context, *model.NativeTask) (Poller, error) {
 		t.Fatal("must not poll or cancel a task without an upstream ID")
 		return nil, nil
@@ -74,6 +100,7 @@ func TestUnconfirmedSubmissionFailsAndRefundsAtTheDeadline(t *testing.T) {
 			report, err := e.RecoverOnce(context.Background(), "worker", now, neverPoll(t), nil)
 			require.NoError(t, err)
 			require.Equal(t, 1, report.Expired)
+
 			task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, "failed", task.Status)
@@ -88,9 +115,13 @@ func TestUnconfirmedSubmissionFailsAndRefundsAtTheDeadline(t *testing.T) {
 
 			recorder := httptest.NewRecorder()
 			WritePublic(recorder, 200, task)
+
 			var public struct {
 				Status string `json:"status"`
-				Error  struct{ Code, Message string }
+				Error  struct {
+					Code    string `json:"Code"`
+					Message string `json:"Message"`
+				} `json:"Error"`
 			}
 			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &public))
 			require.Equal(t, "failed", public.Status)
@@ -98,7 +129,13 @@ func TestUnconfirmedSubmissionFailsAndRefundsAtTheDeadline(t *testing.T) {
 			require.Equal(t, model.AsyncGenerationTimeoutMessage, public.Error.Message)
 
 			// A settled failure is not claimed again.
-			report, err = e.RecoverOnce(context.Background(), "worker", now.Add(time.Hour), neverPoll(t), nil)
+			report, err = e.RecoverOnce(
+				context.Background(),
+				"worker",
+				now.Add(time.Hour),
+				neverPoll(t),
+				nil,
+			)
 			require.NoError(t, err)
 			require.Zero(t, report.Claimed)
 		})
@@ -113,10 +150,12 @@ func TestUnconfirmedSubmissionIsCheckedAgainAtTheDeadline(t *testing.T) {
 	report, err := e.RecoverOnce(context.Background(), "worker", now, neverPoll(t), nil)
 	require.NoError(t, err)
 	require.Zero(t, report.Expired)
+
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "submission_unknown", task.Status)
 	require.False(t, refundedWith(&w.walletStub, "platform_failure"))
+
 	deadline := task.CreatedAt.Add(model.AsyncGenerationDeadline)
 	require.True(t, time.Unix(task.NextRecoveryAt, 0).After(deadline))
 	require.LessOrEqual(t, task.NextRecoveryAt, deadline.Add(2*time.Second).Unix())
@@ -128,13 +167,26 @@ func TestUnconfirmedSubmissionIsCheckedAgainAtTheDeadline(t *testing.T) {
 func TestUnconfirmedSubmissionFromBeforeTheDeployIsPickedUp(t *testing.T) {
 	e, w, _ := unconfirmed(t, "submission_unknown")
 	now := acceptedAgo(t, e, 3*time.Hour)
-	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "req").Update("next_recovery_at", now.Add(30*time.Minute).Unix()).Error)
+	require.NoError(
+		t,
+		e.DB.Model(&model.NativeTask{}).
+			Where("id = ?", "req").
+			Update("next_recovery_at", now.Add(30*time.Minute).Unix()).
+			Error,
+	)
 	report, err := e.RecoverOnce(context.Background(), "worker", now, neverPoll(t), nil)
 	require.NoError(t, err)
 	require.Zero(t, report.Claimed)
-	report, err = e.RecoverOnce(context.Background(), "worker", now.Add(30*time.Minute+time.Second), neverPoll(t), nil)
+	report, err = e.RecoverOnce(
+		context.Background(),
+		"worker",
+		now.Add(30*time.Minute+time.Second),
+		neverPoll(t),
+		nil,
+	)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Expired)
+
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, model.AsyncGenerationTimeoutCode, task.ErrorCode)
@@ -151,10 +203,12 @@ func TestUnconfirmedSubmissionRefundIsRetried(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Expired)
 	require.Equal(t, 1, report.Deferred)
+
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, "failed", task.Status)
 	require.False(t, task.BillingSettled)
+
 	w.fail = ""
 	_, err = e.RecoverOnce(context.Background(), "worker", now.Add(time.Hour), neverPoll(t), nil)
 	require.NoError(t, err)
@@ -171,14 +225,35 @@ func TestUnconfirmedSubmissionRefundIsRetried(t *testing.T) {
 // provider call may still be in flight.
 func TestUnconfirmedSubmissionClockStartsAtSubmission(t *testing.T) {
 	e, plan, _, _ := setup(t)
-	_, _, err := model.ReserveNativeTask(e.DB, model.NativeTask{ID: "req", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp", OutputSchema: `{}`, FrozenContract: string(plan.Contract), BillingOperationID: "native:req"})
+	_, _, err := model.ReserveNativeTask(
+		e.DB,
+		model.NativeTask{
+			ID:                 "req",
+			GroupID:            "g",
+			TokenID:            1,
+			Model:              "m",
+			Fingerprint:        "fp",
+			OutputSchema:       `{}`,
+			FrozenContract:     string(plan.Contract),
+			BillingOperationID: "native:req",
+		},
+	)
 	require.NoError(t, err)
 	acceptedAgo(t, e, 3*time.Hour)
-	require.NoError(t, model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""))
+	require.NoError(
+		t,
+		model.TransitionNativeSubmission(e.DB, "req", "g", 1, "reserved", "submitting", ""),
+	)
 	task, err := model.GetNativeTask(e.DB, "req", "g", 1)
 	require.NoError(t, err)
 	require.WithinDuration(t, time.Now(), task.CreatedAt, 5*time.Second)
-	expired, err := model.ExpireUnconfirmedNativeSubmission(e.DB, "req", "g", 1, time.Now().Add(time.Minute))
+	expired, err := model.ExpireUnconfirmedNativeSubmission(
+		e.DB,
+		"req",
+		"g",
+		1,
+		time.Now().Add(time.Minute),
+	)
 	require.NoError(t, err)
 	require.False(t, expired)
 }
@@ -194,9 +269,27 @@ func TestExpireUnconfirmedNativeSubmissionScope(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, expired, "accepted tasks keep the provider deadline")
 
-	_, _, err = model.ReserveNativeTask(e.DB, model.NativeTask{ID: "reserved", GroupID: "g", TokenID: 1, Model: "m", Fingerprint: "fp", OutputSchema: `{}`, FrozenContract: string(plan.Contract), BillingOperationID: "native:reserved"})
+	_, _, err = model.ReserveNativeTask(
+		e.DB,
+		model.NativeTask{
+			ID:                 "reserved",
+			GroupID:            "g",
+			TokenID:            1,
+			Model:              "m",
+			Fingerprint:        "fp",
+			OutputSchema:       `{}`,
+			FrozenContract:     string(plan.Contract),
+			BillingOperationID: "native:reserved",
+		},
+	)
 	require.NoError(t, err)
-	require.NoError(t, e.DB.Model(&model.NativeTask{}).Where("id = ?", "reserved").Update("created_at", now.Add(-time.Hour)).Error)
+	require.NoError(
+		t,
+		e.DB.Model(&model.NativeTask{}).
+			Where("id = ?", "reserved").
+			Update("created_at", now.Add(-time.Hour)).
+			Error,
+	)
 	expired, err = model.ExpireUnconfirmedNativeSubmission(e.DB, "reserved", "g", 1, now)
 	require.NoError(t, err)
 	require.False(t, expired, "nothing was submitted")

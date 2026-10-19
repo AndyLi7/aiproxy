@@ -1,10 +1,11 @@
-//nolint:testpackage // Uses the internal Postgres harness, options and the claim lock.
 package model
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,32 +25,65 @@ import (
 func TestPostgresConcurrentClaimsNeverExceedTheLimit(t *testing.T) {
 	withTestPostgresStoreDB(t, func() {
 		require.NoError(t, LogDB.AutoMigrate(&NativeTask{}, &ImageTask{}))
+
 		claimLocally = false
 		t.Cleanup(func() { claimLocally = true })
+
 		for round := range 5 {
 			require.NoError(t, LogDB.Exec("DELETE FROM native_tasks").Error)
+
 			for i := range 8 {
-				id := "task-" + string(rune('a'+i))
-				_, _, err := ReserveNativeTask(LogDB, NativeTask{ID: id, GroupID: "g" + id, TokenID: 1, Model: "a/b/c",
-					Fingerprint: "f", OutputSchema: `{"type":"object"}`, BillingOperationID: "native:" + id, QueueScope: "fal:default"})
+				id := "task-" + strconv.Itoa(i)
+				_, _, err := ReserveNativeTask(LogDB, NativeTask{
+					ID:                 id,
+					GroupID:            "g" + id,
+					TokenID:            1,
+					Model:              "a/b/c",
+					Fingerprint:        "f",
+					OutputSchema:       `{"type":"object"}`,
+					BillingOperationID: "native:" + id,
+					QueueScope:         "fal:default",
+				})
 				require.NoError(t, err)
-				require.NoError(t, EnqueueNativeTask(LogDB, id, "g"+id, 1, "fal:default", time.Now(), time.Now().Add(time.Minute)))
+				require.NoError(
+					t,
+					EnqueueNativeTask(
+						LogDB,
+						id,
+						"g"+id,
+						1,
+						"fal:default",
+						time.Now(),
+						time.Now().Add(time.Minute),
+					),
+				)
 			}
-			var wg sync.WaitGroup
-			var mu sync.Mutex
+
+			var (
+				wg sync.WaitGroup
+				mu sync.Mutex
+			)
+
 			claimed := 0
+
 			start := make(chan struct{})
 			for i := range 8 {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
+
 					<-start // all claimers race at once
 					// Each claimer picks a different task, so only the scope lock,
 					// never the row's compare-and-set, can keep the limit.
-					task, _, err := ClaimNativeDispatch(LogDB, NativeDispatchClaim{Scope: "fal:default", Limit: 2,
-						Owner: "owner-" + string(rune('a'+i)), Now: time.Now(),
-						Pick: func(s *NativeQueueSnapshot) string { return s.Waiting[i%len(s.Waiting)].ID }})
+					task, _, err := ClaimNativeDispatch(LogDB, NativeDispatchClaim{
+						Scope: "fal:default",
+						Limit: 2,
+						Owner: "owner-" + strconv.Itoa(i),
+						Now:   time.Now(),
+						Pick:  func(s *NativeQueueSnapshot) string { return s.Waiting[i%len(s.Waiting)].ID },
+					})
 					require.NoError(t, err)
+
 					if task != nil {
 						mu.Lock()
 						claimed++
@@ -57,11 +91,19 @@ func TestPostgresConcurrentClaimsNeverExceedTheLimit(t *testing.T) {
 					}
 				}(i)
 			}
+
 			close(start)
 			wg.Wait()
 			require.Equal(t, 2, claimed, "round %d", round)
+
 			var dispatching int64
-			require.NoError(t, LogDB.Model(&NativeTask{}).Where("status = ?", NativeStatusDispatching).Count(&dispatching).Error)
+			require.NoError(
+				t,
+				LogDB.Model(&NativeTask{}).
+					Where("status = ?", NativeStatusDispatching).
+					Count(&dispatching).
+					Error,
+			)
 			require.Equal(t, int64(2), dispatching)
 		}
 	})
@@ -76,15 +118,22 @@ func TestNativeQueueOptionsLoadLenientlyAndSaveStrictly(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&Option{}))
 	DB = db
-	optionKeys = []string{config.NativeQueueEnabledKey, config.NativeQueueLimitsKey, config.NativeQueueTimeoutSecondsKey, "RetryTimes"}
+	optionKeys = []string{
+		config.NativeQueueEnabledKey,
+		config.NativeQueueLimitsKey,
+		config.NativeQueueTimeoutSecondsKey,
+		"RetryTimes",
+	}
 	oldRetry := config.GetRetryTimes()
 	t.Cleanup(func() {
 		DB, optionKeys = oldDB, oldKeys
+
 		config.SetNativeQueueEnabled(false)
 		config.SetNativeQueueLimits(map[string]int{})
 		config.SetNativeQueueTimeoutSeconds(int64(config.NativeQueueTimeout / time.Second))
 		config.SetRetryTimes(oldRetry)
 	})
+
 	for key, value := range map[string]string{
 		config.NativeQueueEnabledKey:        `"true"`,
 		config.NativeQueueLimitsKey:         `{"fal:default":0}`,
@@ -93,6 +142,7 @@ func TestNativeQueueOptionsLoadLenientlyAndSaveStrictly(t *testing.T) {
 	} {
 		require.NoError(t, db.Create(&Option{Key: key, Value: value}).Error)
 	}
+
 	config.SetNativeQueueEnabled(true)
 	config.SetNativeQueueLimits(map[string]int{"fal:default": 3})
 	config.SetNativeQueueTimeoutSeconds(60)
@@ -112,12 +162,14 @@ func TestNativeQueueOptionsLoadLenientlyAndSaveStrictly(t *testing.T) {
 			require.Error(t, UpdateOption(key, value), "%s=%s", key, value)
 		}
 	}
+
 	require.NoError(t, UpdateOption(config.NativeQueueEnabledKey, "true"))
 	require.NoError(t, UpdateOption(config.NativeQueueLimitsKey, `{"fal:default":8}`))
 	require.NoError(t, UpdateOption(config.NativeQueueTimeoutSecondsKey, "120"))
 	require.True(t, config.GetNativeQueueEnabled())
 	require.Equal(t, map[string]int{"fal:default": 8}, config.GetNativeQueueLimits())
 	require.Equal(t, 2*time.Minute, config.GetNativeQueueTimeout())
+
 	saved, err := GetOption(config.NativeQueueLimitsKey)
 	require.NoError(t, err)
 	require.Equal(t, `{"fal:default":8}`, saved.Value)
@@ -128,15 +180,27 @@ func TestNativeQueueOptionsLoadLenientlyAndSaveStrictly(t *testing.T) {
 func TestPostgresNativeV3MigrationUpgradesAnEarlierTable(t *testing.T) {
 	withTestPostgresStoreDB(t, func() {
 		require.NoError(t, LogDB.AutoMigrate(&NativeTask{}))
+
 		for _, column := range []string{"queue_scope", "enqueued_at", "dispatched_at", "dispatch_owner", "dispatch_until", "dispatch_after"} {
 			require.NoError(t, LogDB.Exec("ALTER TABLE native_tasks DROP COLUMN "+column).Error)
 		}
+
 		require.NoError(t, LogDB.Exec("DROP INDEX IF EXISTS idx_native_tasks_group_created").Error)
-		require.NoError(t, LogDB.Exec("INSERT INTO native_tasks (id, group_id, token_id, model, fingerprint, output_schema, output_schema_hash, status, error_code) VALUES ('kept', 'g', 1, 'a/b/c', 'fp', '{}', 'h', 'failed', 'upstream_rejected')").Error)
+		require.NoError(
+			t,
+			LogDB.Exec(
+				"INSERT INTO native_tasks (id, group_id, token_id, model, fingerprint, output_schema, output_schema_hash, status, error_code) VALUES ('kept', 'g', 1, 'a/b/c', 'fp', '{}', 'h', 'failed', 'upstream_rejected')",
+			).Error,
+		)
 		require.False(t, NativeTaskStorageReady(LogDB))
-		script, err := os.ReadFile(filepath.Join("..", "migrations", "native-task-v3", "postgres.sql"))
+
+		script, err := os.ReadFile(
+			filepath.Join("..", "migrations", "native-task-v3", "postgres.sql"),
+		)
 		require.NoError(t, err)
-		indexes, err := os.ReadFile(filepath.Join("..", "migrations", "native-task-v3", "postgres-indexes.sql"))
+		indexes, err := os.ReadFile(
+			filepath.Join("..", "migrations", "native-task-v3", "postgres-indexes.sql"),
+		)
 		require.NoError(t, err)
 		// psql's way: the simple protocol runs the column script as one
 		// transaction, and each index statement on its own (CONCURRENTLY
@@ -145,29 +209,46 @@ func TestPostgresNativeV3MigrationUpgradesAnEarlierTable(t *testing.T) {
 		require.NoError(t, err)
 		conn, err := sqlDB.Conn(context.Background())
 		require.NoError(t, err)
+
 		defer conn.Close()
+
 		exec := func(text string) error {
 			return conn.Raw(func(driverConn any) error {
-				_, execErr := driverConn.(*stdlib.Conn).Conn().PgConn().Exec(context.Background(), text).ReadAll()
+				pgConn, ok := driverConn.(*stdlib.Conn)
+				if !ok {
+					return errors.New("unexpected PostgreSQL driver connection")
+				}
+
+				_, execErr := pgConn.Conn().
+					PgConn().
+					Exec(context.Background(), text).
+					ReadAll()
+
 				return execErr
 			})
 		}
 		for range 2 {
 			require.NoError(t, exec(string(script)))
-			for _, statement := range strings.Split(string(indexes), ";") {
+
+			for statement := range strings.SplitSeq(string(indexes), ";") {
 				if body := sqlBody(statement); body != "" {
 					require.NoError(t, exec(body))
 				}
 			}
 		}
+
 		require.True(t, NativeTaskStorageReady(LogDB))
 		task, err := GetNativeTask(LogDB, "kept", "g", 1)
 		require.NoError(t, err)
 		require.Equal(t, "", task.QueueScope)
 		require.Equal(t, "upstream_rejected", task.ErrorCode)
+
 		var valid int64
-		require.NoError(t, LogDB.Raw(`SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
-			WHERE c.relname IN ('idx_native_tasks_status_queue_scope', 'idx_native_tasks_group_created') AND i.indisvalid`).Scan(&valid).Error)
+		require.NoError(
+			t,
+			LogDB.Raw(`SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+			WHERE c.relname IN ('idx_native_tasks_status_queue_scope', 'idx_native_tasks_group_created') AND i.indisvalid`).Scan(&valid).Error,
+		)
 		require.Equal(t, int64(2), valid)
 	})
 }
@@ -175,11 +256,12 @@ func TestPostgresNativeV3MigrationUpgradesAnEarlierTable(t *testing.T) {
 // sqlBody is a script statement without its comment lines.
 func sqlBody(statement string) string {
 	lines := []string{}
-	for _, line := range strings.Split(statement, "\n") {
+	for line := range strings.SplitSeq(statement, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "--") {
 			lines = append(lines, line)
 		}
 	}
+
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
@@ -187,12 +269,14 @@ func sqlBody(statement string) string {
 // 5-second sync, and again only when it changes.
 func TestUnreadableQueueOptionIsLoggedOnce(t *testing.T) {
 	reportUnreadableOption(config.NativeQueueEnabledKey, "", nil) // forget earlier tests' values
+
 	hook := logtest.NewGlobal()
 	t.Cleanup(func() {
 		hook.Reset()
 		config.SetNativeQueueEnabled(false)
 		reportUnreadableOption(config.NativeQueueEnabledKey, "false", nil)
 	})
+
 	load := lenientOptionLoaders[config.NativeQueueEnabledKey]
 	errors := func() int {
 		n := 0
@@ -201,11 +285,14 @@ func TestUnreadableQueueOptionIsLoggedOnce(t *testing.T) {
 				n++
 			}
 		}
+
 		return n
 	}
+
 	for range 3 {
 		load(config.NativeQueueEnabledKey, `"true"`)
 	}
+
 	require.Equal(t, 1, errors())
 	load(config.NativeQueueEnabledKey, `yes`)
 	require.Equal(t, 2, errors(), "a different bad value is logged")
@@ -221,10 +308,16 @@ func TestClaimTransactionIsReadCommitted(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, claimTxOptions(db))
 	withTestPostgresStoreDB(t, func() {
-		require.NoError(t, LogDB.Exec("ALTER DATABASE aiproxy_test SET default_transaction_isolation TO 'serializable'").Error)
+		require.NoError(
+			t,
+			LogDB.Exec(
+				"ALTER DATABASE aiproxy_test SET default_transaction_isolation TO 'serializable'",
+			).Error,
+		)
 		sqlDB, err := LogDB.DB()
 		require.NoError(t, err)
 		sqlDB.SetMaxIdleConns(0) // new connections pick up the stricter default
+
 		var plain, claim string
 		require.NoError(t, LogDB.Transaction(func(tx *gorm.DB) error {
 			return tx.Raw("SHOW transaction_isolation").Scan(&plain).Error
@@ -242,9 +335,11 @@ func TestTruncatedQueueWarningIsThrottled(t *testing.T) {
 	hook := logtest.NewGlobal()
 	t.Cleanup(hook.Reset)
 	truncationLogged.Delete("throttle:test")
+
 	for range 5 {
 		logTruncatedQueue("throttle:test")
 	}
+
 	require.Len(t, hook.AllEntries(), 1)
 	truncationLogged.Store("throttle:test", time.Now().Add(-2*time.Minute))
 	logTruncatedQueue("throttle:test")

@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private setup fixture or implementation.
 package nativetask
 
 import (
@@ -28,6 +29,7 @@ func TestNativeRealWalletSettlementAndReplay(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("requires disposable prepayment-wallet-server.ts")
 	}
+
 	require.True(t, strings.HasPrefix(endpoint, "http://127.0.0.1:"))
 	e, plan, _, provider := setup(t)
 	wallet := balance.NewExternalHTTP(endpoint, "local-d34-test-only")
@@ -37,12 +39,24 @@ func TestNativeRealWalletSettlementAndReplay(t *testing.T) {
 	post := func(path string, value any) json.RawMessage {
 		raw, err := json.Marshal(value)
 		require.NoError(t, err)
-		req, err := http.NewRequest("POST", endpoint+path, bytes.NewReader(raw))
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			endpoint+path,
+			bytes.NewReader(raw),
+		)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer local-d34-test-only")
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
 		response, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer response.Body.Close()
+
 		var out struct {
 			Code    int             `json:"code"`
 			Message string          `json:"message"`
@@ -50,39 +64,70 @@ func TestNativeRealWalletSettlementAndReplay(t *testing.T) {
 		}
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&out))
 		require.Equal(t, 0, out.Code, out.Message)
+
 		return out.Data
 	}
 	task, err := e.Submit(ctx, id, "u_u", 1, body, plan)
 	require.NoError(t, err)
 	require.Equal(t, "queued", task.Status)
 	require.Equal(t, 1, provider.calls)
+
 	_, err = e.Submit(ctx, id, "u_u", 1, body, plan)
 	require.NoError(t, err)
 	require.Equal(t, 1, provider.calls)
-	poll := &pollStub{result: nativeresult.PollResult{Status: "result_received", Output: json.RawMessage(`{"text":"native result"}`)}}
-	done, err := e.Poll(ctx, id, "u_u", 1, func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil }, nil)
+
+	poll := &pollStub{
+		result: nativeresult.PollResult{
+			Status: "result_received",
+			Output: json.RawMessage(`{"text":"native result"}`),
+		},
+	}
+	done, err := e.Poll(
+		ctx,
+		id,
+		"u_u",
+		1,
+		func(context.Context, *model.NativeTask) (Poller, error) { return poll, nil },
+		nil,
+	)
 	require.NoError(t, err)
 	require.Equal(t, "completed", done.Status)
+
 	var pending balance.PrepaymentReceipt
 	require.NoError(t, json.Unmarshal([]byte(done.BillingReceiptJSON), &pending))
 	require.Nil(t, pending.ChargedMicros, "delivered output is not a settled provider bill")
-	post("/_test/bill", map[string]any{"provider": "fal", "requestId": task.UpstreamID, "endpoint": plan.Endpoint, "currency": "USD", "subtotal": "0.0001", "total": "0.00008"})
+	post(
+		"/_test/bill",
+		map[string]any{
+			"provider":  "fal",
+			"requestId": task.UpstreamID,
+			"endpoint":  plan.Endpoint,
+			"currency":  "USD",
+			"subtotal":  "0.0001",
+			"total":     "0.00008",
+		},
+	)
 	require.NoError(t, wallet.RecoverPrepayments(ctx))
-	for i := 0; i < 2; i++ {
+
+	for range 2 {
 		require.NoError(t, e.SyncBilling(ctx, done))
 	}
+
 	var settled balance.PrepaymentReceipt
 	require.NoError(t, json.Unmarshal([]byte(done.BillingReceiptJSON), &settled))
 	require.NotNil(t, settled.ChargedMicros)
 	require.Equal(t, int64(80), *settled.ChargedMicros)
+
 	saved, err := model.GetNativeTask(e.DB, id, "u_u", 1)
 	require.NoError(t, err)
 	require.True(t, saved.BillingSettled)
+
 	var rows []struct {
 		RequestID string `json:"request_id"`
 		Amount    int64  `json:"amount_micros"`
 	}
 	require.NoError(t, json.Unmarshal(post("/_test/ledger", nil), &rows))
+
 	count, net := 0, int64(0)
 	for _, row := range rows {
 		if row.RequestID == "prepay:native:"+id || row.RequestID == "prepay-refund:native:"+id {
@@ -90,6 +135,7 @@ func TestNativeRealWalletSettlementAndReplay(t *testing.T) {
 			net += row.Amount
 		}
 	}
+
 	require.Equal(t, 2, count)
 	require.Equal(t, int64(-80), net)
 	require.Equal(t, 1, provider.calls)
@@ -100,6 +146,7 @@ func TestNativeRealWalletRejectedSubmissionRefund(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("requires disposable prepayment-wallet-server.ts")
 	}
+
 	require.True(t, strings.HasPrefix(endpoint, "http://127.0.0.1:"))
 	engine, plan, _, provider := setup(t)
 	provider.err = adaptor.ErrImageSubmissionRejected
@@ -107,9 +154,11 @@ func TestNativeRealWalletRejectedSubmissionRefund(t *testing.T) {
 	task, err := engine.Submit(context.Background(), "native-real-rejected", "u_u", 1, body, plan)
 	require.NoError(t, err)
 	require.Equal(t, "failed", task.Status)
-	for i := 0; i < 2; i++ {
+
+	for range 2 {
 		require.NoError(t, engine.SyncBilling(context.Background(), task))
 	}
+
 	var receipt balance.PrepaymentReceipt
 	require.NoError(t, json.Unmarshal([]byte(task.BillingReceiptJSON), &receipt))
 	require.NotNil(t, receipt.ChargedMicros)
@@ -122,15 +171,28 @@ func TestNativeRealWalletRejectedSubmissionRefund(t *testing.T) {
 // data; the fixture answers code 0 on success.
 func fixturePost(t *testing.T, endpoint, path string, value any) json.RawMessage {
 	t.Helper()
+
 	raw, err := json.Marshal(value)
 	require.NoError(t, err)
-	req, err := http.NewRequest(http.MethodPost, endpoint+path, bytes.NewReader(raw))
+	// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+	// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		endpoint+path,
+		bytes.NewReader(raw),
+	)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer local-d34-test-only")
 	req.Header.Set("Content-Type", "application/json")
+	// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+	// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+	// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
 	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
+
 	defer response.Body.Close()
+
 	var out struct {
 		Code    int             `json:"code"`
 		Message string          `json:"message"`
@@ -138,6 +200,7 @@ func fixturePost(t *testing.T, endpoint, path string, value any) json.RawMessage
 	}
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&out))
 	require.Equal(t, 0, out.Code, out.Message)
+
 	return out.Data
 }
 
@@ -157,76 +220,107 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 	if endpoint == "" {
 		t.Skip("requires disposable prepayment-wallet-server.ts")
 	}
+
 	require.True(t, strings.HasPrefix(endpoint, "http://127.0.0.1:"))
+
 	ctx := context.Background()
 	// A model of its own, so the pause check sees only this test's holds, and
 	// a task ID of its own per run, so the test can rerun on one fixture.
 	const group, modelID = "u_u", "brand/model/stop-loss-incident"
+
 	id := "native-real-lost-claim-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	operation := "native:" + id
 
 	// edge stands for the platform edge in front of the wallet: it passes
 	// every command through, except that it holds the first begin_attempt
 	// until the gateway has given up waiting, and only then delivers it.
-	var mu sync.Mutex
-	var sent []string
+	var (
+		mu   sync.Mutex
+		sent []string
+	)
+
 	held := false
 	lateClaim := make(chan string, 1)
 	forward := func(ctx context.Context, r *http.Request, raw []byte) (int, []byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+r.URL.Path, bytes.NewReader(raw))
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		req, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			endpoint+r.URL.Path,
+			bytes.NewReader(raw),
+		)
 		if err != nil {
 			return 0, nil, err
 		}
+
 		req.Header.Set("Authorization", r.Header.Get("Authorization"))
 		req.Header.Set("Content-Type", "application/json")
+
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
+		// #nosec G704 -- This opt-in integration test contacts only the endpoint supplied by its trusted local test harness.
 		response, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return 0, nil, err
 		}
 		defer response.Body.Close()
+
 		body, err := io.ReadAll(response.Body)
+
 		return response.StatusCode, body, err
 	}
+
 	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
+
 		var command balance.PrepaymentCommand
 		if err := json.Unmarshal(raw, &command); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+
 		action := command.Action
 		if command.Outcome != nil {
 			action += ":" + command.Outcome.Kind + "/" + command.Outcome.Reason
 		}
+
 		mu.Lock()
+
 		sent = append(sent, action)
 		hold := command.Action == "begin_attempt" && !held
 		held = held || hold
 		mu.Unlock()
+
 		if hold {
 			// The request context ends when the gateway's client gives up.
 			<-r.Context().Done()
+
 			_, body, err := forward(context.Background(), r, raw)
 			if err != nil {
 				body = []byte(err.Error())
 			}
+
 			lateClaim <- string(body)
+
 			return
 		}
+
 		status, body, err := forward(r.Context(), r, raw)
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
 	}))
 	defer edge.Close()
+
 	actions := func() []string {
 		mu.Lock()
 		defer mu.Unlock()
@@ -235,28 +329,45 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 	reset := func() {
 		mu.Lock()
 		defer mu.Unlock()
+
 		sent = nil
 	}
 
 	e, plan, _, provider := setup(t)
 	e.Wallet = balance.NewExternalHTTP(edge.URL, "local-d34-test-only")
 	e.AbandonReservations = true
-	plan.Contract = json.RawMessage(strings.Replace(string(plan.Contract), "brand/model/native", modelID, 1))
+	plan.Contract = json.RawMessage(
+		strings.Replace(string(plan.Contract), "brand/model/native", modelID, 1),
+	)
 	requestBody := []byte(strings.Replace(string(body), "brand/model/native", modelID, 1))
-	h := &HTTP{Engine: e, Identity: func(*http.Request) (string, int, error) { return group, 1, nil },
+	h := &HTTP{
+		Engine:      e,
+		Identity:    func(*http.Request) (string, int, error) { return group, 1, nil },
 		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, provider, nil },
-		limiter:     newReadLimiter(time.Now)}
+		limiter:     newReadLimiter(time.Now),
+	}
 	submit := func() *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodPost, "/v1/model-tasks", bytes.NewReader(requestBody))
-		r.Header.Set("X-Request-Id", id)
+		r := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/v1/model-tasks",
+			bytes.NewReader(requestBody),
+		)
+		r.Header.Set("X-Request-ID", id)
+
 		response := httptest.NewRecorder()
 		h.Create(response, r)
+
 		return response
 	}
 	wallet := balance.NewExternalHTTP(endpoint, "local-d34-test-only")
 	walletGet := func() balance.PrepaymentReceipt {
-		receipt, err := wallet.Prepayment(ctx, balance.PrepaymentCommand{Action: "get", Group: group, BillingOperationID: operation})
+		receipt, err := wallet.Prepayment(
+			ctx,
+			balance.PrepaymentCommand{Action: "get", Group: group, BillingOperationID: operation},
+		)
 		require.NoError(t, err)
+
 		return receipt
 	}
 	stored := func() *model.NativeTask {
@@ -270,6 +381,7 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 			Amount    int64  `json:"amount_micros"`
 		}
 		require.NoError(t, json.Unmarshal(fixturePost(t, endpoint, "/_test/ledger", nil), &rows))
+
 		count, net := 0, int64(0)
 		for _, row := range rows {
 			if row.RequestID == "prepay:"+operation || row.RequestID == "prepay-refund:"+operation {
@@ -277,6 +389,7 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 				net += row.Amount
 			}
 		}
+
 		return count, net
 	}
 
@@ -284,17 +397,39 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 	started := time.Now()
 	response := submit()
 	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-	require.Contains(t, response.Body.String(), "Retry within a few minutes with the same request ID.")
-	require.GreaterOrEqual(t, time.Since(started), 5*time.Second, "the gateway waited its full wallet timeout")
+	require.Contains(
+		t,
+		response.Body.String(),
+		"Retry within a few minutes with the same request ID.",
+	)
+	require.GreaterOrEqual(
+		t,
+		time.Since(started),
+		5*time.Second,
+		"the gateway waited its full wallet timeout",
+	)
+
 	select {
 	case answer := <-lateClaim:
-		require.Contains(t, answer, `"claimed":true`, "the wallet recorded the claim after the gateway gave up")
+		require.Contains(
+			t,
+			answer,
+			`"claimed":true`,
+			"the wallet recorded the claim after the gateway gave up",
+		)
 	case <-time.After(30 * time.Second):
 		t.Fatal("the held claim never reached the wallet")
 	}
-	require.Equal(t, []string{"admit", "begin_attempt"}, actions(), "a timed-out claim is not resent")
+
+	require.Equal(
+		t,
+		[]string{"admit", "begin_attempt"},
+		actions(),
+		"a timed-out claim is not resent",
+	)
 	require.Zero(t, provider.calls)
 	require.Equal(t, "reserved", stored().Status)
+
 	hold := walletGet()
 	require.Equal(t, "pending", hold.Status)
 	require.Equal(t, "unknown", hold.Submission())
@@ -305,6 +440,7 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 
 	// Before the grace recovery only reads the wallet.
 	reset()
+
 	report, err := e.RecoverOnce(ctx, "worker", time.Now(), nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Claimed)
@@ -313,12 +449,24 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 
 	// After it: failed as not_started first, then released and refunded.
 	reset()
-	report, err = e.RecoverOnce(ctx, "worker", time.Now().Add(reservationGrace+time.Second), nil, nil)
+
+	report, err = e.RecoverOnce(
+		ctx,
+		"worker",
+		time.Now().Add(reservationGrace+time.Second),
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Abandoned)
 	require.Zero(t, report.Deferred)
-	require.Equal(t, []string{"get", "get", "reject_attempt", "settle:failed/not_accepted", "get"}, actions())
+	require.Equal(
+		t,
+		[]string{"get", "get", "reject_attempt", "settle:failed/not_accepted", "get"},
+		actions(),
+	)
 	require.Zero(t, provider.calls)
+
 	task := stored()
 	require.Equal(t, "failed", task.Status)
 	require.Equal(t, model.NotStartedCode, task.ErrorCode)
@@ -326,7 +474,12 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 
 	final := walletGet()
 	require.Equal(t, "refunded", final.Status)
-	require.Equal(t, "not_submitted", final.Submission(), "the attempt was released before the refund")
+	require.Equal(
+		t,
+		"not_submitted",
+		final.Submission(),
+		"the attempt was released before the refund",
+	)
 	state, present, err = final.AttemptState(operation + ":1")
 	require.NoError(t, err)
 	require.True(t, present)
@@ -335,6 +488,7 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 	require.NotNil(t, final.RefundMicros)
 	require.Zero(t, *final.ChargedMicros)
 	require.Equal(t, final.PrepaidMicros, *final.RefundMicros)
+
 	count, net := ledgerNet()
 	require.Equal(t, 2, count)
 	require.Zero(t, net)
@@ -344,6 +498,7 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 	require.Equal(t, http.StatusAccepted, replay.Code, replay.Body.String())
 	require.Contains(t, replay.Body.String(), model.NotStartedCode)
 	require.Zero(t, provider.calls)
+
 	count, net = ledgerNet()
 	require.Equal(t, 2, count)
 	require.Zero(t, net)
@@ -353,31 +508,54 @@ func TestNativeRealWalletLostBeginAttemptReplyRefundsWithoutPause(t *testing.T) 
 	// an unknown submission, the row would be refunded as submission_timeout
 	// and the model paused, as in the incident.)
 	fixturePost(t, endpoint, "/_test/advance", map[string]any{"ms": 86400001})
+
 	reviewed := false
 	for range 10 {
 		var results []struct {
 			OperationID string `json:"operationId"`
 			State       string `json:"state"`
 		}
-		require.NoError(t, json.Unmarshal(fixturePost(t, endpoint, "/api/internal/wallet/reconcile", nil), &results))
+		require.NoError(
+			t,
+			json.Unmarshal(
+				fixturePost(t, endpoint, "/api/internal/wallet/reconcile", nil),
+				&results,
+			),
+		)
+
 		for _, result := range results {
 			reviewed = reviewed || result.OperationID == operation
 		}
+
 		if reviewed || len(results) == 0 {
 			break
 		}
 	}
+
 	require.True(t, reviewed, "the reconciler reviewed the refunded row")
 	require.Equal(t, "refunded", walletGet().Status)
+
 	count, net = ledgerNet()
 	require.Equal(t, 2, count)
 	require.Zero(t, net)
+
 	probe := operation + "-pause-probe"
 	prepaid, estimated := int64(200), int64(100)
-	_, err = wallet.Prepayment(ctx, balance.PrepaymentCommand{Action: "admit", Group: group, BillingOperationID: probe, TaskID: id + "-pause-probe",
-		ModelID: modelID, Currency: "USD", PrepaidMicros: &prepaid, EstimatedMicros: &estimated, QuoteJSON: plan.QuoteJSON})
+	_, err = wallet.Prepayment(ctx, balance.PrepaymentCommand{
+		Action:             "admit",
+		Group:              group,
+		BillingOperationID: probe,
+		TaskID:             id + "-pause-probe",
+		ModelID:            modelID,
+		Currency:           "USD",
+		PrepaidMicros:      &prepaid,
+		EstimatedMicros:    &estimated,
+		QuoteJSON:          plan.QuoteJSON,
+	})
 	require.NoError(t, err, "the model was not paused")
-	_, err = wallet.Prepayment(ctx, balance.PrepaymentCommand{Action: "settle", Group: group, BillingOperationID: probe,
-		Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_accepted"}})
+	_, err = wallet.Prepayment(ctx, balance.PrepaymentCommand{
+		Action: "settle", Group: group, BillingOperationID: probe,
+		Outcome: &balance.PrepaymentOutcome{Kind: "failed", Reason: "not_accepted"},
+	})
 	require.NoError(t, err)
 }

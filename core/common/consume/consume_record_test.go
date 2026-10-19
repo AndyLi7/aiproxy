@@ -106,17 +106,30 @@ func TestConsumeSkipsExactlyReadModes(t *testing.T) {
 	for _, relayMode := range mode.All() {
 		records := consume.NeedRecordConsumeForTest(http.StatusOK, &meta.Meta{Mode: relayMode})
 		if records != !model.IsReadMode(relayMode) {
-			t.Fatalf("mode %s: records success = %v, IsReadMode = %v", relayMode, records, model.IsReadMode(relayMode))
+			t.Fatalf(
+				"mode %s: records success = %v, IsReadMode = %v",
+				relayMode,
+				records,
+				model.IsReadMode(relayMode),
+			)
 		}
 
 		if model.IsReadMode(relayMode) != pinnedReads[relayMode] {
-			t.Fatalf("mode %s: read = %v, pinned list says %v", relayMode, model.IsReadMode(relayMode), pinnedReads[relayMode])
+			t.Fatalf(
+				"mode %s: read = %v, pinned list says %v",
+				relayMode,
+				model.IsReadMode(relayMode),
+				pinnedReads[relayMode],
+			)
 		}
 
 		if model.IsReadMode(relayMode) {
 			reads++
 
-			if !consume.NeedRecordConsumeForTest(http.StatusBadGateway, &meta.Meta{Mode: relayMode}) {
+			if !consume.NeedRecordConsumeForTest(
+				http.StatusBadGateway,
+				&meta.Meta{Mode: relayMode},
+			) {
 				t.Fatalf("mode %s: a failed read must still be logged", relayMode)
 			}
 		}
@@ -126,7 +139,10 @@ func TestConsumeSkipsExactlyReadModes(t *testing.T) {
 		t.Fatalf("read modes = %d, want %d", reads, len(pinnedReads))
 	}
 
-	if consume.NeedRecordConsumeForTest(http.StatusNoContent, &meta.Meta{Mode: mode.DoubaoVideoTasksDelete}) {
+	if consume.NeedRecordConsumeForTest(
+		http.StatusNoContent,
+		&meta.Meta{Mode: mode.DoubaoVideoTasksDelete},
+	) {
 		t.Fatal("a successful Doubao task delete (204) must not be logged")
 	}
 }

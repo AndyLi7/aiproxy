@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/labring/aiproxy/core/common/actionguard"
 	"github.com/labring/aiproxy/core/model"
 )
 
@@ -149,6 +150,7 @@ func appEnvelope(body []byte) (string, bool) {
 	if json.Unmarshal(body, &envelope) != nil || envelope.Code == nil {
 		return "", false
 	}
+
 	return envelope.Message, true
 }
 
@@ -238,6 +240,7 @@ func receiptText(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &value) != nil {
 		return ""
 	}
+
 	return value
 }
 
@@ -271,6 +274,7 @@ func (r PrepaymentReceipt) AttemptState(id string) (state string, present bool, 
 	if text := receiptText(r.AttemptsJSON); text != "" {
 		raw = []byte(text)
 	}
+
 	var attempts []struct {
 		ID    string `json:"id"`
 		State string `json:"state"`
@@ -278,11 +282,13 @@ func (r PrepaymentReceipt) AttemptState(id string) (state string, present bool, 
 	if len(raw) == 0 || json.Unmarshal(raw, &attempts) != nil || attempts == nil {
 		return "", false, ErrUnreadableAttempts
 	}
+
 	for _, attempt := range attempts {
 		if attempt.ID == id {
 			return attempt.State, true, nil
 		}
 	}
+
 	return "", false, nil
 }
 
@@ -293,10 +299,12 @@ func (r PrepaymentReceipt) AttemptCount() (int, error) {
 	if text := receiptText(r.AttemptsJSON); text != "" {
 		raw = []byte(text)
 	}
+
 	var attempts []json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &attempts) != nil || attempts == nil {
 		return 0, ErrUnreadableAttempts
 	}
+
 	return len(attempts), nil
 }
 
@@ -309,28 +317,36 @@ func (r *PrepaymentReceipt) normalizeUsage() {
 	}
 }
 
-func (e *ExternalHTTP) Prepayment(ctx context.Context, command PrepaymentCommand) (PrepaymentReceipt, error) {
+func (e *ExternalHTTP) Prepayment(
+	ctx context.Context,
+	command PrepaymentCommand,
+) (PrepaymentReceipt, error) {
 	if command.Group == "" || command.BillingOperationID == "" {
 		return PrepaymentReceipt{}, errors.New("missing prepayment identity")
 	}
+
 	body, err := json.Marshal(command)
 	if err != nil {
 		return PrepaymentReceipt{}, err
 	}
+
 	tries := 1
 	if submitRetry(ctx, command.Action) {
 		tries = prepaymentSubmitTries
 	}
+
 	for try := 1; ; try++ {
 		receipt, retryable, err := e.prepaymentOnce(ctx, command, body)
 		if err == nil || !retryable || try >= tries {
 			return receipt, err
 		}
+
 		select {
 		case <-ctx.Done():
 			return receipt, err
 		case <-time.After(prepaymentRetryBackoff[try-1]):
 		}
+
 		if !FullRequestLeft(ctx) {
 			// A retry the deadline would cut short could be processed after
 			// this submission gave up; the same-ID retry replays it instead.
@@ -341,22 +357,44 @@ func (e *ExternalHTTP) Prepayment(ctx context.Context, command PrepaymentCommand
 
 // prepaymentOnce sends one wallet command. retryable reports an error after
 // which a marked submission command may be sent again (see WithSubmitRetry).
-func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCommand, body []byte) (receipt PrepaymentReceipt, retryable bool, err error) {
+func (e *ExternalHTTP) prepaymentOnce(
+	ctx context.Context,
+	command PrepaymentCommand,
+	body []byte,
+) (receipt PrepaymentReceipt, retryable bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, externalRequestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.url+"/api/internal/wallet/prepayment", bytes.NewReader(body))
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		e.url+"/api/internal/wallet/prepayment",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return receipt, false, err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+e.key)
 	req.Header.Set("Content-Type", "application/json")
+
 	client := *externalHTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+	if err := actionguard.Check(ctx); err != nil {
+		return receipt, false, err
+	}
+
 	response, err := client.Do(req)
 	if err != nil {
-		return receipt, neverDelivered(err), errors.New("prepayment outcome unknown; retry original billing operation")
+		return receipt, neverDelivered(
+				err,
+			), errors.New(
+				"prepayment outcome unknown; retry original billing operation",
+			)
 	}
 	defer response.Body.Close()
+
 	switch response.StatusCode {
 	case http.StatusPaymentRequired:
 		return receipt, false, ErrPrepaymentInsufficientBalance
@@ -370,8 +408,10 @@ func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCom
 		if message, ok := appEnvelope(raw); ok && message == "Prepayment not found" {
 			return receipt, false, appNotFoundError{}
 		}
+
 		return receipt, false, ErrPrepaymentNotFound
 	}
+
 	if response.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 128<<10))
 		_, fromApp := appEnvelope(raw)
@@ -379,61 +419,88 @@ func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCom
 		// application may still have processed the command (a container
 		// stopped mid-request), so it is retryable only because the retried
 		// commands replay idempotently (WithSubmitRetry).
-		edge := response.StatusCode >= 500 && response.StatusCode != http.StatusGatewayTimeout && !fromApp
+		edge := response.StatusCode >= 500 && response.StatusCode != http.StatusGatewayTimeout &&
+			!fromApp
+
 		return receipt, edge, errors.New("prepayment unavailable")
 	}
-	var envelope struct {
-		Code *int              `json:"code"`
-		Data PrepaymentReceipt `json:"data"`
-	}
-	if json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&envelope) != nil || envelope.Code == nil {
+
+	return decodePrepaymentReceipt(response.Body, command)
+}
+
+func decodePrepaymentReceipt(
+	body io.Reader,
+	command PrepaymentCommand,
+) (PrepaymentReceipt, bool, error) {
+	var (
+		receipt  PrepaymentReceipt
+		envelope struct {
+			Code *int              `json:"code"`
+			Data PrepaymentReceipt `json:"data"`
+		}
+	)
+	if json.NewDecoder(io.LimitReader(body, 128<<10)).Decode(&envelope) != nil ||
+		envelope.Code == nil {
 		return receipt, false, errors.New("prepayment rejected or unavailable")
 	}
+
 	if *envelope.Code != 0 {
 		return receipt, false, ErrPrepaymentRejected
 	}
+
 	if command.Action != "submitting" && envelope.Data.ID != command.BillingOperationID {
 		return receipt, false, errors.New("prepayment receipt identity mismatch")
 	}
+
 	if command.Action != "submitting" && command.Action != "begin_attempt" {
 		switch envelope.Data.Status {
 		case "pending", "settled", "estimated", "refunded":
 		default:
 			return receipt, false, errors.New("invalid prepayment receipt state")
 		}
+
 		if envelope.Data.PrepaidMicros < 0 || envelope.Data.PrepaidMicros > 9007199254740991 {
 			return receipt, false, errors.New("invalid prepayment receipt amount")
 		}
+
 		if envelope.Data.Status != "pending" {
 			c, r := envelope.Data.ChargedMicros, envelope.Data.RefundMicros
+
 			var policy struct {
 				SettlementPolicy string `json:"settlementPolicy"`
 			}
-			if envelope.Data.QuoteJSON != "" && json.Unmarshal([]byte(envelope.Data.QuoteJSON), &policy) != nil {
+			if envelope.Data.QuoteJSON != "" &&
+				json.Unmarshal([]byte(envelope.Data.QuoteJSON), &policy) != nil {
 				return receipt, false, errors.New("invalid receipt settlement policy")
 			}
+
 			if policy.SettlementPolicy != "" && policy.SettlementPolicy != "actual-cost-v1" {
 				return receipt, false, errors.New("unsupported receipt settlement policy")
 			}
+
 			if c == nil || r == nil || *c < 0 || *c > 9007199254740991 || *r < 0 {
 				return receipt, false, errors.New("invalid final prepayment receipt")
 			}
+
 			expectedRefund := envelope.Data.PrepaidMicros - *c
 			if policy.SettlementPolicy == "actual-cost-v1" {
 				if envelope.Data.Status == "estimated" {
 					return receipt, false, errors.New("actual-cost receipt cannot be estimated")
 				}
+
 				if expectedRefund < 0 {
 					expectedRefund = 0
 				}
 			} else if expectedRefund < 0 {
 				return receipt, false, errors.New("legacy receipt exceeds prepayment")
 			}
+
 			if *r != expectedRefund {
 				return receipt, false, errors.New("invalid final prepayment receipt")
 			}
 		}
 	}
+
 	envelope.Data.normalizeUsage()
 
 	return envelope.Data, false, nil
@@ -443,23 +510,37 @@ func (e *ExternalHTTP) prepaymentOnce(ctx context.Context, command PrepaymentCom
 func (e *ExternalHTTP) RecoverPrepayments(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.url+"/api/internal/wallet/reconcile", nil)
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		e.url+"/api/internal/wallet/reconcile",
+		nil,
+	)
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Authorization", "Bearer "+e.key)
+
 	client := *externalHTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 	response, err := client.Do(req)
 	if err != nil {
 		return errors.New("billing recovery unavailable")
 	}
 	defer response.Body.Close()
+
 	var envelope struct {
 		Code *int `json:"code"`
 	}
-	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&envelope) != nil || envelope.Code == nil || *envelope.Code != 0 {
+	if response.StatusCode != http.StatusOK ||
+		json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&envelope) != nil ||
+		envelope.Code == nil ||
+		*envelope.Code != 0 {
 		return errors.New("billing recovery unavailable")
 	}
+
 	return nil
 }

@@ -58,7 +58,10 @@ func resolveNativeCapability(
 		return nil, true
 	}
 
-	resolution, match := model.ResolveNativeCapabilityRoute(requested, entitledModelConfigs(c, token))
+	resolution, match := model.ResolveNativeCapabilityRoute(
+		requested,
+		entitledModelConfigs(c, token),
+	)
 	switch match {
 	case model.NativeRouteAmbiguous:
 		// Same public code as a broken binding (controller/native_route.go),
@@ -68,7 +71,13 @@ func resolveNativeCapability(
 			NativeRouteAmbiguousReason, GetRequestID(c), requested, ModelCacheVersion(c),
 		)
 		setRequestedModelForLog(c, requested)
-		abortNativeModelError(c, http.StatusServiceUnavailable, "model_route_unavailable", model.FailureStageRouting, nil)
+		abortNativeModelError(
+			c,
+			http.StatusServiceUnavailable,
+			"model_route_unavailable",
+			model.FailureStageRouting,
+			nil,
+		)
 
 		return nil, false
 	case model.NativeRouteFound:
@@ -77,6 +86,7 @@ func resolveNativeCapability(
 	}
 
 	route := &nativeCapabilityRoute{route: resolution.Route}
+
 	c.Set(RequestedModel, requested)
 
 	if resolution.HasIdentity {
@@ -108,7 +118,13 @@ func abortUnknownNativeModel(c *gin.Context, token model.TokenCache, requested s
 	}
 
 	setRequestedModelForLog(c, requested)
-	abortNativeModelError(c, status, code, model.FailureStageModel, append([]string{}, suggestion.Models...))
+	abortNativeModelError(
+		c,
+		status,
+		code,
+		model.FailureStageModel,
+		append([]string{}, suggestion.Models...),
+	)
 }
 
 // logModelColumnLength is the size of the request log's model column.

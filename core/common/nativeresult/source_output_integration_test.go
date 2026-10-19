@@ -1,4 +1,4 @@
-package nativeresult
+package nativeresult_test
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,8 +16,11 @@ func TestNativeSourceOutputAlternatives(t *testing.T) {
 	if file == "" {
 		t.Skip("requires exported source/output cases")
 	}
+
+	// #nosec G703 -- The opt-in local integration harness owns this fixture or rendezvous path; no HTTP input supplies it.
 	raw, err := os.ReadFile(file)
 	require.NoError(t, err)
+
 	var cases []struct {
 		Endpoint      string          `json:"endpoint"`
 		Contract      json.RawMessage `json:"contract"`
@@ -25,29 +29,37 @@ func TestNativeSourceOutputAlternatives(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &cases))
 	require.Len(t, cases, 10)
+
 	for i, c := range cases {
 		t.Run(fmt.Sprintf("%s/%d", c.Endpoint, i), func(t *testing.T) {
-			compiled, err := CompileTaskContract(c.Contract)
+			compiled, err := nativeresult.CompileTaskContract(c.Contract)
 			require.NoError(t, err)
 			output, err := compiled.ValidateOutput(c.Output)
 			require.NoError(t, err)
-			var contract TaskContract
+
+			var contract nativeresult.TaskContract
 			require.NoError(t, json.Unmarshal(c.Contract, &contract))
-			plan, err := PlanArtifacts(output, contract.Artifacts)
+			plan, err := nativeresult.PlanArtifacts(output, contract.Artifacts)
 			require.NoError(t, err)
 			require.Len(t, plan, c.ArtifactCount)
+
 			owned := map[string]string{}
 			for i, artifact := range plan {
-				owned[artifact.Pointer] = fmt.Sprintf("https://gateway.example/v1/model-tasks/test/artifacts/%d", i)
+				owned[artifact.Pointer] = fmt.Sprintf(
+					"https://gateway.example/v1/model-tasks/test/artifacts/%d",
+					i,
+				)
 			}
-			delivered, err := RewriteArtifacts(output, contract.Artifacts, owned)
+
+			delivered, err := nativeresult.RewriteArtifacts(output, contract.Artifacts, owned)
 			require.NoError(t, err)
 			require.NotContains(t, string(delivered), "https://provider.example")
 			_, err = compiled.ValidateOutput(delivered)
 			require.NoError(t, err)
+
 			if len(plan) > 0 {
 				delete(owned, plan[0].Pointer)
-				_, err = RewriteArtifacts(output, contract.Artifacts, owned)
+				_, err = nativeresult.RewriteArtifacts(output, contract.Artifacts, owned)
 				require.Error(t, err, "partial archive cannot be delivered")
 			}
 		})

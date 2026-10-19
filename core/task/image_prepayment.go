@@ -15,38 +15,54 @@ import (
 func ImagePrepaymentRecoveryTask(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			expireUnconfirmedImageSubmissions(ctx, time.Now())
+
+	runRecoveryTicks(ctx, ticker.C, func(ctx context.Context) {
+		expireUnconfirmedImageSubmissions(ctx, time.Now())
+
+		if ctx.Err() == nil {
 			recoverImagePrepayments(ctx)
 		}
-	}
+	})
 }
+
 func recoverImagePrepayments(ctx context.Context) {
-	_, ok := balance.Default.(*balance.ExternalHTTP)
-	if !ok || model.LogDB == nil || !model.LogDB.Migrator().HasColumn(&model.ImageTask{}, "billing_next_check_at") {
+	if ctx.Err() != nil {
 		return
 	}
+
+	_, ok := balance.Default.(*balance.ExternalHTTP)
+	if !ok || model.LogDB == nil ||
+		!model.LogDB.Migrator().HasColumn(&model.ImageTask{}, "billing_next_check_at") {
+		return
+	}
+
 	var tasks []model.ImageTask
+
 	now := time.Now().UTC()
-	if err := dueImagePrepayments(model.LogDB, now).Find(&tasks).Error; err != nil {
+	if err := dueImagePrepayments(
+		model.LogDB.WithContext(ctx),
+		now,
+	).Find(&tasks).
+		Error; err != nil {
 		log.Warn("image prepayment recovery scan unavailable")
 		return
 	}
+
 	for i := range tasks {
+		if ctx.Err() != nil {
+			return
+		}
+
 		task := &tasks[i]
-		// Claim a short lease using the same predicate. All remote effects are also
-		// idempotent, so expiry/crashes cannot duplicate a debit or refund.
-		won := model.LogDB.Model(&model.ImageTask{}).Where("id = ? AND (billing_next_check_at IS NULL OR billing_next_check_at <= ?)", task.ID, now).
-			Update("billing_next_check_at", now.Add(2*time.Minute))
-		if won.Error != nil || won.RowsAffected != 1 {
+
+		won, err := model.ClaimImagePrepaymentRecovery(ctx, task, now)
+		if err != nil || !won {
 			continue
 		}
-		if _, err := imageprepayment.Sync(ctx, task); err != nil {
-			log.WithField("task_id", task.ID).Warn("image prepayment state synchronization unavailable")
+
+		if _, err := imageprepayment.SyncOwned(ctx, task); err != nil {
+			log.WithField("task_id", task.ID).
+				Warn("image prepayment owned synchronization unavailable")
 		}
 	}
 }
@@ -61,7 +77,8 @@ const imagePrepaymentBatch = 10
 // batch of scheduled ones is due.
 func dueImagePrepayments(db *gorm.DB, now time.Time) *gorm.DB {
 	return db.Where("prepayment_quote_json <> '' AND billing_settled = ? AND (billing_next_check_at IS NULL OR billing_next_check_at <= ?)", false, now).
-		Order("COALESCE(billing_next_check_at, created_at) ASC").Limit(imagePrepaymentBatch)
+		Order("COALESCE(billing_next_check_at, created_at) ASC").
+		Limit(imagePrepaymentBatch)
 }
 
 // upstreamBillingInterval paces the application's provider bill matching. fal
@@ -74,18 +91,19 @@ const upstreamBillingInterval = 10 * time.Second
 func UpstreamBillingRecoveryTask(ctx context.Context) {
 	ticker := time.NewTicker(upstreamBillingInterval)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
+
+	runUpstreamBillingRecovery(ctx, ticker.C)
+}
+
+func runUpstreamBillingRecovery(ctx context.Context, ticks <-chan time.Time) {
+	runRecoveryTicks(ctx, ticks, func(ctx context.Context) {
+		client, ok := balance.Default.(*balance.ExternalHTTP)
+		if !ok {
 			return
-		case <-ticker.C:
-			client, ok := balance.Default.(*balance.ExternalHTTP)
-			if !ok {
-				continue
-			}
-			if err := client.RecoverPrepayments(ctx); err != nil {
-				log.Warn("upstream billing recovery unavailable")
-			}
 		}
-	}
+
+		if err := client.RecoverPrepayments(ctx); err != nil {
+			log.Warn("upstream billing recovery unavailable")
+		}
+	})
 }

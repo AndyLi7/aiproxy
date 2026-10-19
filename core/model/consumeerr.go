@@ -10,7 +10,7 @@ import (
 )
 
 type ConsumeError struct {
-	BillingOperationID string          `gorm:"type:varchar(128)" json:"billing_operation_id,omitempty"`
+	BillingOperationID string          `gorm:"type:varchar(128)"                                            json:"billing_operation_id,omitempty"`
 	RequestAt          time.Time       `gorm:"index;index:idx_consume_error_group_reqat,priority:2"         json:"request_at"`
 	CreatedAt          time.Time       `                                                                    json:"created_at"`
 	GroupID            string          `gorm:"size:64;index;index:idx_consume_error_group_reqat,priority:1" json:"group_id"`
@@ -49,6 +49,7 @@ func CreateConsumeError(
 	if len(billingOperationIDs) > 0 {
 		billingOperationID = billingOperationIDs[0]
 	}
+
 	return LogDB.Create(&ConsumeError{
 		RequestID:          requestID,
 		BillingOperationID: billingOperationID,

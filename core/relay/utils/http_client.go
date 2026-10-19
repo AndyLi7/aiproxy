@@ -142,7 +142,8 @@ func createTransport(
 	transport.ResponseHeaderTimeout = normalizeTimeout(timeout)
 	if skipTLSVerify {
 		transport.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true, //nolint:gosec // Explicit administrator-controlled channel compatibility option.
 		}
 	}
 

@@ -109,7 +109,13 @@ func RecordNativeTaskLog(db *gorm.DB, task *NativeTask, info NativeTaskLog) erro
 		}
 
 		var count int64
-		if err := nativeTaskLogs(tx, task.ID, task.GroupID, task.TokenID).Count(&count).Error; err != nil {
+		if err := nativeTaskLogs(
+			tx,
+			task.ID,
+			task.GroupID,
+			task.TokenID,
+		).Count(&count).
+			Error; err != nil {
 			return err
 		}
 
@@ -129,7 +135,10 @@ func RecordNativeTaskLog(db *gorm.DB, task *NativeTask, info NativeTaskLog) erro
 		var metadata map[string]string
 		if info.RequestedModel != "" && info.RequestedModel != task.Model {
 			metadata = map[string]string{
-				"requested_model": truncateNativeLogField(info.RequestedModel, MaxPublicModelIDLength),
+				"requested_model": truncateNativeLogField(
+					info.RequestedModel,
+					MaxPublicModelIDLength,
+				),
 			}
 		}
 
@@ -238,12 +247,20 @@ func insertMissingNativeTaskLog(
 	receipt nativeReceiptUsage,
 	tokenName string,
 ) error {
-	if task == nil || priorStatus == "reserved" || (task.ErrorCode == NotStartedCode && task.EnqueuedAt == nil) || !receipt.usable() {
+	if task == nil || priorStatus == "reserved" ||
+		(task.ErrorCode == NotStartedCode && task.EnqueuedAt == nil) ||
+		!receipt.usable() {
 		return nil
 	}
 
 	var count int64
-	if err := nativeTaskLogs(tx, task.ID, task.GroupID, task.TokenID).Count(&count).Error; err != nil {
+	if err := nativeTaskLogs(
+		tx,
+		task.ID,
+		task.GroupID,
+		task.TokenID,
+	).Count(&count).
+		Error; err != nil {
 		return err
 	}
 
@@ -293,20 +310,24 @@ func nativeTaskSafeError(task *NativeTask) string {
 	if len(issues) == 0 {
 		return "Native task failed"
 	}
+
 	summary := "Invalid parameters:"
 	for i, issue := range issues {
 		part := " " + issue.Field + " (" + issue.Rule + ")"
 		if i > 0 {
 			part = "," + part
 		}
+
 		if len(summary)+len(part) > nativeSafeErrorLimit {
 			if i == 0 {
 				return truncateNativeLogField(summary+part, nativeSafeErrorLimit)
 			}
 			break
 		}
+
 		summary += part
 	}
+
 	return summary
 }
 
@@ -328,7 +349,13 @@ func syncNativeTaskLog(
 
 	if locked != nil {
 		parsed, _ := parseNativeReceiptUsage(receipt)
-		if err := insertMissingNativeTaskLog(tx, locked, locked.Status, parsed, tokenName); err != nil {
+		if err := insertMissingNativeTaskLog(
+			tx,
+			locked,
+			locked.Status,
+			parsed,
+			tokenName,
+		); err != nil {
 			return err
 		}
 	}

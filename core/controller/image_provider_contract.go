@@ -2,16 +2,16 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/labring/aiproxy/core/common/imagecapabilities"
-	"github.com/labring/aiproxy/core/relay/adaptor"
-	"github.com/labring/aiproxy/core/relay/adaptors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/imagecapabilities"
 	"github.com/labring/aiproxy/core/common/registryvalidation"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/adaptor"
+	"github.com/labring/aiproxy/core/relay/adaptors"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
 )
@@ -70,14 +70,17 @@ func mapChannelProviderInput(
 	}
 
 	rawAdapter, exists := adaptors.GetAdaptor(ch.Type)
+
 	executor, supported := rawAdapter.(adaptor.ImageTaskExecutor)
 	if !exists || !supported {
 		return nil, b, registryvalidation.ErrProviderContract
 	}
+
 	capability, supported := imagecapabilities.Lookup(executor.ImageAdapterName())
 	if !supported {
 		return nil, b, registryvalidation.ErrProviderContract
 	}
+
 	adapter, execution := executor.ImageAdapterName(), capability.Execution
 
 	endpoint, _ := meta.GetMappedModelName(route, ch.ModelMapping)
@@ -117,8 +120,10 @@ func imageProviderPredicate(c *gin.Context, route string, m mode.Mode) func(*mod
 	return func(ch *model.Channel) bool {
 		_, _, err := mapChannelProviderInput(raw, ch, route, body)
 		if err != nil {
-			common.GetLogger(c).Warnf("image channel compatibility rejected: channel=%d route=%s", ch.ID, route)
+			common.GetLogger(c).
+				Warnf("image channel compatibility rejected: channel=%d route=%s", ch.ID, route)
 		}
+
 		return err == nil
 	}
 }

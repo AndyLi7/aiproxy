@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private walletStub fixture or implementation.
 package nativetask
 
 import (
@@ -31,28 +32,45 @@ var (
 // turboContract follows the Eleven v4 Turbo input schema. textSchema and
 // required vary per case; additionalProperties is open as in the provider schema.
 func turboContract(textSchema, required string) json.RawMessage {
-	return json.RawMessage(`{"version":1,"model":"` + turboModel + `","input_schema":{"type":"object","required":[` + required + `],"properties":{` +
-		`"text":` + textSchema + `,"voice":{"type":"string"},"stability":{"type":"number","minimum":0,"maximum":1},` +
-		`"language_code":{"anyOf":[{"type":"string"},{"type":"null"}]},"apply_text_normalization":{"type":"string","enum":["auto","on","off"]},` +
-		`"preset":{"type":"string","enum":["` + longEnum + `"]},"tag":{"const":"` + longConst + `"},"timestamps":{"type":"boolean"}}},"output_schema":{"type":"object"}}`)
+	return json.RawMessage(
+		`{"version":1,"model":"` + turboModel + `","input_schema":{"type":"object","required":[` + required + `],"properties":{` +
+			`"text":` + textSchema + `,"voice":{"type":"string"},"stability":{"type":"number","minimum":0,"maximum":1},` +
+			`"language_code":{"anyOf":[{"type":"string"},{"type":"null"}]},"apply_text_normalization":{"type":"string","enum":["auto","on","off"]},` +
+			`"preset":{"type":"string","enum":["` + longEnum + `"]},"tag":{"const":"` + longConst + `"},"timestamps":{"type":"boolean"}}},"output_schema":{"type":"object"}}`,
+	)
 }
 
 var defaultTurboContract = turboContract(`{"type":"string","maxLength":5000}`, `"text"`)
 
 func fixture(t *testing.T, name string) string {
 	t.Helper()
+
 	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err)
+
 	return string(raw)
 }
 
 func meteredSetup(t *testing.T) (*Engine, Plan, *walletStub, *providerStub) {
+	t.Helper()
+
 	e, _, w, p := setup(t)
 	e.InputMeter = true
 	// The contract the application publishes for Eleven v4 Turbo: imported
 	// request schemas are a local $ref into the contract's own components.
-	plan := Plan{KeyFingerprint: model.ImageChannelKeyFingerprint("test-native-key"), Contract: json.RawMessage(fixture(t, "contract-turbo.json")), ChannelID: 48, Endpoint: turboEndpoint,
-		CredentialScope: "f1da35c5-782c-4341-9e09-a705b70b6b6b", QuoteJSON: fixture(t, "quote-turbo-max.json"), InputMeter: json.RawMessage(fixture(t, "input-meter-turbo.json"))}
+	// #nosec G101 -- Synthetic test identifiers and ownership tokens; these are not live credentials.
+	plan := Plan{
+		KeyFingerprint: model.ImageChannelKeyFingerprint(
+			"test-native-key",
+		),
+		Contract:        json.RawMessage(fixture(t, "contract-turbo.json")),
+		ChannelID:       48,
+		Endpoint:        turboEndpoint,
+		CredentialScope: "f1da35c5-782c-4341-9e09-a705b70b6b6b",
+		QuoteJSON:       fixture(t, "quote-turbo-max.json"),
+		InputMeter:      json.RawMessage(fixture(t, "input-meter-turbo.json")),
+	}
+
 	return e, plan, w, p
 }
 
@@ -61,7 +79,11 @@ func turboBody(input string) []byte {
 }
 
 func textInput(text string) string {
-	encoded, _ := json.Marshal(map[string]string{"text": text})
+	encoded, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		panic(err)
+	}
+
 	return string(encoded)
 }
 
@@ -71,6 +93,7 @@ func admission(t *testing.T, commands []balance.PrepaymentCommand) balance.Prepa
 	require.Equal(t, "admit", commands[0].Action)
 	require.NotNil(t, commands[0].PrepaidMicros)
 	require.NotNil(t, commands[0].EstimatedMicros)
+
 	return commands[0]
 }
 
@@ -87,13 +110,20 @@ func TestInputMeterGoldenTurbo122(t *testing.T) {
 	require.Equal(t, "queued", task.Status)
 	admit := admission(t, w.commands)
 	golden := fixture(t, "metered-quote-turbo-122.json")
-	require.Equal(t, golden, admit.QuoteJSON, "the rewritten quote must match the golden file byte for byte")
+	require.Equal(
+		t,
+		golden,
+		admit.QuoteJSON,
+		"the rewritten quote must match the golden file byte for byte",
+	)
 	require.EqualValues(t, 4880, *admit.PrepaidMicros)
 	require.EqualValues(t, 4880, *admit.EstimatedMicros)
+
 	saved, err := model.GetNativeTask(e.DB, "turbo-122", "g", 1)
 	require.NoError(t, err)
 	require.Equal(t, golden, saved.PrepaymentQuoteJSON)
 	require.Equal(t, input, string(p.body), "the upstream body is never changed")
+
 	quote, err := model.ParseImagePrepaymentQuote(golden)
 	require.NoError(t, err)
 	require.Equal(t, "actual-cost-v1", quote.SettlementPolicy)
@@ -103,6 +133,7 @@ func TestInputMeterGoldenTurbo122(t *testing.T) {
 func TestMeteredCharactersAreCodePointsOfTheUpstreamString(t *testing.T) {
 	var frozen nativeresult.TaskContract
 	require.NoError(t, json.Unmarshal(defaultTurboContract, &frozen))
+
 	for input, want := range map[string]int64{
 		fixture(t, "metered-input-turbo-122.json"): 122,
 		`{"text":"\ud83d\ude00"}`:                  1, // one escaped astral character
@@ -119,6 +150,7 @@ func TestMeteredCharactersAreCodePointsOfTheUpstreamString(t *testing.T) {
 		require.NoError(t, err, input)
 		require.Equal(t, want, count, input)
 	}
+
 	for input, want := range map[string]error{
 		`{"voice":"Aria"}`:                        errMeterFieldMissing,
 		`{"text":12}`:                             errMeterFieldNotText,
@@ -132,6 +164,7 @@ func TestMeteredCharactersAreCodePointsOfTheUpstreamString(t *testing.T) {
 		_, err := meteredCharacters(frozen, json.RawMessage(input), "text")
 		require.ErrorIs(t, err, want, input)
 	}
+
 	frozen.InputSchema = json.RawMessage(`{"type":"object"}`)
 	_, err := meteredCharacters(frozen, json.RawMessage(`{"text":"hi"}`), "text")
 	require.ErrorIs(t, err, errMeterSchema)
@@ -144,38 +177,79 @@ func TestMeteredCharactersAreCodePointsOfTheUpstreamString(t *testing.T) {
 func TestMeteredCharactersFollowLocalSchemaReferences(t *testing.T) {
 	var published nativeresult.TaskContract
 	require.NoError(t, json.Unmarshal([]byte(fixture(t, "contract-turbo.json")), &published))
-	require.Contains(t, string(published.InputSchema), `"$ref":"#/components/schemas/TtsElevenV4TurboInput"`)
-	count, err := meteredCharacters(published, json.RawMessage(fixture(t, "metered-input-turbo-122.json")), "text")
+	require.Contains(
+		t,
+		string(published.InputSchema),
+		`"$ref":"#/components/schemas/TtsElevenV4TurboInput"`,
+	)
+	count, err := meteredCharacters(
+		published,
+		json.RawMessage(fixture(t, "metered-input-turbo-122.json")),
+		"text",
+	)
 	require.NoError(t, err)
 	require.EqualValues(t, 122, count)
-	count, err = meteredCharacters(published, json.RawMessage(`{"text":"hi","voice":"Rachel","stability":0.5,"output_format":"pcm_16000","timestamps":true}`), "text")
+	count, err = meteredCharacters(
+		published,
+		json.RawMessage(
+			`{"text":"hi","voice":"Rachel","stability":0.5,"output_format":"pcm_16000","timestamps":true}`,
+		),
+		"text",
+	)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, count)
-	_, err = meteredCharacters(published, json.RawMessage(`{"text":"hi","previous_text":"earlier"}`), "text")
+
+	_, err = meteredCharacters(
+		published,
+		json.RawMessage(`{"text":"hi","previous_text":"earlier"}`),
+		"text",
+	)
 	require.ErrorIs(t, err, errMeterUndeclaredKey)
-	_, err = meteredCharacters(published, json.RawMessage(`{"text":"hi","voice":"`+strings.Repeat("v", 65)+`"}`), "text")
+	_, err = meteredCharacters(
+		published,
+		json.RawMessage(`{"text":"hi","voice":"`+strings.Repeat("v", 65)+`"}`),
+		"text",
+	)
 	require.ErrorIs(t, err, errMeterOtherText)
 
 	components := `"components":{"schemas":{"Input":{"type":"object","properties":{"text":{"type":"string"},"preset":{"$ref":"#/components/schemas/Preset"},` +
 		`"style":{"allOf":[{"$ref":"#/components/schemas/Preset"}],"description":"wrapped"},"note":{"$ref":"#/components/schemas/Note"}}},` +
 		`"Preset":{"type":"string","enum":["` + longEnum + `"]},"Note":{"type":"string"},"Loop":{"$ref":"#/components/schemas/Loop"},"a/b":{"type":"object","properties":{"text":{"type":"string"}}}}}`
 	contract := func(inputSchema string) nativeresult.TaskContract {
-		return nativeresult.TaskContract{Version: 1, Model: turboModel, InputSchema: json.RawMessage(inputSchema)}
+		return nativeresult.TaskContract{
+			Version:     1,
+			Model:       turboModel,
+			InputSchema: json.RawMessage(inputSchema),
+		}
 	}
-	referenced := contract(`{"$ref":"#/components/schemas/Input","title":"Input",` + components + `}`)
-	count, err = meteredCharacters(referenced, json.RawMessage(`{"text":"hello","preset":"`+longEnum+`","style":"`+longEnum+`"}`), "text")
+	referenced := contract(
+		`{"$ref":"#/components/schemas/Input","title":"Input",` + components + `}`,
+	)
+	count, err = meteredCharacters(
+		referenced,
+		json.RawMessage(`{"text":"hello","preset":"`+longEnum+`","style":"`+longEnum+`"}`),
+		"text",
+	)
 	require.NoError(t, err, "a referenced enum fixes its value")
 	require.EqualValues(t, 5, count)
-	_, err = meteredCharacters(referenced, json.RawMessage(`{"text":"hello","note":"`+strings.Repeat("n", 65)+`"}`), "text")
+
+	_, err = meteredCharacters(
+		referenced,
+		json.RawMessage(`{"text":"hello","note":"`+strings.Repeat("n", 65)+`"}`),
+		"text",
+	)
 	require.ErrorIs(t, err, errMeterOtherText, "a referenced free string is other text")
+
 	wrapped := contract(`{"allOf":[{"$ref":"#/components/schemas/Input"}],` + components + `}`)
 	count, err = meteredCharacters(wrapped, json.RawMessage(`{"text":"hello"}`), "text")
 	require.NoError(t, err)
 	require.EqualValues(t, 5, count)
+
 	escaped := contract(`{"$ref":"#/components/schemas/a~1b",` + components + `}`)
 	count, err = meteredCharacters(escaped, json.RawMessage(`{"text":"hello"}`), "text")
 	require.NoError(t, err)
 	require.EqualValues(t, 5, count)
+
 	for name, schema := range map[string]string{
 		"remote reference":       `{"$ref":"https://example.com/input.json"}`,
 		"missing target":         `{"$ref":"#/components/schemas/Missing",` + components + `}`,
@@ -219,9 +293,11 @@ func TestInputMeterHoldsThePriceOfTheText(t *testing.T) {
 // declares them, so they do not stop the meter.
 func TestInputMeterAcceptsDeclaredPlatformControls(t *testing.T) {
 	e, plan, w, p := meteredSetup(t)
-	plan.Contract = json.RawMessage(`{"version":1,"model":"` + turboModel + `","input_schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string","maxLength":5000}}},` +
-		`"upstream_input_schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string","maxLength":5000},"output_format":{"type":"string","enum":["mp3_44100_128","pcm_16000"]}}},` +
-		`"fixed_parameters":{"output_format":"mp3_44100_128"},"output_schema":{"type":"object"}}`)
+	plan.Contract = json.RawMessage(
+		`{"version":1,"model":"` + turboModel + `","input_schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string","maxLength":5000}}},` +
+			`"upstream_input_schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string","maxLength":5000},"output_format":{"type":"string","enum":["mp3_44100_128","pcm_16000"]}}},` +
+			`"fixed_parameters":{"output_format":"mp3_44100_128"},"output_schema":{"type":"object"}}`,
+	)
 	_, err := e.Submit(context.Background(), "req", "g", 1, turboBody(textInput("hello")), plan)
 	require.NoError(t, err)
 	require.EqualValues(t, 200, *admission(t, w.commands).PrepaidMicros)
@@ -254,19 +330,29 @@ func TestInputMeterKeepsThePublishedMaximum(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, plan, w, _ := meteredSetup(t)
+
 			e.InputMeter = !tc.meterOff
 			if tc.contract != nil {
 				plan.Contract = tc.contract
 			}
+
 			if tc.meter != "" {
 				plan.InputMeter = json.RawMessage(tc.meter)
 			}
+
 			if tc.unmetered {
 				plan.InputMeter = nil
 			}
+
 			if tc.quoteNoAct {
-				plan.QuoteJSON = strings.Replace(plan.QuoteJSON, `,"settlementPolicy":"actual-cost-v1"`, ``, 1)
+				plan.QuoteJSON = strings.Replace(
+					plan.QuoteJSON,
+					`,"settlementPolicy":"actual-cost-v1"`,
+					``,
+					1,
+				)
 			}
+
 			published := plan.QuoteJSON
 			task, err := e.Submit(context.Background(), "req", "g", 1, turboBody(tc.input), plan)
 			require.NoError(t, err)
@@ -275,6 +361,7 @@ func TestInputMeterKeepsThePublishedMaximum(t *testing.T) {
 			require.Equal(t, published, admit.QuoteJSON)
 			require.EqualValues(t, 200000, *admit.PrepaidMicros)
 			require.EqualValues(t, 200000, *admit.EstimatedMicros)
+
 			saved, err := model.GetNativeTask(e.DB, "req", "g", 1)
 			require.NoError(t, err)
 			require.Equal(t, published, saved.PrepaymentQuoteJSON)
@@ -287,7 +374,9 @@ func TestInputMeterKeepsThePublishedMaximum(t *testing.T) {
 func TestInputMeterQuoteIsDeterministicAcrossRetries(t *testing.T) {
 	e, plan, _, p := meteredSetup(t)
 	body := turboBody(fixture(t, "metered-input-turbo-122.json"))
-	ambiguous := &scriptedWallet{errs: map[string]error{"admit": errors.New("prepayment outcome unknown")}}
+	ambiguous := &scriptedWallet{
+		errs: map[string]error{"admit": errors.New("prepayment outcome unknown")},
+	}
 	e.Wallet = ambiguous
 	_, err := e.Submit(context.Background(), "req", "g", 1, body, plan)
 	require.Error(t, err)
@@ -309,9 +398,21 @@ func TestInputMeterQuoteIsDeterministicAcrossRetries(t *testing.T) {
 	require.NoError(t, json.Unmarshal(plan.Contract, &frozen))
 	quote, err := model.ParseImagePrepaymentQuote(plan.QuoteJSON)
 	require.NoError(t, err)
-	first, _, err := sizeQuoteToInput(plan.QuoteJSON, quote, plan.InputMeter, frozen, json.RawMessage(fixture(t, "metered-input-turbo-122.json")))
+	first, _, err := sizeQuoteToInput(
+		plan.QuoteJSON,
+		quote,
+		plan.InputMeter,
+		frozen,
+		json.RawMessage(fixture(t, "metered-input-turbo-122.json")),
+	)
 	require.NoError(t, err)
-	second, _, err := sizeQuoteToInput(plan.QuoteJSON, quote, plan.InputMeter, frozen, json.RawMessage(fixture(t, "metered-input-turbo-122.json")))
+	second, _, err := sizeQuoteToInput(
+		plan.QuoteJSON,
+		quote,
+		plan.InputMeter,
+		frozen,
+		json.RawMessage(fixture(t, "metered-input-turbo-122.json")),
+	)
 	require.NoError(t, err)
 	require.Equal(t, first, second)
 }
@@ -321,7 +422,9 @@ func TestInputMeterQuoteIsDeterministicAcrossRetries(t *testing.T) {
 func TestInputMeterInsufficientBalanceReleasesReservation(t *testing.T) {
 	e, plan, _, p := meteredSetup(t)
 	body := turboBody(fixture(t, "metered-input-turbo-122.json"))
-	refusing := &scriptedWallet{errs: map[string]error{"admit": balance.ErrPrepaymentInsufficientBalance}}
+	refusing := &scriptedWallet{
+		errs: map[string]error{"admit": balance.ErrPrepaymentInsufficientBalance},
+	}
 	e.Wallet = refusing
 	_, err := e.Submit(context.Background(), "req", "g", 1, body, plan)
 	require.ErrorIs(t, err, balance.ErrPrepaymentInsufficientBalance)
@@ -348,12 +451,16 @@ func TestInputMeterInsufficientBalanceReleasesReservation(t *testing.T) {
 // dialogue turn, a context block). Short nested settings still meter; nested
 // text longer than otherTextLimit in total holds the published maximum.
 func TestMeteredCharactersTreatLongNestedTextAsOtherText(t *testing.T) {
-	frozen := nativeresult.TaskContract{InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-		`"text":{"type":"string"},"dialogue":{"type":"array"},"voice_setting":{"type":"object"}}}`)}
+	frozen := nativeresult.TaskContract{
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+			`"text":{"type":"string"},"dialogue":{"type":"array"},"voice_setting":{"type":"object"}}}`),
+	}
 	count, err := meteredCharacters(frozen, json.RawMessage(
-		`{"text":"hi","voice_setting":{"voice_id":"Wise_Woman","speed":1,"emotion":"happy"},"dialogue":[]}`), "text")
+		`{"text":"hi","voice_setting":{"voice_id":"Wise_Woman","speed":1,"emotion":"happy"},"dialogue":[]}`,
+	), "text")
 	require.NoError(t, err)
 	require.Equal(t, int64(2), count)
+
 	for _, input := range []string{
 		`{"text":"hi","dialogue":[{"text":"` + strings.Repeat("话", 65) + `"}]}`,
 		`{"text":"hi","dialogue":["` + strings.Repeat("a", 40) + `","` + strings.Repeat("b", 25) + `"]}`,

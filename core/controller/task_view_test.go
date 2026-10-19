@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,8 +29,14 @@ func seedTaskViewLogs(t *testing.T, db *gorm.DB, now time.Time) map[string]*mode
 
 	native := func(id string, token int) model.Log {
 		return model.Log{
-			RequestID: model.EmptyNullString(id), GroupID: "g", TokenID: token, Model: "vendor/flux",
-			Mode: int(mode.NativeTasks), Endpoint: "POST /v1/model-tasks",
+			RequestID: model.EmptyNullString(
+				id,
+			),
+			GroupID:  "g",
+			TokenID:  token,
+			Model:    "vendor/flux",
+			Mode:     int(mode.NativeTasks),
+			Endpoint: "POST /v1/model-tasks",
 		}
 	}
 
@@ -56,16 +63,35 @@ func seedTaskViewLogs(t *testing.T, db *gorm.DB, now time.Time) map[string]*mode
 	rows["b-own"] = ownB
 
 	rows["image-trace-429"] = model.Log{
-		RequestID: "image-trace-1760000000000001", GroupID: "g", TokenID: 3, Endpoint: "POST /v1/images/tasks",
-		Code: 429, FailureStage: model.FailureStageRateLimit, RequestAt: now.Add(-30 * time.Minute),
+		RequestID:    "image-trace-1760000000000001",
+		GroupID:      "g",
+		TokenID:      3,
+		Endpoint:     "POST /v1/images/tasks",
+		Code:         429,
+		FailureStage: model.FailureStageRateLimit,
+		RequestAt:    now.Add(-30 * time.Minute),
 	}
 	rows["poll-unknown-404"] = model.Log{
-		RequestID: "poll-1", GroupID: "g", TokenID: 3, Endpoint: "GET /v1/model-tasks/nope", Code: 404,
-		FailureStage: model.FailureStageValidation, ErrorCode: "task_not_found", RequestAt: now.Add(-20 * time.Minute),
+		RequestID:    "poll-1",
+		GroupID:      "g",
+		TokenID:      3,
+		Endpoint:     "GET /v1/model-tasks/nope",
+		Code:         404,
+		FailureStage: model.FailureStageValidation,
+		ErrorCode:    "task_not_found",
+		RequestAt:    now.Add(-20 * time.Minute),
 	}
 	rows["chat-ok"] = model.Log{
-		RequestID: "chat-ok", GroupID: "g", TokenID: 3, Code: 200, Model: "gpt-4o",
-		Mode: int(mode.ChatCompletions), Endpoint: "/v1/chat/completions", RequestAt: now.Add(-10 * time.Minute),
+		RequestID: "chat-ok",
+		GroupID:   "g",
+		TokenID:   3,
+		Code:      200,
+		Model:     "gpt-4o",
+		Mode: int(
+			mode.ChatCompletions,
+		),
+		Endpoint:  "/v1/chat/completions",
+		RequestAt: now.Add(-10 * time.Minute),
 	}
 	rows["unknown-key-401"] = model.Log{
 		RequestID: "unknown-key", Code: 401, FailureStage: model.FailureStageAuth,
@@ -74,10 +100,9 @@ func seedTaskViewLogs(t *testing.T, db *gorm.DB, now time.Time) map[string]*mode
 
 	stored := make(map[string]*model.Log, len(rows))
 	for label, row := range rows {
-		entry := row
-		entry.CreatedAt = entry.RequestAt.Add(time.Second)
-		require.NoError(t, db.Create(&entry).Error, label)
-		stored[label] = &entry
+		row.CreatedAt = row.RequestAt.Add(time.Second)
+		require.NoError(t, db.Create(&row).Error, label)
+		stored[label] = &row
 	}
 
 	return stored
@@ -90,7 +115,7 @@ func labelsOfPage(stored map[string]*model.Log, page groupLogPage) []string {
 		byID[entry.ID] = label
 	}
 
-	out := []string{}
+	out := make([]string, 0, len(page.Logs))
 
 	for _, row := range page.Logs {
 		out = append(out, byID[row.ID])
@@ -120,30 +145,29 @@ func TestGroupLogsTaskViewKinds(t *testing.T) {
 
 	query := func(extra url.Values) url.Values {
 		out := url.Values{}
-		for key, values := range window {
-			out[key] = values
-		}
+		maps.Copy(out, window)
 
-		for key, values := range extra {
-			out[key] = values
-		}
+		maps.Copy(out, extra)
 
 		return out
 	}
 
-	code, page, body := serveGroupLogs(t, "g", query(url.Values{"kind": {"tasks"}}))
+	code, page, body := serveGroupLogs(t, query(url.Values{"kind": {"tasks"}}))
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, []string{"a-own", "b-own", "chat-ok"}, labelsOfPage(stored, page))
 	require.EqualValues(t, 3, page.Total)
 
-	code, page, body = serveGroupLogs(t, "g", query(url.Values{"kind": {"non_task"}}))
+	code, page, body = serveGroupLogs(t, query(url.Values{"kind": {"non_task"}}))
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t,
 		[]string{"a-rejected-429", "b-failed-after-hold", "image-trace-429", "poll-unknown-404"},
 		labelsOfPage(stored, page))
 	require.EqualValues(t, 4, page.Total)
 
-	code, page, body = serveGroupLogs(t, "g", query(url.Values{"kind": {"tasks"}, "status": {"succeeded"}}))
+	code, page, body = serveGroupLogs(
+		t,
+		query(url.Values{"kind": {"tasks"}, "status": {"succeeded"}}),
+	)
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, []string{"a-own", "b-own", "chat-ok"}, labelsOfPage(stored, page))
 
@@ -156,16 +180,25 @@ func TestGroupLogsTaskViewKinds(t *testing.T) {
 		{"kind": {"task"}},
 		{"kind": {"non-task"}},
 	} {
-		code, _, body := serveGroupLogs(t, "g", query(extra))
+		code, _, body := serveGroupLogs(t, query(extra))
 		require.Equal(t, http.StatusBadRequest, code, "%v: %s", extra, body)
 	}
 
 	// Without the new kinds the list is unchanged: calls keep every attempt.
-	code, page, body = serveGroupLogs(t, "g", query(url.Values{"kind": {"calls"}}))
+	code, page, body = serveGroupLogs(t, query(url.Values{"kind": {"calls"}}))
 	require.Equal(t, http.StatusOK, code, body)
-	require.Equal(t,
-		[]string{"a-own", "a-rejected-429", "b-failed-after-hold", "b-own", "chat-ok", "image-trace-429"},
-		labelsOfPage(stored, page))
+	require.Equal(
+		t,
+		[]string{
+			"a-own",
+			"a-rejected-429",
+			"b-failed-after-hold",
+			"b-own",
+			"chat-ok",
+			"image-trace-429",
+		},
+		labelsOfPage(stored, page),
+	)
 }
 
 func TestAdminLogsTaskViewKinds(t *testing.T) {
@@ -182,16 +215,31 @@ func TestAdminLogsTaskViewKinds(t *testing.T) {
 		query   url.Values
 		want    []string
 	}{
-		{"list tasks", GetLogs, "/api/logs/", url.Values{"kind": {"tasks"}},
-			[]string{"a-own", "b-own", "chat-ok"}},
-		{"list non_task keeps unidentified callers", GetLogs, "/api/logs/", url.Values{"kind": {"non_task"}},
-			[]string{"a-rejected-429", "b-failed-after-hold", "image-trace-429", "poll-unknown-404", "unknown-key-401"}},
-		{"search tasks of one group", SearchLogs, "/api/logs/search", url.Values{"kind": {"tasks"}, "group": {"g"}},
-			[]string{"a-own", "b-own", "chat-ok"}},
-		{"search non_task of one group", SearchLogs, "/api/logs/search", url.Values{"kind": {"non_task"}, "group": {"g"}},
-			[]string{"a-rejected-429", "b-failed-after-hold", "image-trace-429", "poll-unknown-404"}},
-		{"search tasks by request id", SearchLogs, "/api/logs/search", url.Values{"kind": {"tasks"}, "request_id": {"job-a1234"}},
-			[]string{"a-own"}},
+		{
+			"list tasks", GetLogs, "/api/logs/",
+			url.Values{"kind": {"tasks"}},
+			[]string{"a-own", "b-own", "chat-ok"},
+		},
+		{
+			"list non_task keeps unidentified callers", GetLogs, "/api/logs/",
+			url.Values{"kind": {"non_task"}},
+			[]string{"a-rejected-429", "b-failed-after-hold", "image-trace-429", "poll-unknown-404", "unknown-key-401"},
+		},
+		{
+			"search tasks of one group", SearchLogs, "/api/logs/search",
+			url.Values{"kind": {"tasks"}, "group": {"g"}},
+			[]string{"a-own", "b-own", "chat-ok"},
+		},
+		{
+			"search non_task of one group", SearchLogs, "/api/logs/search",
+			url.Values{"kind": {"non_task"}, "group": {"g"}},
+			[]string{"a-rejected-429", "b-failed-after-hold", "image-trace-429", "poll-unknown-404"},
+		},
+		{
+			"search tasks by request id", SearchLogs, "/api/logs/search",
+			url.Values{"kind": {"tasks"}, "request_id": {"job-a1234"}},
+			[]string{"a-own"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.query.Set("per_page", "100")
@@ -239,13 +287,9 @@ func TestUsageUnitTasks(t *testing.T) {
 		t.Helper()
 
 		query := url.Values{}
-		for key, values := range window {
-			query[key] = values
-		}
+		maps.Copy(query, window)
 
-		for key, values := range extra {
-			query[key] = values
-		}
+		maps.Copy(query, extra)
 
 		code, body := serveUsage(t, handler, path, query)
 
@@ -267,14 +311,22 @@ func TestUsageUnitTasks(t *testing.T) {
 	require.EqualValues(t, 3, byRequest.Data.Totals.Succeeded)
 	require.EqualValues(t, 2, byRequest.Data.Totals.Rejected)
 
-	code, explicit, body := usage(GetGroupUsageCalls, "/api/usage/g/calls", url.Values{"unit": {"requests"}})
+	code, explicit, body := usage(
+		GetGroupUsageCalls,
+		"/api/usage/g/calls",
+		url.Values{"unit": {"requests"}},
+	)
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, "requests", *explicit.Data.Unit)
 	require.Equal(t, byRequest.Data.Totals, explicit.Data.Totals)
 
 	// unit=tasks: the failed-then-resent submit counts once; rejected calls
 	// still count.
-	code, byTask, body := usage(GetGroupUsageCalls, "/api/usage/g/calls", url.Values{"unit": {"tasks"}})
+	code, byTask, body := usage(
+		GetGroupUsageCalls,
+		"/api/usage/g/calls",
+		url.Values{"unit": {"tasks"}},
+	)
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, "tasks", *byTask.Data.Unit)
 	require.EqualValues(t, 5, byTask.Data.Totals.Requests)
@@ -315,6 +367,7 @@ func TestUsageUnitTasks(t *testing.T) {
 // requests without the new parameters are served as before.
 func TestTaskViewFailsClosedWhenNotReady(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
 	db := statusLogDB(t)
 	require.NoError(t, db.AutoMigrate(&model.RequestDetail{}, &model.GroupSummary{}))
 
@@ -331,18 +384,24 @@ func TestTaskViewFailsClosedWhenNotReady(t *testing.T) {
 
 	// While unready the probe runs at most every 10 s.
 	before := probes
+
 	require.Equal(t, http.StatusOK, getStatus(t).Code)
 	require.Equal(t, before, probes)
 
 	for _, kind := range []string{"tasks", "non_task"} {
-		code, _, body := serveGroupLogs(t, "g", url.Values{"kind": {kind}})
+		code, _, body := serveGroupLogs(t, url.Values{"kind": {kind}})
 		require.Equal(t, http.StatusServiceUnavailable, code, body)
 		require.Contains(t, body, errTaskViewUnavailable)
 
 		code, _, body = serveAdminLogs(t, GetLogs, "/api/logs/", url.Values{"kind": {kind}})
 		require.Equal(t, http.StatusServiceUnavailable, code, body)
 
-		code, _, body = serveAdminLogs(t, SearchLogs, "/api/logs/search", url.Values{"kind": {kind}})
+		code, _, body = serveAdminLogs(
+			t,
+			SearchLogs,
+			"/api/logs/search",
+			url.Values{"kind": {kind}},
+		)
 		require.Equal(t, http.StatusServiceUnavailable, code, body)
 	}
 
@@ -362,7 +421,7 @@ func TestTaskViewFailsClosedWhenNotReady(t *testing.T) {
 	code, body = serveUsage(t, GetGroupUsageKeys, "/api/usage/g/keys", window)
 	require.Equal(t, http.StatusServiceUnavailable, code, string(body))
 
-	code, _, body2 := serveGroupLogs(t, "g", url.Values{"kind": {"calls"}})
+	code, _, body2 := serveGroupLogs(t, url.Values{"kind": {"calls"}})
 	require.Equal(t, http.StatusOK, code, body2)
 
 	code, related := serveTaskRequests(t, "g", url.Values{"log_id": {"1"}})
@@ -394,7 +453,11 @@ func TestGroupLogTaskRequests(t *testing.T) {
 	stored := seedTaskViewLogs(t, db, now)
 
 	// Without the task tables the endpoint is unavailable.
-	code, body := serveTaskRequests(t, "g", url.Values{"log_id": {strconv.Itoa(stored["a-own"].ID)}})
+	code, body := serveTaskRequests(
+		t,
+		"g",
+		url.Values{"log_id": {strconv.Itoa(stored["a-own"].ID)}},
+	)
 	require.Equal(t, http.StatusServiceUnavailable, code, body)
 
 	require.NoError(t, db.AutoMigrate(&model.NativeTask{}, &model.ImageTask{}))
@@ -411,7 +474,9 @@ func TestGroupLogTaskRequests(t *testing.T) {
 
 	var payload struct {
 		Data struct {
-			Task     struct{ ID int } `json:"task"`
+			Task struct {
+				ID int `json:"ID"`
+			} `json:"task"`
 			Attempts []struct {
 				Relation string `json:"relation"`
 				Hint     string `json:"hint"`

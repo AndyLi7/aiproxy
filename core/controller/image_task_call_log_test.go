@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,6 +25,12 @@ import (
 const imageCallLogRequestID = "call-log"
 
 type imageCallLogHarness struct {
+	beginClaimed *bool
+	beginStatus  int
+	channel      *model.Channel
+	walletHook   func(balance.PrepaymentCommand)
+	providerHook func()
+
 	db            *gorm.DB
 	providerCalls int
 	requestID     string
@@ -62,10 +69,9 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 	h := &imageCallLogHarness{requestID: imageCallLogRequestID}
 	admitStatus := options.admitStatus
+
 	edgeFailures := map[string]int{}
-	for action, count := range options.edgeFailures {
-		edgeFailures[action] = count
-	}
+	maps.Copy(edgeFailures, options.edgeFailures)
 
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
@@ -78,8 +84,19 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 		var command balance.PrepaymentCommand
 		require.NoError(t, json.Unmarshal(raw, &command))
 
+		if h.walletHook != nil {
+			h.walletHook(command)
+		}
+
+		if command.Action == "begin_attempt" && h.beginStatus != 0 {
+			w.WriteHeader(h.beginStatus)
+			_, _ = w.Write([]byte(`{"code":1,"message":"synthetic refusal"}`))
+			return
+		}
+
 		if edgeFailures[command.Action] > 0 {
 			edgeFailures[command.Action]--
+
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`<html>Application failed to respond</html>`))
 
@@ -88,14 +105,25 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 		if command.Action == "admit" && admitStatus != http.StatusOK {
 			w.WriteHeader(admitStatus)
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "message": "refused"})
+
+			if err := json.NewEncoder(w).
+				Encode(map[string]any{"code": 1, "message": "refused"}); err != nil {
+				panic(err)
+			} /* A broken test response must fail visibly. */
 
 			return
 		}
 
-		receipt := map[string]any{"id": command.BillingOperationID, "status": "pending", "prepaidMicros": 2000000}
+		receipt := map[string]any{
+			"id":            command.BillingOperationID,
+			"status":        "pending",
+			"prepaidMicros": 2000000,
+		}
 		if command.Action == "begin_attempt" {
 			receipt["claimed"] = true
+			if h.beginClaimed != nil {
+				receipt["claimed"] = *h.beginClaimed
+			}
 		}
 
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": receipt}))
@@ -108,6 +136,10 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		h.providerCalls++
+		if h.providerHook != nil {
+			h.providerHook()
+		}
+
 		_, _ = w.Write([]byte(`{"request_id":"upstream"}`))
 	}))
 	t.Cleanup(upstream.Close)
@@ -121,7 +153,15 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 
 	db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "call-log.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.ImageTask{}, &model.AsyncUsageInfo{}, &model.Log{}, &model.RequestDetail{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(
+			&model.ImageTask{},
+			&model.AsyncUsageInfo{},
+			&model.Log{},
+			&model.RequestDetail{},
+		),
+	)
 
 	oldLogDB := model.LogDB
 	model.LogDB = db
@@ -133,22 +173,42 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 		ID: 7, Type: model.ChannelTypeFal, Key: "secret", BaseURL: upstream.URL,
 		Models: []string{"image"}, ModelMapping: map[string]string{"image": "fal-ai/test"},
 		Configs: map[string]any{providerBindingsConfig: map[string]any{"image": map[string]any{
-			"provider": "small", "id": "small", "revision": "1",
+			"provider":     "small",
+			"id":           "small",
+			"revision":     "1",
 			"contractHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}}},
 	}
 
+	h.channel = channel
+
 	var quote map[string]any
-	require.NoError(t, json.Unmarshal([]byte(`{"version":1,"quoteVersion":"test-1","currency":"USD","prepaidMicros":2000000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":1000000,"prepaidMicros":2000000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`), &quote))
+	require.NoError(
+		t,
+		json.Unmarshal(
+			[]byte(
+				`{"version":1,"quoteVersion":"test-1","currency":"USD","prepaidMicros":2000000,"routes":[{"routeId":"primary","channelId":7,"provider":"fal","endpoint":"fal-ai/test","credentialScope":"channel-7","estimatedMicros":1000000,"prepaidMicros":2000000,"rule":{"mode":"list_ratio","ratio":"1"}}]}`,
+			),
+			&quote,
+		),
+	)
 
 	price := model.Price{PerRequestPrice: 1}
+
 	config := map[model.ModelConfigKey]any{
-		"x_token_platform_capability_contract": map[string]any{"entry_id": "image", "contract": contract},
-		"x_token_platform_pricing":             map[string]any{"currency": "USD", "pricing_version": "v1"},
-		model.ImagePrepaymentConfigKey:         quote,
+		"x_token_platform_capability_contract": map[string]any{
+			"entry_id": "image",
+			"contract": contract,
+		},
+		"x_token_platform_pricing": map[string]any{
+			"currency":        "USD",
+			"pricing_version": "v1",
+		},
+		model.ImagePrepaymentConfigKey: quote,
 	}
 	if options.unprepaid {
 		price = options.price
+
 		delete(config, model.ImagePrepaymentConfigKey)
 	}
 
@@ -164,7 +224,10 @@ func newImageHarness(t *testing.T, options imageHarnessOptions) *imageCallLogHar
 		c.Set(middleware.RequestModel, "image")
 		c.Set(middleware.RoutingModel, "image")
 		c.Set(middleware.RequestedModel, "image")
-		c.Set(middleware.ModelCaches, &model.ModelCaches{ChannelsByID: map[int]*model.Channel{7: channel}})
+		c.Set(
+			middleware.ModelCaches,
+			&model.ModelCaches{ChannelsByID: map[int]*model.Channel{7: channel}},
+		)
 		c.Set(middleware.ModelConfig, model.ModelConfig{Price: price, Config: config})
 		c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{
 			Group: "g", CheckBalance: func(float64) bool { return true },
@@ -336,7 +399,13 @@ func TestFinishReservedImageCall(t *testing.T) {
 			logID = reservation.ID + 1000
 		}
 
-		finishReservedImageCall(c, logID, "reserved", "g", false)
+		_ = finishReservedImageCall(
+			c,
+			logID,
+			"reserved",
+			"g",
+			false,
+		) // This branch tests the persisted call row, not the optional returned summary.
 	})
 
 	for _, path := range []string{"/direct/existing", "/direct/missing"} {
@@ -362,7 +431,10 @@ func TestFinishReservedImageCall(t *testing.T) {
 // instead of answering prepayment_pending. The resend is safe because a
 // replayed admit returns the existing hold.
 func TestImageTaskAdmissionResendsAfterAnEdge502(t *testing.T) {
-	h := newImageHarness(t, imageHarnessOptions{admitStatus: http.StatusOK, edgeFailures: map[string]int{"admit": 1}})
+	h := newImageHarness(
+		t,
+		imageHarnessOptions{admitStatus: http.StatusOK, edgeFailures: map[string]int{"admit": 1}},
+	)
 
 	w := h.submit()
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
@@ -378,7 +450,13 @@ func TestImageTaskAdmissionResendsAfterAnEdge502(t *testing.T) {
 // A replayed claim answers claimed:false, so the resend never authorizes a
 // second provider call.
 func TestImageTaskFirstClaimResendsAfterAnEdge502(t *testing.T) {
-	h := newImageHarness(t, imageHarnessOptions{admitStatus: http.StatusOK, edgeFailures: map[string]int{"begin_attempt": 1}})
+	h := newImageHarness(
+		t,
+		imageHarnessOptions{
+			admitStatus:  http.StatusOK,
+			edgeFailures: map[string]int{"begin_attempt": 1},
+		},
+	)
 
 	w := h.submit()
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
@@ -398,6 +476,7 @@ func TestImageTaskFirstClaimResendsAfterAnEdge502(t *testing.T) {
 func TestImageTaskSkipsTheFirstClaimWhenTheWalletBudgetIsShort(t *testing.T) {
 	budget := imageSubmitWalletBudget
 	t.Cleanup(func() { imageSubmitWalletBudget = budget })
+
 	imageSubmitWalletBudget = 4 * time.Second
 	h := newImageHarness(t, imageHarnessOptions{admitStatus: http.StatusOK})
 

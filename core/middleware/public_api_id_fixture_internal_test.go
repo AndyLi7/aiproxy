@@ -47,7 +47,15 @@ func TestPublicAPIIDFixtureErrorBodies(t *testing.T) {
 		body, err := json.Marshal(map[string]any{"model": tc.Requested, "input": map[string]any{}})
 		require.NoError(t, err)
 
-		got := distributeAs(t, mode.NativeTasks, "/v1/model-tasks", fixture.Configs, entitled, false, string(body))
+		got := distributeAs(
+			t,
+			mode.NativeTasks,
+			"/v1/model-tasks",
+			fixture.Configs,
+			entitled,
+			false,
+			string(body),
+		)
 		require.False(t, got.reached, tc.Requested)
 		require.Equal(t, tc.Status, got.status, "%s: %s", tc.Requested, got.body)
 		require.JSONEq(t, string(tc.Body), got.body, tc.Requested)
@@ -67,7 +75,15 @@ func TestPublicAPIIDFixtureErrorBodies(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, path := range []string{"/v1/images/generations", "/v1/images/tasks"} {
-			got := distributeAs(t, mode.ImagesGenerations, path, fixture.Configs, entitled, false, string(body))
+			got := distributeAs(
+				t,
+				mode.ImagesGenerations,
+				path,
+				fixture.Configs,
+				entitled,
+				false,
+				string(body),
+			)
 			require.False(t, got.reached, tc.Requested)
 			require.Equal(t, tc.Status, got.status, "%s %s: %s", path, tc.Requested, got.body)
 			require.JSONEq(t, string(tc.Body), got.body, "%s %s", path, tc.Requested)

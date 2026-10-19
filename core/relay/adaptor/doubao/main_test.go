@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/labring/aiproxy/core/common/ownedimage"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/ownedimage"
 	coremodel "github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
@@ -588,9 +588,15 @@ func TestAdaptorConvertRequestImageGenerationMapsSequentialCount(t *testing.T) {
 func TestAdaptorDoResponseImageGenerationUsesDoubaoUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	adaptor := &Adaptor{imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
-		return "https://api.example.com/owned.png", ownedimage.Metadata{Width: 2048, Height: 2048, ContentType: "image/png"}, nil
-	}}
+	adaptor := &Adaptor{
+		imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
+			return "https://api.example.com/owned.png", ownedimage.Metadata{
+				Width:       2048,
+				Height:      2048,
+				ContentType: "image/png",
+			}, nil
+		},
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequestWithContext(
@@ -651,7 +657,8 @@ func TestAdaptorDoResponseImageGenerationUsesDoubaoUsage(t *testing.T) {
 		t.Fatalf("expected OpenAI image data, got %#v", payload["data"])
 	}
 
-	if first["size"] != "2048x2048" || first["width"] != float64(2048) || first["content_type"] != "image/png" {
+	if first["size"] != "2048x2048" || first["width"] != float64(2048) ||
+		first["content_type"] != "image/png" {
 		t.Fatalf("expected actual image metadata, got %#v", first)
 	}
 
@@ -677,9 +684,15 @@ func TestAdaptorDoResponseImageGenerationUsesDoubaoUsage(t *testing.T) {
 func TestAdaptorDoResponseImageGenerationStreamConvertsDoubaoEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	adaptor := &Adaptor{imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
-		return "https://api.example.com/owned.png", ownedimage.Metadata{Width: 2048, Height: 2048, ContentType: "image/png"}, nil
-	}}
+	adaptor := &Adaptor{
+		imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
+			return "https://api.example.com/owned.png", ownedimage.Metadata{
+				Width:       2048,
+				Height:      2048,
+				ContentType: "image/png",
+			}, nil
+		},
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequestWithContext(
@@ -752,9 +765,15 @@ func TestAdaptorDoResponseImageGenerationStreamConvertsDoubaoEvents(t *testing.T
 func TestAdaptorDoResponseImageGenerationStreamFallsBackToCompletedImages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	adaptor := &Adaptor{imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
-		return "https://api.example.com/owned.png", ownedimage.Metadata{Width: 2048, Height: 2048, ContentType: "image/png"}, nil
-	}}
+	adaptor := &Adaptor{
+		imageStore: func(context.Context, string) (string, ownedimage.Metadata, error) {
+			return "https://api.example.com/owned.png", ownedimage.Metadata{
+				Width:       2048,
+				Height:      2048,
+				ContentType: "image/png",
+			}, nil
+		},
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequestWithContext(

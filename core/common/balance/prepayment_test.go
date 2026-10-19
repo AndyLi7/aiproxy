@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private mustJSON fixture or implementation.
 package balance
 
 import (
@@ -12,44 +13,74 @@ import (
 
 func TestPrepaymentRetryKeepsServerIdentityAndNeverUsesBalanceCache(t *testing.T) {
 	calls := 0
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+
 		require.Equal(t, "/api/internal/wallet/prepayment", r.URL.Path)
 		require.Equal(t, "Bearer private-test-key", r.Header.Get("Authorization"))
+
 		var command PrepaymentCommand
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&command))
 		require.Equal(t, "op-1", command.BillingOperationID)
 		require.NotNil(t, command.PrepaidMicros)
 		require.Zero(t, *command.PrepaidMicros)
+
 		_, _ = w.Write([]byte(`{"code":0,"data":{"id":"op-1","status":"pending"}}`))
 	}))
 	defer server.Close()
+
 	client := &ExternalHTTP{url: server.URL, key: "private-test-key"}
 	zero := int64(0)
-	cmd := PrepaymentCommand{Action: "admit", Group: "user", BillingOperationID: "op-1", PrepaidMicros: &zero}
+
+	cmd := PrepaymentCommand{
+		Action:             "admit",
+		Group:              "user",
+		BillingOperationID: "op-1",
+		PrepaidMicros:      &zero,
+	}
 	for range 2 {
 		receipt, err := client.Prepayment(context.Background(), cmd)
 		require.NoError(t, err)
 		require.Equal(t, "op-1", receipt.ID)
 	}
+
 	require.Equal(t, 2, calls)
 }
 
 func TestPrepaymentRejectsAmbiguousOrWrongIdentityReceiptsAndRedirects(t *testing.T) {
 	for _, body := range []string{`{}`, `{"code":1,"data":{"id":"op-1"}}`, `{"code":0,"data":{"id":"other"}}`, `not-json`} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		server := httptest.NewServer(
+			http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) },
+			),
+		)
 		client := &ExternalHTTP{url: server.URL, key: "private-test-key"}
-		_, err := client.Prepayment(context.Background(), PrepaymentCommand{Action: "get", Group: "user", BillingOperationID: "op-1"})
+		_, err := client.Prepayment(
+			context.Background(),
+			PrepaymentCommand{Action: "get", Group: "user", BillingOperationID: "op-1"},
+		)
 		require.Error(t, err)
 		server.Close()
 	}
+
 	leaked := false
-	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
+
+	other := httptest.NewServer(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }),
+	)
 	defer other.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, 307) }))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusTemporaryRedirect)
+	}))
 	defer server.Close()
+
 	client := &ExternalHTTP{url: server.URL, key: "private-test-key"}
-	_, err := client.Prepayment(context.Background(), PrepaymentCommand{Action: "get", Group: "user", BillingOperationID: "op-1"})
+	_, err := client.Prepayment(
+		context.Background(),
+		PrepaymentCommand{Action: "get", Group: "user", BillingOperationID: "op-1"},
+	)
 	require.Error(t, err)
 	require.False(t, leaked)
 }
@@ -70,13 +101,24 @@ func TestPrepaymentActualCostReceiptRequiresFrozenPolicy(t *testing.T) {
 		{"unknown policy", "unknown", "settled", 80, 120, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			quote, _ := json.Marshal(map[string]string{"settlementPolicy": tc.policy})
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"id": "op-1", "status": tc.status, "prepaidMicros": 200, "chargedMicros": tc.charge, "refundMicros": tc.refund, "quoteJson": string(quote)}})
-			}))
+			quote := mustJSON(t, map[string]string{"settlementPolicy": tc.policy})
+
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewEncoder(w).
+						Encode(map[string]any{"code": 0, "data": map[string]any{"id": "op-1", "status": tc.status, "prepaidMicros": 200, "chargedMicros": tc.charge, "refundMicros": tc.refund, "quoteJson": string(quote)}}); err != nil {
+						panic(err)
+					} /* A broken test response must fail visibly. */
+				}),
+			)
 			defer server.Close()
+
 			client := &ExternalHTTP{url: server.URL, key: "private-test-key"}
-			_, err := client.Prepayment(context.Background(), PrepaymentCommand{Action: "get", Group: "user", BillingOperationID: "op-1"})
+
+			_, err := client.Prepayment(
+				context.Background(),
+				PrepaymentCommand{Action: "get", Group: "user", BillingOperationID: "op-1"},
+			)
 			if tc.ok {
 				require.NoError(t, err)
 			} else {
@@ -94,9 +136,16 @@ func TestPrepaymentAdmissionRefusalsAreTyped(t *testing.T) {
 		http.StatusTooManyRequests: ErrPrepaymentTooManyActiveTasks,
 		http.StatusLocked:          ErrPrepaymentModelPaused,
 	} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		server := httptest.NewServer(
+			http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) },
+			),
+		)
 		client := &ExternalHTTP{url: server.URL, key: "private-test-key"}
-		_, err := client.Prepayment(context.Background(), PrepaymentCommand{Action: "admit", Group: "user", BillingOperationID: "op-1"})
+		_, err := client.Prepayment(
+			context.Background(),
+			PrepaymentCommand{Action: "admit", Group: "user", BillingOperationID: "op-1"},
+		)
 		require.ErrorIs(t, err, want)
 		server.Close()
 	}

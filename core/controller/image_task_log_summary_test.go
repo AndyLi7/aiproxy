@@ -1,3 +1,4 @@
+//nolint:testpackage // White-box coverage needs the package-private imageTaskLogRequestSummary fixture or implementation.
 package controller
 
 import (
@@ -8,10 +9,26 @@ import (
 )
 
 func TestImageTaskLogSummaryKeepsPromptWithoutUploadedMedia(t *testing.T) {
-	summary := imageTaskLogRequestSummary([]byte(`{"prompt":"A quiet harbor","negative_prompt":"fog","image":"https://private.example/secret","api_key":"secret"}`))
+	summary := imageTaskLogRequestSummary(
+		[]byte(
+			`{"prompt":"A quiet harbor","negative_prompt":"fog","image":"https://private.example/secret","api_key":"secret"}`,
+		),
+	)
 	require.JSONEq(t, `{"prompt":"A quiet harbor","negative_prompt":"fog"}`, summary)
 	require.NotContains(t, summary, "private.example")
-	require.Empty(t, imageTaskLogRequestSummary([]byte(`{"image":"https://private.example/secret"}`)))
-	require.Empty(t, imageTaskLogRequestSummary([]byte(`{"prompt":"`+strings.Repeat("x", 8193)+`"}`)))
-	require.JSONEq(t, `{"prompt":"A quiet harbor"}`, imageTaskLogRequestSummary([]byte(`{"prompt":"A quiet harbor","image":"`+strings.Repeat("x", 70000)+`"}`)))
+	require.Empty(
+		t,
+		imageTaskLogRequestSummary([]byte(`{"image":"https://private.example/secret"}`)),
+	)
+	require.Empty(
+		t,
+		imageTaskLogRequestSummary([]byte(`{"prompt":"`+strings.Repeat("x", 8193)+`"}`)),
+	)
+	require.JSONEq(
+		t,
+		`{"prompt":"A quiet harbor"}`,
+		imageTaskLogRequestSummary(
+			[]byte(`{"prompt":"A quiet harbor","image":"`+strings.Repeat("x", 70000)+`"}`),
+		),
+	)
 }

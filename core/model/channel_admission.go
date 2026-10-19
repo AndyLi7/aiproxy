@@ -136,12 +136,17 @@ func (s *ChannelAdmissionStore) controlTransaction(ctx context.Context, work fun
 	}, claimTxOptions(s.DB)...)
 }
 
+// SQLite's Julian-day floating-point conversion can truncate a millisecond.
+// Build milliseconds from integer seconds and the stored fractional digits so
+// freshly created tasks are not rejected as coming from the future.
+const sqliteAdmissionClockSQL = "(CAST(strftime('%s','now') AS INTEGER) * 1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER))"
+
 func channelAdmissionTime(tx *gorm.DB) (time.Time, error) {
 	var millis int64
 	var query string
 	switch tx.Dialector.Name() {
 	case "sqlite":
-		query = "SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)"
+		query = "SELECT " + sqliteAdmissionClockSQL
 	case "postgres":
 		query = "SELECT CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)"
 	default:
@@ -204,7 +209,7 @@ func admissionClockSQL(tx *gorm.DB) string {
 	if tx.Dialector.Name() == "postgres" {
 		return "CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)"
 	}
-	return "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)"
+	return sqliteAdmissionClockSQL
 }
 
 // All needed channel/proof locks are already held. This final persistent CAS

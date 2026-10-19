@@ -59,7 +59,11 @@ func channelRoutingStorageReady(tx *gorm.DB) (bool, error) {
 		if e != nil {
 			return true, ErrChannelAdmissionUnavailable
 		}
-		rows.Close()
+		readErr := rows.Err()
+		closeErr := rows.Close()
+		if readErr != nil || closeErr != nil {
+			return true, ErrChannelAdmissionUnavailable
+		}
 	}
 	var n int64
 	if e = tx.Model(&ChannelRoutingState{}).Where("version IS NULL OR version<>1 OR revision IS NULL OR revision<1").Count(&n).Error; e != nil || n != 0 {

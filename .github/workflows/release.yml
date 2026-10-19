@@ -159,6 +159,10 @@ jobs:
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on || 'ubuntu-24.04' }}
     steps:
+      - name: Normalize GHCR repository
+        shell: bash
+        run: echo "GHCR_REPO=${GHCR_REPO,,}" >> "$GITHUB_ENV"
+
       - name: Login to GitHub Container Registry
         if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
         uses: docker/login-action@v4
@@ -231,6 +235,10 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
     steps:
+      - name: Normalize GHCR repository
+        shell: bash
+        run: echo "GHCR_REPO=${GHCR_REPO,,}" >> "$GITHUB_ENV"
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -299,6 +307,10 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
     steps:
+      - name: Normalize GHCR repository
+        shell: bash
+        run: echo "GHCR_REPO=${GHCR_REPO,,}" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v6
       - name: install cache images tools

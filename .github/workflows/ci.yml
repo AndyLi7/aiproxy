@@ -41,7 +41,9 @@ jobs:
       - name: Go test
         working-directory: core
         run: |
-          go test -v -timeout 60s -count=1 ./...
+          # The controller/model suites include concurrency and database matrices.
+          # Keep all cases; bound each package independently from job duration.
+          go test -v -timeout 300s -count=1 ./...
 
   golangci-lint-aiproxy:
     name: Lint AI Proxy
@@ -58,7 +60,7 @@ jobs:
       - name: Run Linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0
           working-directory: core
           args: --color=always --path-mode=abs
 
@@ -112,7 +114,7 @@ jobs:
       - name: Run Linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0
           working-directory: mcp-servers
           args: --color=always --path-mode=abs
 
@@ -149,7 +151,7 @@ jobs:
       - name: Run Linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0
           working-directory: openapi-mcp
           args: --color=always --path-mode=abs
 

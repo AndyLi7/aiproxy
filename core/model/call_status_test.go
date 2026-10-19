@@ -2,7 +2,6 @@
 package model
 
 import (
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -243,10 +242,11 @@ func assertCallStatusSQLMatchesGo(t *testing.T, db *gorm.DB) {
 		entry := byID[row.ID]
 		require.NotNil(t, entry)
 
-		description := fmt.Sprintf("%+v", *entry)
-		require.Equal(t, string(entry.CallStatus(now)), row.Status, description)
-		require.Equal(t, entry.IsCall(), row.IsCall == 1, description)
-		require.Equal(t, entry.isAdminLogCall(), row.IsAdminCall == 1, description)
+		// Format the full row only on failure; this exhaustive matrix has tens
+		// of thousands of rows and successful assertions need no diagnostic.
+		require.Equal(t, string(entry.CallStatus(now)), row.Status, "row: %+v", *entry)
+		require.Equal(t, entry.IsCall(), row.IsCall == 1, "row: %+v", *entry)
+		require.Equal(t, entry.isAdminLogCall(), row.IsAdminCall == 1, "row: %+v", *entry)
 		counts[row.Status]++
 
 		if row.IsAdminCall == 1 {

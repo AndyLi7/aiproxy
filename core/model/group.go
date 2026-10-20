@@ -395,11 +395,13 @@ func EnsureGroup(initial *Group) (*Group, error) {
 	if initial.ID == "" {
 		return nil, errors.New("group id is empty")
 	}
+
 	if err := DB.Omit(clause.Associations).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}}, DoNothing: true,
 	}).Create(initial).Error; err != nil {
 		return nil, err
 	}
+
 	stored, err := GetGroupByID(initial.ID, false)
 	if err != nil {
 		return nil, err
@@ -409,5 +411,6 @@ func EnsureGroup(initial *Group) (*Group, error) {
 	if err := CacheDeleteGroup(initial.ID); err != nil {
 		log.Error("cache invalidate ensured group failed: " + err.Error())
 	}
+
 	return stored, nil
 }

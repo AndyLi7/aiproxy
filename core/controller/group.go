@@ -137,9 +137,14 @@ func GetGroup(c *gin.Context) {
 
 	_group, err := model.GetGroupByID(group, false)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "code": "group_not_found", "message": "group not found"})
+		c.JSON(
+			http.StatusNotFound,
+			gin.H{"success": false, "code": "group_not_found", "message": "group not found"},
+		)
+
 		return
 	}
+
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
@@ -878,32 +883,43 @@ func EnsureGroup(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid group id")
 		return
 	}
+
 	var req *struct {
 		Status        int      `json:"status"`
 		AvailableSets []string `json:"available_sets"`
 	}
+
 	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 16385))
 	decoder.DisallowUnknownFields()
+
 	if err := decoder.Decode(&req); err != nil || req == nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
 		return
 	}
+
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
 		return
 	}
+
 	if req.Status == 0 {
 		req.Status = model.GroupStatusEnabled
 	}
-	if req.Status < model.GroupStatusEnabled || req.Status > model.GroupStatusInternal || len(req.AvailableSets) > 100 {
+
+	if req.Status < model.GroupStatusEnabled || req.Status > model.GroupStatusInternal ||
+		len(req.AvailableSets) > 100 {
 		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
 		return
 	}
-	g, err := model.EnsureGroup(&model.Group{ID: id, Status: req.Status, AvailableSets: req.AvailableSets})
+
+	g, err := model.EnsureGroup(
+		&model.Group{ID: id, Status: req.Status, AvailableSets: req.AvailableSets},
+	)
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, "group provisioning failed")
 		return
 	}
+
 	middleware.SuccessResponse(c, &GroupResponse{Group: g})
 }

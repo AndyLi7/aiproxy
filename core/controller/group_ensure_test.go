@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/labring/aiproxy/core/controller"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,6 +99,71 @@ func TestGroupEnsureHTTP(t *testing.T) {
 			call("POST", "/api/group/new/ensure", body, auth).Code,
 			body,
 		)
+	}
+
+	const (
+		bodyLimit = 16 * 1024
+		extraJSON = `{"quota":999}`
+	)
+
+	for index, tc := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{"below-limit", "{}" + strings.Repeat(" ", bodyLimit-3), http.StatusOK},
+		{"exact-limit", "{}" + strings.Repeat(" ", bodyLimit-2), http.StatusOK},
+		{"one-byte-over", "{}" + strings.Repeat(" ", bodyLimit-1), http.StatusRequestEntityTooLarge},
+		{"oversized-whitespace", "{}" + strings.Repeat(" ", 17000), http.StatusRequestEntityTooLarge},
+		{"hidden-trailing-json", "{}" + strings.Repeat(" ", 16383) + extraJSON, http.StatusRequestEntityTooLarge},
+		{"trailing-json-at-limit", "{}" + strings.Repeat(" ", bodyLimit-2-len(extraJSON)) + extraJSON, http.StatusBadRequest},
+		{"short-trailing-json", "{} {}", http.StatusBadRequest},
+		{"oversized-string", `{"available_sets":["` + strings.Repeat("x", 17000) + `"]}`, http.StatusRequestEntityTooLarge},
+	} {
+		for _, unknownLength := range []bool{false, true} {
+			t.Run(tc.name+"/unknown-length="+strconv.FormatBool(unknownLength), func(t *testing.T) {
+				id := "body-boundary-" + strconv.Itoa(
+					index,
+				) + "-" + strconv.FormatBool(
+					unknownLength,
+				)
+				request := httptest.NewRequestWithContext(
+					t.Context(),
+					http.MethodPost,
+					"/api/group/"+id+"/ensure",
+					strings.NewReader(tc.body),
+				)
+				request.Header.Set("Authorization", auth)
+				request.Header.Set("Content-Type", "application/json")
+
+				if unknownLength {
+					request.ContentLength = -1
+				}
+
+				var before int64
+				require.NoError(t, db.Model(&model.Group{}).Count(&before).Error)
+
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, request)
+
+				var after, persisted int64
+				require.NoError(t, db.Model(&model.Group{}).Count(&after).Error)
+				require.NoError(
+					t,
+					db.Model(&model.Group{}).Where("id = ?", id).Count(&persisted).Error,
+				)
+
+				if tc.status == http.StatusOK {
+					assert.EqualValues(t, 1, persisted)
+					assert.Equal(t, before+1, after)
+				} else {
+					assert.Zero(t, persisted, "rejected body must not create a group")
+					assert.Equal(t, before, after, "rejected body must not write to groups")
+				}
+
+				assert.Equal(t, tc.status, response.Code, "body bytes=%d", len(tc.body))
+			})
+		}
 	}
 
 	require.NoError(t, db.Migrator().DropTable(&model.Group{}))

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -874,6 +875,8 @@ func GetIPGroupList(c *gin.Context) {
 	middleware.SuccessResponse(c, ipGroupList)
 }
 
+const maxEnsureGroupBodyBytes = 16 * 1024
+
 // EnsureGroup creates only if the ID is absent. Existing rows always win, including
 // their status and permissions. It deliberately does not change CreateGroup semantics.
 // Initial settings apply only to a new row; callers must validate reused permissions.
@@ -889,7 +892,25 @@ func EnsureGroup(c *gin.Context) {
 		AvailableSets []string `json:"available_sets"`
 	}
 
-	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 16385))
+	// Read one byte beyond the accepted size so truncation cannot masquerade
+	// as EOF and hide trailing JSON behind whitespace. Reject before any insert.
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxEnsureGroupBodyBytes+1))
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
+		return
+	}
+
+	if len(body) > maxEnsureGroupBodyBytes {
+		middleware.ErrorResponse(
+			c,
+			http.StatusRequestEntityTooLarge,
+			"initial group settings body too large",
+		)
+
+		return
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&req); err != nil || req == nil {

@@ -1,6 +1,10 @@
 package controller
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +15,7 @@ import (
 	"github.com/labring/aiproxy/core/controller/utils"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"gorm.io/gorm"
 )
 
 type GroupResponse struct {
@@ -132,6 +137,15 @@ func GetGroup(c *gin.Context) {
 	}
 
 	_group, err := model.GetGroupByID(group, false)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(
+			http.StatusNotFound,
+			gin.H{"success": false, "code": "group_not_found", "message": "group not found"},
+		)
+
+		return
+	}
+
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
@@ -859,4 +873,74 @@ func GetIPGroupList(c *gin.Context) {
 	}
 
 	middleware.SuccessResponse(c, ipGroupList)
+}
+
+const maxEnsureGroupBodyBytes = 16 * 1024
+
+// EnsureGroup creates only if the ID is absent. Existing rows always win, including
+// their status and permissions. It deliberately does not change CreateGroup semantics.
+// Initial settings apply only to a new row; callers must validate reused permissions.
+func EnsureGroup(c *gin.Context) {
+	id := c.Param("group")
+	if id == "" || len(id) > 64 {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid group id")
+		return
+	}
+
+	var req *struct {
+		Status        int      `json:"status"`
+		AvailableSets []string `json:"available_sets"`
+	}
+
+	// Read one byte beyond the accepted size so truncation cannot masquerade
+	// as EOF and hide trailing JSON behind whitespace. Reject before any insert.
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxEnsureGroupBodyBytes+1))
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
+		return
+	}
+
+	if len(body) > maxEnsureGroupBodyBytes {
+		middleware.ErrorResponse(
+			c,
+			http.StatusRequestEntityTooLarge,
+			"initial group settings body too large",
+		)
+
+		return
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil || req == nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
+		return
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
+		return
+	}
+
+	if req.Status == 0 {
+		req.Status = model.GroupStatusEnabled
+	}
+
+	if req.Status < model.GroupStatusEnabled || req.Status > model.GroupStatusInternal ||
+		len(req.AvailableSets) > 100 {
+		middleware.ErrorResponse(c, http.StatusBadRequest, "invalid initial group settings")
+		return
+	}
+
+	g, err := model.EnsureGroup(
+		&model.Group{ID: id, Status: req.Status, AvailableSets: req.AvailableSets},
+	)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, "group provisioning failed")
+		return
+	}
+
+	middleware.SuccessResponse(c, &GroupResponse{Group: g})
 }

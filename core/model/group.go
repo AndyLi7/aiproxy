@@ -387,3 +387,27 @@ func SearchGroup(
 func CreateGroup(group *Group) error {
 	return DB.Create(group).Error
 }
+
+// EnsureGroup inserts atomically without updating an existing group or associations.
+// Only the primary-key conflict is ignored (PostgreSQL/SQLite); other constraints
+// and database failures propagate. Read back the winner, never the proposed defaults.
+func EnsureGroup(initial *Group) (*Group, error) {
+	if initial.ID == "" {
+		return nil, errors.New("group id is empty")
+	}
+	if err := DB.Omit(clause.Associations).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}}, DoNothing: true,
+	}).Create(initial).Error; err != nil {
+		return nil, err
+	}
+	stored, err := GetGroupByID(initial.ID, false)
+	if err != nil {
+		return nil, err
+	}
+	// Invalidate even on a concurrent winner: this process may have cached
+	// absence before another process inserted. Never seed proposed permissions.
+	if err := CacheDeleteGroup(initial.ID); err != nil {
+		log.Error("cache invalidate ensured group failed: " + err.Error())
+	}
+	return stored, nil
+}

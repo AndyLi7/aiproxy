@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/labring/aiproxy/core/controller/utils"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"gorm.io/gorm"
 )
 
 // GetModelConfigs godoc
@@ -251,6 +253,16 @@ func GetModelConfig(c *gin.Context) {
 	_model := strings.TrimPrefix(c.Param("model"), "/")
 
 	config, err := model.GetModelConfig(_model)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"code":    "model_config_not_found",
+			"message": "model config record not found",
+		})
+
+		return
+	}
+
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return

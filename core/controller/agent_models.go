@@ -35,6 +35,12 @@ type agentModelInput struct {
 // The limited Agent image tool consumes the existing public native contract.
 // No provider schema or URL is authored by the operator in this workflow.
 func agentImageMapping(mc model.ModelConfig) (map[string]any, bool) {
+	// Capability is registry-owned metadata. A native task, a quote, an artifact
+	// URL, or a model name alone says nothing about its output modality.
+	capability, _ := mc.Config[model.ModelConfigCapabilityKey].(string)
+	if capability != "text-to-image" && capability != "image-to-image" && capability != "edit" {
+		return nil, false
+	}
 	binding, ok := parseNativeRouteBinding(mc)
 	if !ok || mc.Type != mode.NativeTasks {
 		return nil, false
@@ -56,9 +62,6 @@ func agentImageMapping(mc model.ModelConfig) (map[string]any, bool) {
 		Properties map[string]struct {
 			Type    string `json:"type"`
 			Default any    `json:"default"`
-			Items   struct {
-				Type string `json:"type"`
-			} `json:"items"`
 		} `json:"properties"`
 	}
 	if json.Unmarshal(contract.InputSchema, &schema) != nil || schema.Type != "object" {
@@ -79,7 +82,11 @@ func agentImageMapping(mc model.ModelConfig) (map[string]any, bool) {
 		if field == "prompt" {
 			continue
 		}
-		if field == "image_urls" && spec.Type == "array" && spec.Items.Type == "string" {
+		if field == "image_urls" {
+			if !agentDataURIReferences(contract.InputSchema) ||
+				(len(contract.UpstreamInputSchema) > 0 && !agentDataURIReferences(contract.UpstreamInputSchema)) {
+				return nil, false
+			}
 			reference = field
 			format = "data-uri-array"
 			continue
@@ -99,7 +106,60 @@ func agentImageMapping(mc model.ModelConfig) (map[string]any, bool) {
 			return nil, false
 		}
 	}
+	if capability != "text-to-image" && reference == nil {
+		return nil, false
+	}
 	return map[string]any{"version": 1, "kind": "image", "upstreamModelId": binding.Endpoint, "promptField": "prompt", "referenceField": reference, "referenceFormat": format, "defaults": defaults}, true
+}
+
+// V1 recognizes only explicit, simple data URI declarations. A plain string or
+// format:uri also accepts HTTPS and does not prove the supplier accepts bytes.
+// Unsupported schema compositions fail closed; never rewrite a frozen contract
+// to make it eligible. Full request constraints still run before native dispatch.
+func agentDataURIReferences(raw json.RawMessage) bool {
+	var root map[string]json.RawMessage
+	if json.Unmarshal(raw, &root) != nil {
+		return false
+	}
+	for key := range root {
+		if !slices.Contains([]string{"type", "properties", "required", "additionalProperties", "title", "description", "$schema"}, key) {
+			return false
+		}
+	}
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if json.Unmarshal(raw, &schema) != nil {
+		return false
+	}
+	field := schema.Properties["image_urls"]
+	if field["type"] != "array" {
+		return false
+	}
+	for key := range field {
+		if !slices.Contains([]string{"type", "items", "minItems", "maxItems", "title", "description"}, key) {
+			return false
+		}
+	}
+	item, ok := field["items"].(map[string]any)
+	if !ok || item["type"] != "string" {
+		return false
+	}
+	for key := range item {
+		if !slices.Contains([]string{"type", "pattern", "minLength", "maxLength", "title", "description"}, key) {
+			return false
+		}
+	}
+	pattern, _ := item["pattern"].(string)
+	switch pattern {
+	case `^data:image/png;base64,[A-Za-z0-9+/=]+$`,
+		`^data:image/jpeg;base64,[A-Za-z0-9+/=]+$`,
+		`^data:image/webp;base64,[A-Za-z0-9+/=]+$`,
+		`^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$`:
+		return true
+	default:
+		return false
+	}
 }
 func GetAgentModelOptions(c *gin.Context) {
 	caches := model.LoadModelCaches()

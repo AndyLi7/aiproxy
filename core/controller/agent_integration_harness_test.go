@@ -74,7 +74,7 @@ func TestAgentIntegrationHarness(t *testing.T) {
 		contract := map[string]any{"version": 1, "model": "local-fixture/image", "input_schema": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"prompt"}, "properties": map[string]any{"prompt": map[string]any{"type": "string", "minLength": 1, "maxLength": 6000}, "image_urls": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"type": "string", "pattern": "^data:image/png;base64,[A-Za-z0-9+/=]+$"}}}}, "output_schema": map[string]any{"type": "object", "required": []string{"images"}, "properties": map[string]any{"images": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "object", "required": []string{"url"}, "properties": map[string]any{"url": map[string]any{"type": "string"}}}}}}, "artifacts": []any{map[string]any{"path": []string{"images", "*", "url"}}}}
 		quote := map[string]any{"version": 1, "currency": "USD", "settlementPolicy": "actual-cost-v1", "quoteVersion": "agent-test-media-v1", "prepaidMicros": 30000, "routes": []any{map[string]any{"routeId": "agent-local-image", "channelId": 11, "provider": "fal", "endpoint": "fal-ai/agent-fixture", "credentialScope": "agent-test-fixture", "estimatedMicros": 20000, "prepaidMicros": 30000, "quantityMetric": "bounded_request", "rule": map[string]any{"mode": "cost_markup", "ratio": "1"}}}}
 		native := map[string]any{"version": 1, "channelId": 11, "endpoint": "fal-ai/agent-fixture", "credentialScope": "agent-test-fixture", "keyFingerprint": model.ImageChannelKeyFingerprint(channel.Key), "deliveryBase": "https://agent-gateway.invalid", "contract": contract}
-		image := model.ModelConfig{Model: "local-fixture/image", Type: mode.NativeTasks, Config: map[model.ModelConfigKey]any{NativeResultConfigKey: native, model.ImagePrepaymentConfigKey: quote, AgentExecutionConfigKey: map[string]any{"version": 1, "kind": "image", "upstreamModelId": "fal-ai/agent-fixture", "promptField": "prompt", "referenceField": "image_urls", "referenceFormat": "data-uri-array", "defaults": map[string]any{}}}}
+		image := model.ModelConfig{Model: "local-fixture/image", Type: mode.NativeTasks, Config: map[model.ModelConfigKey]any{NativeResultConfigKey: native, model.ImagePrepaymentConfigKey: quote, model.ModelConfigCapabilityKey: "text-to-image", AgentExecutionConfigKey: map[string]any{"version": 1, "kind": "image", "upstreamModelId": "fal-ai/agent-fixture", "promptField": "prompt", "referenceField": "image_urls", "referenceFormat": "data-uri-array", "defaults": map[string]any{}}}}
 		llm := model.ModelConfig{Model: "local-fixture/conversation", Type: mode.ChatCompletions, Price: model.Price{InputPrice: 1, InputPriceUnit: 1_000_000, OutputPrice: 2, OutputPriceUnit: 1_000_000}, Config: map[model.ModelConfigKey]any{AgentExecutionConfigKey: map[string]any{"version": 1, "kind": "inference", "upstreamModelId": "local-fixture/conversation", "maxInputTokens": 32000, "maxOutputTokens": 1200, "vision": true, "toolCalling": true, "imageTokensIncluded": true, "reasoningTokensIncluded": true}, "x_token_platform_pricing": map[string]any{"currency": "USD", "pricing_version": "agent-test-llm-v1"}}}
 		require.NoError(t, database.Create(&image).Error)
 		require.NoError(t, database.Create(&llm).Error)
@@ -98,6 +98,16 @@ func TestAgentIntegrationHarness(t *testing.T) {
 		require.NoError(t, database.First(&channel, 11).Error)
 		channel.Models = append(channel.Models, source.Model)
 		require.NoError(t, database.Save(&channel).Error)
+	}
+	// Backfill only the two local fake fixtures' capability metadata. Preserve
+	// their frozen contracts, quotes, existing bindings, tasks and wallet history.
+	for _, name := range []string{"local-fixture/image", "local-public/image"} {
+		fixture, e := model.GetModelConfig(name)
+		require.NoError(t, e)
+		if _, exists := fixture.Config[model.ModelConfigCapabilityKey]; !exists {
+			fixture.Config[model.ModelConfigCapabilityKey] = "text-to-image"
+			require.NoError(t, database.Model(&fixture).Select("Config", "UpdatedAt").Updates(&fixture).Error)
+		}
 	}
 	require.NoError(t, model.InitModelConfigAndChannelCache())
 	gin.SetMode(gin.ReleaseMode)

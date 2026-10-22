@@ -4,23 +4,26 @@ on:
   workflow_call:
   workflow_dispatch:
   push:
-    branches:
-      - "**"
+    branches: [main]
     tags:
       - "v*.*.*"
     paths-ignore:
       - "**/*.md"
-      - "**/*.yaml"
+      - "docs/**"
+      # All jobs in this workflow test or lint Go code.
+      - "web/**"
   pull_request:
     branches:
       - "**"
     paths-ignore:
       - "**/*.md"
-      - "**/*.yaml"
+      - "docs/**"
+      # All jobs in this workflow test or lint Go code.
+      - "web/**"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-aiproxy:

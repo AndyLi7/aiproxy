@@ -47,6 +47,7 @@ func SetRelayRouter(router *gin.Engine) {
 		modelsRouter.GET("/:model", controller.RetrieveModel)
 	}
 
+	v1Router.GET("/agent-access", controller.AgentAccess)
 	v1Router.POST("/model-tasks", controller.NativeTasks()...)
 	v1Router.GET("/model-tasks/:id", controller.GetNativeTask)
 	v1Router.POST("/model-tasks/:id/cancel", controller.CancelNativeTask)

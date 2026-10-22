@@ -1,0 +1,34 @@
+Image Agent local integration candidate
+
+Base: dc9ea94051f6da8607308e8c6fea64dff5e09700
+Branch: codex/image-agent-integration
+Pairs with the app integration worktree based on a91eb81587b3598894bbbe977e6b7b1d8bae85cb.
+Exact commit pair is recorded in the app acceptance manifest and main handoff.
+
+Changes: trusted Agent token source; ordinary-key header spoof denial; private
+GET /v1/agent-access with current group/model authorization and effective pricing;
+Agent-only configured models excluded from public discovery; native create checks
+an immutable execution revision; existing native owner/token, wallet and artifact
+paths remain the authority. Retired numeric Agent keys preserve original task reads.
+
+Only the opt-in TestAgentIntegrationHarness starts localhost:3511. It uses a new
+persistent SQLite directory, real auth/controllers/native engine/wallet HTTP and
+archive recovery. The outer fal/download transport rewrites fixture hosts to 3512
+and rejects other hosts. All keys, balances and prices are explicit local fixtures.
+StoreWithSourceClient allows the harness's outer provider downloader injection;
+production Store still uses its existing SSRF-restricted client.
+
+From core/:
+AGENT_INTEGRATION_HARNESS=true AGENT_INTEGRATION_STATE=/private/tmp/agent-integration-gateway-state go test ./controller -run '^TestAgentIntegrationHarness$' -count=1 -timeout=0 -v
+
+The application and fake upstream on 3510/3512 must also run. See the paired app's
+docs/image-agent/README.txt for the HTTP acceptance suite and restart instructions.
+No production configuration, deployed gateway, old port/worktree or supplier key
+was used. No push, deployment, paid supplier call or production SQL is authorized.
+
+Verification: middleware/controller/router/ownedartifact suites; focused model usage
+identity and operational-field tests; real HTTP integration with generation/edit,
+private bytes, wallet receipts, token rotation and two-process restart recovery.
+Docker-dependent PostgreSQL/Redis cases fail to initialize on this host (Docker
+provider unavailable), so those cases are not accepted. Existing SQLite cases run.
+Manager's independent review of both exact commits remains required.

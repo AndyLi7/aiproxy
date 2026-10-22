@@ -23,6 +23,7 @@ const (
 )
 
 const (
+	RequestSourceAgent      = "agent"
 	RequestSourceAPI        = "api"
 	RequestSourcePlayground = "playground"
 	RequestSourceAdminDemo  = "admin_demo"
@@ -102,7 +103,7 @@ type OperationalLogFilter struct {
 
 func ValidRequestSource(source string) bool {
 	switch source {
-	case "", RequestSourceAPI, RequestSourcePlayground, RequestSourceAdminDemo:
+	case "", RequestSourceAPI, RequestSourcePlayground, RequestSourceAdminDemo, RequestSourceAgent:
 		return true
 	default:
 		return false
@@ -118,7 +119,7 @@ func BuildOperationalFields(
 	errorCodes ...string,
 ) OperationalFields {
 	switch requestSource {
-	case RequestSourcePlayground, RequestSourceAdminDemo:
+	case RequestSourcePlayground, RequestSourceAdminDemo, RequestSourceAgent:
 	default:
 		requestSource = RequestSourceAPI
 	}

@@ -21,6 +21,30 @@ import (
 //nolint:gosec // Symbolic credential name or synthetic test identifier, not a secret.
 const PlaygroundCredentialName = "__website_playground__"
 
+// AgentCredentialName is reserved by the application. Only AdminAuth provisions
+// these server-held keys. Retired keys keep an explicit numeric suffix so tasks
+// can be read with their original identity after rotation.
+const AgentCredentialName = "__website_agent__"
+
+func IsAgentCredentialName(name string) bool {
+	if name == AgentCredentialName {
+		return true
+	}
+	if !strings.HasPrefix(name, "__website_agent_") || !strings.HasSuffix(name, "__") {
+		return false
+	}
+	suffix := strings.TrimSuffix(strings.TrimPrefix(name, "__website_agent_"), "__")
+	if len(suffix) == 0 || len(name) > MaxTokenNameLength {
+		return false
+	}
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // MaxUsageModelIDLength bounds a usage model id (the canonical capability key),
 // equal to the application's limit and async_usage_infos.usage_model_id.
 const MaxUsageModelIDLength = 256
@@ -56,6 +80,8 @@ func UsageSource(tokenName string, groupInternal bool, header string) string {
 	switch {
 	case groupInternal && header == RequestSourceAdminDemo:
 		return RequestSourceAdminDemo
+	case !groupInternal && IsAgentCredentialName(tokenName):
+		return RequestSourceAgent
 	case !groupInternal && tokenName == PlaygroundCredentialName:
 		return RequestSourcePlayground
 	default:
@@ -132,7 +158,7 @@ func validUsageModelID(id string) bool {
 
 func validUsageSource(source string) bool {
 	switch source {
-	case RequestSourceAPI, RequestSourcePlayground, RequestSourceAdminDemo:
+	case RequestSourceAPI, RequestSourcePlayground, RequestSourceAdminDemo, RequestSourceAgent:
 		return true
 	default:
 		return false

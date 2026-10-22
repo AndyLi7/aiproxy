@@ -77,7 +77,7 @@ func publicModelIndexForToken(
 	var identities []model.PublicCapabilityIdentity
 	token.Range(func(modelName string) bool {
 		mc, ok := enabledModelConfigsMap[modelName]
-		if !ok {
+		if !ok || mc.Config[AgentExecutionConfigKey] != nil {
 			return true
 		}
 

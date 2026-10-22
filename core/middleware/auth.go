@@ -168,6 +168,14 @@ func TokenAuth(c *gin.Context) {
 		setOperationalLogIdentity(c, token.ID, token.Name, token.Group)
 	}
 
+	// Agent cannot be asserted by a customer header. Reject a spoof explicitly;
+	// all accepted source attribution still derives from the authenticated token.
+	if c.GetHeader(OperationalLogSourceHeader) == model.RequestSourceAgent &&
+		(useInternalToken || !model.IsAgentCredentialName(token.Name)) {
+		SetOperationalFailure(c, model.FailureStageAuth, "access_denied", "agent credential required")
+		AbortLogWithMessage(c, http.StatusForbidden, "agent credential required")
+		return
+	}
 	SetLogTokenFields(log.Data, token, useInternalToken)
 
 	if len(token.Subnets) > 0 {

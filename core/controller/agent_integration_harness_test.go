@@ -3,6 +3,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
@@ -78,11 +79,33 @@ func TestAgentIntegrationHarness(t *testing.T) {
 		require.NoError(t, database.Create(&image).Error)
 		require.NoError(t, database.Create(&llm).Error)
 	}
+	// An existing public media product, with no Agent descriptor. The acceptance
+	// client must opt it in through the authenticated typed administration API.
+	var publicCount int64
+	require.NoError(t, database.Model(&model.ModelConfig{}).Where("model = ?", "local-public/image").Count(&publicCount).Error)
+	if publicCount == 0 {
+		source, e := model.GetModelConfig("local-fixture/image")
+		require.NoError(t, e)
+		source.Model = "local-public/image"
+		delete(source.Config, AgentExecutionConfigKey)
+		raw, _ := json.Marshal(source.Config[NativeResultConfigKey])
+		var native map[string]any
+		require.NoError(t, json.Unmarshal(raw, &native))
+		native["contract"].(map[string]any)["model"] = source.Model
+		source.Config[NativeResultConfigKey] = native
+		require.NoError(t, database.Create(&source).Error)
+		var channel model.Channel
+		require.NoError(t, database.First(&channel, 11).Error)
+		channel.Models = append(channel.Models, source.Model)
+		require.NoError(t, database.Save(&channel).Error)
+	}
 	require.NoError(t, model.InitModelConfigAndChannelCache())
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.RequestIDMiddleware, middleware.NewLog(logrus.StandardLogger()))
 	api := router.Group("/api", middleware.AdminAuth)
+	api.GET("/agent-models", GetAgentModelOptions)
+	api.POST("/agent-models", ConfigureAgentModel)
 	api.POST("/group/:group/ensure", EnsureGroup)
 	api.GET("/group/:group", GetGroup)
 	api.POST("/group/:group/status", UpdateGroupStatus)

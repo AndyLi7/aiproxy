@@ -289,6 +289,8 @@ func SetAPIRouter(router *gin.Engine) {
 		apiRouter.GET("/trace/:group/by-request/:request_id", controller.GetRequestTracesByRequest)
 		apiRouter.GET("/trace/:group/:trace_id", controller.GetRequestTrace)
 		apiRouter.GET("/trace-health", controller.GetTraceHealth)
+		apiRouter.GET("/agent-models", controller.GetAgentModelOptions)
+		apiRouter.POST("/agent-models", controller.ConfigureAgentModel)
 		modelConfigsRoute := apiRouter.Group("/model_configs")
 		{
 			modelConfigsRoute.GET("/", controller.GetModelConfigs)

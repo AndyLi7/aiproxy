@@ -10,7 +10,7 @@ import (
 	"net/http"
 )
 
-const AgentExecutionConfigKey model.ModelConfigKey = "x_token_platform_agent_execution_v1"
+const AgentExecutionConfigKey = model.AgentExecutionKey
 
 // AgentAccess is a private product authorization view. It does not publish a
 // model into customer discovery. Group sets and token model limits still apply.

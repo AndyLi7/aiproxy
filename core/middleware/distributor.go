@@ -624,7 +624,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		}
 	}
 
-	if mc.Config[model.ModelConfigKey("x_token_platform_agent_execution_v1")] != nil && !model.IsAgentCredentialName(token.Name) {
+	if model.IsAgentOnlyModel(mc) && !model.IsAgentCredentialName(token.Name) {
 		AbortLogWithMessage(c, http.StatusForbidden, "model unavailable")
 		return
 	}

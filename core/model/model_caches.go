@@ -104,6 +104,8 @@ func InitModelConfigAndChannelCache() error {
 		modelConfig,
 	)
 
+	addPrivateAgentInferenceModels(snapshot.modelConfigs, enabledModelsBySet, enabledModelConfigsBySet, enabledModelConfigsMap)
+
 	disabledModel2ChannelsBySet := buildModelToChannelsBySetMap(disabledChannels)
 
 	channelsByID := make(map[int]*Channel, len(enabledChannels)+len(disabledChannels))

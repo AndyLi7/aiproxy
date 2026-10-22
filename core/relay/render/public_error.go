@@ -5,6 +5,16 @@ import "encoding/json"
 // Public serialization only: never mutate the event used for usage, audit or retries.
 // Keep successful content byte-for-byte, even when generated text discusses errors.
 func publicStreamData(data []byte, event string, gemini bool) []byte {
+	return publicErrorData(data, event, gemini, false)
+}
+
+// PublicResponseData applies the same failure boundary to HTTP-200 Responses
+// objects. The adapter keeps its original parsed object for usage and storage.
+func PublicResponseData(data []byte) []byte {
+	return publicErrorData(data, "", false, true)
+}
+
+func publicErrorData(data []byte, event string, gemini, responseObject bool) []byte {
 	var body map[string]json.RawMessage
 	if json.Unmarshal(data, &body) != nil || body == nil {
 		if event != "error" && event != "response.failed" {
@@ -16,8 +26,12 @@ func publicStreamData(data []byte, event string, gemini bool) []byte {
 
 	_ = json.Unmarshal(body["type"], &kind)
 
+	var status string
+	_ = json.Unmarshal(body["status"], &status)
+	failedResponse := responseObject && status == "failed"
+
 	hasError := len(body["error"]) > 0 && string(body["error"]) != "null"
-	if !hasError && kind != "error" && kind != "response.failed" && event != "error" &&
+	if !hasError && !failedResponse && kind != "error" && kind != "response.failed" && event != "error" &&
 		event != "response.failed" {
 		return data
 	}
@@ -32,18 +46,15 @@ func publicStreamData(data []byte, event string, gemini bool) []byte {
 
 	safe := map[string]any{"error": detail}
 	switch {
+	case responseObject && (failedResponse || hasError):
+		safe = publicFailedResponse(body, detail)
+		safe["object"] = "response"
 	case gemini:
 		safe["error"] = map[string]any{"message": message, "code": 503, "status": "UNAVAILABLE"}
 	case kind == "response.failed" || event == "response.failed":
-		response := map[string]any{"status": "failed", "error": detail}
-
 		var original map[string]json.RawMessage
-		if json.Unmarshal(body["response"], &original) == nil {
-			var id string
-			if json.Unmarshal(original["id"], &id) == nil && id != "" {
-				response["id"] = id
-			}
-		}
+		_ = json.Unmarshal(body["response"], &original)
+		response := publicFailedResponse(original, detail)
 
 		safe = map[string]any{"type": "response.failed", "response": response}
 	case kind == "error" || event == "error":
@@ -67,4 +78,14 @@ func publicStreamData(data []byte, event string, gemini bool) []byte {
 	}
 
 	return encoded
+}
+
+// Failure envelopes omit arbitrary provider diagnostics, as stream errors do.
+func publicFailedResponse(original map[string]json.RawMessage, detail map[string]any) map[string]any {
+	response := map[string]any{"status": "failed", "error": detail}
+	var id string
+	if json.Unmarshal(original["id"], &id) == nil && id != "" {
+		response["id"] = id
+	}
+	return response
 }

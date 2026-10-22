@@ -91,6 +91,8 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 				c.Set(middleware.RequestModel, "retry-budget-test")
 				c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{})
 				middleware.SetRequestAt(c, time.Now())
+				middleware.RequestIDMiddleware(c)
+				billingOperationID := middleware.GetBillingOperationID(c)
 
 				channels := []*model.Channel{
 					{ID: 1, Status: model.ChannelStatusEnabled},
@@ -105,7 +107,7 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 				}
 				initialError := relaymodel.NewOpenAIError(
 					http.StatusBadGateway,
-					relaymodel.OpenAIError{Message: "initial failure"},
+					relaymodel.OpenAIError{Message: syntheticUpstreamFailure},
 				)
 
 				state := initRetryState(
@@ -140,6 +142,7 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 					mode.Responses,
 					state,
 					func(c *gin.Context, m *meta.Meta) *relaycontroller.HandleResult {
+						require.Equal(t, billingOperationID, m.BillingOperationID)
 						require.False(t, seen[m.Channel.ID], "channel must never be replayed")
 						seen[m.Channel.ID] = true
 						attempts++
@@ -158,7 +161,7 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 						return &relaycontroller.HandleResult{
 							Error: adaptor.WithFailover(relaymodel.NewOpenAIError(
 								tt.status,
-								relaymodel.OpenAIError{Message: "retry failure"},
+								relaymodel.OpenAIError{Message: syntheticUpstreamFailure},
 							), failover.Failure{Acceptance: failover.NotAccepted, Class: failover.Transient}),
 						}
 					},
@@ -181,6 +184,11 @@ func TestRetryLoopBudgetAndCount(t *testing.T) {
 					require.Nil(t, state.result.Error)
 				} else {
 					require.True(t, c.Writer.Written())
+					require.NotContains(t, recorder.Body.String(), "FakeVendor")
+					require.NotContains(t, recorder.Body.String(), "private.invalid")
+					require.NotContains(t, recorder.Body.String(), "signature")
+					require.Contains(t, state.result.Error.Error(), syntheticUpstreamFailure)
+					require.Equal(t, middleware.GetRequestID(c), recorder.Header().Get(middleware.RequestIDHeader))
 				}
 			})
 		})

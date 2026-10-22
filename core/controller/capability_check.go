@@ -32,11 +32,14 @@ func CheckCapabilityResolution(c *gin.Context) {
 	for _, config := range cache.EnabledModelConfigsMap {
 		configs = append(configs, config)
 	}
+
 	resolution, match := model.NativeRouteResolution{}, model.NativeRouteNotFound
 	if !strings.Contains(publicID, "::") {
 		resolution, match = model.ResolveNativeCapabilityRoute(publicID, configs)
 	}
+
 	route, capability := publicID, ""
+
 	mapped := match == model.NativeRouteFound
 	if mapped {
 		route = resolution.Route
@@ -67,6 +70,7 @@ func CheckCapabilityResolution(c *gin.Context) {
 				}
 			}
 		}
+
 		mapped = capability != ""
 	}
 
@@ -81,6 +85,7 @@ func CheckCapabilityResolution(c *gin.Context) {
 			if match == model.NativeRouteAmbiguous {
 				continue
 			}
+
 			channels[channel.ID] = true
 		}
 	}
@@ -91,6 +96,7 @@ func CheckCapabilityResolution(c *gin.Context) {
 	} else if match == model.NativeRouteAmbiguous {
 		status = "ambiguous"
 	}
+
 	middleware.SuccessResponse(c, gin.H{
 		"public_id": publicID, "routing_model": route, "capability": capability,
 		"registered": registered, "mapped": mapped, "enabled_channels": len(channels),

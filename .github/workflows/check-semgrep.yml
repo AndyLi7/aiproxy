@@ -7,8 +7,7 @@ on:
   schedule:
     - cron: 0 0 * * *
   push:
-    branches:
-      - "**"
+    branches: [main]
     tags:
       - "v*.*.*"
     paths-ignore:
@@ -22,8 +21,8 @@ on:
       - "**/*.yaml"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   semgrep:

@@ -165,6 +165,7 @@ func (a failingBoundaryAdapter) DoRequest(
 	if a.stage == "transport" {
 		return nil, errors.New(syntheticUpstreamFailure)
 	}
+
 	return &http.Response{
 		StatusCode: http.StatusBadGateway,
 		Header:     make(http.Header),

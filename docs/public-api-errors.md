@@ -154,3 +154,16 @@ The video endpoints keep accepting group IDs; an unknown video model returns
 `GET /v1/models/{id}` accepts any ID that calls a listed model and returns that
 model's entry. An unknown ID returns 404 `model_not_found` with
 type `not_found_error` (the same type as the schema's `schema_not_found`).
+
+## Failed Responses objects
+
+A Responses create, get or cancel operation can return HTTP 200 with
+`status = failed`. These objects retain their ID and failed state, but expose
+only `error.code = upstream_unavailable`, `error.type = api_error` and the
+stable retry-later message. Provider diagnostics and arbitrary extra fields
+are omitted, as they are for streamed `response.failed` events. The response
+header still carries the platform `X-Request-ID`. Successful, pending and
+incomplete Responses objects without an upstream error retain their existing content. This serialization
+boundary does not change usage accounting, response storage or retry decisions;
+server logs retain bounded, credential-redacted provider error codes correlated
+with the request ID.

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/config"
+	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/requesttrace"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
@@ -478,6 +480,8 @@ func TestRequestTraceBlockedAndFullQueueDoNotChangeGatewayResult(t *testing.T) {
 
 	fixture := newTraceCaptureFixture(t)
 	blocked := make(chan struct{})
+	release := sync.OnceFunc(func() { close(blocked) })
+	blockedDB := model.LogDB
 	require.NoError(
 		t,
 		model.LogDB.Callback().
@@ -489,7 +493,13 @@ func TestRequestTraceBlockedAndFullQueueDoNotChangeGatewayResult(t *testing.T) {
 				}
 			}),
 	)
-	t.Cleanup(func() { _ = model.LogDB.Callback().Create().Remove("test:block_trace_writes") })
+	t.Cleanup(func() {
+		// Release and drain the writer even if an assertion fails before release.
+		release()
+		fixture.flush(t)
+
+		_ = blockedDB.Callback().Create().Remove("test:block_trace_writes")
+	})
 
 	for i := range 5000 {
 		session := fixture.runtime.NewRequest(fmt.Sprintf("queue-%d", i))
@@ -513,7 +523,7 @@ func TestRequestTraceBlockedAndFullQueueDoNotChangeGatewayResult(t *testing.T) {
 	fixture.engine.ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Equal(t, int32(1), fixture.providerCalls.Load())
-	close(blocked)
+	release()
 	fixture.awaitConsume(t, requestID)
 
 	var blockedConsumes int64
@@ -690,6 +700,13 @@ func newTraceCaptureFixture(t *testing.T) *traceCaptureFixture {
 	model.DB, model.LogDB, common.RedisEnabled, common.UsingSQLite = db, db, false, true
 	config.AdminKey = "trace-admin-key"
 	t.Cleanup(func() {
+		// Background consumers must finish before globals and the temporary DB go away.
+		consume.Wait()
+
+		if f.runtime != nil {
+			require.NoError(t, f.runtime.Close(context.Background()))
+		}
+
 		model.DB, model.LogDB, common.RedisEnabled, common.UsingSQLite = oldDB, oldLogDB, oldRedis, oldSQLite
 		config.AdminKey = oldAdminKey
 
@@ -800,10 +817,13 @@ func (f *traceCaptureFixture) flush(t *testing.T) {
 
 func (f *traceCaptureFixture) awaitConsume(t *testing.T, requestID string) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		var count int64
-		return model.LogDB.Model(&model.Log{}).
-			Where("request_id = ?", requestID).
-			Count(&count).Error == nil && count == 1
-	}, 3*time.Second, 10*time.Millisecond)
+	// A full trace queue competes for SQLite writes. Wait for the real consumer
+	// completion instead of imposing an unrelated three-second polling deadline.
+	consume.Wait()
+
+	var count int64
+	require.NoError(t, model.LogDB.Model(&model.Log{}).
+		Where("request_id = ?", requestID).
+		Count(&count).Error)
+	require.EqualValues(t, 1, count)
 }

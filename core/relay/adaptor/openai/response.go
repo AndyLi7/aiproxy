@@ -328,7 +328,8 @@ func ResponseHandler(
 		)
 	}
 
-	// Write response
+	// Write only the public failure envelope; keep response for usage/storage.
+	responseBody = publicResponseBody(c, meta, responseBody)
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	_, _ = c.Writer.Write(responseBody)
@@ -610,6 +611,20 @@ func rewriteResponseStreamEventModel(
 	return rewrittenData
 }
 
+// Keep bounded, credential-redacted machine diagnostics in the request logger.
+// HTTP-200 failures may quote customer input, so use the existing structured-only
+// diagnostic policy; the public envelope is never used for billing or storage.
+func publicResponseBody(c *gin.Context, meta *meta.Meta, body []byte) []byte {
+	safe := render.PublicResponseData(body)
+	if !bytes.Equal(safe, body) {
+		common.GetLogger(c).WithField("provider_reason", adaptor.ProviderErrorReason(
+			http.StatusBadRequest, body, meta.Channel.Key,
+		)).Warn("response object failed")
+	}
+
+	return safe
+}
+
 func writeResponseObjectWithOriginModel(
 	meta *meta.Meta,
 	c *gin.Context,
@@ -644,6 +659,7 @@ func writeResponseObjectWithOriginModel(
 		)
 	}
 
+	responseBody = publicResponseBody(c, meta, responseBody)
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	_, _ = c.Writer.Write(responseBody)

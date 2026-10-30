@@ -9,6 +9,14 @@ import (
 )
 
 func SetRelayRouter(router *gin.Engine) {
+	tools := router.Group("/internal/tools", controller.ToolsAuth)
+	tools.GET("/models", controller.GetToolsModelOptions)
+	tools.GET("/model-access", controller.GetToolsModelAccess)
+	tools.POST("/model-tasks", controller.CreateToolsNativeTask)
+	tools.GET("/model-tasks/:id", controller.GetToolsNativeTask)
+	tools.POST("/model-tasks/:id/cancel", controller.CancelToolsNativeTask)
+	tools.GET("/model-tasks/:id/artifacts/:index", controller.GetToolsNativeArtifact)
+
 	// Signed, read-only result URLs permit browser image loading without exposing upstream hosts.
 	router.GET(
 		"/v1/images/tasks/:id/content/:index",

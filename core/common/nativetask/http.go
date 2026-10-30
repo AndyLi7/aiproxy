@@ -532,7 +532,18 @@ func (h *HTTP) GetArtifact(w http.ResponseWriter, r *http.Request, id, indexText
 		return
 	}
 
-	receipt := entries[index]
+	h.ServeOwnedArtifact(w, r, group, token, id, index, entries[index])
+}
+
+// ServeOwnedArtifact shares native bounded/range-verified downloads with an
+// already-authorized internal execution. The caller must prove task ownership;
+// this method independently validates the storage receipt and enforces limits.
+func (h *HTTP) ServeOwnedArtifact(w http.ResponseWriter, r *http.Request, group string, token int, id string, index int, receipt ownedartifact.Receipt) {
+	if !ownedartifact.ValidReceipt(id, index, receipt) {
+		h.writeError(w, 404, "artifact_not_found")
+		return
+	}
+	var err error
 	file := artifactFile{name: ownedartifact.FileName(id, index, receipt.Type), receipt: receipt}
 
 	from, to, ranged, satisfiable := artifactRange(r, receipt)

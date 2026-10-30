@@ -86,6 +86,8 @@ func SetAPIRouter(router *gin.Engine) {
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)
 	apiRouter.POST("/native-contract/validate", controller.ValidateNativeContract)
+	apiRouter.GET("/tools-model-bindings", controller.GetToolsModelBindings)
+	apiRouter.PUT("/tools-model-bindings", controller.PutToolsModelBinding)
 	apiRouter.POST("/native-trials/:group/:token", controller.CreateNativeTrial)
 	apiRouter.GET("/native-trials/:group/:token/:id", controller.GetNativeTrial)
 	apiRouter.GET(

@@ -96,7 +96,7 @@ func downloadClient() *http.Client {
 					return nil, ErrStorage
 				}
 
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				ips, err := lookupArtifactIPs(ctx, host)
 				if err != nil || len(ips) == 0 {
 					return nil, ErrStorage
 				}

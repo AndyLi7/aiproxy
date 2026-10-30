@@ -31,7 +31,7 @@ func GetAllOption() ([]*Option, error) {
 }
 
 func GetOption(key string) (*Option, error) {
-	if !slices.Contains(optionKeys, key) {
+	if key != OpenAIImageIdentitiesOption && !slices.Contains(optionKeys, key) {
 		return nil, ErrUnknownOptionKey
 	}
 
@@ -248,6 +248,9 @@ func saveOption(key, value string) error {
 }
 
 func UpdateOption(key, value string) error {
+	if key == OpenAIImageIdentitiesOption {
+		return errors.New("OpenAI image identities are internally maintained")
+	}
 	err := updateOption(key, value, false)
 	if err != nil {
 		return err

@@ -23,7 +23,9 @@ type ModelConfigCache interface {
 }
 
 type ModelCaches struct {
-	ChannelsByID map[int]*Channel
+	OpenAIImageIdentities   OpenAIImageIdentitySnapshot
+	imageIdentityReadFailed *atomic.Bool
+	ChannelsByID            map[int]*Channel
 
 	ModelConfig ModelConfigCache
 
@@ -71,6 +73,9 @@ func InitModelConfigAndChannelCache() error {
 
 	snapshot, err := readCacheSnapshot()
 	if err != nil {
+		if fault := modelCaches.Load().imageIdentityReadFailed; fault != nil {
+			fault.Store(true)
+		}
 		return err
 	}
 
@@ -120,9 +125,31 @@ func InitModelConfigAndChannelCache() error {
 		}
 	}
 
+	identityConfigs := append([]ModelConfig(nil), snapshot.modelConfigs...)
+	if yaml := LoadYAMLConfig(); yaml != nil {
+		for _, item := range yaml.ModelConfigs {
+			if effective, ok := modelConfig.GetModelConfig(item.Model); ok {
+				identityConfigs = append(identityConfigs, effective)
+			}
+		}
+	}
+
+	identities := snapshot.imageIdentities.withCurrent(identityConfigs)
+
+	previous := modelCaches.Load()
+	if !identities.Ready() || !identities.retains(previous.OpenAIImageIdentities) {
+		if previous.OpenAIImageIdentities.Trusted() {
+			if fault := previous.imageIdentityReadFailed; fault != nil {
+				fault.Store(true)
+			}
+			return errImageIdentityInvalid
+		}
+	}
 	cacheVersion++
 	next := &ModelCaches{
-		ChannelsByID: channelsByID,
+		OpenAIImageIdentities:   identities,
+		imageIdentityReadFailed: &atomic.Bool{},
+		ChannelsByID:            channelsByID,
 
 		ModelConfig: modelConfig,
 
@@ -159,6 +186,7 @@ func rebuildModelCachesAfterWrite() {
 
 // cacheSnapshot is what one rebuild reads from the database.
 type cacheSnapshot struct {
+	imageIdentities  OpenAIImageIdentitySnapshot
 	modelConfigs     []ModelConfig
 	enabledChannels  []*Channel
 	disabledChannels []*Channel
@@ -194,7 +222,15 @@ func readCacheSnapshot() (cacheSnapshot, error) {
 			return err
 		}
 
-		return tx.Where("status = ?", ChannelStatusDisabled).Find(&snapshot.disabledChannels).Error
+		if err := tx.Where("status = ?", ChannelStatusDisabled).
+			Find(&snapshot.disabledChannels).
+			Error; err != nil {
+			return err
+		}
+
+		snapshot.imageIdentities = ReadOpenAIImageIdentities(tx)
+
+		return nil
 	}
 
 	if DB.Name() == "sqlite" {

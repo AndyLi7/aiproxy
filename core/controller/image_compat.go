@@ -174,13 +174,42 @@ func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 
 			requested = body.Model
 		}
-		// Durable accepted operations are looked up before today's profile. A profile
-		// can be disabled/upgraded without stranding a previously accepted task.
+
+		value, _ := c.Get(middleware.ModelCaches)
+
+		caches, _ := value.(*model.ModelCaches)
+		if caches == nil {
+			caches = model.LoadModelCaches()
+		}
+
+		identities := caches.ImageIdentityEvidence()
 		group, token := middleware.GetGroup(c).ID, middleware.GetToken(c).ID
 
-		var existing *model.NativeTask
-
 		id, idErr := imagecompat.OperationID(c.Request.Header, group, token)
+
+		selected, enabled := selectImageCompatProfile(caches.EnabledModelConfigsMap, requested)
+		if !identities.Known(requested) && !enabled {
+			// Reviewed history proves unrelated requests need no native storage or
+			// read allowance. Unknown history cannot prove a keyed historical alias absent.
+			if !identities.Trusted() && idErr == nil && c.GetHeader("Idempotency-Key") != "" {
+				imageCompatError(
+					c,
+					503,
+					"image_identity_history_unavailable",
+					"Compatibility identity history is not ready; retry this operation only after configuration recovery.",
+					id,
+				)
+
+				return
+			}
+
+			c.Next()
+
+			return
+		}
+
+		// Accepted operations survive profile disable/conflicts and identity removal.
+		var existing *model.NativeTask
 		if idErr == nil && c.GetHeader("Idempotency-Key") != "" {
 			var safe bool
 
@@ -190,18 +219,15 @@ func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 			}
 		}
 
-		value, _ := c.Get(middleware.ModelCaches)
-		caches, _ := value.(*model.ModelCaches)
-
-		var selected model.ModelConfig
-
-		enabled := false
-		if caches != nil {
-			selected, enabled = selectImageCompatProfile(caches.EnabledModelConfigsMap, requested)
-		}
-
+		enabled = enabled && identities.Registered(selected)
 		if existing == nil && !enabled {
-			c.Next()
+			imageCompatError(
+				c,
+				503,
+				"image_compatibility_unavailable",
+				"This compatibility identity is reserved for native operation recovery; its registered profile is unavailable.",
+				id,
+			)
 			return
 		}
 

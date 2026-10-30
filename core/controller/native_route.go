@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/gin-gonic/gin"
@@ -52,22 +51,7 @@ func (r *nativeRouteError) Unwrap() error { return nativetask.ErrUnavailable }
 // invalid when missing, unparsable, of another version, or naming no channel
 // (the unbound placeholder a publisher may write before its channel exists).
 func parseNativeRouteBinding(mc model.ModelConfig) (nativeRouteBinding, bool) {
-	raw := mc.Config[NativeResultConfigKey]
-	if raw == nil {
-		return nativeRouteBinding{}, false
-	}
-
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return nativeRouteBinding{}, false
-	}
-
-	var binding nativeRouteBinding
-	if json.Unmarshal(encoded, &binding) != nil || binding.Version != 1 || binding.ChannelID <= 0 {
-		return nativeRouteBinding{}, false
-	}
-
-	return binding, true
+	return model.ParseNativeRouteBinding(mc)
 }
 
 // nativeBindingFilter restricts native task routing to the channel the model

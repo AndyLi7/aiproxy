@@ -3,7 +3,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -24,17 +23,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const NativeResultConfigKey model.ModelConfigKey = "x_token_platform_native_result_v1"
+const NativeResultConfigKey = model.NativeResultConfigKey
 
-type nativeRouteBinding struct {
-	Version         int             `json:"version"`
-	Contract        json.RawMessage `json:"contract"`
-	ChannelID       int             `json:"channelId"`
-	Endpoint        string          `json:"endpoint"`
-	CredentialScope string          `json:"credentialScope"`
-	KeyFingerprint  string          `json:"keyFingerprint"`
-	DeliveryBase    string          `json:"deliveryBase"`
-}
+type nativeRouteBinding = model.NativeRouteBinding
 
 // Native storage is deliberately not part of automatic startup migrations.
 // Routes remain unavailable until reviewed additive storage and wallet exist.
@@ -377,7 +368,8 @@ func nativeRuntimeFeatures() []string {
 	}
 	if ownedartifact.Configured() {
 		features = append(features, "native_owned_artifact_v1")
-		if len(os.Getenv("EXTERNAL_BALANCE_KEY")) >= 32 {
+		if len(os.Getenv("EXTERNAL_BALANCE_KEY")) >= 32 &&
+			model.LoadModelCaches().ImageIdentityEvidence().Ready() {
 			features = append(features, "openai_images_native_v1")
 		}
 	}

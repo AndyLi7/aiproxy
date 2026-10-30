@@ -6,14 +6,16 @@ Status: local implementation; activation closed pending publication evidence.
 
 Only GPT Image 1.5 `text-to-image` and `image-to-image`, on the existing
 `/v1/images/generations` and `/v1/images/edits` endpoints. The explicitly pinned
-profile selects the native retail executor. Existing native and legacy image
-contracts remain unchanged. No Tools execution, provider configuration, price,
+profile selects the native retail executor. Native execution and image payload
+schemas remain unchanged; identity-history readiness controls compatibility
+admission as described below. No Tools execution, provider configuration, price,
 refund policy, task center, or billing system is added.
 
 The profile binds the exact native contract hash and must explicitly enable
 inline edit transport. Activation must verify all public identities and aliases
-against existing image routes; collisions disable compatibility rather than
-stealing a successful route. No profile is installed by this change. Real
+against existing image routes; collisions prevent new compatibility admission.
+Unrelated legacy routes retain their original path; reserved compatibility IDs
+remain protected for replay recovery. No profile is installed by this change. Real
 publication revision, frozen contract, quote, inline transport support and route
 collision evidence are release prerequisites. Fixtures are synthetic.
 
@@ -32,7 +34,8 @@ no temporary public uploads or new storage credentials. The existing task store
 persists the input needed for queued execution. Input bytes must never enter
 logs. Larger uploads are explicitly unsupported in this slice.
 
-`Idempotency-Key` alone defines reliable operation identity, namespaced by owner
+Within the compatibility identity scope, `Idempotency-Key` defines reliable
+operation identity, namespaced by owner
 and API key and hashed to a native task ID. Edge X-Request-ID remains a trace.
 No-key first calls receive random identities; recognizable SDK retries without
 a key are rejected. This can refuse retries after pre-dispatch transient errors
@@ -73,7 +76,7 @@ Test strict translation, collisions, owner isolation, changed-input conflicts,
 concurrent replay, retries without keys, unknown acceptance, timeout, archive
 integrity, exactly-one output and parity with native wallet settlement. Exercise
 real official Python and Node SDKs against loopback mocks only. App examples and
-llms text must not advertise activation without proof. Run both builds and
+llms text must not advertise activation without proof. Run relevant builds and
 security scan before local commits; review deployment hooks before any push.
 
 ## Input evidence and bounds (2026-10-30)
@@ -236,3 +239,116 @@ export AND76_NODE_SDK=/private/tmp/and76-openai-image-compat-20261030/sdk/node/n
 Gateway lint used golangci-lint 2.15.0 with `run --fix --new-from-rev=HEAD
 --timeout=5m`, while HEAD was `17a1e4d287a8b11b3bff926de220730adef781bf`.
 The later workflow-only commit does not change the Go diff or baseline.
+
+
+### Identity lifecycle correction after second review — 2026-10-30
+
+The project manager approved the lifecycle below. The initial WIP counterexamples
+are retained in `identity-lifecycle-counterexamples.log`; they exposed incorrect
+allowlist ownership, rejection of never-enabled legacy deployments, and ownership
+left by an invalid/conflicting candidate. The implementation and acceptance tests
+now preserve the original canonical-ID legacy success cases alongside unrelated-ID
+cases. Final local verification is recorded below; manager acceptance remains separate.
+
+An allowed canonical capability is not acquired ownership. A configuration's
+accepted IDs become owned only when the existing Gateway configuration transaction
+atomically commits a valid opt-in profile, its frozen contract/identity, a complete
+final-namespace conflict check, and the internal append-only declaration. This is
+a technical activation boundary, not an App publication acceptance or completion
+claim. App readback happens later; if it fails after activation, rollback retains
+history because requests may already have been admitted. No activation API,
+second publication workflow, table, UI, billing state or task/key registry is added.
+
+`OpenAIImageIdentities` is an internal versioned Option containing only the two
+supported canonical capabilities and their acquired accepted IDs. Ordinary
+`UpdateOption` and `UpdateOptions` calls cannot append, replace, clear or delete it.
+It is absent from generic defaults, Option sync and YAML Option overrides. The
+existing `SaveModelConfig(s)` / `withMigrationConfigWrite` transaction maintains it.
+The same internal Option row serializes first claims and ordinary configuration
+writes, including installations without the migration extension. A no-op row write
+lock precedes the namespace read, and declaration updates also compare-and-swap.
+Batch saves validate the final configuration state. A transaction failure rolls
+back both config changes and declaration changes. Invalid/disabled candidates
+acquire no identities; conflicts fail before either write. Existing owned IDs
+cannot be reassigned to an unrelated legacy/native capability.
+
+The profile and frozen-contract validator is a single pure implementation in the
+model layer, shared by persistence and runtime. Namespace validation includes
+legacy internal/public names, aliases, disabled configurations and effective YAML
+overlays. YAML cannot itself activate a new identity without durable registration.
+Successful activation retains ownership through profile disable, alias changes,
+config deletion, restart and App readback rollback. No history reclaim operation
+is provided.
+
+A successful coherent configuration read with no declaration and no previously
+activated compatibility evidence is the normal never-enabled upgrade state. It
+allows initial `openai_images_native_v1` capability negotiation subject to the
+existing native storage/wallet/signing prerequisites. It does not require manual
+empty-history initialization. Unowned legacy routes, including ones named exactly
+like the supported canonical capabilities, retain their original behavior.
+Unrelated valid-key legacy requests do not query native task storage or consume
+native read quota, including when that storage is nil, absent, failing, or the
+native read quota is exhausted.
+
+Owned compatibility IDs retain owner/key-scoped operation lookup and fail closed
+when native acceptance is unknown. A new compatibility submission requires a valid
+selected profile, durable ownership and current configuration readiness. An
+unregistered but otherwise valid selected profile cannot admit. Existing accepted
+operations remain recoverable after profile/config removal; they never turn into
+a new legacy provider invocation.
+
+Identity evidence and routing are loaded as one cache snapshot. A warm configuration
+read failure, damaged declaration, or missing/shrunken known history preserves the
+last trusted routing pointer/version and its exact identity classification. It
+withdraws new activation/readiness until recovery, while unrelated legacy traffic
+continues through that trusted snapshot without native-storage dependence. Known
+historical operations keep their fail-closed recovery path. Cold unreadable,
+malformed or unsupported history is not verified empty: unclassified valid-key
+requests fail with `image_identity_history_unavailable` without native queries or
+read-token charges. The allowed capabilities alone never establish ownership.
+
+Supported rollout and recovery preconditions:
+
+- Verified Gateway main `cc9bc6c1d4e29aacfe8c7e1bf794cb7a50bd0f12` contains only
+  legacy image distributor/relay handlers; this AND-76 branch has not been
+  deployed. This supports the first-installation distinction. A cold database
+  with all evidence manually erased is indistinguishable from never-enabled;
+  the application does not claim to solve that information loss automatically.
+- Out-of-band history deletion, older unregistered adapters, and partial database
+  restores require separate recovery acceptance before serving affected traffic.
+  Do not silently bootstrap them as empty history. Normal rollback and backup
+  preserve the complete declaration. `GET /api/option/` does not list this
+  internal Option and is not a complete backup; use the existing full database
+  backup process. No new backup system is introduced.
+- A binary rollback must retain identity protection, or stop admission/reassignment
+  of affected IDs. Rolling back to a binary that cannot interpret this declaration
+  does not preserve the new code's safety guarantee merely by retaining the row.
+- Validate declaration/profile and coherent caches on every serving replica during
+  controlled acceptance. One config-write acknowledgement is not a fleet-wide
+  cache acknowledgement. Real activation, shared databases, deployment and paid
+  generation remain outside this isolated local implementation/test work.
+
+Local verification for this lifecycle correction:
+
+- Full Gateway suites passed: model 175.660 s, imagecompat 4.250 s, nativetask
+  15.408 s, controller 34.251 s, middleware 5.088 s, router 10.445 s. Official
+  Python/Node SDK fixture paths were explicitly configured. SQLite and isolated
+  PostgreSQL tests cover both migration-extension states.
+- Race checks for concurrent ownership writes and cache-fault recovery passed
+  (3.086 s). The final duplicate-key batch and cold unregistered-adapter boundary
+  tests passed separately (1.050 s) after the full run had started.
+- Gateway Go build succeeded. Incremental golangci-lint reports zero issues.
+  App changes in this correction are documentation only, so its previously
+  accepted application tests/build were not repeated.
+- Security scan and manual diff review found no secrets, new network calls,
+  changed billing/auth boundaries or injectable queries. All data is synthetic;
+  shared databases and real providers were not accessed.
+
+Evidence under `/private/tmp/and76-openai-image-compat-20261030`:
+`identity-lifecycle-regression.log`, `identity-lifecycle-final-boundaries.log`,
+`identity-lifecycle-race.log`, `identity-lifecycle-build.log`,
+`identity-lifecycle-lint-complete.log`, `identity-lifecycle-security-staged.log`,
+`identity-lifecycle-app-security-staged.log`. The executable is
+`gateway-lifecycle-build`, outside Git. Validation used the Go/SDK commands above,
+adding `./model` to the full test suite; race used `-race ./model -run
+'TestOpenAIImageIdentityConcurrentAppendsPreserveAllSuccessfulIDs|TestOpenAIImageIdentityFailedRefreshKeepsHistoryClosed'`.

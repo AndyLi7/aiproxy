@@ -352,3 +352,38 @@ Evidence under `/private/tmp/and76-openai-image-compat-20261030`:
 `gateway-lifecycle-build`, outside Git. Validation used the Go/SDK commands above,
 adding `./model` to the full test suite; race used `-race ./model -run
 'TestOpenAIImageIdentityConcurrentAppendsPreserveAllSuccessfulIDs|TestOpenAIImageIdentityFailedRefreshKeepsHistoryClosed'`.
+
+### Model-configuration mode boundary — 2026-10-30
+
+`DISABLE_MODEL_CONFIG=true` permits existing channel-only legacy names that do
+not have ModelConfig rows. This slice does not claim to validate that namespace
+for compatibility activation. While the switch is enabled, configuration saves
+reject valid AND-76 opt-in activation atomically and runtime negotiation withdraws
+`openai_images_native_v1`. A failed save leaves no new ownership, including in a
+batch. Ordinary channel-only legacy calls, with or without an Idempotency-Key,
+retain their real cache/distributor path.
+
+Switching from the normal mode preserves acquired history. Existing accepted
+operations still use owner/key-scoped replay and recovery; unknown acceptance
+stays fail-closed. Fresh compatibility submissions are unavailable in this mode,
+so an owned identity cannot fall through to legacy. Profile disable/deletion
+retains its history. Returning to normal mode restores negotiation and validated
+activation. This boundary adds no channel-write protocol or separate namespace
+implementation.
+
+The regression fixture uses actual Channel rows, rebuilt ModelCaches and the
+real image distributor. Before the fix, channel-only requests succeeded, then a
+valid conflicting profile permanently acquired their name and changed both keyed
+and unkeyed requests to 503. `identity-disabled-config-counterexample.log` records
+that failure. Related regression, build, lint and security evidence for the fix
+use the `identity-disabled-config-` prefix in the local artifact directory.
+
+Local verification: 16 related top-level tests passed with no skips (model
+1.161 s, controller 4.739 s), including both official Python/Node SDK loopback
+paths, original canonical legacy assertions, real channel-only cache/distribution,
+mode-switch recovery, and batch rollback. Gateway build succeeded; incremental
+lint reported zero issues. Evidence: `identity-disabled-config-regression.log`,
+`identity-disabled-config-build.log`, `identity-disabled-config-lint.log`,
+`identity-disabled-config-security-staged.log` and
+`identity-disabled-config-app-security-staged.log`. Prior full-suite evidence
+remains applicable; this narrow follow-up did not repeat unaffected suites.

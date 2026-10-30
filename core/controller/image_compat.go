@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/imagecompat"
 	"github.com/labring/aiproxy/core/common/nativetask"
 	"github.com/labring/aiproxy/core/middleware"
@@ -219,7 +220,7 @@ func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 			}
 		}
 
-		enabled = enabled && identities.Registered(selected)
+		enabled = enabled && !config.DisableModelConfig && identities.Registered(selected)
 		if existing == nil && !enabled {
 			imageCompatError(
 				c,

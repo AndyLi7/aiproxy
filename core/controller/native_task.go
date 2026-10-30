@@ -368,7 +368,7 @@ func nativeRuntimeFeatures() []string {
 	}
 	if ownedartifact.Configured() {
 		features = append(features, "native_owned_artifact_v1")
-		if len(os.Getenv("EXTERNAL_BALANCE_KEY")) >= 32 &&
+		if !config.DisableModelConfig && len(os.Getenv("EXTERNAL_BALANCE_KEY")) >= 32 &&
 			model.LoadModelCaches().ImageIdentityEvidence().Ready() {
 			features = append(features, "openai_images_native_v1")
 		}

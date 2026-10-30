@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/imagecompat"
 	"github.com/labring/aiproxy/core/common/nativeresult"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -407,6 +408,11 @@ func imageIdentityClaims(
 	for _, mc := range changed {
 		if !ValidOpenAIImageProfile(mc) {
 			continue
+		}
+		// Channel-only default routes are outside this configuration namespace.
+		// This slice does not activate compatibility while that mode is enabled.
+		if config.DisableModelConfig {
+			return addition, errors.New("OpenAI image activation requires model configuration")
 		}
 
 		effective := namespace[mc.Model]

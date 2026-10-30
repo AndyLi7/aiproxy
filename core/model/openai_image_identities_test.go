@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/imagecompat"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
@@ -532,4 +533,38 @@ func TestOpenAIImageIdentityColdUnregisteredProfileRequiresRecovery(t *testing.T
 		"normal save must not silently repair unknown admission history",
 	)
 	require.Equal(t, ImageIdentityMissing, ReadOpenAIImageIdentities(db).State)
+}
+
+func TestOpenAIImageIdentityDisabledModelConfigBatchRollback(t *testing.T) {
+	db := useImageIdentityDB(t)
+	oldDisabled := config.DisableModelConfig
+	t.Cleanup(func() { config.DisableModelConfig = oldDisabled })
+
+	config.DisableModelConfig = false
+	cfg := imageIdentityConfig("historical/before-mode-switch")
+	require.NoError(t, SaveModelConfig(cfg))
+
+	config.DisableModelConfig = true
+	next := imageIdentityConfig("new/unsupported-mode")
+	legacy := ModelConfig{Model: "legacy/batch-rollback", Type: mode.ImagesGenerations}
+	require.ErrorContains(
+		t,
+		SaveModelConfigs([]ModelConfig{legacy, next}),
+		"requires model configuration",
+	)
+
+	var count int64
+	require.NoError(t, db.Model(&ModelConfig{}).Where("model=?", legacy.Model).Count(&count).Error)
+	require.Zero(t, count)
+	require.False(t, ReadOpenAIImageIdentities(db).Known("new/unsupported-mode"))
+	require.True(t, ReadOpenAIImageIdentities(db).Known("historical/before-mode-switch"))
+	delete(cfg.Config, OpenAIImageProfileKey)
+	require.NoError(t, SaveModelConfig(cfg))
+	require.NoError(t, DeleteModelConfig(cfg.Model))
+	require.True(t, ReadOpenAIImageIdentities(db).Known("historical/before-mode-switch"))
+
+	config.DisableModelConfig = false
+
+	require.NoError(t, SaveModelConfig(next))
+	require.True(t, ReadOpenAIImageIdentities(db).Known("new/unsupported-mode"))
 }

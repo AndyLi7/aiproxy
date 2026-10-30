@@ -294,6 +294,7 @@ func TestImageCompatReplayAfterProfileDisabled(t *testing.T) {
 	)
 	request.Header = headers
 	request.Header.Set("Content-Type", "application/json")
+
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
 	// Cancel only after the durable selector lookup succeeds, exercising an
@@ -305,6 +306,7 @@ func TestImageCompatReplayAfterProfileDisabled(t *testing.T) {
 			After("gorm:query").
 			Register("cancel-after-lookup", func(*gorm.DB) { cancel() }),
 	)
+
 	request = request.WithContext(ctx)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -347,6 +349,7 @@ func TestImageCompatUsesNativeDistributorAndLegacyFallsThrough(t *testing.T) {
 			if enabled {
 				identities = imageIdentitySnapshot(t, mc)
 			}
+
 			configs := imageCompatConfigCache{mc.Model: mc}
 			sets := map[string][]string{"default": {mc.Model}}
 			token := model.TokenCache{ID: 7}
@@ -507,6 +510,7 @@ func TestImageCompatUnknownIdempotencyFailsClosed(t *testing.T) {
 			if scenario == "read-failure" || scenario == "missing-store" {
 				identities = imageIdentitySnapshot(t, imageProfileFixture(t, false))
 			}
+
 			providerCalls, walletCalls := 0, 0
 			router := gin.New()
 			router.Use(func(c *gin.Context) {

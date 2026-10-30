@@ -134,47 +134,57 @@ func lookupImageCompatOperation(
 	return nil, false
 }
 
+// readImageCompatModel keeps body inspection separate from admission. Its cleanup
+// stays with the caller so multipart files remain available through dispatch.
+func readImageCompatModel(
+	c *gin.Context,
+	legacy mode.Mode,
+) (string, *imageCompatBodyCounter, func(), bool) {
+	cleanup := func() {}
+	if legacy == mode.ImagesEdits {
+		counter := &imageCompatBodyCounter{ReadCloser: c.Request.Body}
+		c.Request.Body = counter
+
+		if err := common.ParseMultipartFormWithLimit(c.Request); err != nil {
+			return "", counter, cleanup, false
+		}
+
+		var requested string
+		if form := c.Request.MultipartForm; form != nil {
+			cleanup = func() { _ = form.RemoveAll() }
+
+			if values := form.Value["model"]; len(values) > 0 {
+				requested = values[0]
+			}
+		}
+
+		return requested, counter, cleanup, true
+	}
+
+	raw, err := common.GetRequestBodyReusable(c.Request)
+	if err != nil {
+		return "", nil, cleanup, false
+	}
+
+	var body struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return "", nil, cleanup, false
+	}
+
+	return body.Model, nil, cleanup, true
+}
+
 func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var (
-			requested   string
-			bodyCounter *imageCompatBodyCounter
-		)
-		if legacy == mode.ImagesEdits {
-			// Existing multipart limits and cleanup apply also when the legacy route wins.
-			bodyCounter = &imageCompatBodyCounter{ReadCloser: c.Request.Body}
-
-			c.Request.Body = bodyCounter
-			if err := common.ParseMultipartFormWithLimit(c.Request); err != nil {
-				c.Next()
-				return
-			}
-
-			if c.Request.MultipartForm != nil {
-				form := c.Request.MultipartForm
-				defer func() { _ = form.RemoveAll() }()
-
-				if values := c.Request.MultipartForm.Value["model"]; len(values) > 0 {
-					requested = values[0]
-				}
-			}
-		} else {
-			raw, err := common.GetRequestBodyReusable(c.Request)
-			if err != nil {
-				c.Next()
-				return
-			}
-
-			var body struct {
-				Model string `json:"model"`
-			}
-			if json.Unmarshal(raw, &body) != nil {
-				c.Next()
-				return
-			}
-
-			requested = body.Model
+		requested, bodyCounter, cleanup, ok := readImageCompatModel(c, legacy)
+		if !ok {
+			c.Next()
+			return
 		}
+
+		defer cleanup()
 
 		value, _ := c.Get(middleware.ModelCaches)
 
@@ -229,6 +239,7 @@ func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 				"This compatibility identity is reserved for native operation recovery; its registered profile is unavailable.",
 				id,
 			)
+
 			return
 		}
 

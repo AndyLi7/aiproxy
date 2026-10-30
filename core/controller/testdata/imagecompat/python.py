@@ -1,4 +1,5 @@
-import base64, os, re, urllib.request
+import base64, http.client, os, re
+from urllib.parse import urlsplit
 from openai import OpenAI, APIStatusError
 base = os.environ['AND76_TEST_BASE']
 assert re.fullmatch(r'http://127\.0\.0\.1:\d+/v1', base)
@@ -13,10 +14,22 @@ def fails(code, fn):
         assert error.status_code == code, str(error)
         return error
     raise AssertionError('expected status error')
+def download_image(url):
+    target, origin = urlsplit(url), urlsplit(base)
+    assert target.scheme == 'http' and target.netloc == origin.netloc
+    assert target.path.startswith('/v1/images/native-results/') and not target.fragment
+    connection = http.client.HTTPConnection('127.0.0.1', origin.port, timeout=5)
+    try:
+        connection.request('GET', target.path + ('?' + target.query if target.query else ''))
+        response = connection.getresponse()
+        assert response.status == 200, response.status
+        return response.read()
+    finally:
+        connection.close()
 result = client.images.generate(model=model, prompt='draw fixture', extra_headers=key('generate'))
 assert base64.b64decode(result.data[0].b64_json) == png
 result = client.images.generate(model=model, prompt='draw fixture', response_format='url', extra_headers=key('generate'))
-assert urllib.request.urlopen(result.data[0].url).read() == png
+assert download_image(result.data[0].url) == png
 result = client.images.edit(model=edit, prompt='edit fixture', image=('image.png', png, 'image/png'), extra_headers=key('edit'))
 assert base64.b64decode(result.data[0].b64_json) == png
 fails(400, lambda: client.images.generate(model=model, prompt='bad', n=2))

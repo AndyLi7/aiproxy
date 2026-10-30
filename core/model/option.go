@@ -251,6 +251,7 @@ func UpdateOption(key, value string) error {
 	if key == OpenAIImageIdentitiesOption {
 		return errors.New("OpenAI image identities are internally maintained")
 	}
+
 	err := updateOption(key, value, false)
 	if err != nil {
 		return err

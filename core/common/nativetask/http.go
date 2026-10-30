@@ -193,6 +193,7 @@ func (h *HTTP) writeErrorMessage(w http.ResponseWriter, status int, code, messag
 	if h != nil && h.ErrorIdentityHeader != "" {
 		message = strings.ReplaceAll(message, "X-Request-Id", h.ErrorIdentityHeader)
 	}
+
 	if h != nil && h.OnError != nil {
 		h.OnError(status, code, message)
 	}
@@ -309,6 +310,7 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, 400, "invalid_request_id")
 		return
 	}
+
 	raw, err := io.ReadAll(io.LimitReader(r.Body, nativeresult.MaxBytes+1))
 	if err != nil || len(raw) > nativeresult.MaxBytes {
 		h.writeError(w, 400, "invalid_request")

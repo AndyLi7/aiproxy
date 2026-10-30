@@ -203,6 +203,7 @@ func withMigrationConfigWrite(
 	write = func(tx *gorm.DB) error {
 		return withImageIdentityConfigWrite(tx, configs, deleted, originalWrite)
 	}
+
 	exists, err := migrationStoragePresent(DB)
 	if err != nil {
 		return err

@@ -145,6 +145,7 @@ func InitModelConfigAndChannelCache() error {
 			return errImageIdentityInvalid
 		}
 	}
+
 	cacheVersion++
 	next := &ModelCaches{
 		OpenAIImageIdentities:   identities,

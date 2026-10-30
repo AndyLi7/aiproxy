@@ -30,18 +30,22 @@ func IsAgentCredentialName(name string) bool {
 	if name == AgentCredentialName {
 		return true
 	}
+
 	if !strings.HasPrefix(name, "__website_agent_") || !strings.HasSuffix(name, "__") {
 		return false
 	}
+
 	suffix := strings.TrimSuffix(strings.TrimPrefix(name, "__website_agent_"), "__")
 	if len(suffix) == 0 || len(name) > MaxTokenNameLength {
 		return false
 	}
+
 	for _, c := range suffix {
 		if c < '0' || c > '9' {
 			return false
 		}
 	}
+
 	return true
 }
 

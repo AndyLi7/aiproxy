@@ -628,6 +628,7 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		AbortLogWithMessage(c, http.StatusForbidden, "model unavailable")
 		return
 	}
+
 	mc = GetGroupAdjustedModelConfig(group, mc)
 
 	c.Set(RequestModel, publicModel)

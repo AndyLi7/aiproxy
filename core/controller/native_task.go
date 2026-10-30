@@ -169,9 +169,11 @@ func submitNativeTask(c *gin.Context) {
 // binding filter in getInitialChannel.
 func resolveNativePlan(c *gin.Context) (nativetask.Plan, nativetask.Provider, error) {
 	mc := middleware.GetModelConfig(c)
-	if model.IsAgentCredentialName(middleware.GetToken(c).Name) && (mc.Config[AgentExecutionConfigKey] == nil || c.GetHeader("X-Agent-Execution-Revision") != agentExecutionRevision(mc)) {
+	if model.IsAgentCredentialName(middleware.GetToken(c).Name) &&
+		(mc.Config[AgentExecutionConfigKey] == nil || c.GetHeader("X-Agent-Execution-Revision") != agentExecutionRevision(mc)) {
 		return nativetask.Plan{}, nil, nativetask.ErrUnavailable
 	}
+
 	if mc.Config[NativeResultConfigKey] == nil {
 		// The model is not published for native tasks: the caller chose the
 		// wrong model or endpoint. Every later failure is a server-side route.

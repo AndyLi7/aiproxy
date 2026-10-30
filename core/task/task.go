@@ -312,6 +312,7 @@ func configuredUsageRecoveryTasks(image, upstream func(context.Context)) []func(
 	if !env.Bool("DISABLE_UPSTREAM_BILLING_RECOVERY", false) {
 		tasks = append(tasks, upstream)
 	}
+
 	return tasks
 }
 

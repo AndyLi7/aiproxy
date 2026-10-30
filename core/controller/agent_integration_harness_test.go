@@ -5,6 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/labring/aiproxy/core/common"
 	"github.com/labring/aiproxy/core/common/balance"
@@ -16,11 +22,6 @@ import (
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	"net/http"
-	"os"
-	"path/filepath"
-	"testing"
-	"time"
 )
 
 type agentLoopbackTransport struct{ real http.RoundTripper }
@@ -28,6 +29,7 @@ type agentLoopbackTransport struct{ real http.RoundTripper }
 func (t agentLoopbackTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	req := r.Clone(r.Context())
 	target := *r.URL
+
 	req.URL = &target
 	switch target.Hostname() {
 	case "queue.fal.run", "agent-fixture.invalid":
@@ -40,6 +42,7 @@ func (t agentLoopbackTransport) RoundTrip(r *http.Request) (*http.Response, erro
 	default:
 		return nil, errors.New("test outbound refused")
 	}
+
 	return t.real.RoundTrip(req)
 }
 
@@ -49,51 +52,200 @@ func TestAgentIntegrationHarness(t *testing.T) {
 	if os.Getenv("AGENT_INTEGRATION_HARNESS") != "true" {
 		t.Skip("opt-in isolated localhost harness")
 	}
+
 	root := os.Getenv("AGENT_INTEGRATION_STATE")
 	require.True(t, filepath.IsAbs(root))
 	require.Contains(t, root, "agent-integration")
-	require.NoError(t, os.MkdirAll(root, 0700))
+	// #nosec G703 -- Opt-in local test harness state is supplied by the developer, never an HTTP request.
+	require.NoError(t, os.MkdirAll(root, 0o700))
 	database, err := model.OpenSQLite(filepath.Join(root, "gateway.db"))
 	require.NoError(t, err)
+
 	model.DB, model.LogDB = database, database
 	common.UsingSQLite = true
 	common.RedisEnabled = false
 	config.AdminKey = "image-agent-local-fake-key"
 	config.DisableModelConfig = false
 	config.NativeRouteFollowsBinding = true
-	require.NoError(t, database.AutoMigrate(&model.Group{}, &model.GroupModelConfig{}, &model.Token{}, &model.Channel{}, &model.ModelConfig{}, &model.NativeTask{}, &model.Log{}, &model.SummaryMinute{}, &model.GroupSummaryMinute{}))
+
+	require.NoError(
+		t,
+		database.AutoMigrate(
+			&model.Group{},
+			&model.GroupModelConfig{},
+			&model.Token{},
+			&model.Channel{},
+			&model.ModelConfig{},
+			&model.NativeTask{},
+			&model.Log{},
+			&model.SummaryMinute{},
+			&model.GroupSummaryMinute{},
+		),
+	)
 	t.Setenv("EXTERNAL_BALANCE_URL", "http://127.0.0.1:3510")
 	t.Setenv("EXTERNAL_BALANCE_KEY", "image-agent-local-fake-key")
+
 	balance.Default = balance.NewExternalHTTP("http://127.0.0.1:3510", "image-agent-local-fake-key")
 	http.DefaultTransport = agentLoopbackTransport{real: http.DefaultTransport}
+
 	var count int64
 	require.NoError(t, database.Model(&model.Channel{}).Count(&count).Error)
+
 	if count == 0 {
-		channel := model.Channel{ID: 11, Name: "agent-local-fixture", Type: model.ChannelTypeFal, Status: model.ChannelStatusEnabled, Key: "image-agent-local-fake-key", Models: []string{"local-fixture/image", "local-fixture/conversation"}}
+		channel := model.Channel{
+			ID:     11,
+			Name:   "agent-local-fixture",
+			Type:   model.ChannelTypeFal,
+			Status: model.ChannelStatusEnabled,
+			Key:    "image-agent-local-fake-key",
+			Models: []string{"local-fixture/image", "local-fixture/conversation"},
+		}
 		require.NoError(t, database.Create(&channel).Error)
-		contract := map[string]any{"version": 1, "model": "local-fixture/image", "input_schema": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"prompt"}, "properties": map[string]any{"prompt": map[string]any{"type": "string", "minLength": 1, "maxLength": 6000}, "image_urls": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"type": "string", "pattern": "^data:image/png;base64,[A-Za-z0-9+/=]+$"}}}}, "output_schema": map[string]any{"type": "object", "required": []string{"images"}, "properties": map[string]any{"images": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "object", "required": []string{"url"}, "properties": map[string]any{"url": map[string]any{"type": "string"}}}}}}, "artifacts": []any{map[string]any{"path": []string{"images", "*", "url"}}}}
-		quote := map[string]any{"version": 1, "currency": "USD", "settlementPolicy": "actual-cost-v1", "quoteVersion": "agent-test-media-v1", "prepaidMicros": 30000, "routes": []any{map[string]any{"routeId": "agent-local-image", "channelId": 11, "provider": "fal", "endpoint": "fal-ai/agent-fixture", "credentialScope": "agent-test-fixture", "estimatedMicros": 20000, "prepaidMicros": 30000, "quantityMetric": "bounded_request", "rule": map[string]any{"mode": "cost_markup", "ratio": "1"}}}}
-		native := map[string]any{"version": 1, "channelId": 11, "endpoint": "fal-ai/agent-fixture", "credentialScope": "agent-test-fixture", "keyFingerprint": model.ImageChannelKeyFingerprint(channel.Key), "deliveryBase": "https://agent-gateway.invalid", "contract": contract}
-		image := model.ModelConfig{Model: "local-fixture/image", Type: mode.NativeTasks, Config: map[model.ModelConfigKey]any{NativeResultConfigKey: native, model.ImagePrepaymentConfigKey: quote, model.ModelConfigCapabilityKey: "text-to-image", AgentExecutionConfigKey: map[string]any{"version": 1, "kind": "image", "upstreamModelId": "fal-ai/agent-fixture", "promptField": "prompt", "referenceField": "image_urls", "referenceFormat": "data-uri-array", "defaults": map[string]any{}}}}
-		llm := model.ModelConfig{Model: "local-fixture/conversation", Type: mode.ChatCompletions, Price: model.Price{InputPrice: 1, InputPriceUnit: 1_000_000, OutputPrice: 2, OutputPriceUnit: 1_000_000}, Config: map[model.ModelConfigKey]any{AgentExecutionConfigKey: map[string]any{"version": 1, "kind": "inference", "upstreamModelId": "local-fixture/conversation", "maxInputTokens": 32000, "maxOutputTokens": 1200, "vision": true, "toolCalling": true, "imageTokensIncluded": true, "reasoningTokensIncluded": true}, "x_token_platform_pricing": map[string]any{"currency": "USD", "pricing_version": "agent-test-llm-v1"}}}
+
+		contract := map[string]any{
+			"version": 1,
+			"model":   "local-fixture/image",
+			"input_schema": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"required":             []string{"prompt"},
+				"properties": map[string]any{
+					"prompt": map[string]any{
+						"type":      "string",
+						"minLength": 1,
+						"maxLength": 6000,
+					},
+					"image_urls": map[string]any{
+						"type":     "array",
+						"maxItems": 4,
+						"items": map[string]any{
+							"type":    "string",
+							"pattern": "^data:image/png;base64,[A-Za-z0-9+/=]+$",
+						},
+					},
+				},
+			},
+			"output_schema": map[string]any{
+				"type":     "object",
+				"required": []string{"images"},
+				"properties": map[string]any{
+					"images": map[string]any{
+						"type":     "array",
+						"minItems": 1,
+						"maxItems": 1,
+						"items": map[string]any{
+							"type":       "object",
+							"required":   []string{"url"},
+							"properties": map[string]any{"url": map[string]any{"type": "string"}},
+						},
+					},
+				},
+			},
+			"artifacts": []any{map[string]any{"path": []string{"images", "*", "url"}}},
+		}
+		quote := map[string]any{
+			"version":          1,
+			"currency":         "USD",
+			"settlementPolicy": "actual-cost-v1",
+			"quoteVersion":     "agent-test-media-v1",
+			"prepaidMicros":    30000,
+			"routes": []any{
+				map[string]any{
+					"routeId":         "agent-local-image",
+					"channelId":       11,
+					"provider":        "fal",
+					"endpoint":        "fal-ai/agent-fixture",
+					"credentialScope": "agent-test-fixture", // #nosec G101 -- Account attribution label, not an authentication credential.
+					"estimatedMicros": 20000,
+					"prepaidMicros":   30000,
+					"quantityMetric":  "bounded_request",
+					"rule":            map[string]any{"mode": "cost_markup", "ratio": "1"},
+				},
+			},
+		}
+		native := map[string]any{
+			"version":         1,
+			"channelId":       11,
+			"endpoint":        "fal-ai/agent-fixture",
+			"credentialScope": "agent-test-fixture", // #nosec G101 -- Account attribution label, not an authentication credential.
+			"keyFingerprint":  model.ImageChannelKeyFingerprint(channel.Key),
+			"deliveryBase":    "https://agent-gateway.invalid",
+			"contract":        contract,
+		}
+		image := model.ModelConfig{
+			Model: "local-fixture/image",
+			Type:  mode.NativeTasks,
+			Config: map[model.ModelConfigKey]any{
+				NativeResultConfigKey:          native,
+				model.ImagePrepaymentConfigKey: quote,
+				model.ModelConfigCapabilityKey: "text-to-image",
+				AgentExecutionConfigKey: map[string]any{
+					"version":         1,
+					"kind":            "image",
+					"upstreamModelId": "fal-ai/agent-fixture",
+					"promptField":     "prompt",
+					"referenceField":  "image_urls",
+					"referenceFormat": "data-uri-array",
+					"defaults":        map[string]any{},
+				},
+			},
+		}
+		llm := model.ModelConfig{
+			Model: "local-fixture/conversation",
+			Type:  mode.ChatCompletions,
+			Price: model.Price{
+				InputPrice:      1,
+				InputPriceUnit:  1_000_000,
+				OutputPrice:     2,
+				OutputPriceUnit: 1_000_000,
+			},
+			Config: map[model.ModelConfigKey]any{
+				AgentExecutionConfigKey: map[string]any{
+					"version":                 1,
+					"kind":                    "inference",
+					"upstreamModelId":         "local-fixture/conversation",
+					"maxInputTokens":          32000,
+					"maxOutputTokens":         1200,
+					"vision":                  true,
+					"toolCalling":             true,
+					"imageTokensIncluded":     true,
+					"reasoningTokensIncluded": true,
+				},
+				"x_token_platform_pricing": map[string]any{
+					"currency":        "USD",
+					"pricing_version": "agent-test-llm-v1",
+				},
+			},
+		}
+
 		require.NoError(t, database.Create(&image).Error)
 		require.NoError(t, database.Create(&llm).Error)
 	}
 	// An existing public media product, with no Agent descriptor. The acceptance
 	// client must opt it in through the authenticated typed administration API.
 	var publicCount int64
-	require.NoError(t, database.Model(&model.ModelConfig{}).Where("model = ?", "local-public/image").Count(&publicCount).Error)
+	require.NoError(
+		t,
+		database.Model(&model.ModelConfig{}).
+			Where("model = ?", "local-public/image").
+			Count(&publicCount).
+			Error,
+	)
+
 	if publicCount == 0 {
 		source, e := model.GetModelConfig("local-fixture/image")
 		require.NoError(t, e)
+
 		source.Model = "local-public/image"
 		delete(source.Config, AgentExecutionConfigKey)
-		raw, _ := json.Marshal(source.Config[NativeResultConfigKey])
+		raw := agentFixtureJSON(t, source.Config[NativeResultConfigKey])
+
 		var native map[string]any
 		require.NoError(t, json.Unmarshal(raw, &native))
-		native["contract"].(map[string]any)["model"] = source.Model
+		agentFixtureValue[map[string]any](t, native["contract"])["model"] = source.Model
 		source.Config[NativeResultConfigKey] = native
 		require.NoError(t, database.Create(&source).Error)
+
 		var channel model.Channel
 		require.NoError(t, database.First(&channel, 11).Error)
 		channel.Models = append(channel.Models, source.Model)
@@ -104,15 +256,25 @@ func TestAgentIntegrationHarness(t *testing.T) {
 	for _, name := range []string{"local-fixture/image", "local-public/image"} {
 		fixture, e := model.GetModelConfig(name)
 		require.NoError(t, e)
+
 		if _, exists := fixture.Config[model.ModelConfigCapabilityKey]; !exists {
 			fixture.Config[model.ModelConfigCapabilityKey] = "text-to-image"
-			require.NoError(t, database.Model(&fixture).Select("Config", "UpdatedAt").Updates(&fixture).Error)
+			require.NoError(
+				t,
+				database.Model(&fixture).Select("Config", "UpdatedAt").Updates(&fixture).Error,
+			)
 		}
 	}
+
 	require.NoError(t, model.InitModelConfigAndChannelCache())
 	gin.SetMode(gin.ReleaseMode)
+
 	router := gin.New()
-	router.Use(gin.Recovery(), middleware.RequestIDMiddleware, middleware.NewLog(logrus.StandardLogger()))
+	router.Use(
+		gin.Recovery(),
+		middleware.RequestIDMiddleware,
+		middleware.NewLog(logrus.StandardLogger()),
+	)
 	api := router.Group("/api", middleware.AdminAuth)
 	api.GET("/agent-models", GetAgentModelOptions)
 	api.POST("/agent-models", ConfigureAgentModel)
@@ -126,6 +288,7 @@ func TestAgentIntegrationHarness(t *testing.T) {
 	api.GET("/token/:group/:id", GetGroupToken)
 	api.POST("/token/:group/:id/status", UpdateGroupTokenStatus)
 	api.POST("/token/:group/:id/name", UpdateGroupTokenName)
+
 	v1 := router.Group("/v1", middleware.OperationalLogMiddleware(), middleware.TokenAuth)
 	v1.GET("/agent-access", AgentAccess)
 	v1.GET("/models", ListModels)
@@ -136,10 +299,21 @@ func TestAgentIntegrationHarness(t *testing.T) {
 	api.GET("/_test/evidence", func(c *gin.Context) {
 		var tasks []model.NativeTask
 		database.Find(&tasks)
-		safe := []map[string]any{}
+
+		safe := make([]map[string]any, 0, len(tasks))
 		for _, task := range tasks {
-			safe = append(safe, map[string]any{"id": task.ID, "group": task.GroupID, "tokenId": task.TokenID, "status": task.Status, "billingOperationId": task.BillingOperationID})
+			safe = append(
+				safe,
+				map[string]any{
+					"id":                 task.ID,
+					"group":              task.GroupID,
+					"tokenId":            task.TokenID,
+					"status":             task.Status,
+					"billingOperationId": task.BillingOperationID,
+				},
+			)
 		}
+
 		c.JSON(200, safe)
 	})
 	api.POST("/_test/reload", func(c *gin.Context) {
@@ -149,11 +323,14 @@ func TestAgentIntegrationHarness(t *testing.T) {
 			c.Status(204)
 		}
 	})
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -161,13 +338,32 @@ func TestAgentIntegrationHarness(t *testing.T) {
 			case <-ticker.C:
 				engine, ok := NativeTaskEngine()
 				if ok {
-					_, _ = engine.RecoverOnce(ctx, "agent-integration", time.Now(), nativetask.ResolveFalPoller(model.GetChannelByID), func(ctx context.Context, task string, index int, source string) (ownedartifact.Receipt, error) {
-						return ownedartifact.StoreWithSourceClient(ctx, task, index, source, http.DefaultClient)
-					})
+					_, _ = engine.RecoverOnce(
+						ctx,
+						"agent-integration",
+						time.Now(),
+						nativetask.ResolveFalPoller(model.GetChannelByID),
+						func(ctx context.Context, task string, index int, source string) (ownedartifact.Receipt, error) {
+							return ownedartifact.StoreWithSourceClient(
+								ctx,
+								task,
+								index,
+								source,
+								http.DefaultClient,
+							)
+						},
+					)
 				}
 			}
 		}
 	}()
+
 	t.Log("Agent gateway HTTP ready at 127.0.0.1:3511")
-	require.NoError(t, http.ListenAndServe("127.0.0.1:3511", router))
+
+	server := &http.Server{
+		Addr:              "127.0.0.1:3511",
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	require.NoError(t, server.ListenAndServe())
 }

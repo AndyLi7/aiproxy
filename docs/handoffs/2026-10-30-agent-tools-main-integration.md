@@ -36,7 +36,7 @@ trial was performed. Test credentials and image pixels are synthetic.
 
 1. Normal `core/main.go` builds for Darwin arm64 and Linux arm64 using Go 1.27,
    `CGO_ENABLED=0`, `-trimpath -buildvcs=false` (not a Go test harness binary).
-2. Seven-package targeted regression selection: **35 top-level / 146 including
+2. Seven-package targeted regression selection: **36 top-level / 149 including
    subtests passed**, no skip/failure. Covers HMAC/replay, submit/cancel, frozen
    binding, Wan references, owned-image SSRF/integrity, preserved main routing,
    public error privacy, usage identity and API-wallet separation.
@@ -83,9 +83,9 @@ trial was performed. Test credentials and image pixels are synthetic.
 Frozen local main binaries (builds before documentation-only edits):
 
 - Darwin arm64 SHA256:
-  `4e4cc976b2eb54cbfe884a8bf4b803351d55e832b91d0a2b023014b932532ed5`
+  `ab718a6a7f620d728da88c66c3610c3aba682f8d85104d7e3d9ca4e5a1b03878`
 - Linux arm64 SHA256:
-  `d6435bce9a508ca4e86bdda405ab850827b112102dc7e7cfb9978d62bb6da18e`
+  `8cd4ca5bbc9cefc43b75f29601e38bf25f5432a839c9bf564f7b7d981b4cc98b`
 
 Local evidence, intentionally not committed with databases/private configuration:
 `/Users/andyli7/code/token/.local-logs/musespan-gateway-integration-20261030/verification/`
@@ -93,6 +93,37 @@ and `musespan-main-integration-20261030/paired-main-services/` under the same
 `.local-logs` root. The frozen source-to-artifact manifest is produced after the
 checkpoint commit. Preserve these files for review; do not distribute private
 fixture env files, TLS private keys or rescued databases.
+
+## Lint closure and final local revalidation
+
+The same golangci-lint 2.15.0 / Go 1.27 rules report zero issues on main
+8d4010b and zero on the final local candidate, without CI configuration changes.
+The recovered code initially produced 469 lint findings. Formatting fixes are
+limited to the changed Agent files; explicit JSON/type checks replace ignored
+errors. Native binding mapping and poll/cancel/archive phases are extracted
+without changing submission order, ownership or lease scope. Corrupt persisted
+output/manifest now returns a closed error rather than a successful empty result;
+a two-case regression covers this behavior. Test harness HTTP servers have
+header timeouts. Narrow documented annotations cover internal white-box tests,
+developer-owned fixture paths/account labels, and the fixed loopback HTTP probe.
+
+After these source changes, both normal-main binaries were rebuilt, all 149
+selected tests passed, 27 HTTP failure checks and 14 success checks passed again,
+and all five App-service scenarios passed with the new Linux binary. The full
+SDK/browser query was repeated against it: session
+`569d8f18-4628-46e7-85c2-aa9b1ad02a92`, run
+`3752d6a3-0c4a-4c59-8a71-1d7ab48935f6`, one provider submission, three tool
+calls, persisted inspection and 1600×900 image after reload. The coffee poster
+is programmatically drawn and visibly labeled offline; model decisions/reports
+are scripted. Final evidence is under `verification/lint-acceptance/` and
+`musespan-main-integration-20261030/paired-main-final/`.
+
+The App checkpoint was merged by the project manager as
+`5cbb1a99931c5d5f2023bbb387de288f066dd93f`, tree-identical to e03ba418.
+The final gateway lint closure is retained locally pending the project manager's
+pause on further integration. No gateway merge or environment deployment was
+performed. Previously triggered gateway branch CI published only branch/SHA
+container tags, not main/latest; this is not a running-service deployment.
 
 ## Remaining acceptance and gates
 

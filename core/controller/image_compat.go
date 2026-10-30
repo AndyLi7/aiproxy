@@ -87,6 +87,52 @@ func (r *imageCompatBodyCounter) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// A missing store is not proof that a stable operation was never accepted.
+// Only a successful not-found lookup permits keyed legacy fallthrough.
+func lookupImageCompatOperation(
+	c *gin.Context,
+	id, group string,
+	token int,
+) (*model.NativeTask, bool) {
+	if !nativetask.AllowCustomerRead(group, token) {
+		imageCompatError(
+			c,
+			429,
+			"rate_limit_exceeded",
+			"Query the existing operation after the read limit recovers.",
+			id,
+		)
+
+		return nil, false
+	}
+
+	if model.LogDB != nil {
+		task, err := model.GetNativeTask(
+			model.LogDB.WithContext(c.Request.Context()),
+			id,
+			group,
+			token,
+		)
+		if err == nil {
+			return task, true
+		}
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, true
+		}
+	}
+
+	imageCompatError(
+		c,
+		503,
+		"task_store_unavailable",
+		"Cannot determine whether this operation was accepted. Query its task or retry with the same Idempotency-Key after recovery.",
+		id,
+	)
+
+	return nil, false
+}
+
 func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var (
@@ -135,13 +181,12 @@ func selectImageCompat(legacy mode.Mode) gin.HandlerFunc {
 		var existing *model.NativeTask
 
 		id, idErr := imagecompat.OperationID(c.Request.Header, group, token)
-		if idErr == nil && c.GetHeader("Idempotency-Key") != "" && model.LogDB != nil {
-			task, err := model.GetNativeTask(model.LogDB, id, group, token)
-			if err == nil {
-				existing = task
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-				// A matching active profile below still fails through the native store gate.
-				existing = nil
+		if idErr == nil && c.GetHeader("Idempotency-Key") != "" {
+			var safe bool
+
+			existing, safe = lookupImageCompatOperation(c, id, group, token)
+			if !safe {
+				return
 			}
 		}
 

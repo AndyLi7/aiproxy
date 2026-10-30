@@ -160,3 +160,31 @@ func mustParseLength(t *testing.T, value string) int64 {
 
 	return n
 }
+
+func TestImageWaitConcurrencyIsPerOwnerKey(t *testing.T) {
+	l := newReadLimiter(time.Now)
+
+	releases := make([]func(), 0, imageWaitsPerKey)
+	for range imageWaitsPerKey {
+		release, ok := l.acquireImageWait("g", 1)
+		require.True(t, ok)
+
+		releases = append(releases, release)
+	}
+
+	_, ok := l.acquireImageWait("g", 1)
+	require.False(t, ok)
+	otherKey, ok := l.acquireImageWait("g", 2)
+	require.True(t, ok)
+	otherOwner, ok := l.acquireImageWait("other", 1)
+	require.True(t, ok)
+	otherKey()
+	otherOwner()
+
+	for _, release := range releases {
+		release()
+		release()
+	}
+
+	require.Empty(t, l.waits)
+}

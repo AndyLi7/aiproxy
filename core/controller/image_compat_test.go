@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -30,6 +31,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func imageProfileFixture(t *testing.T, edit bool) model.ModelConfig {
@@ -264,8 +266,16 @@ func TestImageCompatReplayAfterProfileDisabled(t *testing.T) {
 	request.Header = headers
 	request.Header.Set("Content-Type", "application/json")
 	ctx, cancel := context.WithCancel(request.Context())
-	cancel()
-
+	defer cancel()
+	// Cancel only after the durable selector lookup succeeds, exercising an
+	// accepted replay after disable without waiting for the HTTP deadline.
+	require.NoError(
+		t,
+		db.Callback().
+			Query().
+			After("gorm:query").
+			Register("cancel-after-lookup", func(*gorm.DB) { cancel() }),
+	)
 	request = request.WithContext(ctx)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -409,4 +419,95 @@ func TestImageCompatEditNativeDistributor(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	require.Equal(t, 204, response.Code, response.Body.String())
+}
+
+func TestImageCompatUnknownIdempotencyFailsClosed(t *testing.T) {
+	for _, scenario := range []string{"read-failure", "missing-store", "confirmed-absent", "unkeyed-legacy"} {
+		t.Run(scenario, func(t *testing.T) {
+			db, err := model.OpenSQLite(filepath.Join(t.TempDir(), "fault.db"))
+			require.NoError(t, err)
+			require.NoError(t, db.AutoMigrate(&model.NativeTask{}))
+
+			headers := http.Header{"Idempotency-Key": {"operation-before-disable"}}
+			group := "fault-" + scenario
+			id, err := imagecompat.OperationID(headers, group, 7)
+			require.NoError(t, err)
+
+			if scenario == "read-failure" {
+				task, _ := signedImageFixture(t)
+				task.ID, task.GroupID, task.Status = id, group, "queued"
+				require.NoError(t, db.Create(task).Error)
+				require.NoError(
+					t,
+					db.Callback().
+						Query().
+						Before("gorm:query").
+						Register("injected-store-failure", func(tx *gorm.DB) {
+							_ = tx.AddError(errors.New("synthetic store outage"))
+						}),
+				)
+			}
+
+			old := model.LogDB
+
+			model.LogDB = db
+			if scenario == "missing-store" || scenario == "unkeyed-legacy" {
+				model.LogDB = nil
+			}
+
+			t.Cleanup(func() { model.LogDB = old })
+
+			if scenario == "unkeyed-legacy" {
+				headers.Del("Idempotency-Key")
+			}
+
+			providerCalls, walletCalls := 0, 0
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(middleware.Group, model.GroupCache{ID: group})
+				c.Set(middleware.Token, model.TokenCache{ID: 7})
+				// No active native profile, with a successful legacy route available.
+				c.Next()
+			})
+			router.POST(
+				"/v1/images/generations",
+				selectImageCompat(mode.ImagesGenerations),
+				func(c *gin.Context) {
+					providerCalls++
+					walletCalls++
+
+					c.Status(http.StatusNoContent)
+				},
+			)
+
+			request := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				"/v1/images/generations",
+				strings.NewReader(
+					`{"model":"`+imagecompat.GenerateModel+`","prompt":"same operation"}`,
+				),
+			)
+			request.Header = headers
+			request.Header.Set("Content-Type", "application/json")
+
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			if scenario == "confirmed-absent" || scenario == "unkeyed-legacy" {
+				require.Equal(t, http.StatusNoContent, response.Code)
+				require.Equal(t, 1, providerCalls)
+				return
+			}
+
+			require.Equal(t, http.StatusServiceUnavailable, response.Code)
+			require.Equal(t, "false", response.Header().Get("X-Should-Retry"))
+			require.Equal(t, id, response.Header().Get("X-Musespan-Task-Id"))
+			require.Equal(t, "/v1/model-tasks/"+id, response.Header().Get("Location"))
+			require.Contains(t, response.Body.String(), "task_store_unavailable")
+			require.Contains(t, response.Body.String(), id)
+			require.Zero(t, providerCalls)
+			require.Zero(t, walletCalls)
+		})
+	}
 }

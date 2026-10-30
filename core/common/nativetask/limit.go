@@ -12,6 +12,7 @@ import (
 const (
 	statusReadsPerSecond = 20
 	statusReadBurst      = 40
+	imageWaitsPerKey     = 2
 	// Each download holds a socket and up to bufferedArtifactLimit bytes. The
 	// group cap stops one account's many keys from taking every global slot.
 	artifactDownloadsPerKey   = 4
@@ -31,6 +32,7 @@ type readLimiter struct {
 	active  map[string]int
 	groups  map[string]int
 	total   int
+	waits   map[string]int
 }
 
 var customerReads = newReadLimiter(time.Now)
@@ -47,6 +49,7 @@ func newReadLimiter(now func() time.Time) *readLimiter {
 		buckets: map[string]*readBucket{},
 		active:  map[string]int{},
 		groups:  map[string]int{},
+		waits:   map[string]int{},
 	}
 }
 
@@ -124,6 +127,34 @@ func (l *readLimiter) acquireDownload(group string, token int) (func(), bool) {
 
 			if l.groups[group]--; l.groups[group] <= 0 {
 				delete(l.groups, group)
+			}
+		})
+	}, true
+}
+
+// acquireImageWait uses the customer read limiter to cap waiting HTTP requests
+// per owner/key. Polls also spend the same status-read tokens as ordinary GETs.
+func (l *readLimiter) acquireImageWait(group string, token int) (func(), bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	key := readKey(group, token)
+	if l.waits[key] >= imageWaitsPerKey {
+		return nil, false
+	}
+
+	l.waits[key]++
+
+	var once sync.Once
+
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+
+			l.waits[key]--
+			if l.waits[key] == 0 {
+				delete(l.waits, key)
 			}
 		})
 	}, true

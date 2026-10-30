@@ -11,12 +11,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/labring/aiproxy/core/common/ownedartifact"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestImageWaitDoesNotChangeBillingOrDispatch(t *testing.T) {
@@ -113,4 +116,102 @@ func TestImageErrorInstructionsUseAdapterIdentity(t *testing.T) {
 	result = httptest.NewRecorder()
 	h.writeError(result, 503, "model_route_unavailable")
 	require.Contains(t, result.Body.String(), "X-Request-Id")
+}
+
+func TestImageWaitSharesReadBudgetAndReleasesSlots(t *testing.T) {
+	e, plan, wallet, provider := setup(t)
+	now := time.Now()
+	limiter := newReadLimiter(func() time.Time { return now })
+	h := &HTTP{
+		Engine:      e,
+		limiter:     limiter,
+		Identity:    func(*http.Request) (string, int, error) { return "g", 1, nil },
+		ResolvePlan: func(*http.Request, []byte) (Plan, Provider, error) { return plan, provider, nil },
+	}
+	task := h.CreateTask(
+		httptest.NewRecorder(),
+		httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil),
+		"wait-budget",
+		body,
+	)
+	require.NotNil(t, task)
+
+	commands := len(wallet.commands)
+
+	var queries atomic.Int32
+	require.NoError(
+		t,
+		e.DB.Callback().
+			Query().
+			Before("gorm:query").
+			Register("count-wait-reads", func(*gorm.DB) { queries.Add(1) }),
+	)
+	// Leave three shared status tokens. Many concurrent waits cannot multiply
+	// these into independent 30-second, 4-reads/second polling budgets.
+	for range statusReadBurst - 3 {
+		require.True(t, limiter.allowStatus("g", 1))
+	}
+
+	var wg sync.WaitGroup
+
+	start := make(chan struct{})
+	for range 32 {
+		wg.Go(func() {
+			<-start
+
+			_, err := h.WaitImage(t.Context(), task, time.Now().Add(time.Second))
+			if err != nil {
+				t.Errorf("wait: %v", err)
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+	require.Equal(t, int32(3), queries.Load())
+	limiter.mu.Lock()
+	require.Empty(t, limiter.waits)
+	limiter.mu.Unlock()
+	require.Equal(t, commands, len(wallet.commands))
+	require.Equal(t, 1, provider.calls)
+
+	for _, canceled := range []bool{true, false} {
+		ctx, cancel := context.WithCancel(t.Context())
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+
+			_, _ = h.WaitImage(ctx, task, time.Now().Add(100*time.Millisecond))
+		}()
+
+		require.Eventually(t, func() bool {
+			limiter.mu.Lock()
+			defer limiter.mu.Unlock()
+			return limiter.waits[readKey("g", 1)] == 1
+		}, 80*time.Millisecond, time.Millisecond)
+
+		if canceled {
+			cancel()
+		}
+
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("wait did not release")
+		}
+
+		cancel()
+
+		release, ok := limiter.acquireImageWait("g", 1)
+		require.True(t, ok)
+		release()
+		limiter.mu.Lock()
+		require.Empty(t, limiter.waits)
+		limiter.mu.Unlock()
+	}
+
+	require.Equal(t, int32(3), queries.Load())
+	require.Equal(t, commands, len(wallet.commands))
+	require.Equal(t, 1, provider.calls)
 }

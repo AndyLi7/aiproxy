@@ -148,10 +148,12 @@ accepted tasks keep native recovery and owner access. Keep the signed download
 handler for the 10-minute token lifetime before a binary rollback. Native storage
 and billing are unchanged, so no rollback SQL is needed.
 
-Gateway `.github/workflows/release.yml` publishes images on arbitrary branch pushes.
-Consequently this checkpoint is local-only: pushing cannot be treated as a harmless
-PR preparation step under the current no-release authorization. The project manager
-must review/coordinate that release hook separately before any push.
+At the initial checkpoint, Gateway's remote Release workflow publishes images on
+arbitrary branch pushes. A separate local commit
+`764d4d0556a3e5f2ef4caa0dcb8a3368f2ae203c` removes the ordinary-branch push trigger,
+retaining version-tag publishing and PR builds. Its trigger matrix and static
+checks are recorded in Gateway `docs/and76-release-trigger-review.md`. This change
+has not been pushed and no remote settings changed; the no-push boundary remains.
 
 ### Reproducing SDK checks
 
@@ -167,3 +169,70 @@ The harness rejects non-loopback API origins, uses fake credentials, injects onl
 synthetic provider/archive transports, and creates its own temporary SQLite DB.
 Without both SDK paths this optional test is explicitly skipped; the checkpoint
 above ran it with both paths configured.
+
+
+### Review corrections — 2026-10-30
+
+The first local review requested three corrections; these preserve the same native
+execution, billing and publication architecture:
+
+- A keyed operation lookup now fails closed on a task-store error or missing
+  LogDB, before current-profile selection or legacy routing. The response includes
+  the original owner-derived task ID, status URL, and `x-should-retry: false`.
+  Only a confirmed not-found lookup allows keyed legacy fallthrough. Ordinary
+  unkeyed legacy requests still work without LogDB. The selector lookup itself
+  spends the existing per-key customer read budget. Fault-injection tests cover
+  an accepted operation followed by store failure, missing LogDB, confirmed absence,
+  and unkeyed legacy success; failed/unknown lookups never reach the synthetic
+  provider/wallet dispatch handler.
+- Image waits use the existing customer read limiter: at most two concurrent
+  waits per owner/API key, with every actual poll spending its shared status-read
+  tokens (20/second, burst 40). A saturated waiter returns its latest pending
+  state through the existing recovery response; it does not submit, cancel or
+  settle. Query context inherits cancellation and the wait deadline. The 32-wait
+  concurrency regression leaves three tokens and observes exactly three DB reads,
+  no new wallet commands and one original provider submission. Cancellation and
+  timeout both release slots; separate owner/key and repeated-release cases pass.
+- Publication checks the online configuration set after overlaying this release's
+  replacements/removals before writing, then rechecks the complete live namespace
+  before recording SDK evidence. Scoped-out and unmanaged configs participate.
+  Carried SDK evidence must still exist in that effective set, including new
+  metadata-only releases. Tests cover full/scoped legacy ID and alias conflicts,
+  no-write rejection with original config/evidence preserved, a late alias with
+  rollback, and replacement of the same route without a false collision.
+
+Final local results: App targeted suite 271 tests, 270 passed, 1 existing optional
+real-Go HTTP integration skip; seven OpenAI publication cases also passed in
+isolation. `pnpm build` succeeded. TypeScript remains at 260 baseline diagnostics
+with no additional file/error-code entries. Gateway imagecompat, nativetask,
+controller (both official SDK paths configured), middleware and router suites all
+passed; the accepted-replay cancellation fixture was then updated and its focused
+test passed. Incremental lint reports zero issues and Go build succeeded. All
+fixtures are local synthetic data; no real model, shared DB or environment was used.
+
+Evidence under `/private/tmp/and76-openai-image-compat-20261030`:
+`review-app-tests.log`, `review-app-focused.log`, `review-app-build.log`,
+`review-typescript-comparison.json`, `review-gateway-tests.log`,
+`review-replay-test.log`, `review-gateway-lint.log`, `review-gateway-build.log`.
+
+Commands (from the corresponding worktree; SDK dependencies remain isolated):
+
+```sh
+# App
+DATABASE_URL=file:/private/tmp/and76-openai-image-compat-20261030/validation-fixture.sqlite node --import tsx --test tests/openai-image-profile.test.ts tests/native-result-publication.test.ts tests/native-catalog-docs.test.ts tests/model-capability-llms.test.ts tests/model-ops-validation.test.ts tests/model-ops-publisher.test.ts tests/model-ops-stable-publisher.test.ts
+pnpm build
+pnpm exec tsc --noEmit
+
+# Gateway core/ (Go 1.27 toolchain)
+export GOTOOLCHAIN=local
+export GOCACHE=/private/tmp/and76-openai-image-compat-20261030/go-cache
+export AND76_PYTHON=/private/tmp/and76-openai-image-compat-20261030/sdk/python312/bin/python
+export AND76_NODE_SDK=/private/tmp/and76-openai-image-compat-20261030/sdk/node/node_modules/openai/index.mjs
+/Users/andyli7/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.0.darwin-arm64/bin/go test ./common/imagecompat ./common/nativetask ./controller ./middleware ./router -count=1
+/Users/andyli7/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.0.darwin-arm64/bin/go test ./controller -run TestImageCompatReplayAfterProfileDisabled -count=1
+/Users/andyli7/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.0.darwin-arm64/bin/go build -o /private/tmp/and76-openai-image-compat-20261030/gateway-review-build .
+```
+
+Gateway lint used golangci-lint 2.15.0 with `run --fix --new-from-rev=HEAD
+--timeout=5m`, while HEAD was `17a1e4d287a8b11b3bff926de220730adef781bf`.
+The later workflow-only commit does not change the Go diff or baseline.

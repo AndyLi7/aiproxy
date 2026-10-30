@@ -101,6 +101,20 @@ func (h *HTTP) WaitImage(
 	task *model.NativeTask,
 	until time.Time,
 ) (*model.NativeTask, error) {
+	if task.Status == "completed" || task.Status == "failed" || ctx.Err() != nil ||
+		!time.Now().Before(until) {
+		return task, nil
+	}
+
+	release, ok := h.reads().acquireImageWait(task.GroupID, task.TokenID)
+	if !ok {
+		return task, nil
+	}
+	defer release()
+
+	ctx, cancel := context.WithDeadline(ctx, until)
+	defer cancel()
+
 	timer := time.NewTimer(time.Until(until))
 	defer timer.Stop()
 
@@ -118,7 +132,18 @@ func (h *HTTP) WaitImage(
 		case <-timer.C:
 			return task, nil
 		case <-ticker.C:
-			next, err := model.GetNativeTask(h.Engine.DB, task.ID, task.GroupID, task.TokenID)
+			// No read happens after cancellation or outside the shared owner budget.
+			if ctx.Err() != nil || !time.Now().Before(until) ||
+				!h.reads().allowStatus(task.GroupID, task.TokenID) {
+				return task, nil
+			}
+
+			next, err := model.GetNativeTask(
+				h.Engine.DB.WithContext(ctx),
+				task.ID,
+				task.GroupID,
+				task.TokenID,
+			)
 			if err != nil {
 				return task, err
 			}

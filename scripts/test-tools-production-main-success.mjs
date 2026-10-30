@@ -132,6 +132,8 @@ async function start() {
   proc.stdout.pipe(log, { end: false }); proc.stderr.pipe(log, { end: false });
   for (let i = 0; i < 150; i++) {
     if (proc.exitCode !== null) throw new Error('main exited; see fixture main.log');
+    // Fixed container loopback health probe; no credentials, no default route, no external plaintext transport.
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
     try { if ((await fetch(base + '/api/status')).status === 200) return; } catch {}
     await new Promise(r => setTimeout(r, 100));
   }

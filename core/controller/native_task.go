@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -376,6 +377,9 @@ func nativeRuntimeFeatures() []string {
 	}
 	if ownedartifact.Configured() {
 		features = append(features, "native_owned_artifact_v1")
+		if len(os.Getenv("EXTERNAL_BALANCE_KEY")) >= 32 {
+			features = append(features, "openai_images_native_v1")
+		}
 	}
 	// The application publishes input meters only while this is advertised.
 	if engine.InputMeter {

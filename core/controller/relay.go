@@ -130,10 +130,7 @@ func Embeddings() []gin.HandlerFunc {
 //	@Header			all				{string}	X-RateLimit-Reset-Tokens		"X-RateLimit-Reset-Tokens"
 //	@Router			/v1/images/edits [post]
 func ImagesEdits() []gin.HandlerFunc {
-	return []gin.HandlerFunc{
-		middleware.NewDistribute(mode.ImagesEdits),
-		NewRelay(mode.ImagesEdits),
-	}
+	return imageCompatHandlers(mode.ImagesEdits)
 }
 
 // ImagesGenerations godoc
@@ -154,10 +151,7 @@ func ImagesEdits() []gin.HandlerFunc {
 //	@Header			all				{string}	X-RateLimit-Reset-Tokens		"X-RateLimit-Reset-Tokens"
 //	@Router			/v1/images/generations [post]
 func ImagesGenerations() []gin.HandlerFunc {
-	return []gin.HandlerFunc{
-		middleware.NewDistribute(mode.ImagesGenerations),
-		NewRelay(mode.ImagesGenerations),
-	}
+	return imageCompatHandlers(mode.ImagesGenerations)
 }
 
 // AudioSpeech godoc

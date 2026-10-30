@@ -25,12 +25,15 @@ import (
 // HTTP is embedded behind the gateway's authenticated, rate-limited middleware.
 // Identity and plans are server-resolved callbacks, never values from headers.
 type HTTP struct {
-	Engine        *Engine
-	Identity      func(*http.Request) (string, int, error)
-	ResolvePlan   func(*http.Request, []byte) (Plan, Provider, error)
-	ResolvePoller ResolvePoller
-	Archive       ArchiveFunc
-	Download      func(*http.Request, string) (*http.Response, error)
+	// ErrorIdentityHeader changes only adapter-facing retry instructions; native
+	// task identity and the original HTTP contract remain unchanged.
+	ErrorIdentityHeader string
+	Engine              *Engine
+	Identity            func(*http.Request) (string, int, error)
+	ResolvePlan         func(*http.Request, []byte) (Plan, Provider, error)
+	ResolvePoller       ResolvePoller
+	Archive             ArchiveFunc
+	Download            func(*http.Request, string) (*http.Response, error)
 	// DownloadRange reads bytes from..to (inclusive) of a stored file.
 	DownloadRange func(r *http.Request, key string, from, to int64) (*http.Response, error)
 	// OnError lets the gateway log the same code and message the client receives.
@@ -182,15 +185,14 @@ func (e *NotNativeModelError) Error() string { return ErrNotNativeModel.Error() 
 func (e *NotNativeModelError) Unwrap() error { return ErrNotNativeModel }
 
 func (h *HTTP) writeError(w http.ResponseWriter, status int, code string) {
-	if h != nil && h.OnError != nil {
-		h.OnError(status, code, ErrorMessage(code))
-	}
-
-	WriteError(w, status, code)
+	h.writeErrorMessage(w, status, code, ErrorMessage(code))
 }
 
 // writeErrorMessage is writeError with a message specific to this request.
 func (h *HTTP) writeErrorMessage(w http.ResponseWriter, status int, code, message string) {
+	if h != nil && h.ErrorIdentityHeader != "" {
+		message = strings.ReplaceAll(message, "X-Request-Id", h.ErrorIdentityHeader)
+	}
 	if h != nil && h.OnError != nil {
 		h.OnError(status, code, message)
 	}
@@ -299,21 +301,48 @@ func writePublic(
 }
 
 func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
-	group, token, ok := h.owner(w, r)
-	if !ok {
+	if _, _, ok := h.owner(w, r); !ok {
 		return
 	}
 
-	id := r.Header.Get("X-Request-ID")
-	if !taskID.MatchString(id) {
+	if !taskID.MatchString(r.Header.Get("X-Request-ID")) {
 		h.writeError(w, 400, "invalid_request_id")
 		return
 	}
-
 	raw, err := io.ReadAll(io.LimitReader(r.Body, nativeresult.MaxBytes+1))
 	if err != nil || len(raw) > nativeresult.MaxBytes {
 		h.writeError(w, 400, "invalid_request")
 		return
+	}
+
+	if task := h.CreateTask(w, r, r.Header.Get("X-Request-ID"), raw); task != nil {
+		h.writePublic(w, 202, task)
+	}
+}
+
+// CreateTask shares the native reservation, replay and error handling with an
+// authenticated protocol adapter. The explicit operation ID is independent of
+// request tracing. It never changes the task's billing or recovery policy.
+// A nil result means an error response has already been written.
+func (h *HTTP) CreateTask(
+	w http.ResponseWriter,
+	r *http.Request,
+	id string,
+	raw []byte,
+) *model.NativeTask {
+	group, token, ok := h.owner(w, r)
+	if !ok {
+		return nil
+	}
+
+	if !taskID.MatchString(id) {
+		h.writeError(w, 400, "invalid_request_id")
+		return nil
+	}
+
+	if len(raw) > nativeresult.MaxBytes {
+		h.writeError(w, 400, "invalid_request")
+		return nil
 	}
 	// Accepted retries use their original frozen route. Reserved retries may resolve
 	// again, but ReserveNativeTask rejects any changed contract, route or quote.
@@ -322,7 +351,7 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 		digest := sha256.Sum256(raw)
 		if existing.Fingerprint != hex.EncodeToString(digest[:]) {
 			h.writeError(w, 409, "request_id_conflict")
-			return
+			return nil
 		}
 
 		if existing.Status != "reserved" {
@@ -330,23 +359,21 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 			// billing sync, so a retry loop cannot multiply wallet calls.
 			if !h.reads().allowStatus(group, token) {
 				h.writeError(w, 429, "rate_limit_exceeded")
-				return
+				return nil
 			}
 
-			h.writePublic(w, 202, existing)
-
-			return
+			return existing
 		}
 	}
 
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		h.writeError(w, 503, "task_store_unavailable")
-		return
+		return nil
 	}
 
 	if h.ResolvePlan == nil {
 		h.writeError(w, 503, "native_execution_unavailable")
-		return
+		return nil
 	}
 
 	plan, provider, err := h.ResolvePlan(r, raw)
@@ -361,13 +388,13 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 
 		h.writeErrorDetail(w, 400, "native_model_unavailable", "model", suggested)
 
-		return
+		return nil
 	}
 
 	if err != nil {
 		// Route, channel and quote failures are ours, not a wrong model ID.
 		h.writeError(w, 503, "model_route_unavailable")
-		return
+		return nil
 	}
 	// Per-request engine copy prevents credentials from leaking across concurrent calls.
 	engine := *h.Engine
@@ -376,10 +403,10 @@ func (h *HTTP) Create(w http.ResponseWriter, r *http.Request) {
 	task, err := engine.Submit(r.Context(), id, group, token, raw, plan)
 	if err != nil {
 		h.writeCreateFailure(w, id, group, task, err)
-		return
+		return nil
 	}
 
-	h.writePublic(w, 202, task)
+	return task
 }
 
 // Get only reads stored state. Polling the provider, archiving results and

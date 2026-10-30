@@ -23,6 +23,11 @@ func SetRelayRouter(router *gin.Engine) {
 		middleware.IPBlock,
 		controller.GetImageTaskContent,
 	)
+	router.GET(
+		"/v1/images/native-results/:id/:index",
+		middleware.IPBlock,
+		controller.GetNativeImageContent,
+	)
 	// https://platform.openai.com/docs/api-reference/introduction
 	v1Router := router.Group("/v1")
 	v1Router.Use(

@@ -1,0 +1,2208 @@
+[
+  {
+    "model": "alibaba/wan-2.6/text-to-image",
+    "contract": {
+      "artifacts": [
+        {
+          "path": [
+            "images",
+            "*",
+            "url"
+          ]
+        }
+      ],
+      "fixed_parameters": {
+        "enable_safety_checker": true
+      },
+      "input_schema": {
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "enable_safety_checker"
+              ]
+            }
+          }
+        ],
+        "components": {
+          "schemas": {
+            "File": {
+              "properties": {
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file.",
+                  "examples": [
+                    "image/png"
+                  ],
+                  "title": "Content Type"
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided.",
+                  "examples": [
+                    "z9RV14K95DvU.png"
+                  ],
+                  "title": "File Name"
+                },
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes.",
+                  "examples": [
+                    4404019
+                  ],
+                  "title": "File Size"
+                },
+                "url": {
+                  "description": "The URL where the file can be downloaded from.",
+                  "title": "Url",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "title": "File",
+              "type": "object",
+              "x-fal-order-properties": [
+                "url",
+                "content_type",
+                "file_name",
+                "file_size"
+              ]
+            },
+            "ImageSize": {
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "description": "The height of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Height",
+                  "type": "integer"
+                },
+                "width": {
+                  "default": 512,
+                  "description": "The width of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Width",
+                  "type": "integer"
+                }
+              },
+              "title": "ImageSize",
+              "type": "object",
+              "x-fal-order-properties": [
+                "width",
+                "height"
+              ]
+            },
+            "QueueStatus": {
+              "properties": {
+                "cancel_url": {
+                  "description": "The cancel url.",
+                  "type": "string"
+                },
+                "logs": {
+                  "additionalProperties": true,
+                  "description": "The logs.",
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": true,
+                  "description": "The metrics.",
+                  "type": "object"
+                },
+                "queue_position": {
+                  "description": "The queue position.",
+                  "type": "integer"
+                },
+                "request_id": {
+                  "description": "The request id.",
+                  "type": "string"
+                },
+                "response_url": {
+                  "description": "The response url.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "IN_QUEUE",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                "status_url": {
+                  "description": "The status url.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "request_id"
+              ],
+              "type": "object"
+            },
+            "V26TextToImageInput": {
+              "description": "Input for Wan 2.6 text-to-image or mixed text-and-image generation (enable_interleave=true)",
+              "properties": {
+                "enable_safety_checker": {
+                  "default": true,
+                  "description": "Enable content moderation for input and output. Disabling it requires account authorization; unauthorized requests are always checked.",
+                  "title": "Enable Safety Checker",
+                  "type": "boolean"
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageSize"
+                    },
+                    {
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions.",
+                  "examples": [
+                    "square_hd",
+                    "landscape_16_9"
+                  ],
+                  "title": "Image Size"
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "ui": {
+                        "field": "image"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+                  "title": "Image Url"
+                },
+                "max_images": {
+                  "default": 1,
+                  "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference.",
+                  "maximum": 5,
+                  "minimum": 1,
+                  "title": "Max Images",
+                  "type": "integer"
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": "",
+                  "description": "Content to avoid in the generated image. Max 500 characters.",
+                  "examples": [
+                    "low resolution, error, worst quality, low quality, deformed"
+                  ],
+                  "title": "Negative Prompt"
+                },
+                "prompt": {
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters.",
+                  "examples": [
+                    "An ancient library floating among clouds, golden hour light streaming through massive windows, photorealistic"
+                  ],
+                  "minLength": 1,
+                  "title": "Prompt",
+                  "type": "string"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647).",
+                  "title": "Seed"
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "title": "TextToImageWanInput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "prompt",
+                "image_url",
+                "negative_prompt",
+                "image_size",
+                "max_images",
+                "seed",
+                "enable_safety_checker"
+              ]
+            },
+            "V26TextToImageOutput": {
+              "description": "Output for Wan 2.6 text-to-image (can include generated text in mixed mode)",
+              "properties": {
+                "generated_text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Generated text content (in mixed text-and-image mode). May be None if only images were generated.",
+                  "title": "Generated Text"
+                },
+                "images": {
+                  "description": "Generated images in PNG format",
+                  "examples": [
+                    [
+                      {
+                        "content_type": "image/png",
+                        "file_name": "output_1.png",
+                        "url": "https://v3b.fal.media/files/b/0a86d6b0/cBXGSUEl3DkTcBnf9IEM0_output_1.png"
+                      }
+                    ]
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  "title": "Images",
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "The seed used for generation",
+                  "examples": [
+                    175932751
+                  ],
+                  "title": "Seed",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "images",
+                "seed"
+              ],
+              "title": "TextToImageWanOutput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "images",
+                "generated_text",
+                "seed"
+              ]
+            }
+          },
+          "securitySchemes": {
+            "apiKeyAuth": {
+              "description": "Fal Key",
+              "in": "header",
+              "name": "Authorization",
+              "type": "apiKey"
+            }
+          }
+        },
+        "description": "Input for Wan 2.6 text-to-image or mixed text-and-image generation (enable_interleave=true)",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSize"
+              },
+              {
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions.",
+            "examples": [
+              "square_hd",
+              "landscape_16_9"
+            ],
+            "title": "Image Size"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "ui": {
+                  "field": "image"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+            "title": "Image Url"
+          },
+          "max_images": {
+            "default": 1,
+            "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference.",
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Max Images",
+            "type": "integer"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "description": "Content to avoid in the generated image. Max 500 characters.",
+            "examples": [
+              "low resolution, error, worst quality, low quality, deformed"
+            ],
+            "title": "Negative Prompt"
+          },
+          "prompt": {
+            "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters.",
+            "examples": [
+              "An ancient library floating among clouds, golden hour light streaming through massive windows, photorealistic"
+            ],
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducibility (0-2147483647).",
+            "title": "Seed"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "TextToImageWanInput",
+        "type": "object",
+        "x-fal-order-properties": [
+          "prompt",
+          "image_url",
+          "negative_prompt",
+          "image_size",
+          "max_images",
+          "seed",
+          "enable_safety_checker"
+        ]
+      },
+      "model": "alibaba/wan-2.6/text-to-image",
+      "output_schema": {
+        "$ref": "#/components/schemas/V26TextToImageOutput",
+        "components": {
+          "schemas": {
+            "File": {
+              "properties": {
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file.",
+                  "examples": [
+                    "image/png"
+                  ],
+                  "title": "Content Type"
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided.",
+                  "examples": [
+                    "z9RV14K95DvU.png"
+                  ],
+                  "title": "File Name"
+                },
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes.",
+                  "examples": [
+                    4404019
+                  ],
+                  "title": "File Size"
+                },
+                "url": {
+                  "description": "The URL where the file can be downloaded from.",
+                  "title": "Url",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "title": "File",
+              "type": "object",
+              "x-fal-order-properties": [
+                "url",
+                "content_type",
+                "file_name",
+                "file_size"
+              ]
+            },
+            "ImageSize": {
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "description": "The height of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Height",
+                  "type": "integer"
+                },
+                "width": {
+                  "default": 512,
+                  "description": "The width of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Width",
+                  "type": "integer"
+                }
+              },
+              "title": "ImageSize",
+              "type": "object",
+              "x-fal-order-properties": [
+                "width",
+                "height"
+              ]
+            },
+            "QueueStatus": {
+              "properties": {
+                "cancel_url": {
+                  "description": "The cancel url.",
+                  "type": "string"
+                },
+                "logs": {
+                  "additionalProperties": true,
+                  "description": "The logs.",
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": true,
+                  "description": "The metrics.",
+                  "type": "object"
+                },
+                "queue_position": {
+                  "description": "The queue position.",
+                  "type": "integer"
+                },
+                "request_id": {
+                  "description": "The request id.",
+                  "type": "string"
+                },
+                "response_url": {
+                  "description": "The response url.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "IN_QUEUE",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                "status_url": {
+                  "description": "The status url.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "request_id"
+              ],
+              "type": "object"
+            },
+            "V26TextToImageInput": {
+              "description": "Input for Wan 2.6 text-to-image or mixed text-and-image generation (enable_interleave=true)",
+              "properties": {
+                "enable_safety_checker": {
+                  "default": true,
+                  "description": "Enable content moderation for input and output. Disabling it requires account authorization; unauthorized requests are always checked.",
+                  "title": "Enable Safety Checker",
+                  "type": "boolean"
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageSize"
+                    },
+                    {
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions.",
+                  "examples": [
+                    "square_hd",
+                    "landscape_16_9"
+                  ],
+                  "title": "Image Size"
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "ui": {
+                        "field": "image"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+                  "title": "Image Url"
+                },
+                "max_images": {
+                  "default": 1,
+                  "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference.",
+                  "maximum": 5,
+                  "minimum": 1,
+                  "title": "Max Images",
+                  "type": "integer"
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": "",
+                  "description": "Content to avoid in the generated image. Max 500 characters.",
+                  "examples": [
+                    "low resolution, error, worst quality, low quality, deformed"
+                  ],
+                  "title": "Negative Prompt"
+                },
+                "prompt": {
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters.",
+                  "examples": [
+                    "An ancient library floating among clouds, golden hour light streaming through massive windows, photorealistic"
+                  ],
+                  "minLength": 1,
+                  "title": "Prompt",
+                  "type": "string"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647).",
+                  "title": "Seed"
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "title": "TextToImageWanInput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "prompt",
+                "image_url",
+                "negative_prompt",
+                "image_size",
+                "max_images",
+                "seed",
+                "enable_safety_checker"
+              ]
+            },
+            "V26TextToImageOutput": {
+              "description": "Output for Wan 2.6 text-to-image (can include generated text in mixed mode)",
+              "properties": {
+                "generated_text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Generated text content (in mixed text-and-image mode). May be None if only images were generated.",
+                  "title": "Generated Text"
+                },
+                "images": {
+                  "description": "Generated images in PNG format",
+                  "examples": [
+                    [
+                      {
+                        "content_type": "image/png",
+                        "file_name": "output_1.png",
+                        "url": "https://v3b.fal.media/files/b/0a86d6b0/cBXGSUEl3DkTcBnf9IEM0_output_1.png"
+                      }
+                    ]
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  "title": "Images",
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "The seed used for generation",
+                  "examples": [
+                    175932751
+                  ],
+                  "title": "Seed",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "images",
+                "seed"
+              ],
+              "title": "TextToImageWanOutput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "images",
+                "generated_text",
+                "seed"
+              ]
+            }
+          },
+          "securitySchemes": {
+            "apiKeyAuth": {
+              "description": "Fal Key",
+              "in": "header",
+              "name": "Authorization",
+              "type": "apiKey"
+            }
+          }
+        }
+      },
+      "upstream_input_schema": {
+        "$ref": "#/components/schemas/V26TextToImageInput",
+        "components": {
+          "schemas": {
+            "File": {
+              "properties": {
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file.",
+                  "examples": [
+                    "image/png"
+                  ],
+                  "title": "Content Type"
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided.",
+                  "examples": [
+                    "z9RV14K95DvU.png"
+                  ],
+                  "title": "File Name"
+                },
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes.",
+                  "examples": [
+                    4404019
+                  ],
+                  "title": "File Size"
+                },
+                "url": {
+                  "description": "The URL where the file can be downloaded from.",
+                  "title": "Url",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "title": "File",
+              "type": "object",
+              "x-fal-order-properties": [
+                "url",
+                "content_type",
+                "file_name",
+                "file_size"
+              ]
+            },
+            "ImageSize": {
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "description": "The height of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Height",
+                  "type": "integer"
+                },
+                "width": {
+                  "default": 512,
+                  "description": "The width of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Width",
+                  "type": "integer"
+                }
+              },
+              "title": "ImageSize",
+              "type": "object",
+              "x-fal-order-properties": [
+                "width",
+                "height"
+              ]
+            },
+            "QueueStatus": {
+              "properties": {
+                "cancel_url": {
+                  "description": "The cancel url.",
+                  "type": "string"
+                },
+                "logs": {
+                  "additionalProperties": true,
+                  "description": "The logs.",
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": true,
+                  "description": "The metrics.",
+                  "type": "object"
+                },
+                "queue_position": {
+                  "description": "The queue position.",
+                  "type": "integer"
+                },
+                "request_id": {
+                  "description": "The request id.",
+                  "type": "string"
+                },
+                "response_url": {
+                  "description": "The response url.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "IN_QUEUE",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                "status_url": {
+                  "description": "The status url.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "request_id"
+              ],
+              "type": "object"
+            },
+            "V26TextToImageInput": {
+              "description": "Input for Wan 2.6 text-to-image or mixed text-and-image generation (enable_interleave=true)",
+              "properties": {
+                "enable_safety_checker": {
+                  "default": true,
+                  "description": "Enable content moderation for input and output. Disabling it requires account authorization; unauthorized requests are always checked.",
+                  "title": "Enable Safety Checker",
+                  "type": "boolean"
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageSize"
+                    },
+                    {
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Output image size. If not set: matches input image size (up to 1280*1280). Use presets like 'square_hd', 'landscape_16_9', or specify exact dimensions.",
+                  "examples": [
+                    "square_hd",
+                    "landscape_16_9"
+                  ],
+                  "title": "Image Size"
+                },
+                "image_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "ui": {
+                        "field": "image"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Optional reference image (0 or 1). When provided, can be used for style guidance. Resolution: 384-5000px each dimension. Max size: 10MB. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+                  "title": "Image Url"
+                },
+                "max_images": {
+                  "default": 1,
+                  "description": "Maximum number of images to generate (1-5). Actual count may be less depending on model inference.",
+                  "maximum": 5,
+                  "minimum": 1,
+                  "title": "Max Images",
+                  "type": "integer"
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": "",
+                  "description": "Content to avoid in the generated image. Max 500 characters.",
+                  "examples": [
+                    "low resolution, error, worst quality, low quality, deformed"
+                  ],
+                  "title": "Negative Prompt"
+                },
+                "prompt": {
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters.",
+                  "examples": [
+                    "An ancient library floating among clouds, golden hour light streaming through massive windows, photorealistic"
+                  ],
+                  "minLength": 1,
+                  "title": "Prompt",
+                  "type": "string"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647).",
+                  "title": "Seed"
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "title": "TextToImageWanInput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "prompt",
+                "image_url",
+                "negative_prompt",
+                "image_size",
+                "max_images",
+                "seed",
+                "enable_safety_checker"
+              ]
+            },
+            "V26TextToImageOutput": {
+              "description": "Output for Wan 2.6 text-to-image (can include generated text in mixed mode)",
+              "properties": {
+                "generated_text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Generated text content (in mixed text-and-image mode). May be None if only images were generated.",
+                  "title": "Generated Text"
+                },
+                "images": {
+                  "description": "Generated images in PNG format",
+                  "examples": [
+                    [
+                      {
+                        "content_type": "image/png",
+                        "file_name": "output_1.png",
+                        "url": "https://v3b.fal.media/files/b/0a86d6b0/cBXGSUEl3DkTcBnf9IEM0_output_1.png"
+                      }
+                    ]
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  "title": "Images",
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "The seed used for generation",
+                  "examples": [
+                    175932751
+                  ],
+                  "title": "Seed",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "images",
+                "seed"
+              ],
+              "title": "TextToImageWanOutput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "images",
+                "generated_text",
+                "seed"
+              ]
+            }
+          },
+          "securitySchemes": {
+            "apiKeyAuth": {
+              "description": "Fal Key",
+              "in": "header",
+              "name": "Authorization",
+              "type": "apiKey"
+            }
+          }
+        }
+      },
+      "version": 1
+    },
+    "agent": {
+      "version": 1,
+      "kind": "image",
+      "capability": "text-to-image",
+      "upstreamModelId": "wan/v2.6/text-to-image",
+      "promptField": "prompt",
+      "referenceField": null,
+      "referenceFormat": "none",
+      "parameters": {
+        "count": "max_images",
+        "negativePrompt": "negative_prompt",
+        "seed": "seed",
+        "size": "image_size"
+      },
+      "defaults": {
+        "max_images": 1,
+        "negative_prompt": ""
+      }
+    },
+    "revision": "dfd534aec3adbf4357b806ede3b3e9e9ce60cfc9313e5ae944d954641847b1d0"
+  },
+  {
+    "model": "alibaba/wan-2.6/image-to-image",
+    "contract": {
+      "artifacts": [
+        {
+          "path": [
+            "images",
+            "*",
+            "url"
+          ]
+        }
+      ],
+      "fixed_parameters": {
+        "enable_safety_checker": true
+      },
+      "input_schema": {
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "enable_safety_checker"
+              ]
+            }
+          }
+        ],
+        "components": {
+          "schemas": {
+            "File": {
+              "properties": {
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file.",
+                  "examples": [
+                    "image/png"
+                  ],
+                  "title": "Content Type"
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided.",
+                  "examples": [
+                    "z9RV14K95DvU.png"
+                  ],
+                  "title": "File Name"
+                },
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes.",
+                  "examples": [
+                    4404019
+                  ],
+                  "title": "File Size"
+                },
+                "url": {
+                  "description": "The URL where the file can be downloaded from.",
+                  "title": "Url",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "title": "File",
+              "type": "object",
+              "x-fal-order-properties": [
+                "url",
+                "content_type",
+                "file_name",
+                "file_size"
+              ]
+            },
+            "ImageSize": {
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "description": "The height of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Height",
+                  "type": "integer"
+                },
+                "width": {
+                  "default": 512,
+                  "description": "The width of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Width",
+                  "type": "integer"
+                }
+              },
+              "title": "ImageSize",
+              "type": "object",
+              "x-fal-order-properties": [
+                "width",
+                "height"
+              ]
+            },
+            "QueueStatus": {
+              "properties": {
+                "cancel_url": {
+                  "description": "The cancel url.",
+                  "type": "string"
+                },
+                "logs": {
+                  "additionalProperties": true,
+                  "description": "The logs.",
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": true,
+                  "description": "The metrics.",
+                  "type": "object"
+                },
+                "queue_position": {
+                  "description": "The queue position.",
+                  "type": "integer"
+                },
+                "request_id": {
+                  "description": "The request id.",
+                  "type": "string"
+                },
+                "response_url": {
+                  "description": "The response url.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "IN_QUEUE",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                "status_url": {
+                  "description": "The status url.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "request_id"
+              ],
+              "type": "object"
+            },
+            "V26ImageToImageInput": {
+              "description": "Input for Wan 2.6 image editing with reference images (enable_interleave=false)",
+              "properties": {
+                "enable_prompt_expansion": {
+                  "default": true,
+                  "description": "Enable LLM prompt optimization. Significantly improves results for simple prompts but adds 3-4 seconds processing time.",
+                  "title": "Enable Prompt Expansion",
+                  "type": "boolean"
+                },
+                "enable_safety_checker": {
+                  "default": true,
+                  "description": "Enable content moderation for input and output. Disabling it requires account authorization; unauthorized requests are always checked.",
+                  "title": "Enable Safety Checker",
+                  "type": "boolean"
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageSize"
+                    },
+                    {
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ],
+                      "type": "string"
+                    }
+                  ],
+                  "default": "square_hd",
+                  "description": "Output image size. Use presets like 'square_hd', 'landscape_16_9', 'portrait_9_16', or specify exact dimensions with ImageSize(width=1280, height=720). Total pixels must be between 768*768 and 1280*1280.",
+                  "examples": [
+                    "square_hd",
+                    "landscape_16_9",
+                    "portrait_4_3"
+                  ],
+                  "title": "Image Size"
+                },
+                "image_urls": {
+                  "description": "Reference images for editing (1-3 images required). Order matters: reference as 'image 1', 'image 2', 'image 3' in prompt. Resolution: 384-5000px each dimension. Max size: 10MB each. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+                  "examples": [
+                    [
+                      "https://v3b.fal.media/files/b/0a86d6a7/6smIczyPbvAU3IJ1F5Ok3.png",
+                      "https://v3b.fal.media/files/b/0a86d6a7/nTYVlOfKLD1FqHAGy7KS3.png",
+                      "https://v3b.fal.media/files/b/0a86d6ae/6JA70jOe0-pbDtXLF2roV.png"
+                    ]
+                  ],
+                  "items": {
+                    "_fal_ui_field": "image",
+                    "type": "string"
+                  },
+                  "title": "Image Urls",
+                  "type": "array"
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": "",
+                  "description": "Content to avoid in the generated image. Max 500 characters.",
+                  "examples": [
+                    "low resolution, error, worst quality, low quality, deformed, extra fingers"
+                  ],
+                  "title": "Negative Prompt"
+                },
+                "num_images": {
+                  "default": 1,
+                  "description": "Number of images to generate (1-4). Directly affects billing cost.",
+                  "maximum": 4,
+                  "minimum": 1,
+                  "title": "Num Images",
+                  "type": "integer"
+                },
+                "prompt": {
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters. Example: 'Generate an image using the style of image 1 and background of image 2'.",
+                  "examples": [
+                    "Place the wizard from image 2 in the ancient library from image 3, holding and studying the magical crystal orb from image 1. The orb's glow illuminates his face with purple and blue light. Floating candles around him, ancient books visible in the background. Mystical, dramatic lighting, fantasy art style, highly detailed."
+                  ],
+                  "minLength": 1,
+                  "title": "Prompt",
+                  "type": "string"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647). Same seed produces more consistent results.",
+                  "title": "Seed"
+                }
+              },
+              "required": [
+                "prompt",
+                "image_urls"
+              ],
+              "title": "ImageEditInput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "prompt",
+                "image_urls",
+                "negative_prompt",
+                "image_size",
+                "num_images",
+                "enable_prompt_expansion",
+                "seed",
+                "enable_safety_checker"
+              ]
+            },
+            "V26ImageToImageOutput": {
+              "description": "Output for Wan 2.6 image editing",
+              "properties": {
+                "images": {
+                  "description": "Generated images in PNG format",
+                  "examples": [
+                    [
+                      {
+                        "content_type": "image/png",
+                        "file_name": "output_1.png",
+                        "url": "https://v3b.fal.media/files/b/0a86d6bb/iSEuXzi3kDy1jnlMCwYuH_output_3.png"
+                      }
+                    ]
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  "title": "Images",
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "The seed used for generation",
+                  "examples": [
+                    175932751
+                  ],
+                  "title": "Seed",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "images",
+                "seed"
+              ],
+              "title": "ImageEditOutput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "images",
+                "seed"
+              ]
+            }
+          },
+          "securitySchemes": {
+            "apiKeyAuth": {
+              "description": "Fal Key",
+              "in": "header",
+              "name": "Authorization",
+              "type": "apiKey"
+            }
+          }
+        },
+        "description": "Input for Wan 2.6 image editing with reference images (enable_interleave=false)",
+        "properties": {
+          "enable_prompt_expansion": {
+            "default": true,
+            "description": "Enable LLM prompt optimization. Significantly improves results for simple prompts but adds 3-4 seconds processing time.",
+            "title": "Enable Prompt Expansion",
+            "type": "boolean"
+          },
+          "image_size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSize"
+              },
+              {
+                "enum": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "type": "string"
+              }
+            ],
+            "default": "square_hd",
+            "description": "Output image size. Use presets like 'square_hd', 'landscape_16_9', 'portrait_9_16', or specify exact dimensions with ImageSize(width=1280, height=720). Total pixels must be between 768*768 and 1280*1280.",
+            "examples": [
+              "square_hd",
+              "landscape_16_9",
+              "portrait_4_3"
+            ],
+            "title": "Image Size"
+          },
+          "image_urls": {
+            "description": "Reference images for editing (1-3 images required). Order matters: reference as 'image 1', 'image 2', 'image 3' in prompt. Resolution: 384-5000px each dimension. Max size: 10MB each. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+            "examples": [
+              [
+                "https://v3b.fal.media/files/b/0a86d6a7/6smIczyPbvAU3IJ1F5Ok3.png",
+                "https://v3b.fal.media/files/b/0a86d6a7/nTYVlOfKLD1FqHAGy7KS3.png",
+                "https://v3b.fal.media/files/b/0a86d6ae/6JA70jOe0-pbDtXLF2roV.png"
+              ]
+            ],
+            "items": {
+              "_fal_ui_field": "image",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Image Urls",
+            "type": "array"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "description": "Content to avoid in the generated image. Max 500 characters.",
+            "examples": [
+              "low resolution, error, worst quality, low quality, deformed, extra fingers"
+            ],
+            "title": "Negative Prompt"
+          },
+          "num_images": {
+            "default": 1,
+            "description": "Number of images to generate (1-4). Directly affects billing cost.",
+            "maximum": 4,
+            "minimum": 1,
+            "title": "Num Images",
+            "type": "integer"
+          },
+          "prompt": {
+            "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters. Example: 'Generate an image using the style of image 1 and background of image 2'.",
+            "examples": [
+              "Place the wizard from image 2 in the ancient library from image 3, holding and studying the magical crystal orb from image 1. The orb's glow illuminates his face with purple and blue light. Floating candles around him, ancient books visible in the background. Mystical, dramatic lighting, fantasy art style, highly detailed."
+            ],
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Random seed for reproducibility (0-2147483647). Same seed produces more consistent results.",
+            "title": "Seed"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_urls"
+        ],
+        "title": "ImageEditInput",
+        "type": "object",
+        "x-fal-order-properties": [
+          "prompt",
+          "image_urls",
+          "negative_prompt",
+          "image_size",
+          "num_images",
+          "enable_prompt_expansion",
+          "seed",
+          "enable_safety_checker"
+        ]
+      },
+      "model": "alibaba/wan-2.6/image-to-image",
+      "output_schema": {
+        "$ref": "#/components/schemas/V26ImageToImageOutput",
+        "components": {
+          "schemas": {
+            "File": {
+              "properties": {
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file.",
+                  "examples": [
+                    "image/png"
+                  ],
+                  "title": "Content Type"
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided.",
+                  "examples": [
+                    "z9RV14K95DvU.png"
+                  ],
+                  "title": "File Name"
+                },
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes.",
+                  "examples": [
+                    4404019
+                  ],
+                  "title": "File Size"
+                },
+                "url": {
+                  "description": "The URL where the file can be downloaded from.",
+                  "title": "Url",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "title": "File",
+              "type": "object",
+              "x-fal-order-properties": [
+                "url",
+                "content_type",
+                "file_name",
+                "file_size"
+              ]
+            },
+            "ImageSize": {
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "description": "The height of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Height",
+                  "type": "integer"
+                },
+                "width": {
+                  "default": 512,
+                  "description": "The width of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Width",
+                  "type": "integer"
+                }
+              },
+              "title": "ImageSize",
+              "type": "object",
+              "x-fal-order-properties": [
+                "width",
+                "height"
+              ]
+            },
+            "QueueStatus": {
+              "properties": {
+                "cancel_url": {
+                  "description": "The cancel url.",
+                  "type": "string"
+                },
+                "logs": {
+                  "additionalProperties": true,
+                  "description": "The logs.",
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": true,
+                  "description": "The metrics.",
+                  "type": "object"
+                },
+                "queue_position": {
+                  "description": "The queue position.",
+                  "type": "integer"
+                },
+                "request_id": {
+                  "description": "The request id.",
+                  "type": "string"
+                },
+                "response_url": {
+                  "description": "The response url.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "IN_QUEUE",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                "status_url": {
+                  "description": "The status url.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "request_id"
+              ],
+              "type": "object"
+            },
+            "V26ImageToImageInput": {
+              "description": "Input for Wan 2.6 image editing with reference images (enable_interleave=false)",
+              "properties": {
+                "enable_prompt_expansion": {
+                  "default": true,
+                  "description": "Enable LLM prompt optimization. Significantly improves results for simple prompts but adds 3-4 seconds processing time.",
+                  "title": "Enable Prompt Expansion",
+                  "type": "boolean"
+                },
+                "enable_safety_checker": {
+                  "default": true,
+                  "description": "Enable content moderation for input and output. Disabling it requires account authorization; unauthorized requests are always checked.",
+                  "title": "Enable Safety Checker",
+                  "type": "boolean"
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageSize"
+                    },
+                    {
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ],
+                      "type": "string"
+                    }
+                  ],
+                  "default": "square_hd",
+                  "description": "Output image size. Use presets like 'square_hd', 'landscape_16_9', 'portrait_9_16', or specify exact dimensions with ImageSize(width=1280, height=720). Total pixels must be between 768*768 and 1280*1280.",
+                  "examples": [
+                    "square_hd",
+                    "landscape_16_9",
+                    "portrait_4_3"
+                  ],
+                  "title": "Image Size"
+                },
+                "image_urls": {
+                  "description": "Reference images for editing (1-3 images required). Order matters: reference as 'image 1', 'image 2', 'image 3' in prompt. Resolution: 384-5000px each dimension. Max size: 10MB each. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+                  "examples": [
+                    [
+                      "https://v3b.fal.media/files/b/0a86d6a7/6smIczyPbvAU3IJ1F5Ok3.png",
+                      "https://v3b.fal.media/files/b/0a86d6a7/nTYVlOfKLD1FqHAGy7KS3.png",
+                      "https://v3b.fal.media/files/b/0a86d6ae/6JA70jOe0-pbDtXLF2roV.png"
+                    ]
+                  ],
+                  "items": {
+                    "_fal_ui_field": "image",
+                    "type": "string"
+                  },
+                  "title": "Image Urls",
+                  "type": "array"
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": "",
+                  "description": "Content to avoid in the generated image. Max 500 characters.",
+                  "examples": [
+                    "low resolution, error, worst quality, low quality, deformed, extra fingers"
+                  ],
+                  "title": "Negative Prompt"
+                },
+                "num_images": {
+                  "default": 1,
+                  "description": "Number of images to generate (1-4). Directly affects billing cost.",
+                  "maximum": 4,
+                  "minimum": 1,
+                  "title": "Num Images",
+                  "type": "integer"
+                },
+                "prompt": {
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters. Example: 'Generate an image using the style of image 1 and background of image 2'.",
+                  "examples": [
+                    "Place the wizard from image 2 in the ancient library from image 3, holding and studying the magical crystal orb from image 1. The orb's glow illuminates his face with purple and blue light. Floating candles around him, ancient books visible in the background. Mystical, dramatic lighting, fantasy art style, highly detailed."
+                  ],
+                  "minLength": 1,
+                  "title": "Prompt",
+                  "type": "string"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647). Same seed produces more consistent results.",
+                  "title": "Seed"
+                }
+              },
+              "required": [
+                "prompt",
+                "image_urls"
+              ],
+              "title": "ImageEditInput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "prompt",
+                "image_urls",
+                "negative_prompt",
+                "image_size",
+                "num_images",
+                "enable_prompt_expansion",
+                "seed",
+                "enable_safety_checker"
+              ]
+            },
+            "V26ImageToImageOutput": {
+              "description": "Output for Wan 2.6 image editing",
+              "properties": {
+                "images": {
+                  "description": "Generated images in PNG format",
+                  "examples": [
+                    [
+                      {
+                        "content_type": "image/png",
+                        "file_name": "output_1.png",
+                        "url": "https://v3b.fal.media/files/b/0a86d6bb/iSEuXzi3kDy1jnlMCwYuH_output_3.png"
+                      }
+                    ]
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  "title": "Images",
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "The seed used for generation",
+                  "examples": [
+                    175932751
+                  ],
+                  "title": "Seed",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "images",
+                "seed"
+              ],
+              "title": "ImageEditOutput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "images",
+                "seed"
+              ]
+            }
+          },
+          "securitySchemes": {
+            "apiKeyAuth": {
+              "description": "Fal Key",
+              "in": "header",
+              "name": "Authorization",
+              "type": "apiKey"
+            }
+          }
+        }
+      },
+      "upstream_input_schema": {
+        "$ref": "#/components/schemas/V26ImageToImageInput",
+        "components": {
+          "schemas": {
+            "File": {
+              "properties": {
+                "content_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The mime type of the file.",
+                  "examples": [
+                    "image/png"
+                  ],
+                  "title": "Content Type"
+                },
+                "file_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The name of the file. It will be auto-generated if not provided.",
+                  "examples": [
+                    "z9RV14K95DvU.png"
+                  ],
+                  "title": "File Name"
+                },
+                "file_size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The size of the file in bytes.",
+                  "examples": [
+                    4404019
+                  ],
+                  "title": "File Size"
+                },
+                "url": {
+                  "description": "The URL where the file can be downloaded from.",
+                  "title": "Url",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "title": "File",
+              "type": "object",
+              "x-fal-order-properties": [
+                "url",
+                "content_type",
+                "file_name",
+                "file_size"
+              ]
+            },
+            "ImageSize": {
+              "properties": {
+                "height": {
+                  "default": 512,
+                  "description": "The height of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Height",
+                  "type": "integer"
+                },
+                "width": {
+                  "default": 512,
+                  "description": "The width of the generated image.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 14142,
+                  "title": "Width",
+                  "type": "integer"
+                }
+              },
+              "title": "ImageSize",
+              "type": "object",
+              "x-fal-order-properties": [
+                "width",
+                "height"
+              ]
+            },
+            "QueueStatus": {
+              "properties": {
+                "cancel_url": {
+                  "description": "The cancel url.",
+                  "type": "string"
+                },
+                "logs": {
+                  "additionalProperties": true,
+                  "description": "The logs.",
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": true,
+                  "description": "The metrics.",
+                  "type": "object"
+                },
+                "queue_position": {
+                  "description": "The queue position.",
+                  "type": "integer"
+                },
+                "request_id": {
+                  "description": "The request id.",
+                  "type": "string"
+                },
+                "response_url": {
+                  "description": "The response url.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "IN_QUEUE",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                "status_url": {
+                  "description": "The status url.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "request_id"
+              ],
+              "type": "object"
+            },
+            "V26ImageToImageInput": {
+              "description": "Input for Wan 2.6 image editing with reference images (enable_interleave=false)",
+              "properties": {
+                "enable_prompt_expansion": {
+                  "default": true,
+                  "description": "Enable LLM prompt optimization. Significantly improves results for simple prompts but adds 3-4 seconds processing time.",
+                  "title": "Enable Prompt Expansion",
+                  "type": "boolean"
+                },
+                "enable_safety_checker": {
+                  "default": true,
+                  "description": "Enable content moderation for input and output. Disabling it requires account authorization; unauthorized requests are always checked.",
+                  "title": "Enable Safety Checker",
+                  "type": "boolean"
+                },
+                "image_size": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageSize"
+                    },
+                    {
+                      "enum": [
+                        "square_hd",
+                        "square",
+                        "portrait_4_3",
+                        "portrait_16_9",
+                        "landscape_4_3",
+                        "landscape_16_9"
+                      ],
+                      "type": "string"
+                    }
+                  ],
+                  "default": "square_hd",
+                  "description": "Output image size. Use presets like 'square_hd', 'landscape_16_9', 'portrait_9_16', or specify exact dimensions with ImageSize(width=1280, height=720). Total pixels must be between 768*768 and 1280*1280.",
+                  "examples": [
+                    "square_hd",
+                    "landscape_16_9",
+                    "portrait_4_3"
+                  ],
+                  "title": "Image Size"
+                },
+                "image_urls": {
+                  "description": "Reference images for editing (1-3 images required). Order matters: reference as 'image 1', 'image 2', 'image 3' in prompt. Resolution: 384-5000px each dimension. Max size: 10MB each. Formats: JPEG, JPG, PNG (no alpha), BMP, WEBP.",
+                  "examples": [
+                    [
+                      "https://v3b.fal.media/files/b/0a86d6a7/6smIczyPbvAU3IJ1F5Ok3.png",
+                      "https://v3b.fal.media/files/b/0a86d6a7/nTYVlOfKLD1FqHAGy7KS3.png",
+                      "https://v3b.fal.media/files/b/0a86d6ae/6JA70jOe0-pbDtXLF2roV.png"
+                    ]
+                  ],
+                  "items": {
+                    "_fal_ui_field": "image",
+                    "type": "string"
+                  },
+                  "title": "Image Urls",
+                  "type": "array"
+                },
+                "negative_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": "",
+                  "description": "Content to avoid in the generated image. Max 500 characters.",
+                  "examples": [
+                    "low resolution, error, worst quality, low quality, deformed, extra fingers"
+                  ],
+                  "title": "Negative Prompt"
+                },
+                "num_images": {
+                  "default": 1,
+                  "description": "Number of images to generate (1-4). Directly affects billing cost.",
+                  "maximum": 4,
+                  "minimum": 1,
+                  "title": "Num Images",
+                  "type": "integer"
+                },
+                "prompt": {
+                  "description": "Text prompt describing the desired image. Supports Chinese and English. Max 2000 characters. Example: 'Generate an image using the style of image 1 and background of image 2'.",
+                  "examples": [
+                    "Place the wizard from image 2 in the ancient library from image 3, holding and studying the magical crystal orb from image 1. The orb's glow illuminates his face with purple and blue light. Floating candles around him, ancient books visible in the background. Mystical, dramatic lighting, fantasy art style, highly detailed."
+                  ],
+                  "minLength": 1,
+                  "title": "Prompt",
+                  "type": "string"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Random seed for reproducibility (0-2147483647). Same seed produces more consistent results.",
+                  "title": "Seed"
+                }
+              },
+              "required": [
+                "prompt",
+                "image_urls"
+              ],
+              "title": "ImageEditInput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "prompt",
+                "image_urls",
+                "negative_prompt",
+                "image_size",
+                "num_images",
+                "enable_prompt_expansion",
+                "seed",
+                "enable_safety_checker"
+              ]
+            },
+            "V26ImageToImageOutput": {
+              "description": "Output for Wan 2.6 image editing",
+              "properties": {
+                "images": {
+                  "description": "Generated images in PNG format",
+                  "examples": [
+                    [
+                      {
+                        "content_type": "image/png",
+                        "file_name": "output_1.png",
+                        "url": "https://v3b.fal.media/files/b/0a86d6bb/iSEuXzi3kDy1jnlMCwYuH_output_3.png"
+                      }
+                    ]
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/File"
+                  },
+                  "title": "Images",
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "The seed used for generation",
+                  "examples": [
+                    175932751
+                  ],
+                  "title": "Seed",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "images",
+                "seed"
+              ],
+              "title": "ImageEditOutput",
+              "type": "object",
+              "x-fal-order-properties": [
+                "images",
+                "seed"
+              ]
+            }
+          },
+          "securitySchemes": {
+            "apiKeyAuth": {
+              "description": "Fal Key",
+              "in": "header",
+              "name": "Authorization",
+              "type": "apiKey"
+            }
+          }
+        }
+      },
+      "version": 1
+    },
+    "agent": {
+      "version": 1,
+      "kind": "image",
+      "capability": "image-to-image",
+      "upstreamModelId": "wan/v2.6/image-to-image",
+      "promptField": "prompt",
+      "referenceField": "image_urls",
+      "referenceFormat": "data-uri-array",
+      "parameters": {
+        "count": "num_images",
+        "negativePrompt": "negative_prompt",
+        "seed": "seed",
+        "size": "image_size"
+      },
+      "defaults": {
+        "enable_prompt_expansion": true,
+        "image_size": "square_hd",
+        "negative_prompt": "",
+        "num_images": 1
+      }
+    },
+    "revision": "faa466fde10ebece9f8c41a7238775e95515620c145baab815d6fd50ac557fe7"
+  }
+]

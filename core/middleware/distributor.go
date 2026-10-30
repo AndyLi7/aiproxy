@@ -624,6 +624,11 @@ func distribute(c *gin.Context, mode mode.Mode) {
 		}
 	}
 
+	if model.IsAgentOnlyModel(mc) && !model.IsAgentCredentialName(token.Name) {
+		AbortLogWithMessage(c, http.StatusForbidden, "model unavailable")
+		return
+	}
+
 	mc = GetGroupAdjustedModelConfig(group, mc)
 
 	c.Set(RequestModel, publicModel)

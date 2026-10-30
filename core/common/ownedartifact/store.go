@@ -96,7 +96,7 @@ func downloadClient() *http.Client {
 					return nil, ErrStorage
 				}
 
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				ips, err := lookupArtifactIPs(ctx, host)
 				if err != nil || len(ips) == 0 {
 					return nil, ErrStorage
 				}
@@ -146,6 +146,35 @@ func Configured() bool {
 func Store(ctx context.Context, task string, index int, source string) (Receipt, error) {
 	download, upload := downloadClient(), uploadClient()
 	defer download.CloseIdleConnections()
+	defer upload.CloseIdleConnections()
+
+	return store(
+		ctx,
+		task,
+		index,
+		source,
+		os.Getenv("EXTERNAL_BALANCE_URL"),
+		os.Getenv("EXTERNAL_BALANCE_KEY"),
+		download,
+		upload,
+	)
+}
+
+// StoreWithSourceClient preserves archive validation and application storage,
+// while allowing a caller to supply the outer provider download transport.
+// The production Store uses the SSRF-restricted downloadClient above.
+func StoreWithSourceClient(
+	ctx context.Context,
+	task string,
+	index int,
+	source string,
+	download *http.Client,
+) (Receipt, error) {
+	if download == nil {
+		return Receipt{}, ErrStorage
+	}
+
+	upload := uploadClient()
 	defer upload.CloseIdleConnections()
 
 	return store(

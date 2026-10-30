@@ -41,6 +41,7 @@ func TestUsageSourceThroughTokenAuth(t *testing.T) {
 
 		return token
 	}
+	agent := create("u_source", model.AgentCredentialName, model.TokenStatusEnabled)
 	hidden := create("u_source", model.PlaygroundCredentialName, model.TokenStatusEnabled)
 	visible := create("u_source", "playground", model.TokenStatusEnabled)
 	disabledHidden := create(
@@ -57,6 +58,8 @@ func TestUsageSourceThroughTokenAuth(t *testing.T) {
 		wantStatus int
 		wantSource string
 	}{
+		{name: "agent credential", key: agent.Key, header: model.RequestSourceAgent, wantStatus: http.StatusPaymentRequired, wantSource: model.RequestSourceAgent},
+		{name: "agent header spoof", key: visible.Key, header: model.RequestSourceAgent, wantStatus: http.StatusForbidden, wantSource: model.RequestSourceAPI},
 		{name: "hidden credential", key: hidden.Key, wantStatus: http.StatusPaymentRequired, wantSource: model.RequestSourcePlayground},
 		// Old: playground, from the unsigned header.
 		{name: "visible key named playground with the header", key: visible.Key, header: model.RequestSourcePlayground, wantStatus: http.StatusPaymentRequired, wantSource: model.RequestSourceAPI},

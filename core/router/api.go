@@ -86,6 +86,8 @@ func SetAPIRouter(router *gin.Engine) {
 	apiRouter := api.Group("")
 	apiRouter.Use(middleware.AdminAuth)
 	apiRouter.POST("/native-contract/validate", controller.ValidateNativeContract)
+	apiRouter.GET("/tools-model-bindings", controller.GetToolsModelBindings)
+	apiRouter.PUT("/tools-model-bindings", controller.PutToolsModelBinding)
 	apiRouter.POST("/native-trials/:group/:token", controller.CreateNativeTrial)
 	apiRouter.GET("/native-trials/:group/:token/:id", controller.GetNativeTrial)
 	apiRouter.GET(
@@ -289,6 +291,8 @@ func SetAPIRouter(router *gin.Engine) {
 		apiRouter.GET("/trace/:group/by-request/:request_id", controller.GetRequestTracesByRequest)
 		apiRouter.GET("/trace/:group/:trace_id", controller.GetRequestTrace)
 		apiRouter.GET("/trace-health", controller.GetTraceHealth)
+		apiRouter.GET("/agent-models", controller.GetAgentModelOptions)
+		apiRouter.POST("/agent-models", controller.ConfigureAgentModel)
 		modelConfigsRoute := apiRouter.Group("/model_configs")
 		{
 			modelConfigsRoute.GET("/", controller.GetModelConfigs)

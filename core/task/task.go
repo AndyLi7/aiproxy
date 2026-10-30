@@ -19,6 +19,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/conv"
+	"github.com/labring/aiproxy/core/common/env"
 	"github.com/labring/aiproxy/core/common/ipblack"
 	"github.com/labring/aiproxy/core/common/notify"
 	"github.com/labring/aiproxy/core/common/oncall"
@@ -299,9 +300,20 @@ func AsyncUsagePollTask(ctx context.Context) {
 		ctx,
 		ticker.C,
 		processAsyncUsages,
-		ImagePrepaymentRecoveryTask,
-		UpstreamBillingRecoveryTask,
+		configuredUsageRecoveryTasks(ImagePrepaymentRecoveryTask, UpstreamBillingRecoveryTask)...,
 	)
+}
+
+// A reconstructed Tools-only deployment may retain the owned-artifact storage
+// credentials while keeping the application's unrelated legacy billing queue
+// untouched. Default deployments retain both workers; this is startup-scoped.
+func configuredUsageRecoveryTasks(image, upstream func(context.Context)) []func(context.Context) {
+	tasks := []func(context.Context){image}
+	if !env.Bool("DISABLE_UPSTREAM_BILLING_RECOVERY", false) {
+		tasks = append(tasks, upstream)
+	}
+
+	return tasks
 }
 
 // Child loops own synchronous work and bounded cleanup. Cancellation requests
